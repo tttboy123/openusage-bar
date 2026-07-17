@@ -412,6 +412,44 @@ class OpenUsageAdapterTests(unittest.TestCase):
         self.assertEqual(result.cards[0].status, ProviderStatus.UNKNOWN)
         self.assertEqual([call.args[0][-1] for call in run.call_args_list], ["auto", "direct"])
 
+    def test_failed_cursor_enrichment_backs_off_and_logs_only_safe_timing(self):
+        auto_cursor = snapshot("cursor", None)
+        auto_cursor["status"] = "UNKNOWN"
+        monotonic = [100.0]
+        sources = []
+
+        def run(arguments, **_kwargs):
+            source = arguments[-1]
+            sources.append(source)
+            if source == "auto":
+                return completed(envelope(auto_cursor))
+            monotonic[0] += 0.125
+            return completed({}, returncode=1, stderr="private provider response")
+
+        adapter = OpenUsageAdapter(
+            clock=lambda: NOW, runner=run, monotonic=lambda: monotonic[0]
+        )
+        with self.assertLogs("openusage_bar.openusage_adapter", level="INFO") as logs:
+            adapter.fetch()
+            adapter.fetch()
+
+        self.assertEqual(sources, ["auto", "direct", "auto"])
+        joined = "\n".join(logs.output)
+        self.assertIn("provider=cursor", joined)
+        self.assertIn("outcome=failed", joined)
+        self.assertIn("duration_ms=125", joined)
+        self.assertIn("retry_after_seconds=300", joined)
+        self.assertNotIn("private provider response", joined)
+
+        monotonic[0] += 300
+        adapter.fetch()
+        adapter.fetch()
+        self.assertEqual(sources, ["auto", "direct", "auto", "auto", "direct", "auto"])
+
+        monotonic[0] += 600
+        adapter.fetch()
+        self.assertEqual(sources[-2:], ["auto", "direct"])
+
     def test_empty_auto_falls_back_to_direct(self):
         run = Mock(
             side_effect=[
