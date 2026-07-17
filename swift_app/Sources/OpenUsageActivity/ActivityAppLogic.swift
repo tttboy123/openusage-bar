@@ -112,21 +112,90 @@ enum ProviderConnectionStatus: Sendable, Hashable {
     case available, connected, attention
 }
 
+struct ProviderSourceIssuePresentation: Sendable, Hashable, Identifiable {
+    let providerID: String
+    let sourceID: String
+    let effectiveState: String
+    let errorCode: String?
+    let lastSuccessAt: String?
+
+    var id: String { "\(providerID):\(sourceID)" }
+    var isIssue: Bool { !["ok", "available"].contains(effectiveState.lowercased()) }
+
+    var requiresUserAction: Bool {
+        guard isIssue else { return false }
+        let signals = [effectiveState, errorCode ?? ""].map { $0.lowercased() }
+        return signals.contains { value in
+            value.hasPrefix("auth_")
+                || value.contains("credential")
+                || value == "login_required"
+                || value == "session_expired"
+                || value == "unauthorized"
+                || value == "forbidden"
+        }
+    }
+
+    var title: String {
+        switch sourceID {
+        case "openusage.daily": "Daily token history"
+        case "current.quota": "Current quota"
+        case "minimax.billing": "Billing usage"
+        case "openusage.detect": "Provider compatibility"
+        default: sourceID.replacingOccurrences(of: ".", with: " ").capitalized
+        }
+    }
+
+    var message: String {
+        if requiresUserAction { return "\(title) needs a valid connection." }
+        if effectiveState.lowercased() == "stale" { return "\(title) is stale." }
+        if errorCode?.lowercased() == "timeout" { return "\(title) refresh timed out." }
+        return "\(title) is temporarily unavailable."
+    }
+
+    static func make(from source: SourceHealthItem) -> Self {
+        Self(
+            providerID: source.providerID,
+            sourceID: source.sourceID,
+            effectiveState: source.effectiveState,
+            errorCode: source.errorCode,
+            lastSuccessAt: source.lastSuccessAt
+        )
+    }
+}
+
 struct ProviderCenterItem: Identifiable, Sendable, Hashable {
     let descriptor: ProviderDisplayDescriptor
     let instanceCount: Int
     let observed: Bool
-    let needsAttention: Bool
+    let issues: [ProviderSourceIssuePresentation]
 
     var id: String { descriptor.familyID }
     var category: ProviderBrowseCategory { .classify(descriptor) }
+    var connectionIssues: [ProviderSourceIssuePresentation] {
+        issues.filter { $0.requiresUserAction }
+    }
+    var secondaryIssues: [ProviderSourceIssuePresentation] {
+        issues.filter { $0.isIssue && !$0.requiresUserAction }
+    }
     var status: ProviderConnectionStatus {
-        if needsAttention { return .attention }
+        if !connectionIssues.isEmpty { return .attention }
         return observed || instanceCount > 0 ? .connected : .available
+    }
+    var helpText: String {
+        if let issue = connectionIssues.first ?? secondaryIssues.first { return issue.message }
+        return switch status {
+        case .available: "Available"
+        case .connected: "Connected"
+        case .attention: "Needs attention"
+        }
     }
 }
 
 enum ProviderCenterPresentation {
+    static func isSystemIntegration(_ familyID: String) -> Bool {
+        ["openusage", "openusage_catalog"].contains(familyID)
+    }
+
     static func filter(
         _ items: [ProviderCenterItem], category: ProviderBrowseCategory, query: String
     ) -> [ProviderCenterItem] {

@@ -1,5 +1,5 @@
 import Testing
-import UsageCore
+@testable import UsageCore
 @testable import OpenUsageActivity
 
 @Suite("Provider Center presentation")
@@ -33,15 +33,15 @@ struct ProviderCenterPresentationTests {
         let items = [
             ProviderCenterItem(
                 descriptor: try descriptor("minimax"), instanceCount: 1,
-                observed: true, needsAttention: false
+                observed: true, issues: []
             ),
             ProviderCenterItem(
                 descriptor: try descriptor("alibaba_cloud"), instanceCount: 0,
-                observed: false, needsAttention: false
+                observed: false, issues: []
             ),
             ProviderCenterItem(
                 descriptor: try descriptor("openclaw"), instanceCount: 0,
-                observed: true, needsAttention: true
+                observed: true, issues: [issue(errorCode: "auth_required")]
             ),
         ]
         #expect(ProviderCenterPresentation.filter(items, category: .all, query: "Mini").map(\.id) == ["minimax"])
@@ -53,16 +53,69 @@ struct ProviderCenterPresentationTests {
     func status() throws {
         #expect(ProviderCenterItem(
             descriptor: try descriptor("deepseek"), instanceCount: 0,
-            observed: false, needsAttention: false
+            observed: false, issues: []
         ).status == .available)
         #expect(ProviderCenterItem(
             descriptor: try descriptor("minimax"), instanceCount: 1,
-            observed: true, needsAttention: false
+            observed: true, issues: []
         ).status == .connected)
         #expect(ProviderCenterItem(
             descriptor: try descriptor("openclaw"), instanceCount: 0,
-            observed: true, needsAttention: true
+            observed: true, issues: [issue(errorCode: "auth_required")]
         ).status == .attention)
+    }
+
+    @Test("Secondary source failures keep a connected Provider healthy")
+    func secondaryIssuesDoNotEscalateProvider() throws {
+        let tokenHistory = issue(
+            sourceID: "openusage.daily", effectiveState: "stale", errorCode: "timeout"
+        )
+        let quota = issue(sourceID: "current.quota", effectiveState: "ok", errorCode: nil)
+        let item = ProviderCenterItem(
+            descriptor: try descriptor("minimax"), instanceCount: 1,
+            observed: true, issues: [tokenHistory, quota]
+        )
+
+        #expect(item.status == .connected)
+        #expect(item.secondaryIssues.map(\.message) == ["Daily token history is stale."])
+        #expect(item.helpText == "Daily token history is stale.")
+    }
+
+    @Test("Credential failures are the only source failures promoted to the Provider list")
+    func credentialIssuesRequireAttention() throws {
+        let item = ProviderCenterItem(
+            descriptor: try descriptor("step_plan"), instanceCount: 1,
+            observed: true,
+            issues: [issue(
+                sourceID: "current.quota", effectiveState: "auth_expired",
+                errorCode: "quota_unavailable"
+            )]
+        )
+
+        #expect(item.status == .attention)
+        #expect(item.connectionIssues.count == 1)
+        #expect(item.helpText == "Current quota needs a valid connection.")
+    }
+
+    @Test("OpenUsage is presented as a system integration instead of a Provider")
+    func systemIntegrationClassification() {
+        #expect(ProviderCenterPresentation.isSystemIntegration("openusage"))
+        #expect(ProviderCenterPresentation.isSystemIntegration("openusage_catalog"))
+        #expect(!ProviderCenterPresentation.isSystemIntegration("minimax"))
+    }
+
+    private func issue(
+        sourceID: String = "current.quota",
+        effectiveState: String = "temporarily_unavailable",
+        errorCode: String? = "quota_unavailable"
+    ) -> ProviderSourceIssuePresentation {
+        ProviderSourceIssuePresentation.make(from: SourceHealthItem(
+            providerID: "example", sourceID: sourceID,
+            state: effectiveState, effectiveState: effectiveState,
+            lastAttemptAt: "2026-07-17T10:00:00Z",
+            lastSuccessAt: "2026-07-17T09:00:00Z",
+            staleAt: nil, errorCode: errorCode
+        ))
     }
 
     private func descriptor(_ familyID: String) throws -> ProviderDisplayDescriptor {

@@ -64,7 +64,11 @@ struct ActivityRootView: View {
     @ViewBuilder private var content: some View {
         if let data = store.displayData {
             if coordinator.route == .providersAndAccounts {
-                ProvidersPage(data: data, reload: store.reload)
+                ProvidersPage(
+                    data: data,
+                    reload: store.reload,
+                    openSystemIntegrations: { coordinator.select(.dataHealth) }
+                )
                     .background(.background)
             } else {
                 ScrollView {
@@ -1454,6 +1458,7 @@ private struct LocalToolMetric: View {
 private struct ProvidersPage: View {
     let data: ActivityLoadedData
     let reload: () -> Void
+    let openSystemIntegrations: () -> Void
 
     @State private var selectedCategory = ProviderBrowseCategory.all
     @State private var selectedFamilyID: String? = "minimax"
@@ -1467,11 +1472,12 @@ private struct ProvidersPage: View {
         let observedFamilies = Set(data.availableProviderIDs.map {
             data.providerDescriptor(for: $0).familyID
         })
-        let attentionFamilies = Set(data.health.sources.compactMap { source -> String? in
-            let state = source.effectiveState.lowercased()
-            guard !["ok", "available"].contains(state) else { return nil }
-            return data.providerDescriptor(for: source.providerID).familyID
-        })
+        let issues = Dictionary(grouping: data.health.sources.compactMap {
+            source -> (String, ProviderSourceIssuePresentation)? in
+            let familyID = data.providerDescriptor(for: source.providerID).familyID
+            guard !ProviderCenterPresentation.isSystemIntegration(familyID) else { return nil }
+            return (familyID, ProviderSourceIssuePresentation.make(from: source))
+        }, by: { $0.0 }).mapValues { rows in rows.map { $0.1 } }
         var descriptors = Dictionary(uniqueKeysWithValues: ProviderCatalog.allDescriptors.map {
             ($0.familyID, $0)
         })
@@ -1486,14 +1492,16 @@ private struct ProvidersPage: View {
                 category: .api
             )
         }
-        return descriptors.values.map { descriptor in
+        return descriptors.values.filter {
+            !ProviderCenterPresentation.isSystemIntegration($0.familyID)
+        }.map { descriptor in
             let connectionIDs = Set(instances[descriptor.familyID, default: []].map(\.providerID))
                 .union(configured[descriptor.familyID, default: []].map(\.providerID))
             return ProviderCenterItem(
                 descriptor: descriptor,
                 instanceCount: connectionIDs.count,
                 observed: observedFamilies.contains(descriptor.familyID),
-                needsAttention: attentionFamilies.contains(descriptor.familyID)
+                issues: issues[descriptor.familyID, default: []]
             )
         }.sorted { left, right in
             let leftRank = left.status.sortRank
@@ -1545,6 +1553,7 @@ private struct ProvidersPage: View {
                         connections: configuredConnections.filter {
                             $0.familyID == selectedItem.descriptor.familyID
                         },
+                        sources: providerSources(for: selectedItem.descriptor.familyID),
                         selectedRegionID: $selectedRegionID,
                         reload: {
                             loadConfiguredConnections()
@@ -1585,13 +1594,55 @@ private struct ProvidersPage: View {
             if filteredItems.isEmpty {
                 ContentUnavailableView.search(text: searchText)
             } else {
-                List(filteredItems, selection: $selectedFamilyID) { item in
-                    ProviderCenterRow(item: item)
-                        .tag(Optional(item.id))
+                List(selection: $selectedFamilyID) {
+                    if selectedCategory == .all && searchText.isEmpty {
+                        Section("System Integrations") {
+                            Button(action: openSystemIntegrations) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "arrow.triangle.branch")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 30, height: 30)
+                                        .background(
+                                            .secondary.opacity(0.12),
+                                            in: RoundedRectangle(cornerRadius: 8)
+                                        )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("OpenUsage").font(.body.weight(.medium))
+                                        Text(systemIntegrationSummary)
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open OpenUsage data-source diagnostics")
+                        }
+                    }
+                    Section("Providers") {
+                        ForEach(filteredItems) { item in
+                            ProviderCenterRow(item: item)
+                                .tag(Optional(item.id))
+                        }
+                    }
                 }
                 .listStyle(.sidebar)
             }
         }
+    }
+
+    private var systemIntegrationSummary: String {
+        let count = data.health.sources.filter { source in
+            ProviderCenterPresentation.isSystemIntegration(
+                data.providerDescriptor(for: source.providerID).familyID
+            ) && !["ok", "available"].contains(source.effectiveState.lowercased())
+        }.count
+        return count == 0
+            ? "Data source and compatibility"
+            : "\(count) diagnostic issue\(count == 1 ? "" : "s")"
     }
 
     private func synchronizeSelection() {
@@ -1601,6 +1652,12 @@ private struct ProvidersPage: View {
 
     private func synchronizeRegion() {
         selectedRegionID = selectedItem?.descriptor.regions.sorted().first
+    }
+
+    private func providerSources(for familyID: String) -> [SourceHealthItem] {
+        data.health.sources.filter {
+            data.providerDescriptor(for: $0.providerID).familyID == familyID
+        }
     }
 
     private func loadConfiguredConnections() {
@@ -1637,6 +1694,7 @@ private struct ProviderCenterRow: View {
                 .accessibilityLabel(item.status.title)
         }
         .padding(.vertical, 4)
+        .help(item.helpText)
         .accessibilityElement(children: .combine)
     }
 }
@@ -1645,6 +1703,7 @@ private struct ProviderConnectionDetail: View {
     let item: ProviderCenterItem
     let instances: [ProviderInstanceRecord]
     let connections: [ProviderConnectionSummary]
+    let sources: [SourceHealthItem]
     @Binding var selectedRegionID: String?
     let reload: () -> Void
 
@@ -1664,14 +1723,24 @@ private struct ProviderConnectionDetail: View {
     private var capability: ProviderCapabilityPresentation {
         ProviderCapabilityPresentation(descriptor: descriptor)
     }
+    private var sourceIssues: [ProviderSourceIssuePresentation] {
+        sources.map(ProviderSourceIssuePresentation.make).filter(\.isIssue)
+            .sorted { left, right in
+                if left.requiresUserAction != right.requiresUserAction {
+                    return left.requiresUserAction
+                }
+                return left.title.localizedStandardCompare(right.title) == .orderedAscending
+            }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 header
                 Divider()
-                connectionSection
                 if !connections.isEmpty || !instances.isEmpty { instanceSection }
+                connectionSection
+                if !sourceIssues.isEmpty { sourceIssueSection }
                 capabilitySection
             }
             .frame(maxWidth: 720, alignment: .leading)
@@ -1701,8 +1770,8 @@ private struct ProviderConnectionDetail: View {
 
     private var connectionSection: some View {
         ProviderDetailSection(
-            title: "Connection",
-            detail: "Manage the selected connection here. Saved credentials are never displayed."
+            title: "Connection Setup",
+            detail: "Add another account or review how this Provider connects. Saved credentials are never displayed."
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 if descriptor.regions.count > 1 {
@@ -1736,6 +1805,41 @@ private struct ProviderConnectionDetail: View {
                     Button("Refresh Data", systemImage: "arrow.clockwise", action: reload)
                         .controlSize(.large)
                 }
+                if connections.contains(where: { $0.isStepPlan }) {
+                    Text("Existing Step Plan accounts are edited in Connections above.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var sourceIssueSection: some View {
+        ProviderDetailSection(
+            title: "Data Source Issues",
+            detail: "These diagnostics do not mark the Provider connection as failed unless credentials need attention."
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(sourceIssues.enumerated()), id: \.element.id) { index, issue in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: issue.requiresUserAction
+                            ? "exclamationmark.triangle.fill"
+                            : "clock.badge.exclamationmark")
+                            .foregroundStyle(issue.requiresUserAction ? .red : .orange)
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(issue.message).font(.callout.weight(.medium))
+                            if let lastSuccessAt = issue.lastSuccessAt {
+                                Text("Last successful update: \(DateText.display(lastSuccessAt))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Text("No successful update recorded")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                    }
+                    if index < sourceIssues.count - 1 { Divider() }
+                }
             }
         }
     }
@@ -1766,8 +1870,10 @@ private struct ProviderConnectionDetail: View {
 
     private var instanceSection: some View {
         ProviderDetailSection(
-            title: "Connected Instances",
-            detail: "Select a connection to replace its credentials without leaving this page."
+            title: "Connections",
+            detail: connections.contains { $0.isStepPlan }
+                ? "Use Edit Connection to change the account label or replace saved credentials in this pane."
+                : "These connections are discovered from local tools or OpenUsage and are read only here."
         ) {
             VStack(alignment: .leading, spacing: 10) {
                 if let savedMessage {
@@ -1985,6 +2091,16 @@ private struct DataHealthPage: View {
             if data.visibilityIssue {
                 StatusBanner(symbol: "eye.slash", text: "Provider visibility settings are invalid. All providers remain visible.")
             }
+            let integrationSources = data.health.sources.filter { source in
+                !OpenUsageCatalogPresentation.isCatalogSource(source)
+                    && ProviderCenterPresentation.isSystemIntegration(
+                        data.providerDescriptor(for: source.providerID).familyID
+                    )
+            }
+            if OpenUsageCatalogPresentation.from(data.health.sources) != nil
+                || !integrationSources.isEmpty {
+                Text("System Integrations").font(.title2.weight(.semibold))
+            }
             if let catalog = OpenUsageCatalogPresentation.from(data.health.sources) {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
@@ -2001,12 +2117,42 @@ private struct DataHealthPage: View {
                 }
                 Divider()
             }
+            ForEach(integrationSources, id: \.stableID) { source in
+                let issue = ProviderSourceIssuePresentation.make(from: source)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack {
+                        Text("OpenUsage").font(.headline)
+                        Text(issue.title).foregroundStyle(.secondary)
+                        Spacer()
+                        StateLabel(state: source.effectiveState)
+                    }
+                    if issue.isIssue {
+                        Text(issue.message).font(.callout)
+                    } else {
+                        Text("OpenUsage data collection is available.").font(.callout)
+                    }
+                    LabeledContent("Last attempt", value: DateText.display(source.lastAttemptAt))
+                    LabeledContent(
+                        "Last success",
+                        value: source.lastSuccessAt.map(DateText.display) ?? "Unavailable"
+                    )
+                }
+                Divider()
+            }
             let providerSources = data.health.sources.filter {
                 !OpenUsageCatalogPresentation.isCatalogSource($0)
+                    && !ProviderCenterPresentation.isSystemIntegration(
+                        data.providerDescriptor(for: $0.providerID).familyID
+                    )
             }
-            if providerSources.isEmpty && OpenUsageCatalogPresentation.from(data.health.sources) == nil {
+            if providerSources.isEmpty
+                && integrationSources.isEmpty
+                && OpenUsageCatalogPresentation.from(data.health.sources) == nil {
                 EmptyDataView(title: "No source status", description: "No collection source has reported status yet.")
             } else {
+                if !providerSources.isEmpty {
+                    Text("Provider Data Sources").font(.title2.weight(.semibold))
+                }
                 ForEach(providerSources, id: \.stableID) { source in
                     let descriptor = data.providerDescriptor(for: source.providerID)
                     let runtimeSource = ProviderRuntimeSourcePresentation.resolve(
