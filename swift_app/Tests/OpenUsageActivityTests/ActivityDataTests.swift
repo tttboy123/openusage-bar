@@ -171,6 +171,7 @@ struct ActivityDataTests {
         #expect(loaded.records.isEmpty)
         #expect(loaded.hiddenProviderIDs == ["codex"])
         #expect(loaded.providerDescriptors["codex"]?.displayName == "Work Codex")
+        #expect(loaded.providerInstances.isEmpty)
     }
 
     @Test("Invalid or hidden selected provider is explicit no-match and leaks no other provider facts")
@@ -196,9 +197,10 @@ struct ActivityDataTests {
     @Test("Returning from settings hides a newly hidden selected provider before revalidation finishes")
     func dynamicVisibilityRevalidation() async throws {
         let fixture = try ActivityLedgerFixture()
+        let preferences = ActivityPreferences(defaults: InMemoryActivityPreferencesStore())
         let store = ActivityViewStore(
             loader: ActivityDataLoader(databaseURL: fixture.databaseURL, visibilityURL: fixture.visibilityURL),
-            preferences: isolatedPreferences()
+            preferences: preferences
         )
         store.updateFilters(period: .day, providerID: "codex", modelID: nil)
         try await wait(for: store)
@@ -253,9 +255,10 @@ struct ActivityDataTests {
     @Test("Main actor store publishes the actor result and clears loading")
     func storePublication() async throws {
         let fixture = try ActivityLedgerFixture()
+        let preferences = ActivityPreferences(defaults: InMemoryActivityPreferencesStore())
         let store = ActivityViewStore(loader: ActivityDataLoader(
             databaseURL: fixture.databaseURL, visibilityURL: fixture.visibilityURL
-        ), preferences: isolatedPreferences())
+        ), preferences: preferences)
         store.reload()
         for _ in 0..<100 where store.isLoading {
             try await Task.sleep(for: .milliseconds(10))
@@ -270,10 +273,8 @@ struct ActivityDataTests {
     @Test("Filter change clears both focus surfaces synchronously and persists through failure or cancel")
     func synchronousFocusInvalidation() async {
         let loader = FailingActivityLoader()
-        let name = "OpenUsageActivityTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defer { defaults.removePersistentDomain(forName: name) }
-        let store = ActivityViewStore(loader: loader, preferences: ActivityPreferences(defaults: defaults))
+        let preferences = ActivityPreferences(defaults: InMemoryActivityPreferencesStore())
+        let store = ActivityViewStore(loader: loader, preferences: preferences)
         store.chartFocus.day = try! LocalDay("2026-07-02")
         store.heatmapFocusDay = try! LocalDay("2026-07-02")
         store.updateFilters(period: .week, providerID: "codex", modelID: "gpt-5.5")
@@ -393,9 +394,10 @@ struct ActivityDataTests {
     @Test("Native hosting renders every route plus missing and no-match states at the minimum window size")
     func nativeRouteRendering() async throws {
         let fixture = try ActivityLedgerFixture()
+        let preferences = ActivityPreferences(defaults: InMemoryActivityPreferencesStore())
         let store = ActivityViewStore(loader: ActivityDataLoader(
             databaseURL: fixture.databaseURL, visibilityURL: fixture.visibilityURL
-        ), preferences: isolatedPreferences())
+        ), preferences: preferences)
         store.reload()
         try await wait(for: store)
         #expect(store.data != nil)
@@ -414,10 +416,11 @@ struct ActivityDataTests {
         let empty = render(ActivityRootView(store: store, initialRoute: .activity))
         #expect(empty.descendantCount > 4)
 
+        let missingPreferences = ActivityPreferences(defaults: InMemoryActivityPreferencesStore())
         let missing = ActivityViewStore(loader: ActivityDataLoader(
             databaseURL: fixture.directory.appendingPathComponent("missing.sqlite"),
             visibilityURL: fixture.visibilityURL
-        ), preferences: isolatedPreferences())
+        ), preferences: missingPreferences)
         missing.reload()
         try await wait(for: missing)
         #expect(missing.error == .databaseUnavailable)
@@ -456,7 +459,8 @@ struct ActivityDataTests {
         #expect(chart.unchangedSeries.count == 1)
         #expect(chart.unchangedSeries.first?.points.allSatisfy(\.stale) == true)
 
-        let store = ActivityViewStore(loader: loader, preferences: isolatedPreferences())
+        let preferences = ActivityPreferences(defaults: InMemoryActivityPreferencesStore())
+        let store = ActivityViewStore(loader: loader, preferences: preferences)
         store.reload()
         try await wait(for: store)
         let result = render(ActivityRootView(store: store, initialRoute: .capacity))
@@ -470,10 +474,6 @@ struct ActivityDataTests {
             period: .day, ending: try! LocalDay("2026-07-02"),
             providerIDs: providerID.map { [$0] } ?? [], modelIDs: modelID.map { [$0] } ?? []
         )
-    }
-
-    private func isolatedPreferences() -> ActivityPreferences {
-        ActivityPreferences(defaults: UserDefaults(suiteName: "OpenUsageActivityTests.\(UUID().uuidString)")!)
     }
 
     @MainActor

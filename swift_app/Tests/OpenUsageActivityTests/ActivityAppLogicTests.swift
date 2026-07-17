@@ -7,6 +7,27 @@ import Testing
 struct ActivityAppLogicTests {
     private func day(_ value: String) -> LocalDay { try! LocalDay(value) }
 
+    @Test("Isolated preferences stay in memory and create no preference files")
+    func isolatedPreferencesCleanup() {
+        let before = testPreferenceFiles()
+        let store = InMemoryActivityPreferencesStore()
+        let preferences = ActivityPreferences(defaults: store)
+        preferences.save(.init(period: .week, providerID: "codex", modelID: nil))
+
+        #expect(preferences.load() == .init(period: .week, providerID: "codex", modelID: nil))
+        #expect(testPreferenceFiles() == before)
+    }
+
+    private func testPreferenceFiles() -> Set<String> {
+        let directory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Preferences", isDirectory: true)
+        return Set((try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        ))?.map(\.lastPathComponent).filter {
+            $0.hasPrefix("OpenUsageActivityTests.") && $0.hasSuffix(".plist")
+        } ?? [])
+    }
+
     @Test("Every filter load uses one bounded annual canonical dataset")
     func boundedLoadRequest() {
         let request = ActivityLoadRequest(
@@ -17,6 +38,87 @@ struct ActivityAppLogicTests {
         #expect(request.metricRange == day("2026-07-08")...day("2026-07-14"))
         #expect(request.repositoryRange.dayCount == 365)
         #expect(request.providerIDs == ["codex"])
+    }
+
+    @Test("Provider edits resolve the sibling settings executable")
+    func providerEditCommandResolution() throws {
+        let activity = URL(fileURLWithPath: "/Applications/OpenUsage Bar.app/Contents/Helpers/OpenUsage Activity.app")
+        let expected = URL(fileURLWithPath: "/Applications/OpenUsage Bar.app/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings")
+        let command = try #require(ProviderMutationCommand.resolve(
+            activityBundleURL: activity,
+            activityExecutableURL: activity.appendingPathComponent("Contents/MacOS/OpenUsage Activity"),
+            isExecutable: { $0 == expected }
+        ))
+
+        #expect(command.executableURL == expected)
+        #expect(command.arguments == ["provider-mutate"])
+    }
+
+    @Test("Provider edit wire payload is scoped and does not contain site or endpoint")
+    func providerEditWirePayload() throws {
+        let request = ProviderEditRequest(
+            providerID: "step-plan-main", name: "Main",
+            apiKey: "replacement", sessionCookie: ""
+        )
+        let object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        )
+
+        #expect(object["version"] as? Int == 1)
+        #expect(object["action"] as? String == "update_connection")
+        #expect(object["providerId"] as? String == "step-plan-main")
+        #expect(object["site"] == nil)
+        #expect(object["endpoint"] == nil)
+    }
+
+    @Test("Provider modification stays in the selected detail pane")
+    func providerModificationIsInline() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/OpenUsageActivity/ActivityViews.swift"),
+            encoding: .utf8
+        )
+        let detail = try #require(source.range(of: "private struct ProviderConnectionDetail"))
+        let nextPage = try #require(source.range(of: "private struct DataHealthPage"))
+        let section = String(source[detail.lowerBound..<nextPage.lowerBound])
+
+        #expect(section.contains("Edit Connection"))
+        #expect(section.contains(".buttonStyle(.borderedProminent)"))
+        #expect(section.contains(".tint(.accentColor)"))
+        #expect(section.contains("SecureField"))
+        #expect(section.contains("ProviderMutationService.submit"))
+        #expect(!section.contains("Button(\"Open Provider Settings\""))
+    }
+
+    @Test("Configured connections remain editable before a successful collection")
+    func configuredProviderConnections() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("providers.json")
+        try Data(#"""
+        {
+          "version": 1,
+          "providers": [
+            {"provider_id":"step-plan-main","name":"Main","type":"step_plan","site":"china"},
+            {"provider_id":"feed-zai","name":"ZAI Feed","type":"daily_usage_feed","family_id":"zai","endpoint":"https://example.com"}
+          ]
+        }
+        """#.utf8).write(to: url)
+
+        let connections = try ProviderConnectionSummaryStore(url: url).load()
+
+        #expect(connections.map(\.providerID) == ["step-plan-main", "feed-zai"])
+        #expect(connections[0].familyID == "step_plan")
+        #expect(connections[0].site == "china")
+        #expect(connections[0].isStepPlan)
+        #expect(connections[0].isManaged)
+        #expect(connections[1].familyID == "zai")
+        #expect(!connections[1].isStepPlan)
+        #expect(connections[1].isManaged)
+        #expect(connections[1].credentialLabel == "Replacement API key")
     }
 
     @Test("Stale background loads cannot publish over a newer filter")
@@ -38,7 +140,7 @@ struct ActivityAppLogicTests {
         #expect(DetailsCopy.visibleText.allSatisfy { !$0.contains("—") && !$0.contains("–") })
         #expect(DetailsCopy.sidebar == [
             "Activity", "Capacity", "API Spend", "Local Tools",
-            "Providers and Accounts", "Data Health",
+            "Providers", "Data Health",
         ])
         #expect(!DetailsCopy.visibleText.contains("Longest Task"))
         #expect(!DetailsCopy.visibleText.contains("Unavailable"))
@@ -338,9 +440,7 @@ struct ActivityAppLogicTests {
 
     @Test("Persisted filters restore in an isolated defaults suite and corrupt values fail safe")
     func persistedFilters() throws {
-        let name = "OpenUsageActivityTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: name))
-        defer { defaults.removePersistentDomain(forName: name) }
+        let defaults = InMemoryActivityPreferencesStore()
         let preferences = ActivityPreferences(defaults: defaults)
         preferences.save(.init(period: .month, providerID: "codex", modelID: "gpt-5.5"))
         #expect(preferences.load() == .init(period: .month, providerID: "codex", modelID: "gpt-5.5"))
@@ -593,10 +693,9 @@ struct ActivityAppLogicTests {
 
     @MainActor
     @Test("Legend toggle clears chart focus and stale IDs converge")
-    func legendToggleClearsFocus() {
-        let store = ActivityViewStore(preferences: ActivityPreferences(
-            defaults: UserDefaults(suiteName: "OpenUsageActivityTests.\(UUID().uuidString)")!
-        ))
+    func legendToggleClearsFocus() throws {
+        let preferences = ActivityPreferences(defaults: InMemoryActivityPreferencesStore())
+        let store = ActivityViewStore(preferences: preferences)
         store.chartFocus.day = day("2026-07-02")
 
         #expect(store.toggleModelSeries("m1", availableSeriesIDs: ["m1", "additional-models"]))

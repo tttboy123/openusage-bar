@@ -19,6 +19,10 @@ def main(argv: list[str] | None = None) -> int:
 
         run_provider_settings()
         return 0
+    if arguments == ["provider-mutate"]:
+        from openusage_bar.provider_commands import run_provider_mutation
+
+        return run_provider_mutation(sys.stdin, sys.stdout)
     if arguments[0] not in COLLECTOR_COMMANDS:
         return 2
     from openusage_bar.collector_cli import main as collector_main

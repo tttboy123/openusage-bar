@@ -21,6 +21,7 @@ struct ActivityLoadedData: Sendable, Hashable {
     let latestCollectionAt: String?
     let availableProviderIDs: [String]
     let providerDescriptors: [String: ProviderDisplayDescriptor]
+    let providerInstances: [ProviderInstanceRecord]
     let availableModelIDs: [String]
     let revision: Int64
     let selectionMatch: ActivitySelectionMatch
@@ -246,6 +247,7 @@ actor ActivityDataLoader: ActivityLoading {
                 latestCollectionAt: latest,
                 availableProviderIDs: visibleIDs.sorted(),
                 providerDescriptors: providerDescriptors,
+                providerInstances: instances.filter { visibleIDs.contains($0.providerID) },
                 availableModelIDs: Set(visibleDataset.records.map(\.modelID)).sorted(),
                 revision: finalRevision,
                 selectionMatch: selectionMatch,

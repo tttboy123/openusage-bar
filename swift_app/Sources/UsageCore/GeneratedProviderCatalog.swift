@@ -49,6 +49,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Alibaba Cloud",
             category: .api,
             metricFamilies: [.billing, .operational, .subscriptionQuota, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -73,6 +75,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Amp",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -97,6 +101,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Anthropic",
             category: .api,
             metricFamilies: [.operational],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -121,6 +127,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Azure OpenAI",
             category: .api,
             metricFamilies: [.operational],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -145,6 +153,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Claude Code",
             category: .subscription,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -169,6 +179,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Codebuff",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -193,6 +205,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Codex",
             category: .subscription,
             metricFamilies: [.subscriptionQuota, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.local, .none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "codex_local_log", sourceKind: "local_log"), ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -218,6 +232,8 @@ public enum GeneratedProviderCatalog {
             displayName: "GitHub Copilot",
             category: .subscription,
             metricFamilies: [.billing, .subscriptionQuota, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -242,6 +258,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Crush",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -266,6 +284,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Cursor",
             category: .subscription,
             metricFamilies: [.billing, .subscriptionQuota, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -290,6 +310,8 @@ public enum GeneratedProviderCatalog {
             displayName: "DeepSeek",
             category: .api,
             metricFamilies: [.billing, .operational],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -314,6 +336,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Droid",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -338,6 +362,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Gemini API",
             category: .api,
             metricFamilies: [.operational],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -362,6 +388,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Gemini CLI",
             category: .subscription,
             metricFamilies: [.subscriptionQuota, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -386,6 +414,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Goose",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -410,6 +440,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Groq",
             category: .api,
             metricFamilies: [.operational],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -434,6 +466,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Hermes",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -458,6 +492,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Kilo Code",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -482,6 +518,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Kimi CLI",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -506,6 +544,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Kiro",
             category: .subscription,
             metricFamilies: [.subscriptionQuota, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.keychain, .none, .oauth],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "kiro_codewhisperer_api", sourceKind: "official_api"), ProviderIdentitySource(credentialSource: "kiro_keychain", sourceKind: "keychain"), ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -532,6 +572,8 @@ public enum GeneratedProviderCatalog {
             displayName: "MiniMax",
             category: .subscription,
             metricFamilies: [.subscriptionQuota],
+            regions: ["cn", "international"],
+            supportsAccounts: true,
             credentialSourceTypes: [.apiKey, .none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "minimax_builtin_api", sourceKind: "builtin_api"), ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -557,6 +599,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Mistral",
             category: .api,
             metricFamilies: [.billing, .operational, .subscriptionQuota],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -581,6 +625,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Moonshot",
             category: .api,
             metricFamilies: [.billing, .operational],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -605,6 +651,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Mux",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -629,6 +677,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Ollama",
             category: .localTool,
             metricFamilies: [.tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -653,6 +703,8 @@ public enum GeneratedProviderCatalog {
             displayName: "OpenAI",
             category: .api,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.apiKey, .none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openai_admin_api", sourceKind: "official_api"), ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -678,6 +730,8 @@ public enum GeneratedProviderCatalog {
             displayName: "OpenClaw",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -702,6 +756,8 @@ public enum GeneratedProviderCatalog {
             displayName: "OpenCode",
             category: .subscription,
             metricFamilies: [.billing, .subscriptionQuota, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -726,6 +782,8 @@ public enum GeneratedProviderCatalog {
             displayName: "OpenRouter",
             category: .api,
             metricFamilies: [.billing, .operational, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -750,6 +808,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Perplexity",
             category: .api,
             metricFamilies: [.billing, .subscriptionQuota, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -774,6 +834,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Pi",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -798,6 +860,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Qwen CLI",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -822,6 +886,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Roo Code",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -846,6 +912,8 @@ public enum GeneratedProviderCatalog {
             displayName: "StepFun Step Plan",
             category: .subscription,
             metricFamilies: [.billing, .subscriptionQuota],
+            regions: ["cn", "international"],
+            supportsAccounts: true,
             credentialSourceTypes: [.apiKey, .browserSession],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "step_plan_browser_session", sourceKind: "browser_session"), ProviderIdentitySource(credentialSource: "step_plan_official_api", sourceKind: "official_api")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -871,6 +939,8 @@ public enum GeneratedProviderCatalog {
             displayName: "xAI",
             category: .api,
             metricFamilies: [.billing, .operational],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -895,6 +965,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Z.AI",
             category: .api,
             metricFamilies: [.billing, .operational, .subscriptionQuota, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
@@ -919,6 +991,8 @@ public enum GeneratedProviderCatalog {
             displayName: "Zed",
             category: .localTool,
             metricFamilies: [.billing, .tokenActivity],
+            regions: [],
+            supportsAccounts: false,
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
