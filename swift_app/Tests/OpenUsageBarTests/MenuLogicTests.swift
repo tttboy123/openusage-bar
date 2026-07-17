@@ -348,7 +348,11 @@ struct MenuLogicTests {
         open(sys.argv[1], 'w').write(str(child.pid))
         while True: time.sleep(1)
         """.write(to: script, atomically: true, encoding: .utf8)
-        let command = RefreshCommand(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: [script.path, pidFile.path, ownershipMarker.path], timeout: 0.15)
+        // A shared CI runner can take longer than a few scheduler ticks to execute
+        // the Python fixture after Process.run() returns. Keep the timeout short
+        // enough to test forced tree termination, but long enough for the fixture
+        // to publish the child PID that the assertion must inspect.
+        let command = RefreshCommand(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: [script.path, pidFile.path, ownershipMarker.path], timeout: 2)
         #expect(RefreshRunner().run(command) == .timedOut)
         let childPID = try #require(Int32(try String(contentsOf: pidFile, encoding: .utf8)))
         defer { cleanupOwnedTestProcess(childPID, marker: ownershipMarker.path) }
