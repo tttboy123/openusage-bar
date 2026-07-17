@@ -85,7 +85,7 @@ flowchart LR
 - [Approved Chinese work queue](2026-07-18-openusage-work-queue.zh-CN.md)
 - Optional external consumer plan: [Loom resource observer](2026-07-18-openusage-loom-resource-observer.md)
 
-### Task 1: Create an isolated implementation worktree
+### Task 1: Create the isolated sequential implementation worktree
 
 **Files:**
 - Read: `AGENTS.md`
@@ -104,25 +104,25 @@ git -C /Users/lune/Documents/Codex/2026-07-13/new-chat/work/openusage-bar-public
 
 Expected: the status command has no output and the tree command lists every approved OpenUsage plan, including the Chinese work queue. If the plans are not committed on the selected base, stop; do not create an implementation worktree from a commit that cannot contain its own instructions.
 
-- [ ] **Step 2: Create the M0 worktree from the exact reviewed base**
+- [ ] **Step 2: Create the implementation worktree from the exact reviewed base**
 
 Run:
 
 ```bash
 PLAN_BASE=$(git -C /Users/lune/Documents/Codex/2026-07-13/new-chat/work/openusage-bar-public-release rev-parse HEAD)
 git -C /Users/lune/Documents/Codex/2026-07-13/new-chat/work/openusage-bar-public-release \
-  worktree add /Users/lune/Documents/Codex/2026-07-13/new-chat/worktrees/openusage-control-center-m0 \
-  -b feature/control-center-m0 "$PLAN_BASE"
+  worktree add /Users/lune/Documents/Codex/2026-07-13/new-chat/worktrees/openusage-control-center \
+  -b feature/openusage-control-center "$PLAN_BASE"
 ```
 
-Expected: a new clean worktree on `feature/control-center-m0`; `git rev-parse HEAD` in that worktree equals `PLAN_BASE`, and all six plans are readable there.
+Expected: a new clean worktree on `feature/openusage-control-center`; `git rev-parse HEAD` in that worktree equals `PLAN_BASE`, and every approved plan is readable there. Execute the Chinese work queue in A1 → A2 → A3/A4/A5 → A6 order in this worktree; the optional Loom track remains in a different repository and worktree.
 
 - [ ] **Step 3: Record the starting baseline**
 
 Run:
 
 ```bash
-cd /Users/lune/Documents/Codex/2026-07-13/new-chat/worktrees/openusage-control-center-m0
+cd /Users/lune/Documents/Codex/2026-07-13/new-chat/worktrees/openusage-control-center
 scripts/bootstrap.sh
 scripts/build_app.sh
 ```
