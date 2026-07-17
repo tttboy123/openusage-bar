@@ -171,6 +171,7 @@ struct ActivityDataTests {
         #expect(loaded.records.isEmpty)
         #expect(loaded.hiddenProviderIDs == ["codex"])
         #expect(loaded.providerDescriptors["codex"]?.displayName == "Work Codex")
+        #expect(loaded.providerInstances.isEmpty)
     }
 
     @Test("Invalid or hidden selected provider is explicit no-match and leaks no other provider facts")

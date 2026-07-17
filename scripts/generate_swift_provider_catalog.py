@@ -140,6 +140,7 @@ def render() -> str:
         ) + "]"
         capabilities = family.capabilities
         quota_windows = swift_quota_capability(capabilities.quota_windows)
+        swift_regions = "[" + ", ".join(swift_string(value) for value in sorted(family.regions)) + "]"
         swift_sources = [
             "                ProviderSourceCapability("
             f"sourceID: {swift_string(source.source_id)}, "
@@ -157,6 +158,8 @@ def render() -> str:
                 f"            displayName: {swift_string(family.display_name)},",
                 f"            category: .{category},",
                 f"            metricFamilies: {swift_cases(metrics)},",
+                f"            regions: {swift_regions},",
+                f"            supportsAccounts: {str(family.supports_accounts).lower()},",
                 f"            credentialSourceTypes: {swift_cases(credentials)},",
                 f"            acceptedIdentitySources: {swift_identity_sources},",
                 "            capabilityProfile: ProviderCapabilityProfile(",

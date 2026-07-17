@@ -65,6 +65,8 @@ struct ProviderCatalogTests {
             let displayName: String
             let category: String
             let metricFamilies: [String]
+            let regions: [String]
+            let supportsAccounts: Bool
             let capabilities: Capabilities
             let sources: [Source]
 
@@ -72,6 +74,8 @@ struct ProviderCatalogTests {
                 case id, category, capabilities, sources
                 case displayName = "display_name"
                 case metricFamilies = "metric_families"
+                case regions
+                case supportsAccounts = "supports_accounts"
             }
         }
 
@@ -143,6 +147,8 @@ struct ProviderCatalogTests {
             #expect(descriptor.displayName == family.displayName)
             #expect(descriptor.category.manifestName == family.category)
             #expect(descriptor.metricFamilies.map(\.manifestName).sorted() == family.metricFamilies)
+            #expect(descriptor.regions == Set(family.regions))
+            #expect(descriptor.supportsAccounts == family.supportsAccounts)
             #expect(Set(descriptor.credentialSourceTypes.map(\.manifestName)) == expectedCredentials)
             #expect(descriptor.acceptedIdentitySources == expectedIdentitySources)
             #expect(descriptor.capabilityProfile == expectedProfile)
@@ -185,6 +191,8 @@ struct ProviderCatalogTests {
         #expect(kiro.capabilityProfile.credits == .supported)
 
         let stepPlan = try #require(GeneratedProviderCatalog.families["step_plan"])
+        #expect(stepPlan.regions == ["cn", "international"])
+        #expect(stepPlan.supportsAccounts)
         #expect(stepPlan.capabilityProfile.billing == .supported)
         #expect(stepPlan.sourceCapabilities.first == ProviderSourceCapability(
             sourceID: "step_plan_browser_session",
@@ -223,6 +231,19 @@ struct ProviderCatalogTests {
         #expect(categories[.api]?.count == 13)
     }
 
+    @Test("Catalog exposes every family in stable display order")
+    func allDescriptors() {
+        let descriptors = ProviderCatalog.allDescriptors
+        let familyIDs = Set(descriptors.map(\.familyID))
+        let displayNames = descriptors.map(\.displayName)
+        let sortedDisplayNames = displayNames.sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+        #expect(descriptors.count == 37)
+        #expect(familyIDs == Set(GeneratedProviderCatalog.families.keys))
+        #expect(displayNames == sortedDisplayNames)
+    }
+
     @Test("Unknown IDs never inherit a known family by substring or prefix")
     func adversarialUnknownIDs() {
         #expect(ProviderCatalog.descriptor(for: "minimaxevil").displayName == "Minimaxevil")
@@ -236,6 +257,8 @@ struct ProviderCatalogTests {
     func unknownCapabilityFallback() {
         let descriptor = ProviderCatalog.descriptor(for: "future_provider")
         #expect(descriptor.capabilityProfile == .unknown)
+        #expect(descriptor.regions.isEmpty)
+        #expect(!descriptor.supportsAccounts)
         #expect(descriptor.sourceCapabilities == [ProviderSourceCapability(
             sourceID: "openusage",
             sourceKind: "openusage",
@@ -258,6 +281,8 @@ struct ProviderCatalogTests {
         #expect(minimax.metricFamilies == GeneratedProviderCatalog.families["minimax"]?.metricFamilies)
         #expect(minimax.capabilityProfile == GeneratedProviderCatalog.families["minimax"]?.capabilityProfile)
         #expect(minimax.sourceCapabilities == GeneratedProviderCatalog.families["minimax"]?.sourceCapabilities)
+        #expect(minimax.regions == ["cn", "international"])
+        #expect(minimax.supportsAccounts)
 
         let redundantRawLabel = ProviderCatalog.descriptor(
             for: "minimax-generated", familyID: "minimax",

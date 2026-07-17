@@ -822,6 +822,8 @@ public struct ProviderDisplayDescriptor: Sendable, Hashable {
     public let displayName: String
     public let category: ProviderProductCategory
     public let metricFamilies: Set<ProviderMetricFamily>
+    public let regions: Set<String>
+    public let supportsAccounts: Bool
     public let credentialSourceTypes: Set<CredentialSourceType>
     public let acceptedIdentitySources: Set<ProviderIdentitySource>
     public let capabilityProfile: ProviderCapabilityProfile
@@ -829,12 +831,20 @@ public struct ProviderDisplayDescriptor: Sendable, Hashable {
 }
 
 public enum ProviderCatalog {
+    public static var allDescriptors: [ProviderDisplayDescriptor] {
+        GeneratedProviderCatalog.families.values.sorted {
+            let order = $0.displayName.localizedStandardCompare($1.displayName)
+            return order == .orderedSame ? $0.familyID < $1.familyID : order == .orderedAscending
+        }
+    }
+
     public static func descriptor(for providerID: String) -> ProviderDisplayDescriptor {
         if let descriptor = known[providerID] { return descriptor }
         return ProviderDisplayDescriptor(
             providerID: providerID, familyID: providerID,
             displayName: DisplayText.provider(providerID), category: .api,
-            metricFamilies: [.tokenActivity, .billing], credentialSourceTypes: [.none],
+            metricFamilies: [.tokenActivity, .billing], regions: [], supportsAccounts: false,
+            credentialSourceTypes: [.none],
             acceptedIdentitySources: [], capabilityProfile: .unknown,
             sourceCapabilities: [.openUsageFallback]
         )
@@ -860,6 +870,8 @@ public enum ProviderCatalog {
             displayName: resolvedDisplayName,
             category: category,
             metricFamilies: family.metricFamilies,
+            regions: family.regions,
+            supportsAccounts: family.supportsAccounts,
             credentialSourceTypes: family.credentialSourceTypes,
             acceptedIdentitySources: family.acceptedIdentitySources,
             capabilityProfile: family.capabilityProfile,

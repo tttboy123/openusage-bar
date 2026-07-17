@@ -82,7 +82,7 @@ struct HeatmapTooltipText: Sendable, Hashable {
 enum DetailsCopy {
     static let sidebar = [
         "Activity", "Capacity", "API Spend", "Local Tools",
-        "Providers and Accounts", "Data Health",
+        "Providers", "Data Health",
     ]
     static let visibleText = sidebar + [
         "Usage Details", "Refresh", "All Providers", "All Models", "Total Tokens",
@@ -91,6 +91,84 @@ enum DetailsCopy {
         "Manage Credentials", "Retry", "Missing", "Covered zero",
         "Lower", "Higher", "Exact", "Estimated", "Partial", "Partial history", "Stale",
     ]
+}
+
+enum ProviderBrowseCategory: String, CaseIterable, Sendable, Hashable, Identifiable {
+    case all, subscription, api, cloud, local
+
+    var id: String { rawValue }
+
+    static func classify(_ descriptor: ProviderDisplayDescriptor) -> Self {
+        if ["alibaba_cloud", "azure_openai"].contains(descriptor.familyID) { return .cloud }
+        return switch descriptor.category {
+        case .subscription: .subscription
+        case .api: .api
+        case .localTool: .local
+        }
+    }
+}
+
+enum ProviderConnectionStatus: Sendable, Hashable {
+    case available, connected, attention
+}
+
+struct ProviderCenterItem: Identifiable, Sendable, Hashable {
+    let descriptor: ProviderDisplayDescriptor
+    let instanceCount: Int
+    let observed: Bool
+    let needsAttention: Bool
+
+    var id: String { descriptor.familyID }
+    var category: ProviderBrowseCategory { .classify(descriptor) }
+    var status: ProviderConnectionStatus {
+        if needsAttention { return .attention }
+        return observed || instanceCount > 0 ? .connected : .available
+    }
+}
+
+enum ProviderCenterPresentation {
+    static func filter(
+        _ items: [ProviderCenterItem], category: ProviderBrowseCategory, query: String
+    ) -> [ProviderCenterItem] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return items.filter { item in
+            (category == .all || item.category == category)
+                && (needle.isEmpty
+                    || item.descriptor.displayName.localizedCaseInsensitiveContains(needle)
+                    || item.descriptor.familyID.localizedCaseInsensitiveContains(needle))
+        }
+    }
+}
+
+enum ProviderCenterText {
+    static func region(_ value: String) -> String {
+        switch value {
+        case "cn": "China"
+        case "international": "International"
+        default: value.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    static func scope(_ descriptor: ProviderDisplayDescriptor) -> String? {
+        let regions = descriptor.regions
+        if regions == ["cn", "international"] { return "中国站和国际站" }
+        if regions == ["cn"] { return "中国站" }
+        if regions == ["international"] { return "国际站" }
+        return regions.isEmpty ? nil : regions.sorted().joined(separator: ", ")
+    }
+
+    static func connectionMethod(_ descriptor: ProviderDisplayDescriptor) -> String {
+        let sources = descriptor.credentialSourceTypes
+        if sources.contains(.browserSession), sources.contains(.apiKey) {
+            return "API Key or web session"
+        }
+        if sources.contains(.apiKey) { return "API Key" }
+        if sources.contains(.oauth) || sources.contains(.keychain) || sources.contains(.local) {
+            return "Existing local login"
+        }
+        if sources.contains(.cli) { return "CLI configuration" }
+        return "OpenUsage data source"
+    }
 }
 
 struct LocalToolUsageSummary: Identifiable, Sendable, Hashable {

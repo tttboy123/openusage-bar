@@ -63,33 +63,38 @@ struct ActivityRootView: View {
 
     @ViewBuilder private var content: some View {
         if let data = store.displayData {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    ActivityHeader(store: store, updatedAt: data.latestCollectionAt)
-                    if let error = store.error {
-                        StatusBanner(symbol: "exclamationmark.triangle", text: error.localizedDescription)
-                    }
-                    if data.selectionMatch != .matched {
-                        NoMatchView(
-                            match: data.selectionMatch,
-                            providerName: { data.providerDescriptor(for: $0).displayName },
-                            retry: store.reload, clear: store.clearFilters
-                        )
-                    } else {
-                        switch coordinator.route {
-                        case .activity: ActivityPage(store: store, data: data)
-                        case .capacity: CapacityPage(data: data)
-                        case .apiSpend: APISpendPage(data: data)
-                        case .localTools: LocalToolsPage(store: store, data: data)
-                        case .providersAndAccounts: ProvidersPage(data: data)
-                        case .dataHealth: DataHealthPage(data: data, retry: store.reload)
+            if coordinator.route == .providersAndAccounts {
+                ProvidersPage(data: data, reload: store.reload)
+                    .background(.background)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        ActivityHeader(store: store, updatedAt: data.latestCollectionAt)
+                        if let error = store.error {
+                            StatusBanner(symbol: "exclamationmark.triangle", text: error.localizedDescription)
+                        }
+                        if data.selectionMatch != .matched {
+                            NoMatchView(
+                                match: data.selectionMatch,
+                                providerName: { data.providerDescriptor(for: $0).displayName },
+                                retry: store.reload, clear: store.clearFilters
+                            )
+                        } else {
+                            switch coordinator.route {
+                            case .activity: ActivityPage(store: store, data: data)
+                            case .capacity: CapacityPage(data: data)
+                            case .apiSpend: APISpendPage(data: data)
+                            case .localTools: LocalToolsPage(store: store, data: data)
+                            case .providersAndAccounts: EmptyView()
+                            case .dataHealth: DataHealthPage(data: data, retry: store.reload)
+                            }
                         }
                     }
+                    .padding(28)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(28)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.background)
             }
-            .background(.background)
         } else if store.isLoading {
             VStack(spacing: 12) {
                 ProgressView()
@@ -1448,63 +1453,306 @@ private struct LocalToolMetric: View {
 
 private struct ProvidersPage: View {
     let data: ActivityLoadedData
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            PageHeading("Providers and Accounts", detail: "Capabilities and privacy-safe account references")
-            ForEach(data.visibleProviderIDs, id: \.self) { id in
-                let descriptor = data.providerDescriptor(for: id)
-                let capability = ProviderCapabilityPresentation(descriptor: descriptor)
-                let accountRefs = Set(data.capacity.filter { $0.providerID == id }.map(\.accountRef))
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack {
-                        Text(descriptor.displayName).font(.headline)
-                        Text(descriptor.category.title).font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        StateLabel(state: providerState(id))
-                    }
-                    LabeledContent("Capabilities") {
-                        Text(capability.summary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .help(capability.summary)
-                    }
-                    LabeledContent("Account", value: accountRefs.isEmpty ? "Default" : accountRefs.map(AccountText.pseudonymous).sorted().joined(separator: ", "))
-                    DisclosureGroup("Capability details") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(capability.groups, id: \.state) { group in
-                                LabeledContent(group.title) {
-                                    Text(group.items.isEmpty
-                                        ? "None"
-                                        : group.items.map(\.title).joined(separator: ", "))
-                                        .multilineTextAlignment(.trailing)
-                                }
-                            }
-                            Divider()
-                            Text("Catalog source strategies")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            ForEach(capability.sourceStrategies.indices, id: \.self) { index in
-                                let strategy = capability.sourceStrategies[index]
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(strategy.summary)
-                                    LabeledContent("Platforms", value: strategy.platforms)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .padding(.top, 6)
-                    }
-                }
-                Divider()
-            }
-            Button("Manage Credentials", systemImage: "key") { SettingsHelper.open() }
+    let reload: () -> Void
+
+    @State private var selectedCategory = ProviderBrowseCategory.all
+    @State private var selectedFamilyID: String? = "minimax"
+    @State private var selectedRegionID: String? = "cn"
+    @State private var searchText = ""
+
+    private var allItems: [ProviderCenterItem] {
+        let instances = Dictionary(grouping: data.providerInstances, by: \.familyID)
+        let observedFamilies = Set(data.availableProviderIDs.map {
+            data.providerDescriptor(for: $0).familyID
+        })
+        let attentionFamilies = Set(data.health.sources.compactMap { source -> String? in
+            let state = source.effectiveState.lowercased()
+            guard !["ok", "available"].contains(state) else { return nil }
+            return data.providerDescriptor(for: source.providerID).familyID
+        })
+        var descriptors = Dictionary(uniqueKeysWithValues: ProviderCatalog.allDescriptors.map {
+            ($0.familyID, $0)
+        })
+        for descriptor in data.providerDescriptors.values where descriptors[descriptor.familyID] == nil {
+            descriptors[descriptor.familyID] = descriptor
+        }
+        return descriptors.values.map { descriptor in
+            ProviderCenterItem(
+                descriptor: descriptor,
+                instanceCount: instances[descriptor.familyID]?.count ?? 0,
+                observed: observedFamilies.contains(descriptor.familyID),
+                needsAttention: attentionFamilies.contains(descriptor.familyID)
+            )
+        }.sorted { left, right in
+            let leftRank = left.status.sortRank
+            let rightRank = right.status.sortRank
+            if leftRank != rightRank { return leftRank < rightRank }
+            let order = left.descriptor.displayName.localizedStandardCompare(right.descriptor.displayName)
+            return order == .orderedSame ? left.id < right.id : order == .orderedAscending
         }
     }
 
-    private func providerState(_ id: String) -> String {
-        data.health.sources.first { $0.providerID == id }?.effectiveState
-            ?? data.capacity.first { $0.providerID == id }?.state ?? "available"
+    private var filteredItems: [ProviderCenterItem] {
+        ProviderCenterPresentation.filter(
+            allItems, category: selectedCategory, query: searchText
+        )
+    }
+
+    private var selectedItem: ProviderCenterItem? {
+        allItems.first { $0.id == selectedFamilyID }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Providers").font(.largeTitle.weight(.semibold))
+                    Text("Connect services and inspect the data each source can provide")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                TextField("Search providers or clients", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 260)
+                    .accessibilityLabel("Search providers or clients")
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 20)
+
+            Divider()
+
+            HSplitView {
+                providerList
+                    .frame(minWidth: 250, idealWidth: 290, maxWidth: 340)
+                if let selectedItem {
+                    ProviderConnectionDetail(
+                        item: selectedItem,
+                        instances: data.providerInstances.filter {
+                            $0.familyID == selectedItem.descriptor.familyID
+                        },
+                        selectedRegionID: $selectedRegionID,
+                        reload: reload
+                    )
+                    .id(selectedItem.id)
+                } else {
+                    ContentUnavailableView(
+                        "Select a Provider", systemImage: "bolt.horizontal.circle",
+                        description: Text("Review connection methods and available data.")
+                    )
+                }
+            }
+        }
+        .onAppear { synchronizeSelection() }
+        .onChange(of: selectedCategory) { synchronizeSelection() }
+        .onChange(of: searchText) { synchronizeSelection() }
+        .onChange(of: selectedFamilyID) { _, _ in synchronizeRegion() }
+    }
+
+    private var providerList: some View {
+        VStack(spacing: 0) {
+            Picker("Category", selection: $selectedCategory) {
+                ForEach(ProviderBrowseCategory.allCases) { category in
+                    Text(category.title).tag(category)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(12)
+
+            Divider()
+
+            if filteredItems.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+            } else {
+                List(filteredItems, selection: $selectedFamilyID) { item in
+                    ProviderCenterRow(item: item)
+                        .tag(Optional(item.id))
+                }
+                .listStyle(.sidebar)
+            }
+        }
+    }
+
+    private func synchronizeSelection() {
+        guard !filteredItems.contains(where: { $0.id == selectedFamilyID }) else { return }
+        selectedFamilyID = filteredItems.first?.id
+    }
+
+    private func synchronizeRegion() {
+        selectedRegionID = selectedItem?.descriptor.regions.sorted().first
+    }
+}
+
+private struct ProviderCenterRow: View {
+    let item: ProviderCenterItem
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: item.category.symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(item.category.color)
+                .frame(width: 30, height: 30)
+                .background(item.category.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.descriptor.displayName)
+                    .font(.body.weight(.medium)).lineLimit(1)
+                Text(ProviderCenterText.scope(item.descriptor)
+                    ?? ProviderCenterText.connectionMethod(item.descriptor))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: item.status.symbol)
+                .foregroundStyle(item.status.color)
+                .accessibilityLabel(item.status.title)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct ProviderConnectionDetail: View {
+    let item: ProviderCenterItem
+    let instances: [ProviderInstanceRecord]
+    @Binding var selectedRegionID: String?
+    let reload: () -> Void
+
+    private var descriptor: ProviderDisplayDescriptor { item.descriptor }
+    private var capability: ProviderCapabilityPresentation {
+        ProviderCapabilityPresentation(descriptor: descriptor)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 26) {
+                header
+                Divider()
+                connectionSection
+                capabilitySection
+                if !instances.isEmpty { instanceSection }
+            }
+            .frame(maxWidth: 720, alignment: .leading)
+            .padding(.horizontal, 34)
+            .padding(.vertical, 28)
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: item.category.symbol)
+                .font(.system(size: 23, weight: .semibold))
+                .foregroundStyle(item.category.color)
+                .frame(width: 50, height: 50)
+                .background(item.category.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(descriptor.displayName).font(.title2.weight(.semibold))
+                Text(ProviderCenterText.scope(descriptor) ?? item.category.title)
+                    .foregroundStyle(.secondary)
+                Label(item.status.title, systemImage: item.status.symbol)
+                    .font(.caption).foregroundStyle(item.status.color)
+            }
+            Spacer()
+        }
+    }
+
+    private var connectionSection: some View {
+        ProviderDetailSection(
+            title: "Connection",
+            detail: "Setup stays in the existing Python helper. This view never reads secrets."
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                if descriptor.regions.count > 1 {
+                    LabeledContent("Site") {
+                        Picker("Site", selection: $selectedRegionID) {
+                            ForEach(descriptor.regions.sorted(), id: \.self) { region in
+                                Text(ProviderCenterText.region(region)).tag(Optional(region))
+                            }
+                        }
+                        .labelsHidden().pickerStyle(.segmented).frame(width: 250)
+                    }
+                } else if let scope = ProviderCenterText.scope(descriptor) {
+                    LabeledContent("Site", value: scope)
+                }
+                LabeledContent(
+                    "Connection method",
+                    value: ProviderCenterText.connectionMethod(descriptor)
+                )
+                LabeledContent(
+                    "Multiple accounts",
+                    value: descriptor.supportsAccounts ? "Supported" : "Not declared"
+                )
+                HStack {
+                    Button("Open Provider Settings", systemImage: "key") {
+                        SettingsHelper.open()
+                    }
+                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    Button("Refresh Data", systemImage: "arrow.clockwise", action: reload)
+                        .controlSize(.large)
+                }
+            }
+        }
+    }
+
+    private var capabilitySection: some View {
+        ProviderDetailSection(
+            title: "Available Data",
+            detail: "Unknown means OpenUsage Bar has no reliable declaration. It is not zero."
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(capability.groups, id: \.state) { group in
+                    HStack(alignment: .firstTextBaseline) {
+                        Label(group.title, systemImage: group.state.symbol)
+                            .foregroundStyle(group.state.color)
+                        Spacer()
+                        Text(group.items.isEmpty
+                            ? "None"
+                            : group.items.map(\.title).joined(separator: ", "))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .font(.callout)
+                    Divider()
+                }
+            }
+        }
+    }
+
+    private var instanceSection: some View {
+        ProviderDetailSection(
+            title: "Connected Instances",
+            detail: "Only privacy-safe instance metadata is shown."
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(instances) { instance in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(instance.displayName).font(.callout.weight(.medium))
+                            Text(instance.sourceKind)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(DateText.display(instance.observedAt))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Divider()
+                }
+            }
+        }
+    }
+}
+
+private struct ProviderDetailSection<Content: View>: View {
+    let title: String
+    let detail: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Text(title).font(.headline)
+            Text(detail).font(.callout).foregroundStyle(.secondary)
+            content
+        }
     }
 }
 
@@ -1842,16 +2090,70 @@ private extension UsageDetailsRoute {
         switch self {
         case .activity: "Activity"; case .capacity: "Capacity"
         case .apiSpend: "API Spend"; case .localTools: "Local Tools"
-        case .providersAndAccounts: "Providers and Accounts"; case .dataHealth: "Data Health"
+        case .providersAndAccounts: "Providers"; case .dataHealth: "Data Health"
         }
     }
     var symbol: String {
         switch self {
         case .activity: "chart.bar.xaxis"; case .capacity: "gauge.with.dots.needle.50percent"
         case .apiSpend: "dollarsign.circle"
-        case .localTools: "terminal"; case .providersAndAccounts: "person.2"
+        case .localTools: "terminal"; case .providersAndAccounts: "bolt.horizontal.circle"
         case .dataHealth: "waveform.path.ecg"
         }
+    }
+}
+
+private extension ProviderBrowseCategory {
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .subscription: "Plans"
+        case .api: "API"
+        case .cloud: "Cloud"
+        case .local: "Local"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .all: "square.grid.2x2"
+        case .subscription: "gauge.with.dots.needle.50percent"
+        case .api: "key"
+        case .cloud: "cloud"
+        case .local: "terminal"
+        }
+    }
+
+    var color: Color {
+        .secondary
+    }
+}
+
+private extension ProviderConnectionStatus {
+    var sortRank: Int {
+        switch self { case .attention: 0; case .connected: 1; case .available: 2 }
+    }
+
+    var title: String {
+        switch self { case .available: "Available"; case .connected: "Connected"; case .attention: "Needs attention" }
+    }
+
+    var symbol: String {
+        switch self { case .available: "circle"; case .connected: "checkmark.circle.fill"; case .attention: "exclamationmark.triangle.fill" }
+    }
+
+    var color: Color {
+        switch self { case .available: .secondary; case .connected: .green; case .attention: .orange }
+    }
+}
+
+private extension ProviderCapabilityState {
+    var symbol: String {
+        switch self { case .supported: "checkmark"; case .unsupported: "minus"; case .unknown: "questionmark" }
+    }
+
+    var color: Color {
+        switch self { case .supported: .green; case .unsupported: .secondary; case .unknown: .orange }
     }
 }
 

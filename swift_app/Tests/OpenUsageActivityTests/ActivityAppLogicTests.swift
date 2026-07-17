@@ -38,7 +38,7 @@ struct ActivityAppLogicTests {
         #expect(DetailsCopy.visibleText.allSatisfy { !$0.contains("—") && !$0.contains("–") })
         #expect(DetailsCopy.sidebar == [
             "Activity", "Capacity", "API Spend", "Local Tools",
-            "Providers and Accounts", "Data Health",
+            "Providers", "Data Health",
         ])
         #expect(!DetailsCopy.visibleText.contains("Longest Task"))
         #expect(!DetailsCopy.visibleText.contains("Unavailable"))
