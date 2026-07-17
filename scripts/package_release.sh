@@ -34,5 +34,9 @@ chmod 755 "$STAGE/scripts/"*.sh
   cd "$ARCHIVE:h"
   shasum -a 256 "$ARCHIVE:t"
 ) > "$CHECKSUM"
+(
+  cd "$ARCHIVE:h"
+  shasum -a 256 -c "$CHECKSUM:t"
+)
 print "release_archive=$ARCHIVE"
 print "release_checksum=$CHECKSUM"
