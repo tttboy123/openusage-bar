@@ -18,6 +18,12 @@ A native macOS menu-bar utility. Data stays local; people read the UI and schedu
 
 OpenUsage Bar is a local-first native macOS dashboard for AI subscriptions, API providers, local coding tools, and daily token activity.
 
+<p align="center">
+  <img src="docs/assets/openusage-bar-activity-demo-zh.png" width="1160" alt="OpenUsage Bar Activity view showing the yearly token heatmap and daily model trend">
+</p>
+
+<p align="center"><sub>Real SwiftUI interface rendered from an isolated synthetic ledger. No user ledger, Keychain data, or real quota was read.</sub></p>
+
 > Current version: **0.3.0 pre-release**. Apple Silicon and macOS 15 or later are required. Developer ID notarization is not available yet; read the Gatekeeper note before installing a downloaded build, or build from source.
 
 ## What it does

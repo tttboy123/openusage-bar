@@ -19,6 +19,12 @@
 
 OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Token 活动统一到一个原生 SwiftUI 客户端里：菜单栏用于快速判断，详情页用于分析，CLI JSON 和本地只读 API 供调度平台读取。
 
+<p align="center">
+  <img src="docs/assets/openusage-bar-activity-demo-zh.png" width="1160" alt="OpenUsage Bar 中文 Activity 界面，展示年度 Token 热力图与每日模型趋势">
+</p>
+
+<p align="center"><sub>真实 SwiftUI 界面，使用隔离的合成账本生成。未读取用户账本、Keychain 或真实额度。</sub></p>
+
 > 当前版本：**0.3.0 预发布版**。支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple Developer ID 公证包；下载构建请阅读 Gatekeeper 说明，或直接从源码构建。
 
 ## 为什么需要它
