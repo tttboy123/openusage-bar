@@ -29,6 +29,7 @@ from .activity_records import (
     QuotaSnapshot,
     QuotaState,
     QuotaStateSnapshot,
+    ResourceStateSnapshot,
     SourceStatus,
     SourceStatusSnapshot,
     UsageSummary,
@@ -585,18 +586,18 @@ class ActivityStore:
 
     def provider_instances(self) -> tuple[ProviderInstance, ...]:
         with self._lock:
-            rows = self._connection.execute(
-                "SELECT * FROM provider_instances ORDER BY provider_id"
-            ).fetchall()
-            return tuple(self._row_to_provider_instance(row) for row in rows)
+            return self._resource_provider_instances_locked()
+
+    def _resource_provider_instances_locked(self) -> tuple[ProviderInstance, ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM provider_instances ORDER BY provider_id"
+        ).fetchall()
+        return tuple(self._row_to_provider_instance(row) for row in rows)
 
     def snapshot_provider_instances(self) -> ProviderInstanceSnapshot:
         with self._read_snapshot():
-            rows = self._connection.execute(
-                "SELECT * FROM provider_instances ORDER BY provider_id"
-            ).fetchall()
             return ProviderInstanceSnapshot(
-                tuple(self._row_to_provider_instance(row) for row in rows),
+                self._resource_provider_instances_locked(),
                 self._current_change_seq_locked(),
             )
 
@@ -1336,16 +1337,19 @@ class ActivityStore:
 
     def quota_states(self) -> list[QuotaState]:
         with self._lock:
-            rows = self._connection.execute("SELECT * FROM quota_state ORDER BY record_id").fetchall()
-            return [self._row_to_quota_state(row) for row in rows]
+            return list(self._resource_quota_states_locked())
+
+    def _resource_quota_states_locked(self) -> tuple[QuotaState, ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM quota_state "
+            "ORDER BY provider_id,account_ref,quota_name,record_id"
+        ).fetchall()
+        return tuple(self._row_to_quota_state(row) for row in rows)
 
     def snapshot_quota_states(self) -> QuotaStateSnapshot:
         with self._read_snapshot():
-            rows = self._connection.execute(
-                "SELECT * FROM quota_state ORDER BY provider_id,account_ref,quota_name,record_id"
-            ).fetchall()
             return QuotaStateSnapshot(
-                tuple(self._row_to_quota_state(row) for row in rows),
+                self._resource_quota_states_locked(),
                 self._current_change_seq_locked(),
             )
 
@@ -1588,10 +1592,13 @@ class ActivityStore:
 
     def source_statuses(self) -> list[SourceStatus]:
         with self._lock:
-            rows = self._connection.execute(
-                "SELECT * FROM source_status ORDER BY provider_id,source_id"
-            ).fetchall()
-            return [SourceStatus(**dict(row)) for row in rows]
+            return list(self._resource_source_statuses_locked())
+
+    def _resource_source_statuses_locked(self) -> tuple[SourceStatus, ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM source_status ORDER BY provider_id,source_id"
+        ).fetchall()
+        return tuple(SourceStatus(**dict(row)) for row in rows)
 
     def delete_source_status(
         self, provider_id: str, source_id: str, attempted_at: datetime
@@ -1624,12 +1631,36 @@ class ActivityStore:
 
     def snapshot_source_statuses(self) -> SourceStatusSnapshot:
         with self._read_snapshot():
-            rows = self._connection.execute(
-                "SELECT * FROM source_status ORDER BY provider_id,source_id"
-            ).fetchall()
             return SourceStatusSnapshot(
-                tuple(SourceStatus(**dict(row)) for row in rows),
+                self._resource_source_statuses_locked(),
                 self._current_change_seq_locked(),
+            )
+
+    def snapshot_resource_state(self, local_day: str) -> ResourceStateSnapshot:
+        _validate_day(local_day)
+        with self._read_snapshot():
+            total, count = self._connection.execute(
+                "SELECT COALESCE(SUM(total_tokens),0),COUNT(*) "
+                "FROM daily_model_usage WHERE day=?",
+                (local_day,),
+            ).fetchone()
+            covered = self._connection.execute(
+                "SELECT COUNT(*) FROM daily_coverage WHERE day=?",
+                (local_day,),
+            ).fetchone()[0]
+            quota_states = self._resource_quota_states_locked()
+            provider_instances = self._resource_provider_instances_locked()
+            source_statuses = self._resource_source_statuses_locked()
+            cursor = self._current_change_seq_locked()
+            return ResourceStateSnapshot(
+                local_day=local_day,
+                cursor=cursor,
+                today_tokens=int(total),
+                model_count=int(count),
+                covered_day_count=int(covered),
+                quota_states=quota_states,
+                provider_instances=provider_instances,
+                source_statuses=source_statuses,
             )
 
     def apply_retention(

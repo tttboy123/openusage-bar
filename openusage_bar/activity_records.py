@@ -395,6 +395,23 @@ class SourceStatus:
 
 
 @dataclass(frozen=True)
+class ResourceStateSnapshot:
+    local_day: str
+    cursor: int
+    today_tokens: int
+    model_count: int
+    covered_day_count: int
+    quota_states: tuple[QuotaState, ...]
+    provider_instances: tuple[ProviderInstance, ...]
+    source_statuses: tuple[SourceStatus, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "quota_states", tuple(self.quota_states))
+        object.__setattr__(self, "provider_instances", tuple(self.provider_instances))
+        object.__setattr__(self, "source_statuses", tuple(self.source_statuses))
+
+
+@dataclass(frozen=True)
 class SourceStatusSnapshot:
     rows: tuple[SourceStatus, ...]
     cursor: int

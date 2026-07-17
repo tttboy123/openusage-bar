@@ -1584,5 +1584,78 @@ class RetentionAndConcurrencyTests(unittest.TestCase):
             store.close()
 
 
+class ResourceSnapshotTests(unittest.TestCase):
+    def test_resource_snapshot_is_revision_consistent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "activity.sqlite3"
+            reader = ActivityStore(path)
+            writer = ActivityStore(path)
+            quota_select_entered = threading.Event()
+            release_quota_select = threading.Event()
+            try:
+                reader.replace_daily_usage(
+                    "codex", "2026-07-18",
+                    [usage(day="2026-07-18", total_tokens=1)],
+                )
+                reader.record_quota(quota())
+                reader.upsert_provider_instance(provider_instance())
+                reader.record_source_success(
+                    "codex", "openusage.daily",
+                    datetime.fromisoformat("2026-07-18T01:00:00+00:00"),
+                )
+                original = reader._resource_quota_states_locked
+
+                def blocking_quota_select():
+                    quota_select_entered.set()
+                    if not release_quota_select.wait(timeout=2):
+                        raise TimeoutError("test did not release quota read")
+                    return original()
+
+                with patch.object(
+                    reader,
+                    "_resource_quota_states_locked",
+                    side_effect=blocking_quota_select,
+                ):
+                    with ThreadPoolExecutor(max_workers=2) as executor:
+                        future = executor.submit(
+                            reader.snapshot_resource_state, "2026-07-18"
+                        )
+                        self.assertTrue(quota_select_entered.wait(timeout=2))
+                        writer.replace_daily_usage(
+                            "codex", "2026-07-18",
+                            [usage(day="2026-07-18", total_tokens=2)],
+                        )
+                        writer.upsert_provider_instance(provider_instance(
+                            provider_id="cursor", family_id="cursor",
+                            display_name="Cursor",
+                        ))
+                        writer_cursor = writer.current_change_seq
+                        release_quota_select.set()
+                        snapshot = future.result(timeout=2)
+
+                self.assertEqual(snapshot.local_day, "2026-07-18")
+                self.assertEqual(snapshot.today_tokens, 1)
+                self.assertEqual(snapshot.model_count, 1)
+                self.assertEqual(snapshot.covered_day_count, 1)
+                self.assertEqual(
+                    [row.provider_id for row in snapshot.provider_instances],
+                    ["codex"],
+                )
+                self.assertEqual(
+                    [row.provider_id for row in snapshot.quota_states],
+                    ["minimax"],
+                )
+                self.assertEqual(
+                    [row.provider_id for row in snapshot.source_statuses],
+                    ["codex"],
+                )
+                self.assertLess(snapshot.cursor, writer_cursor)
+                self.assertTrue(reader.changes(snapshot.cursor))
+            finally:
+                release_quota_select.set()
+                writer.close()
+                reader.close()
+
+
 if __name__ == "__main__":
     unittest.main()
