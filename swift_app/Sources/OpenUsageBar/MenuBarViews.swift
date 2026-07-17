@@ -52,7 +52,12 @@ struct MenuBarPopover: View {
                 Text(model.updatedAge).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Button { model.refresh() } label: { Label(model.isRefreshing ? "Refreshing" : "Refresh", systemImage: "arrow.clockwise") }
+            Button { model.refresh() } label: {
+                Label(
+                    AppLocalization.text(model.isRefreshing ? "Refreshing" : "Refresh"),
+                    systemImage: "arrow.clockwise"
+                )
+            }
                 .buttonStyle(.borderless).disabled(model.isRefreshing).keyboardShortcut("r", modifiers: .command)
         }
         .padding(.horizontal, 16).padding(.vertical, 13)
@@ -151,8 +156,11 @@ struct MenuBarPopover: View {
     private var emptyState: some View {
         VStack(spacing: 6) {
             Image(systemName: "tray").foregroundStyle(.secondary)
-            Text(model.displayError == nil ? "No capacity data" : "Last-good data unavailable").fontWeight(.medium)
-            Text(model.displayError ?? "Connect a supported provider in Settings.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text(AppLocalization.text(
+                model.displayError == nil ? "No capacity data" : "Last-good data unavailable"
+            )).fontWeight(.medium)
+            Text(model.displayError ?? AppLocalization.text("Connect a supported provider in Settings."))
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .padding(24).frame(maxWidth: .infinity)
     }

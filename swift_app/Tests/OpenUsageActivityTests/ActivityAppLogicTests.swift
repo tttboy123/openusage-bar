@@ -63,6 +63,8 @@ struct ActivityAppLogicTests {
         let section = String(source[detail.lowerBound..<nextPage.lowerBound])
 
         #expect(section.contains("Edit Connection"))
+        #expect(section.contains(".buttonStyle(.borderedProminent)"))
+        #expect(section.contains(".tint(.accentColor)"))
         #expect(section.contains("SecureField"))
         #expect(section.contains("ProviderMutationService.submit"))
         #expect(!section.contains("Button(\"Open Provider Settings\""))

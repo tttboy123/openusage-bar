@@ -15,8 +15,8 @@ struct ProviderCenterPresentationTests {
 
     @Test("Site labels preserve China and international separation")
     func siteLabels() throws {
-        #expect(ProviderCenterText.scope(try descriptor("minimax")) == "中国站和国际站")
-        #expect(ProviderCenterText.scope(try descriptor("step_plan")) == "中国站和国际站")
+        #expect(ProviderCenterText.scope(try descriptor("minimax")) == "China and International")
+        #expect(ProviderCenterText.scope(try descriptor("step_plan")) == "China and International")
         #expect(ProviderCenterText.scope(try descriptor("deepseek")) == nil)
     }
 

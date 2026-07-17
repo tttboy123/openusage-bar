@@ -54,6 +54,99 @@ EXPANDED_ROW_HEIGHT = 94
 ATTENTION_HEIGHT = 36
 
 
+_UI_TEXT = {
+    "en": {
+        "settings.window_title": "OpenUsage Bar Settings",
+        "settings.providers_title": "Providers and visibility",
+        "settings.credentials_help": (
+            "Credentials stay in Keychain. Add accounts here, then edit existing "
+            "connections in Usage Details > Providers."
+        ),
+        "settings.add_provider": "Add Provider",
+        "settings.provider_visibility": "Provider Visibility",
+        "settings.manage_title": "Manage Providers",
+        "settings.manage_help": (
+            "Choose which providers appear in the menu bar. Hidden providers keep "
+            "their data and credentials."
+        ),
+        "settings.done": "Done",
+        "settings.cancel": "Cancel",
+        "settings.no_providers": "No providers discovered yet.",
+        "settings.visibility_error": "Could not save provider visibility",
+        "settings.visibility_error_help": (
+            "The previous visibility selection is still active."
+        ),
+        "settings.add_help": "Choose a built-in provider or a generic HTTPS API.",
+        "settings.openai": "OpenAI Organization",
+        "settings.daily_feed": "Daily Token Feed",
+        "settings.generic_api": "Generic API",
+        "settings.save": "Save",
+        "settings.add_daily_feed": "Add Daily Token Feed",
+        "settings.add_openai": "Connect OpenAI Organization",
+        "settings.add_step_plan": "Connect StepFun Step Plan",
+        "settings.add_minimax": "Add MiniMax Coding Plan",
+        "settings.add_generic": "Add Generic HTTPS Provider",
+        "settings.account_label": "Account label",
+        "settings.api_key": "API key",
+        "settings.step_api_key": "Step API key (optional)",
+        "settings.step_session": "Full Session Cookie or Oasis-Token",
+        "settings.china_site": "China (.com)",
+        "settings.international_site": "International (.ai)",
+        "settings.could_not_save": "Could not save provider",
+    },
+    "zh-Hans": {
+        "settings.window_title": "OpenUsage Bar 设置",
+        "settings.providers_title": "Provider 与显示设置",
+        "settings.credentials_help": (
+            "凭证保存在钥匙串中。在此添加账号；已有连接请前往“用量详情 > Provider”修改。"
+        ),
+        "settings.add_provider": "添加 Provider",
+        "settings.provider_visibility": "Provider 显示设置",
+        "settings.manage_title": "管理 Provider",
+        "settings.manage_help": (
+            "选择菜单栏中显示的 Provider。隐藏不会删除数据或凭证。"
+        ),
+        "settings.done": "完成",
+        "settings.cancel": "取消",
+        "settings.no_providers": "尚未发现 Provider。",
+        "settings.visibility_error": "无法保存 Provider 显示设置",
+        "settings.visibility_error_help": "仍保留之前的显示选择。",
+        "settings.add_help": "选择内置 Provider 或通用 HTTPS API。",
+        "settings.openai": "OpenAI 组织",
+        "settings.daily_feed": "每日 Token 数据源",
+        "settings.generic_api": "通用 API",
+        "settings.save": "保存",
+        "settings.add_daily_feed": "添加每日 Token 数据源",
+        "settings.add_openai": "连接 OpenAI 组织",
+        "settings.add_step_plan": "连接 StepFun Step Plan",
+        "settings.add_minimax": "添加 MiniMax Coding Plan",
+        "settings.add_generic": "添加通用 HTTPS Provider",
+        "settings.account_label": "账号名称",
+        "settings.api_key": "API Key",
+        "settings.step_api_key": "Step API Key（可选）",
+        "settings.step_session": "完整 Session Cookie 或 Oasis-Token",
+        "settings.china_site": "中国站（.com）",
+        "settings.international_site": "国际站（.ai）",
+        "settings.could_not_save": "无法保存 Provider",
+    },
+}
+
+
+def normalize_ui_language(languages) -> str:
+    """Resolve Apple preferred languages without loading AppKit in headless paths."""
+    for language in languages or []:
+        value = str(language).replace("_", "-").lower()
+        if value == "zh" or value.startswith("zh-"):
+            return "zh-Hans"
+    return "en"
+
+
+def localized_ui_text(key: str, language: str = "en") -> str:
+    """Return human-facing GUI copy with a stable English fallback."""
+    normalized = normalize_ui_language([language])
+    return _UI_TEXT.get(normalized, {}).get(key, _UI_TEXT["en"].get(key, key))
+
+
 @dataclass(frozen=True)
 class ProviderSection:
     title: str
@@ -64,14 +157,6 @@ class ProviderSection:
 class OperationResult:
     ok: bool
     message: str
-
-
-def editable_step_plan_configs(configs) -> list[StepPlanConfig]:
-    """Return exact editable Step Plan accounts without exposing credentials."""
-    return sorted(
-        (config for config in configs if isinstance(config, StepPlanConfig)),
-        key=lambda config: (config.name.casefold(), config.provider_id),
-    )
 
 
 def configure_status_item(status_item, target, icon):
@@ -529,7 +614,7 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
         NSWindowStyleMaskMiniaturizable,
         NSWindowStyleMaskTitled,
     )
-    from Foundation import NSObject, NSSize, NSTimer
+    from Foundation import NSLocale, NSObject, NSSize, NSTimer
     from PyObjCTools import AppHelper
 
     def label(text: str, frame, size=12, bold=False, color=None, alignment=NSTextAlignmentLeft):
@@ -568,6 +653,7 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
 
     class AppDelegate(NSObject):
         def applicationDidFinishLaunching_(self, _notification):
+            self.ui_language = normalize_ui_language(NSLocale.preferredLanguages())
             self.store = ProviderConfigStore()
             self.visibility_store = ProviderVisibilityStore()
             self.hidden_provider_ids = self.visibility_store.load()
@@ -616,17 +702,20 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
                 60.0, self, "updateRefreshAge:", None, True
             )
 
+        def _text(self, key):
+            return localized_ui_text(key, self.ui_language)
+
         def _build_settings_window(self):
             style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
             self.settings_window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
                 NSMakeRect(0, 0, 440, 210), style, NSBackingStoreBuffered, False
             )
-            self.settings_window.setTitle_("OpenUsage Bar Settings")
+            self.settings_window.setTitle_(self._text("settings.window_title"))
             self.settings_window.setDelegate_(self)
             content = self.settings_window.contentView()
             content.addSubview_(
                 label(
-                    "Providers and visibility",
+                    self._text("settings.providers_title"),
                     NSMakeRect(24, 160, 392, 24),
                     16,
                     True,
@@ -634,31 +723,22 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             )
             content.addSubview_(
                 label(
-                    "Credentials stay in Keychain. Provider validation is shared with OpenUsage Bar.",
+                    self._text("settings.credentials_help"),
                     NSMakeRect(24, 132, 392, 20),
                     11,
                     False,
                     NSColor.secondaryLabelColor(),
                 )
             )
-            add = NSButton.buttonWithTitle_target_action_("Add Provider", self, "addProvider:")
-            add.setFrame_(NSMakeRect(24, 82, 126, 32))
+            add = NSButton.buttonWithTitle_target_action_(
+                self._text("settings.add_provider"), self, "addProvider:"
+            )
+            add.setFrame_(NSMakeRect(62, 82, 148, 32))
             content.addSubview_(add)
-            self.settings_edit = NSButton.buttonWithTitle_target_action_(
-                "Edit Step Plan", self, "editStepPlan:"
-            )
-            self.settings_edit.setFrame_(NSMakeRect(158, 82, 126, 32))
-            try:
-                self.settings_edit.setEnabled_(
-                    bool(editable_step_plan_configs(self.store.load()))
-                )
-            except (OSError, ValueError):
-                self.settings_edit.setEnabled_(False)
-            content.addSubview_(self.settings_edit)
             self.settings_manage = NSButton.buttonWithTitle_target_action_(
-                "Provider Visibility", self, "manageProviders:"
+                self._text("settings.provider_visibility"), self, "manageProviders:"
             )
-            self.settings_manage.setFrame_(NSMakeRect(292, 82, 124, 32))
+            self.settings_manage.setFrame_(NSMakeRect(230, 82, 148, 32))
             self.settings_manage.setEnabled_(False)
             content.addSubview_(self.settings_manage)
             self.settings_window.center()
@@ -673,12 +753,6 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             self.all_overview = overview
             self.last_overview = visible_overview(overview, self.hidden_provider_ids)
             self.settings_manage.setEnabled_(True)
-            try:
-                self.settings_edit.setEnabled_(
-                    bool(editable_step_plan_configs(self.store.load()))
-                )
-            except (OSError, ValueError):
-                self.settings_edit.setEnabled_(False)
 
         def windowWillClose_(self, _notification):
             finish_settings_helper(NSApplication.sharedApplication(), settings_only)
@@ -1060,12 +1134,10 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
         def manageProviders_(self, _sender):
             rows = visibility_rows(self.all_overview, self.hidden_provider_ids)
             alert = NSAlert.alloc().init()
-            alert.setMessageText_("Manage Providers")
-            alert.setInformativeText_(
-                "Choose which providers appear in the menu bar. Hidden providers keep their data and credentials."
-            )
-            alert.addButtonWithTitle_("Done")
-            alert.addButtonWithTitle_("Cancel")
+            alert.setMessageText_(self._text("settings.manage_title"))
+            alert.setInformativeText_(self._text("settings.manage_help"))
+            alert.addButtonWithTitle_(self._text("settings.done"))
+            alert.addButtonWithTitle_(self._text("settings.cancel"))
 
             row_height = 30
             accessory_height = max(42, len(rows) * row_height + 8)
@@ -1087,14 +1159,16 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
                 checkbox.setState_(
                     NSControlStateValueOn if row.visible else NSControlStateValueOff
                 )
-                checkbox.setAccessibilityLabel_(f"Show {row.name} in menu bar")
+                checkbox.setAccessibilityLabel_(
+                    f"{self._text('settings.provider_visibility')}: {row.name}"
+                )
                 accessory.addSubview_(checkbox)
                 checkboxes[row.provider_id] = checkbox
 
             if not rows:
                 accessory.addSubview_(
                     label(
-                        "No providers discovered yet.",
+                        self._text("settings.no_providers"),
                         NSMakeRect(4, 10, 332, 20),
                         11,
                         False,
@@ -1123,25 +1197,23 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
 
         def _show_visibility_error(self):
             error = NSAlert.alloc().init()
-            error.setMessageText_("Could not save provider visibility")
-            error.setInformativeText_(
-                "The previous visibility selection is still active."
-            )
+            error.setMessageText_(self._text("settings.visibility_error"))
+            error.setInformativeText_(self._text("settings.visibility_error_help"))
             error.runModal()
 
         def addProvider_(self, _sender):
             chooser = NSAlert.alloc().init()
-            chooser.setMessageText_("Add Provider")
-            chooser.setInformativeText_("Choose a built-in provider or a generic HTTPS API.")
+            chooser.setMessageText_(self._text("settings.add_provider"))
+            chooser.setInformativeText_(self._text("settings.add_help"))
             chooser.addButtonWithTitle_("Step Plan")
             chooser.addButtonWithTitle_("MiniMax")
-            chooser.addButtonWithTitle_("OpenAI Organization")
-            chooser.addButtonWithTitle_("Daily Token Feed")
-            chooser.addButtonWithTitle_("Generic API")
-            chooser.addButtonWithTitle_("Cancel")
+            chooser.addButtonWithTitle_(self._text("settings.openai"))
+            chooser.addButtonWithTitle_(self._text("settings.daily_feed"))
+            chooser.addButtonWithTitle_(self._text("settings.generic_api"))
+            chooser.addButtonWithTitle_(self._text("settings.cancel"))
             response = chooser.runModal()
             if response == NSAlertFirstButtonReturn:
-                self._add_step_plan_dialog(None)
+                self._add_step_plan_dialog()
             elif response == NSAlertSecondButtonReturn:
                 self._add_minimax_dialog()
             elif response == NSAlertThirdButtonReturn:
@@ -1151,51 +1223,14 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             elif response == NSAlertThirdButtonReturn + 2:
                 self._add_generic_dialog()
 
-        def editStepPlan_(self, _sender):
-            try:
-                configs = editable_step_plan_configs(self.store.load())
-            except (OSError, ValueError):
-                configs = []
-            if not configs:
-                message = NSAlert.alloc().init()
-                message.setMessageText_("No Step Plan connections")
-                message.setInformativeText_(
-                    "Add a Step Plan connection before editing it."
-                )
-                message.runModal()
-                return
-
-            chooser = NSAlert.alloc().init()
-            chooser.setMessageText_("Edit Step Plan")
-            chooser.setInformativeText_(
-                "Choose the exact account whose label or credentials should change."
-            )
-            chooser.addButtonWithTitle_("Continue")
-            chooser.addButtonWithTitle_("Cancel")
-            accounts = NSPopUpButton.alloc().initWithFrame_pullsDown_(
-                NSMakeRect(0, 0, 360, 26), False
-            )
-            accounts.addItemsWithTitles_([
-                f"{config.name} · "
-                f"{'International' if config.site == 'international' else 'China'} · "
-                f"{config.provider_id}"
-                for config in configs
-            ])
-            chooser.setAccessoryView_(accounts)
-            if chooser.runModal() != NSAlertFirstButtonReturn:
-                return
-            index = accounts.indexOfSelectedItem()
-            if 0 <= index < len(configs):
-                self._add_step_plan_dialog(configs[index])
-
         def _add_daily_feed_dialog(self):
             alert = NSAlert.alloc().init()
-            alert.setMessageText_("Add Daily Token Feed")
+            alert.setMessageText_(self._text("settings.add_daily_feed"))
             alert.setInformativeText_(
                 "Connect a range-aware HTTPS JSON feed. Field paths use dot notation; credentials stay in macOS Keychain."
             )
-            alert.addButtonWithTitle_("Save")
-            alert.addButtonWithTitle_("Cancel")
+            alert.addButtonWithTitle_(self._text("settings.save"))
+            alert.addButtonWithTitle_(self._text("settings.cancel"))
             placeholders = [
                 "Display name", "Family ID, e.g. zai", "https://api.example.com/usage",
                 "Authorization", "Bearer", "Items path, e.g. data.items",
@@ -1254,14 +1289,16 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
 
         def _add_openai_dialog(self):
             alert = NSAlert.alloc().init()
-            alert.setMessageText_("Connect OpenAI Organization")
+            alert.setMessageText_(self._text("settings.add_openai"))
             alert.setInformativeText_(
                 "Requires an OpenAI Admin API key. A read-only key is recommended; it stays in macOS Keychain."
             )
-            alert.addButtonWithTitle_("Save")
-            alert.addButtonWithTitle_("Cancel")
+            alert.addButtonWithTitle_(self._text("settings.save"))
+            alert.addButtonWithTitle_(self._text("settings.cancel"))
             accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 350, 68))
-            name = input_field("Account label", NSMakeRect(0, 38, 350, 24))
+            name = input_field(
+                self._text("settings.account_label"), NSMakeRect(0, 38, 350, 24)
+            )
             secret = input_field(
                 "OpenAI Admin API key", NSMakeRect(0, 6, 350, 24), secure=True
             )
@@ -1278,51 +1315,32 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             )
             self._finish_add(result)
 
-        def _add_step_plan_dialog(self, existing):
-            is_editing = existing is not None
+        def _add_step_plan_dialog(self):
             alert = NSAlert.alloc().init()
-            alert.setMessageText_(
-                "Edit StepFun Step Plan"
-                if is_editing
-                else "Connect StepFun Step Plan"
-            )
+            alert.setMessageText_(self._text("settings.add_step_plan"))
             alert.setInformativeText_(
-                (
-                    "Paste a replacement API key or web session. Leave both credential fields blank to keep the saved credentials. The site is fixed to prevent cross-region reuse."
-                    if is_editing
-                    else "Choose the matching StepFun site, then paste its API key or Session Cookie. Credentials are never sent across China and International hosts."
-                )
+                "Choose the matching StepFun site, then paste its API key or Session Cookie. Credentials are never sent across China and International hosts."
             )
-            alert.addButtonWithTitle_("Save Changes" if is_editing else "Save")
-            alert.addButtonWithTitle_("Cancel")
+            alert.addButtonWithTitle_(self._text("settings.save"))
+            alert.addButtonWithTitle_(self._text("settings.cancel"))
             accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 360, 134))
             site = NSPopUpButton.alloc().initWithFrame_pullsDown_(
                 NSMakeRect(0, 104, 360, 24), False
             )
-            site.addItemsWithTitles_(["China (.com)", "International (.ai)"])
-            if is_editing:
-                site.selectItemAtIndex_(
-                    1 if existing.site == "international" else 0
-                )
-                site.setEnabled_(False)
-            name = input_field("Account label", NSMakeRect(0, 72, 360, 24))
-            if is_editing:
-                name.setStringValue_(existing.name)
+            site.addItemsWithTitles_([
+                self._text("settings.china_site"),
+                self._text("settings.international_site"),
+            ])
+            name = input_field(
+                self._text("settings.account_label"), NSMakeRect(0, 72, 360, 24)
+            )
             secret = input_field(
-                (
-                    "Replacement Step API key (optional)"
-                    if is_editing
-                    else "Step API key (optional)"
-                ),
+                self._text("settings.step_api_key"),
                 NSMakeRect(0, 40, 360, 24),
                 secure=True,
             )
             session_cookie = input_field(
-                (
-                    "Replacement Session Cookie or Oasis-Token"
-                    if is_editing
-                    else "Full Session Cookie or Oasis-Token"
-                ),
+                self._text("settings.step_session"),
                 NSMakeRect(0, 8, 360, 24),
                 secure=True,
             )
@@ -1336,32 +1354,26 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             selected_site = (
                 "international" if site.indexOfSelectedItem() == 1 else "china"
             )
-            provider_id = (
-                existing.provider_id
-                if existing is not None
-                else f"step-plan-{int(datetime.now().timestamp())}"
-            )
+            provider_id = f"step-plan-{int(datetime.now().timestamp())}"
             config = StepPlanConfig(
                 provider_id,
-                name.stringValue().strip()
-                or (existing.name if existing is not None else "Step Plan"),
+                name.stringValue().strip() or "Step Plan",
                 site=selected_site,
             )
-            configure = (
-                self.provider_controller.update_step_plan
-                if existing is not None
-                else self.provider_controller.add_step_plan
+            result = self.provider_controller.add_step_plan(
+                config, secret.stringValue(), session_cookie.stringValue()
             )
-            result = configure(config, secret.stringValue(), session_cookie.stringValue())
             self._finish_add(result)
 
         def _add_minimax_dialog(self):
             alert = NSAlert.alloc().init()
-            alert.setMessageText_("Add MiniMax Coding Plan")
-            alert.addButtonWithTitle_("Save")
-            alert.addButtonWithTitle_("Cancel")
+            alert.setMessageText_(self._text("settings.add_minimax"))
+            alert.addButtonWithTitle_(self._text("settings.save"))
+            alert.addButtonWithTitle_(self._text("settings.cancel"))
             accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 330, 68))
-            name = input_field("Account label", NSMakeRect(0, 38, 330, 24))
+            name = input_field(
+                self._text("settings.account_label"), NSMakeRect(0, 38, 330, 24)
+            )
             secret = input_field("MiniMax Coding Plan key", NSMakeRect(0, 6, 330, 24), secure=True)
             accessory.addSubview_(name)
             accessory.addSubview_(secret)
@@ -1375,9 +1387,9 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
 
         def _add_generic_dialog(self):
             alert = NSAlert.alloc().init()
-            alert.setMessageText_("Add Generic HTTPS Provider")
-            alert.addButtonWithTitle_("Save")
-            alert.addButtonWithTitle_("Cancel")
+            alert.setMessageText_(self._text("settings.add_generic"))
+            alert.addButtonWithTitle_(self._text("settings.save"))
+            alert.addButtonWithTitle_(self._text("settings.cancel"))
             accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 350, 276))
             fields = [
                 input_field("Display name", NSMakeRect(0, 246, 350, 24)),
@@ -1387,7 +1399,11 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
                 input_field("Primary path, e.g. data.remaining", NSMakeRect(0, 118, 350, 24)),
                 input_field("Percent path (optional)", NSMakeRect(0, 86, 350, 24)),
                 input_field("Reset path (optional)", NSMakeRect(0, 54, 350, 24)),
-                input_field("API key", NSMakeRect(0, 22, 350, 24), secure=True),
+                input_field(
+                    self._text("settings.api_key"),
+                    NSMakeRect(0, 22, 350, 24),
+                    secure=True,
+                ),
             ]
             for field in fields:
                 accessory.addSubview_(field)
@@ -1412,7 +1428,7 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
         def _finish_add(self, result):
             message = NSAlert.alloc().init()
             message.setMessageText_(
-                result.message if result.ok else "Could not save provider"
+                result.message if result.ok else self._text("settings.could_not_save")
             )
             message.setInformativeText_(result.message)
             message.runModal()
@@ -1420,7 +1436,6 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
                 self.aggregator = _build_aggregator(self.store, self.keychain)
                 if settings_only:
                     self.settings_manage.setEnabled_(False)
-                    self.settings_edit.setEnabled_(False)
                     threading.Thread(target=self._settings_refresh_worker, daemon=True).start()
                 else:
                     self.refresh_(None)

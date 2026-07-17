@@ -103,6 +103,15 @@ mkdir -p "$ACTIVITY_APP/Contents/MacOS"
 cp "$RESOURCES/OpenUsageActivity-Info.plist" "$ACTIVITY_APP/Contents/Info.plist"
 cp "$SWIFT_PACKAGE/.build/release/OpenUsageActivity" "$ACTIVITY_APP/Contents/MacOS/OpenUsage Activity"
 chmod 755 "$ACTIVITY_APP/Contents/MacOS/OpenUsage Activity"
+for LANGUAGE in en zh-Hans; do
+  mkdir -p \
+    "$APP/Contents/Resources/$LANGUAGE.lproj" \
+    "$ACTIVITY_APP/Contents/Resources/$LANGUAGE.lproj"
+  cp "$RESOURCES/$LANGUAGE.lproj/Localizable.strings" \
+    "$APP/Contents/Resources/$LANGUAGE.lproj/Localizable.strings"
+  cp "$RESOURCES/$LANGUAGE.lproj/Localizable.strings" \
+    "$ACTIVITY_APP/Contents/Resources/$LANGUAGE.lproj/Localizable.strings"
+done
 
 mkdir -p "$BUILD_ROOT/python-dist" "$BUILD_ROOT/python-build"
 "$PYTHON" setup.py py2app --dist-dir "$BUILD_ROOT/python-dist" --bdist-base "$BUILD_ROOT/python-build"

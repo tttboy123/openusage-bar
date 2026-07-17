@@ -1792,7 +1792,9 @@ private struct ProviderConnectionDetail: View {
                 )
                 LabeledContent(
                     "Multiple accounts",
-                    value: descriptor.supportsAccounts ? "Supported" : "Not declared"
+                    value: AppLocalization.text(
+                        descriptor.supportsAccounts ? "Supported" : "Not declared"
+                    )
                 )
                 HStack {
                     Button(
@@ -1829,7 +1831,10 @@ private struct ProviderConnectionDetail: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(issue.message).font(.callout.weight(.medium))
                             if let lastSuccessAt = issue.lastSuccessAt {
-                                Text("Last successful update: \(DateText.display(lastSuccessAt))")
+                                Text(
+                                    "\(AppLocalization.text("Last successful update:")) "
+                                        + DateText.display(lastSuccessAt)
+                                )
                                     .font(.caption).foregroundStyle(.secondary)
                             } else {
                                 Text("No successful update recorded")
@@ -1852,12 +1857,13 @@ private struct ProviderConnectionDetail: View {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(capability.groups, id: \.state) { group in
                     HStack(alignment: .firstTextBaseline) {
-                        Label(group.title, systemImage: group.state.symbol)
+                        Label(AppLocalization.text(group.title), systemImage: group.state.symbol)
                             .foregroundStyle(group.state.color)
                         Spacer()
                         Text(group.items.isEmpty
-                            ? "None"
-                            : group.items.map(\.title).joined(separator: ", "))
+                            ? AppLocalization.text("None")
+                            : group.items.map { AppLocalization.text($0.title) }
+                                .joined(separator: ", "))
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
                     }
@@ -1894,7 +1900,9 @@ private struct ProviderConnectionDetail: View {
                             Button("Edit Connection", systemImage: "pencil") {
                                 beginEditing(connection)
                             }
-                            .buttonStyle(.borderless)
+                            .buttonStyle(.borderedProminent)
+                            .tint(.accentColor)
+                            .controlSize(.small)
                             .disabled(isSaving)
                         } else {
                             Text("Read only")
@@ -2068,7 +2076,7 @@ private struct ProviderConnectionDetail: View {
         let site = ProviderCenterText.region(connection.site ?? "Configured")
         guard let observed = instances.first(where: {
             $0.providerID == connection.providerID
-        }) else { return "\(site) · Not collected yet" }
+        }) else { return "\(site) · \(AppLocalization.text("Not collected yet"))" }
         return "\(site) · \(DateText.display(observed.observedAt))"
     }
 }
@@ -2080,8 +2088,8 @@ private struct ProviderDetailSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
-            Text(title).font(.headline)
-            Text(detail).font(.callout).foregroundStyle(.secondary)
+            Text(AppLocalization.text(title)).font(.headline)
+            Text(AppLocalization.text(detail)).font(.callout).foregroundStyle(.secondary)
             content
         }
     }
@@ -2328,7 +2336,11 @@ private struct EmptyDataView: View {
     let title: String
     let description: String
     var body: some View {
-        ContentUnavailableView(title, systemImage: "chart.bar.xaxis", description: Text(description))
+        ContentUnavailableView(
+            AppLocalization.text(title),
+            systemImage: "chart.bar.xaxis",
+            description: Text(AppLocalization.text(description))
+        )
             .frame(maxWidth: .infinity, minHeight: 140)
     }
 }
@@ -2339,8 +2351,8 @@ private struct PageHeading: View {
     init(_ title: String, detail: String) { self.title = title; self.detail = detail }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.largeTitle.weight(.semibold))
-            Text(detail).foregroundStyle(.secondary)
+            Text(AppLocalization.text(title)).font(.largeTitle.weight(.semibold))
+            Text(AppLocalization.text(detail)).foregroundStyle(.secondary)
         }
     }
 }
@@ -2351,8 +2363,8 @@ private struct SectionHeading: View {
     init(_ title: String, detail: String) { self.title = title; self.detail = detail }
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.title2.weight(.semibold))
-            Text(detail).font(.callout).foregroundStyle(.secondary)
+            Text(AppLocalization.text(title)).font(.title2.weight(.semibold))
+            Text(AppLocalization.text(detail)).font(.callout).foregroundStyle(.secondary)
             Spacer()
         }
     }
@@ -2459,9 +2471,12 @@ private enum SourceText {
 private extension UsageDetailsRoute {
     var title: String {
         switch self {
-        case .activity: "Activity"; case .capacity: "Capacity"
-        case .apiSpend: "API Spend"; case .localTools: "Local Tools"
-        case .providersAndAccounts: "Providers"; case .dataHealth: "Data Health"
+        case .activity: AppLocalization.text("Activity")
+        case .capacity: AppLocalization.text("Capacity")
+        case .apiSpend: AppLocalization.text("API Spend")
+        case .localTools: AppLocalization.text("Local Tools")
+        case .providersAndAccounts: AppLocalization.text("Providers")
+        case .dataHealth: AppLocalization.text("Data Health")
         }
     }
     var symbol: String {
@@ -2477,11 +2492,11 @@ private extension UsageDetailsRoute {
 private extension ProviderBrowseCategory {
     var title: String {
         switch self {
-        case .all: "All"
-        case .subscription: "Plans"
+        case .all: AppLocalization.text("All")
+        case .subscription: AppLocalization.text("Plans")
         case .api: "API"
-        case .cloud: "Cloud"
-        case .local: "Local"
+        case .cloud: AppLocalization.text("Cloud")
+        case .local: AppLocalization.text("Local")
         }
     }
 
@@ -2506,7 +2521,11 @@ private extension ProviderConnectionStatus {
     }
 
     var title: String {
-        switch self { case .available: "Available"; case .connected: "Connected"; case .attention: "Needs attention" }
+        switch self {
+        case .available: AppLocalization.text("Available")
+        case .connected: AppLocalization.text("Connected")
+        case .attention: AppLocalization.text("Needs attention")
+        }
     }
 
     var symbol: String {

@@ -137,19 +137,25 @@ struct ProviderSourceIssuePresentation: Sendable, Hashable, Identifiable {
 
     var title: String {
         switch sourceID {
-        case "openusage.daily": "Daily token history"
-        case "current.quota": "Current quota"
-        case "minimax.billing": "Billing usage"
-        case "openusage.detect": "Provider compatibility"
+        case "openusage.daily": AppLocalization.text("Daily token history")
+        case "current.quota": AppLocalization.text("Current quota")
+        case "minimax.billing": AppLocalization.text("Billing usage")
+        case "openusage.detect": AppLocalization.text("Provider compatibility")
         default: sourceID.replacingOccurrences(of: ".", with: " ").capitalized
         }
     }
 
     var message: String {
-        if requiresUserAction { return "\(title) needs a valid connection." }
-        if effectiveState.lowercased() == "stale" { return "\(title) is stale." }
-        if errorCode?.lowercased() == "timeout" { return "\(title) refresh timed out." }
-        return "\(title) is temporarily unavailable."
+        if requiresUserAction {
+            return "\(title)\(AppLocalization.text(" needs a valid connection."))"
+        }
+        if effectiveState.lowercased() == "stale" {
+            return "\(title)\(AppLocalization.text(" is stale."))"
+        }
+        if errorCode?.lowercased() == "timeout" {
+            return "\(title)\(AppLocalization.text(" refresh timed out."))"
+        }
+        return "\(title)\(AppLocalization.text(" is temporarily unavailable."))"
     }
 
     static func make(from source: SourceHealthItem) -> Self {
@@ -212,31 +218,34 @@ enum ProviderCenterPresentation {
 enum ProviderCenterText {
     static func region(_ value: String) -> String {
         switch value {
-        case "cn": "China"
-        case "international": "International"
+        case "cn", "china": AppLocalization.text("China")
+        case "international": AppLocalization.text("International")
+        case "Configured": AppLocalization.text("Configured")
         default: value.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
 
     static func scope(_ descriptor: ProviderDisplayDescriptor) -> String? {
         let regions = descriptor.regions
-        if regions == ["cn", "international"] { return "中国站和国际站" }
-        if regions == ["cn"] { return "中国站" }
-        if regions == ["international"] { return "国际站" }
+        if regions == ["cn", "international"] {
+            return AppLocalization.text("China and International")
+        }
+        if regions == ["cn"] { return AppLocalization.text("China") }
+        if regions == ["international"] { return AppLocalization.text("International") }
         return regions.isEmpty ? nil : regions.sorted().joined(separator: ", ")
     }
 
     static func connectionMethod(_ descriptor: ProviderDisplayDescriptor) -> String {
         let sources = descriptor.credentialSourceTypes
         if sources.contains(.browserSession), sources.contains(.apiKey) {
-            return "API Key or web session"
+            return AppLocalization.text("API Key or web session")
         }
         if sources.contains(.apiKey) { return "API Key" }
         if sources.contains(.oauth) || sources.contains(.keychain) || sources.contains(.local) {
-            return "Existing local login"
+            return AppLocalization.text("Existing local login")
         }
-        if sources.contains(.cli) { return "CLI configuration" }
-        return "OpenUsage data source"
+        if sources.contains(.cli) { return AppLocalization.text("CLI configuration") }
+        return AppLocalization.text("OpenUsage data source")
     }
 }
 
@@ -255,13 +264,13 @@ struct ProviderConnectionSummary: Sendable, Hashable, Identifiable {
     }
     var credentialLabel: String {
         switch kind {
-        case "minimax": "Replacement Coding Plan key"
-        case "openai_organization": "Replacement Admin API key"
-        default: "Replacement API key"
+        case "minimax": AppLocalization.text("Replacement Coding Plan key")
+        case "openai_organization": AppLocalization.text("Replacement Admin API key")
+        default: AppLocalization.text("Replacement API key")
         }
     }
     var credentialPlaceholder: String {
-        "Leave blank to keep the saved credential"
+        AppLocalization.text("Leave blank to keep the saved credential")
     }
 }
 

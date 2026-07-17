@@ -30,7 +30,6 @@ from openusage_bar.ui import (
     _build_aggregator,
     create_status_item,
     finish_settings_helper,
-    editable_step_plan_configs,
     run_provider_settings,
 )
 
@@ -484,20 +483,6 @@ class UIModelTests(unittest.TestCase):
             ],
         )
         self.assertNotIn("stripe", str(keychain.set.call_args_list).lower())
-
-    def test_editable_step_plans_are_explicit_and_stably_sorted(self):
-        configs = [
-            generic(),
-            StepPlanConfig("step-plan-z", "Zeta", site="china"),
-            StepPlanConfig("step-plan-a", "Alpha", site="international"),
-        ]
-
-        editable = editable_step_plan_configs(configs)
-
-        self.assertEqual(
-            [(item.provider_id, item.name) for item in editable],
-            [("step-plan-a", "Alpha"), ("step-plan-z", "Zeta")],
-        )
 
     def test_update_step_plan_replaces_the_selected_accounts_api_key(self):
         existing = StepPlanConfig("step-plan-work", "Work", site="china")
