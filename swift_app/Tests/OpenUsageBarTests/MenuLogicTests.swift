@@ -338,21 +338,41 @@ struct MenuLogicTests {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let script = directory.appendingPathComponent("parent.py")
+        let sourceURL = directory.appendingPathComponent("parent.c")
+        let executableURL = directory.appendingPathComponent("parent")
         let pidFile = directory.appendingPathComponent("child.pid")
         let ownershipMarker = directory.appendingPathComponent("owned-by-this-test")
         try """
-        import signal, subprocess, sys, time
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        child = subprocess.Popen([sys.executable, '-c', 'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)', sys.argv[2]])
-        open(sys.argv[1], 'w').write(str(child.pid))
-        while True: time.sleep(1)
-        """.write(to: script, atomically: true, encoding: .utf8)
-        // A shared CI runner can take longer than a few scheduler ticks to execute
-        // the Python fixture after Process.run() returns. Keep the timeout short
-        // enough to test forced tree termination, but long enough for the fixture
-        // to publish the child PID that the assertion must inspect.
-        let command = RefreshCommand(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: [script.path, pidFile.path, ownershipMarker.path], timeout: 2)
+        #include <signal.h>
+        #include <stdio.h>
+        #include <unistd.h>
+        int main(int argc, char **argv) {
+            if (argc != 3) return 2;
+            signal(SIGTERM, SIG_IGN);
+            pid_t child = fork();
+            if (child < 0) return 3;
+            if (child == 0) {
+                signal(SIGTERM, SIG_IGN);
+                while (1) pause();
+            }
+            FILE *file = fopen(argv[1], "w");
+            if (!file) return 4;
+            if (fprintf(file, "%d", child) < 0 || fflush(file) != 0 || fsync(fileno(file)) != 0 || fclose(file) != 0) return 5;
+            while (1) pause();
+        }
+        """.write(to: sourceURL, atomically: true, encoding: .utf8)
+        let compiler = Process()
+        compiler.executableURL = URL(fileURLWithPath: "/usr/bin/clang")
+        compiler.arguments = [sourceURL.path, "-o", executableURL.path]
+        compiler.standardOutput = FileHandle.nullDevice
+        compiler.standardError = FileHandle.nullDevice
+        try compiler.run()
+        compiler.waitUntilExit()
+        #expect(compiler.terminationStatus == 0)
+
+        // Compilation happens outside the deadline. The native fixture then has
+        // enough scheduling room on a shared runner to publish its child PID.
+        let command = RefreshCommand(executable: executableURL, arguments: [pidFile.path, ownershipMarker.path], timeout: 5)
         #expect(RefreshRunner().run(command) == .timedOut)
         let childPID = try #require(Int32(try String(contentsOf: pidFile, encoding: .utf8)))
         defer { cleanupOwnedTestProcess(childPID, marker: ownershipMarker.path) }
