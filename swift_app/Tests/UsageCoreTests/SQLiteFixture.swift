@@ -31,6 +31,9 @@ final class SQLiteFixture {
         if userVersion >= 3 {
             try execute(handle, Self.sourceSchema)
         }
+        if userVersion >= 4 {
+            try execute(handle, Self.publicRevisionSchema)
+        }
         try execute(handle, "PRAGMA user_version=\(userVersion)")
         try execute(handle, malformedToken ? Self.malformedRows : Self.rows)
         if userVersion >= 2 {
@@ -116,6 +119,13 @@ final class SQLiteFixture {
       ADD COLUMN source_id TEXT NOT NULL DEFAULT 'legacy';
     """
 
+    private static let publicRevisionSchema = """
+    ALTER TABLE source_status
+      ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE source_status
+      ADD COLUMN payload_hash TEXT NOT NULL DEFAULT '';
+    """
+
     private static let costRows = """
     INSERT INTO daily_costs VALUES
       ('2026-07-01','openai','','actual','USD','0','provider_reported','direct','2026-07-02T00:05:00Z',1,'cost-zero'),
@@ -147,7 +157,9 @@ final class SQLiteFixture {
        NULL,NULL,NULL,0.75,'2026-08-01T00:00:00Z',NULL,NULL,'ok','derived',0,2,'quota-high'),
       ('codex.weekly','2026-07-14T07:00:00Z','codex','','weekly','tokens',
        NULL,NULL,NULL,NULL,NULL,NULL,NULL,'temporarily_unavailable','cached',1,9,'quota-null');
-    INSERT INTO source_status VALUES
+    INSERT INTO source_status(
+      provider_id,source_id,state,last_attempt_at,last_success_at,stale_at,error_code
+    ) VALUES
       ('cursor','openusage.daily','ok','2026-07-14T07:00:00Z','2026-07-14T07:00:00Z',
        '2026-07-14T07:05:00Z',NULL),
       ('codex','openusage.daily','ok','2026-07-14T08:58:00Z','2026-07-14T08:58:00Z',

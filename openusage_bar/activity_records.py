@@ -390,6 +390,8 @@ class SourceStatus:
     last_success_at: str | None
     stale_at: str | None
     error_code: str | None
+    revision: int = 1
+    payload_hash: str = ""
 
 
 @dataclass(frozen=True)

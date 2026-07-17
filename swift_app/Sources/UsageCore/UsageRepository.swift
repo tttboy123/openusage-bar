@@ -491,7 +491,7 @@ public final class UsageRepository {
 
     private func validateSchema(_ database: OpaquePointer) throws {
         let version = try scalarInt64(database, sql: "PRAGMA user_version")
-        guard (1...3).contains(version) else { throw RepositoryError.incompatibleSchema }
+        guard (1...4).contains(version) else { throw RepositoryError.incompatibleSchema }
         var expected: [String: [SchemaColumn]] = [
             "daily_model_usage": [
                 .required("day", "TEXT", primaryKey: 1), .required("provider_id", "TEXT", primaryKey: 2),
@@ -545,6 +545,14 @@ public final class UsageRepository {
             )
             expected["daily_coverage"]?.append(
                 .required("source_id", "TEXT", defaultValue: "'legacy'")
+            )
+        }
+        if version >= 4 {
+            expected["source_status"]?.append(
+                .required("revision", "INTEGER", defaultValue: "1")
+            )
+            expected["source_status"]?.append(
+                .required("payload_hash", "TEXT", defaultValue: "''")
             )
         }
         if version >= 2 {

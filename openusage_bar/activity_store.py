@@ -42,6 +42,7 @@ from .activity_schema import (
     EXPECTED_INDEXES as _EXPECTED_INDEXES,
     EXPECTED_SCHEMA as _EXPECTED_SCHEMA,
     LEGACY_SOURCE_SCHEMAS as _LEGACY_SOURCE_SCHEMAS,
+    PUBLIC_CHANGE_TYPES,
     SCHEMA_VERSION,
 )
 
@@ -72,11 +73,12 @@ class ActivityStore:
                         f"database uses newer schema version {version}; supported version is {SCHEMA_VERSION}"
                     )
                 self._validate_existing_schema(
-                    require_all=version == SCHEMA_VERSION,
+                    require_all=version in {3, SCHEMA_VERSION},
                     optional_missing=frozenset(),
                     allow_legacy_source_columns=version < SCHEMA_VERSION,
                 )
                 self._migrate_source_provenance()
+                self._migrate_public_revisions(version)
                 try:
                     self._initialize_schema()
                 except sqlite3.IntegrityError as error:
@@ -176,6 +178,63 @@ class ActivityStore:
                         f"ALTER TABLE {table} ADD COLUMN source_id TEXT NOT NULL DEFAULT 'legacy'"
                     )
 
+    def _migrate_public_revisions(self, version: int) -> None:
+        existing = {
+            str(row[0])
+            for row in self._connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        columns = (
+            {
+                str(row[1])
+                for row in self._connection.execute("PRAGMA table_info(source_status)")
+            }
+            if "source_status" in existing
+            else set()
+        )
+        migrated = bool(columns) and (
+            "revision" not in columns or "payload_hash" not in columns
+        )
+        with self._connection:
+            if migrated and "revision" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE source_status ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
+                )
+            if migrated and "payload_hash" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE source_status ADD COLUMN payload_hash TEXT NOT NULL DEFAULT ''"
+                )
+            rows = (
+                self._connection.execute(
+                    "SELECT provider_id,source_id,state,last_attempt_at,last_success_at,stale_at,error_code "
+                    "FROM source_status"
+                ).fetchall()
+                if migrated
+                else []
+            )
+            for row in rows:
+                payload_json, payload_hash = self._source_status_payload(dict(row))
+                self._connection.execute(
+                    "UPDATE source_status SET revision=1,payload_hash=? "
+                    "WHERE provider_id=? AND source_id=?",
+                    (payload_hash, row["provider_id"], row["source_id"]),
+                )
+            if 0 < version < SCHEMA_VERSION and "change_log" in existing:
+                changed_at = datetime.now(timezone.utc).isoformat(
+                    timespec="microseconds"
+                ).replace("+00:00", "Z")
+                payload_json = _json({"from": version, "to": SCHEMA_VERSION})
+                self._append_change(
+                    "ledger_schema",
+                    "schema",
+                    self._next_revision_locked("ledger_schema", "schema"),
+                    "update",
+                    changed_at,
+                    payload_json,
+                    _hash(payload_json),
+                )
+
     def _validate_required_indexes(self) -> None:
         for index_name, (table, expected_unique, expected_terms) in _EXPECTED_INDEXES.items():
             indexes = {
@@ -242,6 +301,8 @@ class ActivityStore:
             provider_id TEXT NOT NULL, source_id TEXT NOT NULL, state TEXT NOT NULL,
             last_attempt_at TEXT NOT NULL,
             last_success_at TEXT, stale_at TEXT, error_code TEXT,
+            revision INTEGER NOT NULL DEFAULT 1,
+            payload_hash TEXT NOT NULL DEFAULT '',
             PRIMARY KEY(provider_id,source_id));
         CREATE TABLE IF NOT EXISTS provider_instances(
             provider_id TEXT PRIMARY KEY, family_id TEXT NOT NULL,
@@ -370,6 +431,27 @@ class ActivityStore:
         return payload_json, _hash(payload_json)
 
     @staticmethod
+    def _source_status_record_id(provider_id: str, source_id: str) -> str:
+        return f"source:{provider_id}:{source_id}"
+
+    @staticmethod
+    def _source_status_payload(status: dict[str, Any]) -> tuple[str, str]:
+        payload = {
+            key: status.get(key)
+            for key in (
+                "provider_id",
+                "source_id",
+                "state",
+                "last_attempt_at",
+                "last_success_at",
+                "stale_at",
+                "error_code",
+            )
+        }
+        payload_json = _json(payload)
+        return payload_json, _hash(payload_json)
+
+    @staticmethod
     def _validate_provider_family_binding(instance: ProviderInstance) -> None:
         known_ids = frozenset(catalog.family_ids)
         if instance.family_id not in known_ids:
@@ -424,6 +506,8 @@ class ActivityStore:
         payload_json: str | None,
         payload_hash: str,
     ) -> None:
+        if record_type not in PUBLIC_CHANGE_TYPES:
+            raise ValueError("record_type must be a public change type")
         self._connection.execute(
             "INSERT INTO change_log(record_type,record_id,revision,operation,changed_at,payload_json,payload_hash) VALUES(?,?,?,?,?,?,?)",
             (record_type, record_id, revision, operation, changed_at, payload_json, payload_hash),
@@ -1148,6 +1232,23 @@ class ActivityStore:
         payload_json = _json(asdict(observation))
         return payload_json, _hash(payload_json)
 
+    def _append_quota_snapshot_change_locked(
+        self,
+        snapshot_id: int,
+        observed_at: str,
+        payload_json: str,
+        payload_hash: str,
+    ) -> None:
+        self._append_change(
+            "quota_snapshot",
+            f"quota-snapshot:{snapshot_id}",
+            1,
+            "insert",
+            observed_at,
+            payload_json,
+            payload_hash,
+        )
+
     def record_quota(self, observation: QuotaObservation) -> QuotaState:
         semantic_json, semantic_hash = self._quota_semantic_payload(observation)
         snapshot_json, snapshot_hash = self._quota_snapshot_payload(observation)
@@ -1162,7 +1263,7 @@ class ActivityStore:
                     (observation.record_id, observation.observed_at, snapshot_hash),
                 ).fetchone()
                 if duplicate is None:
-                    self._connection.execute(
+                    inserted = self._connection.execute(
                         "INSERT INTO quota_snapshots(record_id,observed_at,provider_id,account_ref,quota_name,payload_json,payload_hash) VALUES(?,?,?,?,?,?,?)",
                         (
                             observation.record_id,
@@ -1173,6 +1274,12 @@ class ActivityStore:
                             snapshot_json,
                             snapshot_hash,
                         ),
+                    )
+                    self._append_quota_snapshot_change_locked(
+                        int(inserted.lastrowid),
+                        observation.observed_at,
+                        snapshot_json,
+                        snapshot_hash,
                     )
                 return self._quota_state_by_id_locked(observation.record_id)
             changed = old is None or old["payload_hash"] != semantic_hash
@@ -1197,10 +1304,16 @@ class ActivityStore:
                 tuple(values.values()) + (revision, semantic_hash),
             )
             if should_snapshot:
-                self._connection.execute(
+                inserted = self._connection.execute(
                     "INSERT INTO quota_snapshots(record_id,observed_at,provider_id,account_ref,quota_name,payload_json,payload_hash) VALUES(?,?,?,?,?,?,?)",
                     (observation.record_id, observation.observed_at, observation.provider_id,
                      observation.account_ref, observation.quota_name, snapshot_json, snapshot_hash),
+                )
+                self._append_quota_snapshot_change_locked(
+                    int(inserted.lastrowid),
+                    observation.observed_at,
+                    snapshot_json,
+                    snapshot_hash,
                 )
             if changed:
                 self._append_change(
@@ -1342,6 +1455,10 @@ class ActivityStore:
             ).isoformat(),
             "stale_at",
         )
+        old = self._connection.execute(
+            "SELECT * FROM source_status WHERE provider_id=? AND source_id=?",
+            (provider_id, source_id),
+        ).fetchone()
         self._connection.execute(
             "INSERT INTO source_status(provider_id,source_id,state,last_attempt_at,last_success_at,stale_at,error_code) "
             "VALUES(?,?,?,?,?,?,NULL) "
@@ -1360,6 +1477,39 @@ class ActivityStore:
                 expected,
                 expected,
             ),
+        )
+        self._publish_source_status_change_locked(provider_id, source_id, old)
+
+    def _publish_source_status_change_locked(
+        self, provider_id: str, source_id: str, old: sqlite3.Row | None
+    ) -> None:
+        current = self._connection.execute(
+            "SELECT * FROM source_status WHERE provider_id=? AND source_id=?",
+            (provider_id, source_id),
+        ).fetchone()
+        if current is None:
+            return
+        payload_json, payload_hash = self._source_status_payload(dict(current))
+        old_hash = None
+        if old is not None:
+            _, old_hash = self._source_status_payload(dict(old))
+        if old_hash == payload_hash:
+            return
+        revision = 1 if old is None else int(old["revision"]) + 1
+        self._connection.execute(
+            "UPDATE source_status SET revision=?,payload_hash=? "
+            "WHERE provider_id=? AND source_id=?",
+            (revision, payload_hash, provider_id, source_id),
+        )
+        record_id = self._source_status_record_id(provider_id, source_id)
+        self._append_change(
+            "source_status",
+            record_id,
+            revision,
+            "insert" if old is None else "update",
+            str(current["last_attempt_at"]),
+            payload_json,
+            payload_hash,
         )
 
     def record_source_failure(
@@ -1406,6 +1556,10 @@ class ActivityStore:
             else None
         )
         with self._write_transaction():
+            old = self._connection.execute(
+                "SELECT * FROM source_status WHERE provider_id=? AND source_id=?",
+                (provider_id, source_id),
+            ).fetchone()
             self._connection.execute(
                 "INSERT INTO source_status(provider_id,source_id,state,last_attempt_at,last_success_at,stale_at,error_code) "
                 "VALUES(?,?,?,?,NULL,?,?) "
@@ -1430,6 +1584,7 @@ class ActivityStore:
                     expected,
                 ),
             )
+            self._publish_source_status_change_locked(provider_id, source_id, old)
 
     def source_statuses(self) -> list[SourceStatus]:
         with self._lock:
@@ -1445,11 +1600,27 @@ class ActivityStore:
         _validate_id("source_id", source_id)
         attempted = _timestamp(attempted_at.isoformat(), "attempted_at")
         with self._write_transaction():
+            old = self._connection.execute(
+                "SELECT * FROM source_status "
+                "WHERE provider_id=? AND source_id=? AND last_attempt_at<=?",
+                (provider_id, source_id, attempted),
+            ).fetchone()
             self._connection.execute(
                 "DELETE FROM source_status "
                 "WHERE provider_id=? AND source_id=? AND last_attempt_at<=?",
                 (provider_id, source_id, attempted),
             )
+            if old is not None:
+                record_id = self._source_status_record_id(provider_id, source_id)
+                self._append_change(
+                    "source_status",
+                    record_id,
+                    int(old["revision"]) + 1,
+                    "delete",
+                    attempted,
+                    None,
+                    str(old["payload_hash"]),
+                )
 
     def snapshot_source_statuses(self) -> SourceStatusSnapshot:
         with self._read_snapshot():
@@ -1571,12 +1742,23 @@ class ActivityStore:
             self._connection.execute("DELETE FROM daily_coverage WHERE day<?", (day_cutoff,))
             self._connection.execute("DELETE FROM daily_costs WHERE day<?", (day_cutoff,))
             self._connection.execute("DELETE FROM daily_cost_coverage WHERE day<?", (day_cutoff,))
-            snapshot_count = int(self._connection.execute(
-                "SELECT COUNT(*) FROM quota_snapshots WHERE observed_at<?", (normalized_snapshot_cutoff,)
-            ).fetchone()[0])
+            snapshots = self._connection.execute(
+                "SELECT snapshot_id,payload_hash FROM quota_snapshots WHERE observed_at<?",
+                (normalized_snapshot_cutoff,),
+            ).fetchall()
+            for row in snapshots:
+                self._append_change(
+                    "quota_snapshot",
+                    f"quota-snapshot:{int(row['snapshot_id'])}",
+                    2,
+                    "delete",
+                    changed_at,
+                    None,
+                    str(row["payload_hash"]),
+                )
             self._connection.execute("DELETE FROM quota_snapshots WHERE observed_at<?", (normalized_snapshot_cutoff,))
             return PurgeResult(
-                len(daily), len(coverages), snapshot_count,
+                len(daily), len(coverages), len(snapshots),
                 len(costs), len(cost_coverages),
             )
 

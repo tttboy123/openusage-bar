@@ -5,8 +5,21 @@ compatibility rules separate from the repository implementation makes them
 auditable without importing the store's mutation logic.
 """
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DAILY_ACTIVITY_SOURCE_ID = "openusage.daily"
+PUBLIC_CHANGE_TYPES = frozenset(
+    {
+        "daily_cost",
+        "daily_cost_coverage",
+        "daily_coverage",
+        "daily_usage",
+        "ledger_schema",
+        "provider_instance",
+        "quota",
+        "quota_snapshot",
+        "source_status",
+    }
+)
 
 EXPECTED_SCHEMA = {
     "daily_costs": (
@@ -93,6 +106,8 @@ EXPECTED_SCHEMA = {
         ("last_success_at", "TEXT", 0, None, 0),
         ("stale_at", "TEXT", 0, None, 0),
         ("error_code", "TEXT", 0, None, 0),
+        ("revision", "INTEGER", 1, "1", 0),
+        ("payload_hash", "TEXT", 1, "''", 0),
     ),
     "provider_instances": (
         ("provider_id", "TEXT", 0, None, 1),
@@ -124,6 +139,7 @@ EXPECTED_SCHEMA = {
 LEGACY_SOURCE_SCHEMAS = {
     "daily_model_usage": EXPECTED_SCHEMA["daily_model_usage"][:-1],
     "daily_coverage": EXPECTED_SCHEMA["daily_coverage"][:-1],
+    "source_status": EXPECTED_SCHEMA["source_status"][:-2],
 }
 
 EXPECTED_INDEXES = {

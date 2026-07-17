@@ -479,6 +479,29 @@ class QueryServiceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.query.changes(after=bad)
 
+    def test_known_zero_coverage_changes_are_preserved_on_the_public_wire(self):
+        self.store.replace_daily_usage("codex", "2026-07-18", [])
+        self.store.replace_daily_costs("openai", "2026-07-18", [])
+
+        wire = to_wire(self.query.changes(after=0))
+
+        coverage = [
+            record for record in wire["records"]
+            if record["recordType"] in {
+                "daily_coverage", "daily_cost_coverage",
+            }
+        ]
+        self.assertEqual(
+            [record["recordType"] for record in coverage],
+            ["daily_coverage", "daily_cost_coverage"],
+        )
+        for record in coverage:
+            self.assertEqual(record["operation"], "insert")
+            self.assertIsInstance(record["payloadJson"], str)
+            payload = json.loads(record["payloadJson"])
+            self.assertEqual(payload["day"], "2026-07-18")
+            self.assertNotIn("total_tokens", payload)
+
     def test_changes_reject_cursor_ahead_of_same_snapshot_high_water(self):
         self.store.replace_daily_usage("codex", "2026-07-14", [usage()])
         high_water = self.store.high_water_cursor()

@@ -120,11 +120,11 @@ def provider_instance(
 
 
 class ActivityStoreSchemaTests(unittest.TestCase):
-    def test_schema_v3_is_idempotent_and_has_required_tables(self):
+    def test_schema_v4_is_idempotent_and_has_required_tables(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "activity.sqlite3"
             with ActivityStore(path) as store:
-                self.assertEqual(store.schema_version, 3)
+                self.assertEqual(store.schema_version, 4)
                 self.assertEqual(
                     store.table_names(),
                     {
@@ -169,7 +169,7 @@ class ActivityStoreSchemaTests(unittest.TestCase):
                     )
                 )
             with ActivityStore(path) as reopened:
-                self.assertEqual(reopened.schema_version, 3)
+                self.assertEqual(reopened.schema_version, 4)
 
     def test_daily_cost_schema_contains_no_private_upstream_identity_fields(self):
         with ActivityStore(":memory:") as store:
@@ -241,9 +241,10 @@ class ActivityStoreSchemaTests(unittest.TestCase):
             connection.close()
 
             with ActivityStore(path) as reopened:
-                self.assertEqual(reopened.schema_version, 3)
+                self.assertEqual(reopened.schema_version, 4)
                 self.assertEqual(reopened.daily_costs("2020-01-01", "2030-01-01"), [])
-                self.assertEqual(reopened.current_change_seq, before_cursor)
+                changes = reopened.changes(before_cursor)
+                self.assertEqual([row.record_type for row in changes], ["ledger_schema"])
                 self.assertIn("daily_costs", reopened.table_names())
                 self.assertIn("daily_cost_coverage", reopened.table_names())
 
@@ -289,20 +290,60 @@ class ActivityStoreSchemaTests(unittest.TestCase):
             connection.close()
 
             with ActivityStore(path) as reopened:
-                self.assertEqual(reopened.schema_version, 3)
+                self.assertEqual(reopened.schema_version, 4)
                 snapshot = reopened.snapshot_daily_usage("2026-07-02", "2026-07-02")
                 self.assertEqual(snapshot.rows[0].source_id, "legacy")
                 self.assertEqual(
                     snapshot.coverage_sources,
                     frozenset({("2026-07-02", "codex", "", "legacy")}),
                 )
-                self.assertEqual(reopened.current_change_seq, before_cursor)
+                self.assertEqual(
+                    [row.record_type for row in reopened.changes(before_cursor)],
+                    ["ledger_schema"],
+                )
+
+    def test_v3_source_health_migrates_without_row_loss_and_advances_cursor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "activity.sqlite3"
+            with ActivityStore(path) as store:
+                store.record_source_failure(
+                    "cursor", "current.quota", "timeout",
+                    datetime.fromisoformat("2026-07-14T02:00:00+00:00"),
+                )
+            connection = sqlite3.connect(path)
+            connection.execute("ALTER TABLE source_status RENAME TO source_status_v4")
+            connection.execute(
+                "CREATE TABLE source_status("
+                "provider_id TEXT NOT NULL,source_id TEXT NOT NULL,state TEXT NOT NULL,"
+                "last_attempt_at TEXT NOT NULL,last_success_at TEXT,stale_at TEXT,error_code TEXT,"
+                "PRIMARY KEY(provider_id,source_id))"
+            )
+            connection.execute(
+                "INSERT INTO source_status SELECT provider_id,source_id,state,last_attempt_at,"
+                "last_success_at,stale_at,error_code FROM source_status_v4"
+            )
+            connection.execute("DROP TABLE source_status_v4")
+            before_cursor = connection.execute(
+                "SELECT COALESCE(MAX(change_seq),0) FROM change_log"
+            ).fetchone()[0]
+            connection.execute("PRAGMA user_version=3")
+            connection.commit()
+            connection.close()
+
+            with ActivityStore(path) as reopened:
+                status = reopened.source_statuses()[0]
+                self.assertEqual((status.provider_id, status.error_code), ("cursor", "timeout"))
+                self.assertEqual(status.revision, 1)
+                self.assertEqual(len(status.payload_hash), 64)
+                changes = reopened.changes(before_cursor)
+                self.assertEqual([row.record_type for row in changes], ["ledger_schema"])
+                self.assertGreater(reopened.current_change_seq, before_cursor)
 
     def test_rejects_database_from_newer_schema_version(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "future.sqlite3"
             connection = sqlite3.connect(path)
-            connection.execute("PRAGMA user_version=4")
+            connection.execute("PRAGMA user_version=5")
             connection.close()
             with self.assertRaisesRegex(RuntimeError, "newer schema version"):
                 ActivityStore(path)
@@ -661,6 +702,16 @@ class DailyUsageTests(unittest.TestCase):
 
     def tearDown(self):
         self.store.close()
+
+    def test_known_zero_usage_and_cost_coverage_are_public_changes(self):
+        before = self.store.current_change_seq
+        self.store.replace_daily_usage("codex", "2026-07-18", [])
+        self.store.replace_daily_costs("openai", "2026-07-18", [])
+
+        self.assertEqual(
+            [row.record_type for row in self.store.changes(before)],
+            ["daily_coverage", "daily_cost_coverage"],
+        )
 
     def test_row_is_frozen_and_validates_canonical_fields(self):
         row = usage()
@@ -1178,7 +1229,10 @@ class QuotaTests(unittest.TestCase):
         self.assertEqual(first.revision, 1)
         self.assertEqual(second.revision, 1)
         self.assertEqual(len(self.store.quota_snapshots(first.record_id)), 1)
-        self.assertEqual(len(self.store.changes(0)), 1)
+        self.assertEqual(
+            [row.record_type for row in self.store.changes(0)],
+            ["quota_snapshot", "quota"],
+        )
 
     def test_changed_quota_updates_current_and_appends_history(self):
         first = self.store.record_quota(quota())
@@ -1187,7 +1241,10 @@ class QuotaTests(unittest.TestCase):
         self.assertEqual(changed.revision, 2)
         self.assertEqual(self.store.quota_states(), [changed])
         self.assertEqual(len(self.store.quota_snapshots(first.record_id)), 2)
-        self.assertEqual(len(self.store.changes(cursor)), 1)
+        self.assertEqual(
+            [row.record_type for row in self.store.changes(cursor)],
+            ["quota_snapshot", "quota"],
+        )
 
     def test_unchanged_after_hour_samples_history_without_canonical_change(self):
         self.store.record_quota(quota())
@@ -1195,7 +1252,9 @@ class QuotaTests(unittest.TestCase):
         latest = self.store.record_quota(quota(observed_at="2026-07-14T03:00:00Z"))
         self.assertEqual(latest.revision, 1)
         self.assertEqual(len(self.store.quota_snapshots(latest.record_id)), 2)
-        self.assertEqual(self.store.current_change_seq, cursor)
+        changes = self.store.changes(cursor)
+        self.assertEqual([change.record_type for change in changes], ["quota_snapshot"])
+        self.assertGreater(self.store.current_change_seq, cursor)
 
     def test_late_changed_observation_is_history_only_and_deduplicates(self):
         newest = self.store.record_quota(
@@ -1209,7 +1268,10 @@ class QuotaTests(unittest.TestCase):
 
         self.assertEqual(returned, newest)
         self.assertEqual(self.store.quota_states(), [newest])
-        self.assertEqual(self.store.current_change_seq, cursor)
+        self.assertEqual(
+            [row.record_type for row in self.store.changes(cursor)],
+            ["quota_snapshot"],
+        )
         self.assertEqual(len(self.store.quota_snapshots(newest.record_id)), 2)
 
     def test_equivalent_zero_ratios_have_one_canonical_representation(self):
@@ -1232,7 +1294,10 @@ class QuotaTests(unittest.TestCase):
         self.assertTrue(all(state.remaining_ratio == 0.0 for state in states))
         self.assertTrue(all(str(state.remaining_ratio) == "0.0" for state in states))
         self.assertEqual([state.revision for state in states], [1, 1, 1])
-        self.assertEqual(len(self.store.changes(0)), 1)
+        self.assertEqual(
+            [row.record_type for row in self.store.changes(0)],
+            ["quota_snapshot", "quota"],
+        )
 
     def test_quota_validation_rejects_bool_invalid_ids_and_ratio(self):
         base = quota()
@@ -1247,6 +1312,22 @@ class SourceStatusFreshnessTests(unittest.TestCase):
 
     def tearDown(self):
         self.store.close()
+
+    def test_source_health_changes_advance_the_public_cursor_without_duplicate_noise(self):
+        attempted = datetime.fromisoformat("2026-07-14T02:00:00+00:00")
+        before = self.store.current_change_seq
+
+        self.store.record_source_failure(
+            "codex", "current.quota", "timeout", attempted
+        )
+        inserted = self.store.snapshot_changes(before, 100)
+        self.assertEqual([row.record_type for row in inserted.rows], ["source_status"])
+        self.assertGreater(inserted.cursor, before)
+
+        self.store.record_source_failure(
+            "codex", "current.quota", "timeout", attempted
+        )
+        self.assertEqual(self.store.current_change_seq, inserted.cursor)
 
     def test_transient_failures_preserve_last_success_and_freshness_deadline(self):
         success = datetime.fromisoformat("2026-07-14T02:00:00+00:00")
@@ -1301,6 +1382,7 @@ class SourceStatusFreshnessTests(unittest.TestCase):
         )
         status = self.store.source_statuses()[0]
         self.assertEqual(status.state, "ok")
+        self.assertEqual(status.revision, 2)
         self.assertEqual(status.last_success_at, "2026-07-14T03:00:00.000000Z")
         self.assertEqual(status.stale_at, "2026-07-14T03:10:00.000000Z")
         self.assertIsNone(status.error_code)
@@ -1387,12 +1469,17 @@ class SourceStatusFreshnessTests(unittest.TestCase):
             attempted,
             "quota_unavailable",
         )
+        before_delete = self.store.current_change_seq
 
         self.store.delete_source_status("hermes", "current.quota", attempted)
 
         self.assertEqual(
             {(row.provider_id, row.source_id) for row in self.store.source_statuses()},
             {("hermes", "openusage.daily"), ("openclaw", "current.quota")},
+        )
+        self.assertEqual(
+            [(row.record_type, row.operation) for row in self.store.changes(before_delete)],
+            [("source_status", "delete")],
         )
         with self.assertRaises(ValueError):
             self.store.delete_source_status("bad/id", "current.quota", attempted)
@@ -1434,7 +1521,12 @@ class RetentionAndConcurrencyTests(unittest.TestCase):
             self.assertEqual([row.day for row in cost_snapshot.rows], ["2024-07-14"])
             self.assertNotIn(("2024-07-13", "openai", ""), cost_snapshot.covered)
             self.assertEqual(len(store.quota_states()), 1)
-            self.assertTrue(any(change.operation == "delete" for change in store.changes(cursor)))
+            deleted = store.changes(cursor)
+            self.assertTrue(any(change.operation == "delete" for change in deleted))
+            self.assertIn(
+                ("quota_snapshot", "delete"),
+                [(change.record_type, change.operation) for change in deleted],
+            )
 
             store.replace_daily_usage(
                 "codex", "2024-07-13", [usage(day="2024-07-13")]

@@ -209,6 +209,20 @@ struct RepositoryTests {
         }
     }
 
+    @Test("Version four accepts revisioned source health without mutating the ledger")
+    func revisionedSourceHealth() throws {
+        let fixture = try SQLiteFixture(userVersion: 4)
+        let before = try Data(contentsOf: fixture.databaseURL)
+        let repository = try UsageRepository(databaseURL: fixture.databaseURL, now: { now })
+        defer { repository.close() }
+
+        let health = try repository.sourceHealth()
+
+        #expect(health.sources.count == 3)
+        #expect(try repository.dataRevision() == 1842)
+        #expect(try Data(contentsOf: fixture.databaseURL) == before)
+    }
+
     @Test("Version two costs preserve decimals and distinguish known zero from missing")
     func dailyCosts() throws {
         let fixture = try SQLiteFixture(userVersion: 2)
@@ -577,7 +591,7 @@ struct RepositoryTests {
             #expect(!String(describing: error).contains("private-account"))
         }
 
-        let newer = try SQLiteFixture(userVersion: 4)
+        let newer = try SQLiteFixture(userVersion: 5)
         do {
             _ = try UsageRepository(databaseURL: newer.databaseURL)
             Issue.record("newer schema unexpectedly opened")

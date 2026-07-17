@@ -894,7 +894,15 @@ class ActivityCollectorTests(unittest.TestCase):
                 collector.refresh(Overview([]))
                 after = store.snapshot_daily_usage("2025-01-01", "2026-12-31")
 
-                self.assertEqual(after, before)
+                self.assertEqual(after.rows, before.rows)
+                self.assertEqual(after.covered, before.covered)
+                self.assertEqual(after.coverage_sources, before.coverage_sources)
+                self.assertEqual(after.known_scopes, before.known_scopes)
+                self.assertGreater(after.cursor, before.cursor)
+                self.assertTrue(all(
+                    change.record_type == "source_status"
+                    for change in store.changes(before.cursor)
+                ))
                 openusage.fetch.assert_not_called()
 
     def test_failed_import_keeps_history_unchanged_and_records_only_safe_failure(self):
