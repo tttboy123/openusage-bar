@@ -780,6 +780,10 @@ class _BoundedThreads:
         for _, timer in active:
             if timer is not threading.current_thread():
                 timer.join()
+        with self._deadline_lock:
+            for request, timer in active:
+                if self._deadline_timers.get(request) is timer:
+                    self._deadline_timers.pop(request, None)
 
     def server_close(self) -> None:
         self._abort_active_requests()
