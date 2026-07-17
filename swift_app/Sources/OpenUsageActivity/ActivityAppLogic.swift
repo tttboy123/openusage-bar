@@ -675,13 +675,23 @@ struct ActivityFilterSelection: Sendable, Hashable {
     let modelID: String?
 }
 
+protocol ActivityPreferencesStore: AnyObject {
+    func string(forKey defaultName: String) -> String?
+    func set(_ value: Any?, forKey defaultName: String)
+    func removeObject(forKey defaultName: String)
+}
+
+extension UserDefaults: ActivityPreferencesStore {}
+
 final class ActivityPreferences {
     static let periodKey = "activity.period"
     static let providerKey = "activity.providerID"
     static let modelKey = "activity.modelID"
-    private let defaults: UserDefaults
+    private let defaults: any ActivityPreferencesStore
 
-    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    init(defaults: any ActivityPreferencesStore = UserDefaults.standard) {
+        self.defaults = defaults
+    }
 
     func load() -> ActivityFilterSelection {
         let period = defaults.string(forKey: Self.periodKey).flatMap(UsagePeriod.init(rawValue:)) ?? .year

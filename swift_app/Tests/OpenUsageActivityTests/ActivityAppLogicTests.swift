@@ -7,6 +7,27 @@ import Testing
 struct ActivityAppLogicTests {
     private func day(_ value: String) -> LocalDay { try! LocalDay(value) }
 
+    @Test("Isolated preferences stay in memory and create no preference files")
+    func isolatedPreferencesCleanup() {
+        let before = testPreferenceFiles()
+        let store = InMemoryActivityPreferencesStore()
+        let preferences = ActivityPreferences(defaults: store)
+        preferences.save(.init(period: .week, providerID: "codex", modelID: nil))
+
+        #expect(preferences.load() == .init(period: .week, providerID: "codex", modelID: nil))
+        #expect(testPreferenceFiles() == before)
+    }
+
+    private func testPreferenceFiles() -> Set<String> {
+        let directory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Preferences", isDirectory: true)
+        return Set((try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        ))?.map(\.lastPathComponent).filter {
+            $0.hasPrefix("OpenUsageActivityTests.") && $0.hasSuffix(".plist")
+        } ?? [])
+    }
+
     @Test("Every filter load uses one bounded annual canonical dataset")
     func boundedLoadRequest() {
         let request = ActivityLoadRequest(
@@ -419,9 +440,7 @@ struct ActivityAppLogicTests {
 
     @Test("Persisted filters restore in an isolated defaults suite and corrupt values fail safe")
     func persistedFilters() throws {
-        let name = "OpenUsageActivityTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: name))
-        defer { defaults.removePersistentDomain(forName: name) }
+        let defaults = InMemoryActivityPreferencesStore()
         let preferences = ActivityPreferences(defaults: defaults)
         preferences.save(.init(period: .month, providerID: "codex", modelID: "gpt-5.5"))
         #expect(preferences.load() == .init(period: .month, providerID: "codex", modelID: "gpt-5.5"))
@@ -674,10 +693,9 @@ struct ActivityAppLogicTests {
 
     @MainActor
     @Test("Legend toggle clears chart focus and stale IDs converge")
-    func legendToggleClearsFocus() {
-        let store = ActivityViewStore(preferences: ActivityPreferences(
-            defaults: UserDefaults(suiteName: "OpenUsageActivityTests.\(UUID().uuidString)")!
-        ))
+    func legendToggleClearsFocus() throws {
+        let preferences = ActivityPreferences(defaults: InMemoryActivityPreferencesStore())
+        let store = ActivityViewStore(preferences: preferences)
         store.chartFocus.day = day("2026-07-02")
 
         #expect(store.toggleModelSeries("m1", availableSeriesIDs: ["m1", "additional-models"]))
