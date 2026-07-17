@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the local ledger a complete revisioned fact source and expose one coherent resource snapshot to native clients, Loom, and other schedulers.
+**Goal:** Make the local ledger a complete revisioned fact source and expose one coherent resource snapshot to native clients and optional generic local consumers.
 
 **Architecture:** Split schema/record declarations from storage operations, then make every public fact mutation participate in the change cursor. A single SQLite read transaction produces a resource snapshot; QueryService is the only wire-model boundary used by both API and CLI.
 
@@ -187,7 +187,7 @@ git commit -m "feat: revision every public ledger fact"
 
 - [ ] **Step 1: Define the store snapshot contract in a failing test**
 
-The snapshot must contain one cursor and all facts needed for admission evidence:
+The snapshot must contain one cursor and all facts needed by native surfaces and generic resource consumers:
 
 ```python
 @dataclass(frozen=True)
@@ -306,7 +306,7 @@ Expected: PASS, including all pre-existing v1 routes.
 git add openusage_bar/local_api.py openusage_bar/collector_cli.py \
   openusage_bar/query.py tests/test_query.py tests/test_local_api.py \
   tests/test_collector_cli.py docs/api/local-api-v1.md
-git commit -m "feat: publish scheduler resource snapshot"
+git commit -m "feat: publish local resource snapshot"
 ```
 
 ### Task 5: Publish machine-readable schemas and cross-language gates

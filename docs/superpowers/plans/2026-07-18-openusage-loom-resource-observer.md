@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let Loom consume OpenUsage Bar resource facts as bounded, attributable, observe-only evidence without transferring scheduling or state authority to OpenUsage Bar.
+**Goal:** Let Loom optionally consume a standalone OpenUsage Bar installation's generic resource facts as bounded, attributable, observe-only evidence without creating a Bar runtime or release dependency.
 
-**Architecture:** A Loom-side Unix-socket client reads only the public Local API and normalizes capacity facts into a versioned `ResourceObservation`. V0 does not call Scheduler or ProviderRouter. Once SessionBindingController is present on the selected Loom base, a separate event records the observation digest without changing Session state.
+**Architecture:** This plan is implemented only in the Loom repository. A Loom-side Unix-socket client reads the generic public Local API and normalizes capacity facts into a versioned `ResourceObservation`. V0 does not call Scheduler or ProviderRouter. Once SessionBindingController is present on the selected Loom base, a separate event records the observation digest without changing Session state. OpenUsage Bar builds, installs, runs, and releases without this adapter.
 
 **Tech Stack:** Python 3.11+ standard library, AF_UNIX, HTTP/1.1, frozen dataclasses, canonical JSON/SHA-256, pytest, Loom Event Journal.
 
@@ -13,6 +13,8 @@
 **Codex skill resolution:** In this environment, `superpowers:executing-plans` maps to the installed `executing-plans` skill. Use the subagent-driven option only when `subagent-driven-development` is actually available.
 
 ## Repository and authority preflight
+
+This is an optional external-consumer track. It is not part of the OpenUsage Bar Beta, RC, or 1.0 critical path, and no OpenUsage Bar source file may import this adapter.
 
 The inspected Loom worktree at `/Users/lune/Documents/Codex/2026-06-18/hermes-openclaw/agent-platform` contains unrelated user changes. Implementation must use a new worktree and must read that repository's `AGENTS.md` first.
 
@@ -46,6 +48,8 @@ class ResourceObservation:
     provider_id: str
     account_ref: str | None
     quota_name: str
+    applies_to_kind: Literal["subscription", "account", "model"]
+    applies_to_model_ids: tuple[str, ...]
     state: ObservationState
     interval: tuple[float, float] | None
     resets_at: str | None
@@ -60,6 +64,7 @@ Rules:
 - `known` requires `quality` of `direct` or `authoritative` and a bounded interval.
 - `estimated` requires `quality` of `derived` and a bounded interval.
 - `unknown` requires `interval is None`.
+- `model` scope requires a non-empty stable model list; broader scopes require an empty model list.
 - `remainingRatio` maps to `[ratio, ratio]`; absence never maps to `[0, 0]`.
 - stale preserves the last observed interval but is never admission-eligible.
 - Provider/account/source identifiers must pass Loom's stable identifier validation and may not contain email or display identity.
@@ -123,7 +128,7 @@ After OpenUsage Bar publishes `/v1/snapshot`, switch the observer to that single
 - [ ] **Step 4: Map API facts without policy**
 
 - `dataRevision` -> `source_revision`.
-- `providerId/accountRef/quotaName` -> resource identity.
+- `providerId/accountRef/quotaName/appliesTo` -> resource identity and scope.
 - `remainingRatio` -> exact interval.
 - `resetsAt/observedAt` -> temporal facts.
 - `quality=direct|authoritative` -> known.
@@ -255,6 +260,15 @@ git commit -m "feat: bind resource observations as session evidence"
 - Treating stale facts as admission-ready.
 - Restarting Autopilot, enabling Apply, or changing current report-only authority.
 
+## Follow-on Loom-owned phases
+
+This plan is X1 Observe-only. It records facts but does not itself prevent quota exhaustion.
+
+- **X2 Quota Guard:** match the active SessionBinding to Provider/account/model scope, maintain Loom-owned predicted usage and reservations, recheck before long work and at phase boundaries, write a recoverable checkpoint at a soft threshold, and pause new work only after checkpoint success at a hard threshold. Stale, unknown, or unavailable facts are not treated as sufficient capacity.
+- **X3 Policy Routing:** wait for reset or change account/model/Provider only after separate policy design, authorization, and live Canary evidence.
+
+Neither X2 nor X3 adds a dependency from OpenUsage Bar back to Loom.
+
 ## Acceptance gate
 
 - Identical API facts produce an identical canonical digest.
@@ -264,3 +278,4 @@ git commit -m "feat: bind resource observations as session evidence"
 - OpenUsage Bar data remains read-only and credentials never cross the API.
 - Session evidence is append-only, idempotent, and replay-stable when Task 4 is enabled.
 - Existing Scheduler and ProviderRouter results remain unchanged.
+- OpenUsage Bar remains independently releasable and usable when this entire plan is absent.

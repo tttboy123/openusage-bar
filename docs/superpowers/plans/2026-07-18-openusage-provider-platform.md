@@ -144,6 +144,8 @@ class QuotaObservation:
     source_id: str
     quota_name: str
     quota_window: str
+    applies_to_kind: str
+    applies_to_model_ids: tuple[str, ...]
     unit: str
     remaining: str | None
     remaining_ratio: float | None
@@ -154,15 +156,15 @@ class QuotaObservation:
     stale: bool
 ```
 
-Identity is stable `provider_id + account_ref + source_id + quota_window + quota_name`; display names and email must not participate.
+`applies_to_kind` is one of `subscription`, `account`, or `model`. `model` requires a non-empty, sorted, unique `applies_to_model_ids`; broader scopes require an empty model tuple. Identity is stable `provider_id + account_ref + source_id + quota_window + quota_name + scope key`; display names and email must not participate. The scope also participates in the semantic hash and public wire payload.
 
 - [ ] **Step 2: Add schema migration tests**
 
-Migrate existing quota rows with `source_id="current.quota"` and `quota_window="subscription"`. Assert history count, remaining values, reset times, and cursor monotonicity are preserved.
+Migrate existing quota rows with `source_id="current.quota"`, `quota_window="subscription"`, `applies_to_kind="account"`, and an empty model tuple. The conservative legacy default means “this Provider connection/account”, never “every model”. Assert history count, remaining values, reset times, scope, and cursor monotonicity are preserved.
 
 - [ ] **Step 3: Emit all known windows**
 
-Codex, MiniMax, and Step Plan emit each available five-hour, weekly, monthly, or model-specific window separately. Kiro emits its billing-cycle window. A missing window emits no numeric observation and updates source health/capability only.
+Codex, MiniMax, and Step Plan emit each available five-hour, weekly, monthly, or model-specific window separately and declare its authoritative scope. Kiro emits its billing-cycle window. A missing window emits no numeric observation and updates source health/capability only. An account- or subscription-level source must never be labeled model-specific merely because a consumer selected one model.
 
 - [ ] **Step 4: Replace brand-specific merging**
 
