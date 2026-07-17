@@ -19,6 +19,82 @@ struct ActivityAppLogicTests {
         #expect(request.providerIDs == ["codex"])
     }
 
+    @Test("Provider edits resolve the sibling settings executable")
+    func providerEditCommandResolution() throws {
+        let activity = URL(fileURLWithPath: "/Applications/OpenUsage Bar.app/Contents/Helpers/OpenUsage Activity.app")
+        let expected = URL(fileURLWithPath: "/Applications/OpenUsage Bar.app/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings")
+        let command = try #require(ProviderMutationCommand.resolve(
+            activityBundleURL: activity,
+            activityExecutableURL: activity.appendingPathComponent("Contents/MacOS/OpenUsage Activity"),
+            isExecutable: { $0 == expected }
+        ))
+
+        #expect(command.executableURL == expected)
+        #expect(command.arguments == ["provider-mutate"])
+    }
+
+    @Test("Provider edit wire payload is scoped and does not contain site or endpoint")
+    func providerEditWirePayload() throws {
+        let request = StepPlanEditRequest(
+            providerID: "step-plan-main", name: "Main",
+            apiKey: "replacement", sessionCookie: ""
+        )
+        let object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        )
+
+        #expect(object["version"] as? Int == 1)
+        #expect(object["action"] as? String == "update_step_plan")
+        #expect(object["providerId"] as? String == "step-plan-main")
+        #expect(object["site"] == nil)
+        #expect(object["endpoint"] == nil)
+    }
+
+    @Test("Provider modification stays in the selected detail pane")
+    func providerModificationIsInline() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/OpenUsageActivity/ActivityViews.swift"),
+            encoding: .utf8
+        )
+        let detail = try #require(source.range(of: "private struct ProviderConnectionDetail"))
+        let nextPage = try #require(source.range(of: "private struct DataHealthPage"))
+        let section = String(source[detail.lowerBound..<nextPage.lowerBound])
+
+        #expect(section.contains("Edit Connection"))
+        #expect(section.contains("SecureField"))
+        #expect(section.contains("ProviderMutationService.submit"))
+        #expect(!section.contains("Button(\"Open Provider Settings\""))
+    }
+
+    @Test("Configured connections remain editable before a successful collection")
+    func configuredProviderConnections() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("providers.json")
+        try Data(#"""
+        {
+          "version": 1,
+          "providers": [
+            {"provider_id":"step-plan-main","name":"Main","type":"step_plan","site":"china"},
+            {"provider_id":"feed-zai","name":"ZAI Feed","type":"daily_usage_feed","family_id":"zai","endpoint":"https://example.com"}
+          ]
+        }
+        """#.utf8).write(to: url)
+
+        let connections = try ProviderConnectionSummaryStore(url: url).load()
+
+        #expect(connections.map(\.providerID) == ["step-plan-main", "feed-zai"])
+        #expect(connections[0].familyID == "step_plan")
+        #expect(connections[0].site == "china")
+        #expect(connections[0].isStepPlan)
+        #expect(connections[1].familyID == "zai")
+        #expect(!connections[1].isStepPlan)
+    }
+
     @Test("Stale background loads cannot publish over a newer filter")
     func loadGeneration() {
         var gate = ActivityLoadGate()

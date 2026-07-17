@@ -171,6 +171,95 @@ enum ProviderCenterText {
     }
 }
 
+struct ProviderConnectionSummary: Sendable, Hashable, Identifiable {
+    let providerID: String
+    let familyID: String
+    let displayName: String
+    let kind: String
+    let site: String?
+
+    var id: String { providerID }
+    var isStepPlan: Bool { kind == "step_plan" && familyID == "step_plan" }
+}
+
+enum ProviderConnectionSummaryError: Error { case invalidConfiguration }
+
+struct ProviderConnectionSummaryStore {
+    private struct Envelope: Decodable {
+        let version: Int
+        let providers: [Row]
+    }
+
+    private struct Row: Decodable {
+        let providerID: String
+        let name: String
+        let type: String
+        let familyID: String?
+        let site: String?
+
+        enum CodingKeys: String, CodingKey {
+            case name, type, site
+            case providerID = "provider_id"
+            case familyID = "family_id"
+        }
+    }
+
+    static let defaultURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".config/openusage-bar/providers.json")
+
+    let url: URL
+
+    init(url: URL = Self.defaultURL) { self.url = url }
+
+    func load() throws -> [ProviderConnectionSummary] {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        guard data.count <= 1_048_576 else {
+            throw ProviderConnectionSummaryError.invalidConfiguration
+        }
+        let envelope = try JSONDecoder().decode(Envelope.self, from: data)
+        guard envelope.version == 1 else {
+            throw ProviderConnectionSummaryError.invalidConfiguration
+        }
+        return try envelope.providers.map { row in
+            guard Self.isStableID(row.providerID),
+                  !row.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  row.name.utf8.count <= 160
+            else { throw ProviderConnectionSummaryError.invalidConfiguration }
+            let familyID = switch row.type {
+            case "step_plan": "step_plan"
+            case "minimax": "minimax"
+            case "openai_organization": "openai"
+            case "daily_usage_feed": row.familyID ?? row.providerID
+            default: row.providerID
+            }
+            guard Self.isStableID(familyID) else {
+                throw ProviderConnectionSummaryError.invalidConfiguration
+            }
+            if row.type == "step_plan" && !["china", "international"].contains(row.site) {
+                throw ProviderConnectionSummaryError.invalidConfiguration
+            }
+            return ProviderConnectionSummary(
+                providerID: row.providerID,
+                familyID: familyID,
+                displayName: row.name,
+                kind: row.type,
+                site: row.site
+            )
+        }
+    }
+
+    private static func isStableID(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 128
+            && value.unicodeScalars.allSatisfy { scalar in
+                scalar.isASCII && (
+                    CharacterSet.alphanumerics.contains(scalar)
+                        || [".", "_", "-"].contains(Character(scalar))
+                )
+            }
+    }
+}
+
 struct LocalToolUsageSummary: Identifiable, Sendable, Hashable {
     let providerID: String
     let displayName: String
@@ -260,6 +349,102 @@ struct ActivityHelperPlan: Sendable, Hashable {
             return Self(target: .executable(executable), arguments: [])
         }
         return nil
+    }
+}
+
+struct ProviderMutationCommand: Sendable, Hashable {
+    let executableURL: URL
+    let arguments: [String]
+
+    static func resolve(
+        activityBundleURL: URL,
+        activityExecutableURL: URL,
+        isExecutable: (URL) -> Bool = { FileManager.default.isExecutableFile(atPath: $0.path) }
+    ) -> Self? {
+        let helperDirectory = activityBundleURL.pathExtension.lowercased() == "app"
+            ? activityBundleURL.deletingLastPathComponent()
+            : activityExecutableURL.deletingLastPathComponent()
+        let bundled = helperDirectory
+            .appendingPathComponent("OpenUsage Provider Settings.app")
+            .appendingPathComponent("Contents/MacOS/OpenUsage Provider Settings")
+        if isExecutable(bundled) {
+            return Self(executableURL: bundled, arguments: ["provider-mutate"])
+        }
+        let fallbacks = ["OpenUsageSettings", "openusage_settings"].map {
+            helperDirectory.appendingPathComponent($0)
+        }
+        guard let executable = fallbacks.first(where: isExecutable) else { return nil }
+        return Self(executableURL: executable, arguments: ["provider-mutate"])
+    }
+}
+
+struct StepPlanEditRequest: Encodable, Sendable, Hashable {
+    let version = 1
+    let action = "update_step_plan"
+    let providerID: String
+    let name: String
+    let apiKey: String
+    let sessionCookie: String
+
+    enum CodingKeys: String, CodingKey {
+        case version, action, name, apiKey, sessionCookie
+        case providerID = "providerId"
+    }
+}
+
+struct ProviderMutationResponse: Decodable, Sendable, Hashable {
+    let version: Int
+    let ok: Bool
+    let message: String
+}
+
+enum ProviderMutationFailure: Error, Sendable, Hashable {
+    case unavailable, couldNotLaunch, invalidResponse
+
+    var message: String {
+        switch self {
+        case .unavailable: "Provider editor is unavailable. Reinstall OpenUsage Bar."
+        case .couldNotLaunch: "Provider connection could not be updated."
+        case .invalidResponse: "Provider editor returned an invalid response."
+        }
+    }
+}
+
+enum ProviderMutationService {
+    static func submit(
+        _ request: StepPlanEditRequest,
+        command: ProviderMutationCommand
+    ) async -> Result<ProviderMutationResponse, ProviderMutationFailure> {
+        await Task.detached(priority: .userInitiated) {
+            do {
+                let requestData = try JSONEncoder().encode(request)
+                let process = Process()
+                let input = Pipe()
+                let output = Pipe()
+                process.executableURL = command.executableURL
+                process.arguments = command.arguments
+                process.standardInput = input
+                process.standardOutput = output
+                process.standardError = FileHandle.nullDevice
+                try process.run()
+                input.fileHandleForWriting.write(requestData)
+                try input.fileHandleForWriting.close()
+                let responseData = output.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                guard process.terminationStatus == 0 else {
+                    return .failure(.couldNotLaunch)
+                }
+                let response = try JSONDecoder().decode(
+                    ProviderMutationResponse.self, from: responseData
+                )
+                guard response.version == 1 else { return .failure(.invalidResponse) }
+                return .success(response)
+            } catch is DecodingError {
+                return .failure(.invalidResponse)
+            } catch {
+                return .failure(.couldNotLaunch)
+            }
+        }.value
     }
 }
 

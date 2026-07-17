@@ -34,6 +34,7 @@ PYTHON_TOUCHED_MODULES=(
   openusage_bar.openusage_catalog
   openusage_bar.openai_organization
   openusage_bar.provider_catalog
+  openusage_bar.provider_commands
   openusage_bar.query
   openusage_bar.step_plan
 )

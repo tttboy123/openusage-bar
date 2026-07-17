@@ -78,6 +78,18 @@ class SettingsEntrypointTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 2)
         run.assert_not_called()
 
+    def test_provider_mutation_is_dispatched_without_opening_appkit(self):
+        with patch.object(
+            sys, "argv", ["openusage_settings.py", "provider-mutate"]
+        ), patch(
+            "openusage_bar.provider_commands.run_provider_mutation", return_value=0
+        ) as mutate, patch.dict(sys.modules, {"openusage_bar.ui": None}):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path("openusage_settings.py", run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 0)
+        mutate.assert_called_once_with(sys.stdin, sys.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

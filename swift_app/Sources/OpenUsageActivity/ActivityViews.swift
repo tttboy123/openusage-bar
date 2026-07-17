@@ -1459,9 +1459,11 @@ private struct ProvidersPage: View {
     @State private var selectedFamilyID: String? = "minimax"
     @State private var selectedRegionID: String? = "cn"
     @State private var searchText = ""
+    @State private var configuredConnections: [ProviderConnectionSummary] = []
 
     private var allItems: [ProviderCenterItem] {
         let instances = Dictionary(grouping: data.providerInstances, by: \.familyID)
+        let configured = Dictionary(grouping: configuredConnections, by: \.familyID)
         let observedFamilies = Set(data.availableProviderIDs.map {
             data.providerDescriptor(for: $0).familyID
         })
@@ -1476,10 +1478,20 @@ private struct ProvidersPage: View {
         for descriptor in data.providerDescriptors.values where descriptors[descriptor.familyID] == nil {
             descriptors[descriptor.familyID] = descriptor
         }
+        for connection in configuredConnections where descriptors[connection.familyID] == nil {
+            descriptors[connection.familyID] = ProviderCatalog.descriptor(
+                for: connection.providerID,
+                familyID: connection.familyID,
+                displayName: connection.displayName,
+                category: .api
+            )
+        }
         return descriptors.values.map { descriptor in
-            ProviderCenterItem(
+            let connectionIDs = Set(instances[descriptor.familyID, default: []].map(\.providerID))
+                .union(configured[descriptor.familyID, default: []].map(\.providerID))
+            return ProviderCenterItem(
                 descriptor: descriptor,
-                instanceCount: instances[descriptor.familyID]?.count ?? 0,
+                instanceCount: connectionIDs.count,
                 observed: observedFamilies.contains(descriptor.familyID),
                 needsAttention: attentionFamilies.contains(descriptor.familyID)
             )
@@ -1530,8 +1542,14 @@ private struct ProvidersPage: View {
                         instances: data.providerInstances.filter {
                             $0.familyID == selectedItem.descriptor.familyID
                         },
+                        connections: configuredConnections.filter {
+                            $0.familyID == selectedItem.descriptor.familyID
+                        },
                         selectedRegionID: $selectedRegionID,
-                        reload: reload
+                        reload: {
+                            loadConfiguredConnections()
+                            reload()
+                        }
                     )
                     .id(selectedItem.id)
                 } else {
@@ -1542,7 +1560,10 @@ private struct ProvidersPage: View {
                 }
             }
         }
-        .onAppear { synchronizeSelection() }
+        .onAppear {
+            synchronizeSelection()
+            loadConfiguredConnections()
+        }
         .onChange(of: selectedCategory) { synchronizeSelection() }
         .onChange(of: searchText) { synchronizeSelection() }
         .onChange(of: selectedFamilyID) { _, _ in synchronizeRegion() }
@@ -1581,6 +1602,15 @@ private struct ProvidersPage: View {
     private func synchronizeRegion() {
         selectedRegionID = selectedItem?.descriptor.regions.sorted().first
     }
+
+    private func loadConfiguredConnections() {
+        Task { @MainActor in
+            configuredConnections = await Task.detached(priority: .utility) {
+                (try? ProviderConnectionSummaryStore().load()) ?? []
+            }.value.filter { !data.hiddenProviderIDs.contains($0.providerID) }
+            synchronizeSelection()
+        }
+    }
 }
 
 private struct ProviderCenterRow: View {
@@ -1614,8 +1644,21 @@ private struct ProviderCenterRow: View {
 private struct ProviderConnectionDetail: View {
     let item: ProviderCenterItem
     let instances: [ProviderInstanceRecord]
+    let connections: [ProviderConnectionSummary]
     @Binding var selectedRegionID: String?
     let reload: () -> Void
+
+    @State private var editingProviderID: String?
+    @State private var originalName = ""
+    @State private var accountName = ""
+    @State private var replacementAPIKey = ""
+    @State private var replacementSession = ""
+    @State private var isSaving = false
+    @State private var editError: String?
+    @State private var savedMessage: String?
+    @FocusState private var focusedField: EditField?
+
+    private enum EditField: Hashable { case name, apiKey, session }
 
     private var descriptor: ProviderDisplayDescriptor { item.descriptor }
     private var capability: ProviderCapabilityPresentation {
@@ -1628,8 +1671,8 @@ private struct ProviderConnectionDetail: View {
                 header
                 Divider()
                 connectionSection
+                if !connections.isEmpty || !instances.isEmpty { instanceSection }
                 capabilitySection
-                if !instances.isEmpty { instanceSection }
             }
             .frame(maxWidth: 720, alignment: .leading)
             .padding(.horizontal, 34)
@@ -1659,7 +1702,7 @@ private struct ProviderConnectionDetail: View {
     private var connectionSection: some View {
         ProviderDetailSection(
             title: "Connection",
-            detail: "Setup stays in the existing Python helper. This view never reads secrets."
+            detail: "Manage the selected connection here. Saved credentials are never displayed."
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 if descriptor.regions.count > 1 {
@@ -1683,10 +1726,13 @@ private struct ProviderConnectionDetail: View {
                     value: descriptor.supportsAccounts ? "Supported" : "Not declared"
                 )
                 HStack {
-                    Button("Open Provider Settings", systemImage: "key") {
+                    Button(
+                        connections.isEmpty ? "Add Connection" : "Add Account",
+                        systemImage: "plus"
+                    ) {
                         SettingsHelper.open()
                     }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .controlSize(.large)
                     Button("Refresh Data", systemImage: "arrow.clockwise", action: reload)
                         .controlSize(.large)
                 }
@@ -1721,24 +1767,198 @@ private struct ProviderConnectionDetail: View {
     private var instanceSection: some View {
         ProviderDetailSection(
             title: "Connected Instances",
-            detail: "Only privacy-safe instance metadata is shown."
+            detail: "Select a connection to replace its credentials without leaving this page."
         ) {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(instances) { instance in
-                    HStack {
+                if let savedMessage {
+                    Label(savedMessage, systemImage: "checkmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.green)
+                        .accessibilityLabel("Success: \(savedMessage)")
+                }
+                ForEach(connections) { connection in
+                    HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(instance.displayName).font(.callout.weight(.medium))
-                            Text(instance.sourceKind)
+                            Text(connection.displayName).font(.callout.weight(.medium))
+                            Text(connectionMetadata(connection))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(DateText.display(instance.observedAt))
+                        if connection.isStepPlan {
+                            Button("Edit Connection", systemImage: "pencil") {
+                                beginEditing(connection)
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(isSaving)
+                        } else {
+                            Text("Read only")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(minHeight: 44)
+                    if editingProviderID == connection.providerID {
+                        inlineEditor(for: connection)
+                            .padding(.vertical, 8)
+                    }
+                    Divider()
+                }
+                ForEach(instances.filter { instance in
+                    !connections.contains { $0.providerID == instance.providerID }
+                }) { instance in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(instance.displayName).font(.callout.weight(.medium))
+                            Text("Observed source · \(DateText.display(instance.observedAt))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("Read only")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    .frame(minHeight: 44)
                     Divider()
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func inlineEditor(for connection: ProviderConnectionSummary) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Edit \(connection.displayName)")
+                    .font(.headline)
+                Spacer()
+                Text("Site remains locked to this connection")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            LabeledContent("Account label") {
+                TextField("Account label", text: $accountName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 390)
+                    .focused($focusedField, equals: .name)
+                    .disabled(isSaving)
+            }
+            LabeledContent(
+                "Site",
+                value: ProviderCenterText.region(connection.site ?? "fixed")
+            )
+            LabeledContent("Replacement API key") {
+                SecureField("Leave blank to keep the saved key", text: $replacementAPIKey)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 390)
+                    .focused($focusedField, equals: .apiKey)
+                    .disabled(isSaving)
+            }
+            LabeledContent("Replacement web session") {
+                SecureField("Leave blank to keep the saved session", text: $replacementSession)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 390)
+                    .focused($focusedField, equals: .session)
+                    .disabled(isSaving)
+            }
+            Text("Blank credential fields keep the existing values. The helper preserves the connection's China or International site.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            if let editError {
+                Label(editError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .accessibilityLabel("Error: \(editError)")
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { cancelEditing() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(isSaving)
+                Button("Save Changes") { save(connection) }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSave || isSaving)
+                    .overlay {
+                        if isSaving { ProgressView().controlSize(.small) }
+                    }
+            }
+            .controlSize(.large)
+        }
+        .padding(.leading, 16)
+        .overlay(alignment: .leading) {
+            Rectangle().fill(Color.accentColor).frame(width: 2)
+        }
+        .onSubmit { if canSave && !isSaving { save(connection) } }
+    }
+
+    private var canSave: Bool {
+        let trimmedName = accountName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmedName.isEmpty
+            && (trimmedName != originalName
+                || !replacementAPIKey.isEmpty
+                || !replacementSession.isEmpty)
+    }
+
+    private func beginEditing(_ connection: ProviderConnectionSummary) {
+        editingProviderID = connection.providerID
+        originalName = connection.displayName
+        accountName = connection.displayName
+        replacementAPIKey = ""
+        replacementSession = ""
+        editError = nil
+        savedMessage = nil
+        focusedField = .name
+    }
+
+    private func cancelEditing() {
+        editingProviderID = nil
+        originalName = ""
+        accountName = ""
+        replacementAPIKey = ""
+        replacementSession = ""
+        editError = nil
+        focusedField = nil
+    }
+
+    private func save(_ connection: ProviderConnectionSummary) {
+        guard let command = ProviderMutationCommand.resolve(
+            activityBundleURL: Bundle.main.bundleURL,
+            activityExecutableURL: Bundle.main.executableURL ?? Bundle.main.bundleURL
+        ) else {
+            editError = ProviderMutationFailure.unavailable.message
+            return
+        }
+        let request = StepPlanEditRequest(
+            providerID: connection.providerID,
+            name: accountName.trimmingCharacters(in: .whitespacesAndNewlines),
+            apiKey: replacementAPIKey,
+            sessionCookie: replacementSession
+        )
+        isSaving = true
+        editError = nil
+        Task { @MainActor in
+            let result = await ProviderMutationService.submit(request, command: command)
+            isSaving = false
+            switch result {
+            case let .success(response) where response.ok:
+                savedMessage = response.message
+                cancelEditing()
+                savedMessage = response.message
+                reload()
+            case let .success(response):
+                editError = response.message
+                focusedField = .name
+            case let .failure(failure):
+                editError = failure.message
+            }
+        }
+    }
+
+    private func connectionMetadata(_ connection: ProviderConnectionSummary) -> String {
+        let site = ProviderCenterText.region(connection.site ?? "Configured")
+        guard let observed = instances.first(where: {
+            $0.providerID == connection.providerID
+        }) else { return "\(site) · Not collected yet" }
+        return "\(site) · \(DateText.display(observed.observedAt))"
     }
 }
 
