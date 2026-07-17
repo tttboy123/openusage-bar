@@ -1,0 +1,30 @@
+{
+  "object": "page",
+  "data": [
+    {
+      "object": "bucket",
+      "start_time": 1782864000,
+      "end_time": 1782950400,
+      "results": [
+        {
+          "object": "organization.usage.completions.result",
+          "input_tokens": 100,
+          "output_tokens": 40,
+          "input_cached_tokens": 25,
+          "num_model_requests": 2,
+          "model": "gpt-5.5"
+        },
+        {
+          "object": "organization.usage.completions.result",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "input_cached_tokens": 2,
+          "num_model_requests": 1,
+          "model": "gpt/unsafe name"
+        }
+      ]
+    }
+  ],
+  "has_more": true,
+  "next_page": "cursor-two"
+}

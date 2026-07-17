@@ -1,0 +1,32 @@
+{
+  "object": "page",
+  "data": [
+    {
+      "object": "bucket",
+      "start_time": 1782864000,
+      "end_time": 1782950400,
+      "results": [
+        {
+          "object": "organization.costs.result",
+          "amount": {"value": 1.25, "currency": "usd"},
+          "line_item": "api usage",
+          "project_id": null
+        },
+        {
+          "object": "organization.costs.result",
+          "amount": {"value": 0.75, "currency": "usd"},
+          "line_item": "api usage",
+          "project_id": null
+        },
+        {
+          "object": "organization.costs.result",
+          "amount": {"value": 2, "currency": "eur"},
+          "line_item": "api usage",
+          "project_id": null
+        }
+      ]
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

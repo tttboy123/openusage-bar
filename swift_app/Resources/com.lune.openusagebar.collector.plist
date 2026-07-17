@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.lune.openusagebar.collector</string>
+  <key>ProgramArguments</key><array>
+    <string>__APP__/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings</string>
+    <string>daemon</string><string>--interval</string><string>300</string>
+    <string>--api-socket</string><string>__HOME__/.local/state/openusage-bar/openusage.sock</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/OpenUsageBar.collector.stdout.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/OpenUsageBar.collector.stderr.log</string>
+</dict></plist>

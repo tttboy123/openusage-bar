@@ -1,0 +1,44 @@
+name: Pre-release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+      - name: Bootstrap pinned build dependencies
+        run: scripts/bootstrap.sh
+      - name: Verify tag and bundle versions match
+        run: |
+          version=$(plutil -extract CFBundleShortVersionString raw swift_app/Resources/OpenUsageBar-Info.plist)
+          test "$GITHUB_REF_NAME" = "v$version"
+      - name: Scan the complete Git history for credentials
+        run: scripts/release_secret_scan.py --history
+      - name: Test and build
+        run: scripts/build_app.sh
+      - name: Package
+        run: scripts/package_release.sh
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/OpenUsage-Bar-*.zip \
+            dist/OpenUsage-Bar-*.zip.sha256 \
+            --prerelease \
+            --generate-notes \
+            --title "OpenUsage Bar $GITHUB_REF_NAME"

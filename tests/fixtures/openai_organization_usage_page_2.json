@@ -1,0 +1,22 @@
+{
+  "object": "page",
+  "data": [
+    {
+      "object": "bucket",
+      "start_time": 1782950400,
+      "end_time": 1783036800,
+      "results": [
+        {
+          "object": "organization.usage.completions.result",
+          "input_tokens": 50,
+          "output_tokens": 20,
+          "input_cached_tokens": 10,
+          "num_model_requests": 1,
+          "model": "gpt-5.5"
+        }
+      ]
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

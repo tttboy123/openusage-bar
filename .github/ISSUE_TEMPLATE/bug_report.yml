@@ -1,0 +1,45 @@
+name: Bug report
+description: Report reproducible behavior without including private usage data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not paste API keys, cookies, session tokens, account identity, prompts, responses, or unredacted logs.
+  - type: input
+    id: version
+    attributes:
+      label: OpenUsage Bar version
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac model
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - Menu bar
+        - Activity
+        - Provider Settings
+        - Local API or CLI JSON
+        - Install, update, or uninstall
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use synthetic provider values and redact every log.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true

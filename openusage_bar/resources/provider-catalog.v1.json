@@ -1,0 +1,1625 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "version": "0.23.0",
+    "revision": "3059f1b",
+    "family_ids": [
+      "alibaba_cloud",
+      "amp",
+      "anthropic",
+      "azure_openai",
+      "claude_code",
+      "codebuff",
+      "codex",
+      "copilot",
+      "crush",
+      "cursor",
+      "deepseek",
+      "droid",
+      "gemini_api",
+      "gemini_cli",
+      "goose",
+      "groq",
+      "hermes",
+      "kilo_code",
+      "kimi_cli",
+      "kiro_cli",
+      "mistral",
+      "moonshot",
+      "mux",
+      "ollama",
+      "openai",
+      "openclaw",
+      "opencode",
+      "openrouter",
+      "perplexity",
+      "pi",
+      "qwen_cli",
+      "roocode",
+      "xai",
+      "zai",
+      "zed"
+    ]
+  },
+  "families": [
+    {
+      "id": "alibaba_cloud",
+      "display_name": "Alibaba Cloud",
+      "category": "api",
+      "metric_families": [
+        "billing",
+        "operational",
+        "subscription_quota",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "amp",
+      "display_name": "Amp",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "display_name": "Anthropic",
+      "category": "api",
+      "metric_families": [
+        "operational"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "unknown",
+        "billing": "unknown",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "azure_openai",
+      "display_name": "Azure OpenAI",
+      "category": "api",
+      "metric_families": [
+        "operational"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "unknown",
+        "billing": "unknown",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "claude_code",
+      "display_name": "Claude Code",
+      "category": "subscription",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "codebuff",
+      "display_name": "Codebuff",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "codex",
+      "display_name": "Codex",
+      "category": "subscription",
+      "metric_families": [
+        "subscription_quota",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "supported",
+          "values": [
+            "five_hour",
+            "weekly"
+          ]
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "supported",
+        "billing": "unknown",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "codex_local_log",
+          "kind": "local_log",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "local",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "provider_local"
+        },
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "copilot",
+      "display_name": "GitHub Copilot",
+      "category": "subscription",
+      "metric_families": [
+        "billing",
+        "subscription_quota",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "crush",
+      "display_name": "Crush",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "cursor",
+      "display_name": "Cursor",
+      "category": "subscription",
+      "metric_families": [
+        "billing",
+        "subscription_quota",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "deepseek",
+      "display_name": "DeepSeek",
+      "category": "api",
+      "metric_families": [
+        "billing",
+        "operational"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "droid",
+      "display_name": "Droid",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "gemini_api",
+      "display_name": "Gemini API",
+      "category": "api",
+      "metric_families": [
+        "operational"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "unknown",
+        "billing": "unknown",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "gemini_cli",
+      "display_name": "Gemini CLI",
+      "category": "subscription",
+      "metric_families": [
+        "subscription_quota",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "unknown",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "goose",
+      "display_name": "Goose",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "groq",
+      "display_name": "Groq",
+      "category": "api",
+      "metric_families": [
+        "operational"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "unknown",
+        "billing": "unknown",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "hermes",
+      "display_name": "Hermes",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "kilo_code",
+      "display_name": "Kilo Code",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "kimi_cli",
+      "display_name": "Kimi CLI",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "kiro_cli",
+      "display_name": "Kiro",
+      "category": "subscription",
+      "metric_families": [
+        "subscription_quota",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "supported",
+          "values": [
+            "billing_cycle"
+          ]
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "supported",
+        "billing": "unknown",
+        "credits": "supported",
+        "balance": "supported",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "kiro_keychain",
+          "kind": "keychain",
+          "timeout_seconds": 5,
+          "freshness_seconds": 300,
+          "credential_type": "keychain",
+          "credential_scope": "kiro",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "provider_local"
+        },
+        {
+          "source_id": "kiro_codewhisperer_api",
+          "kind": "official_api",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "oauth",
+          "credential_scope": "kiro",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "provider_official"
+        },
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "minimax",
+      "display_name": "MiniMax",
+      "category": "subscription",
+      "metric_families": [
+        "subscription_quota"
+      ],
+      "regions": [
+        "cn",
+        "international"
+      ],
+      "supports_accounts": true,
+      "capabilities": {
+        "quota_windows": {
+          "state": "supported",
+          "values": [
+            "five_hour",
+            "weekly"
+          ]
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "supported",
+        "billing": "unknown",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "minimax_builtin_api",
+          "kind": "builtin_api",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "api_key",
+          "credential_scope": "minimax",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "openusage_bar_builtin"
+        },
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "mistral",
+      "display_name": "Mistral",
+      "category": "api",
+      "metric_families": [
+        "billing",
+        "operational",
+        "subscription_quota"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "moonshot",
+      "display_name": "Moonshot",
+      "category": "api",
+      "metric_families": [
+        "billing",
+        "operational"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "mux",
+      "display_name": "Mux",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "ollama",
+      "display_name": "Ollama",
+      "category": "local_tool",
+      "metric_families": [
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "unknown",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "openai",
+      "display_name": "OpenAI",
+      "category": "api",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "supported",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openai_admin_api",
+          "kind": "official_api",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "api_key",
+          "credential_scope": "openai_admin_api_key",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "provider_official"
+        },
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "openclaw",
+      "display_name": "OpenClaw",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "opencode",
+      "display_name": "OpenCode",
+      "category": "subscription",
+      "metric_families": [
+        "billing",
+        "subscription_quota",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "openrouter",
+      "display_name": "OpenRouter",
+      "category": "api",
+      "metric_families": [
+        "billing",
+        "operational",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "perplexity",
+      "display_name": "Perplexity",
+      "category": "api",
+      "metric_families": [
+        "billing",
+        "subscription_quota",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "pi",
+      "display_name": "Pi",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "qwen_cli",
+      "display_name": "Qwen CLI",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "roocode",
+      "display_name": "Roo Code",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "step_plan",
+      "display_name": "StepFun Step Plan",
+      "category": "subscription",
+      "metric_families": [
+        "billing",
+        "subscription_quota"
+      ],
+      "regions": [
+        "cn",
+        "international"
+      ],
+      "supports_accounts": true,
+      "capabilities": {
+        "quota_windows": {
+          "state": "supported",
+          "values": [
+            "five_hour",
+            "weekly"
+          ]
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "supported",
+        "billing": "supported",
+        "credits": "supported",
+        "balance": "supported",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "step_plan_browser_session",
+          "kind": "browser_session",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "browser_session",
+          "credential_scope": "step_plan_session",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "experimental",
+          "provenance": "user_session"
+        },
+        {
+          "source_id": "step_plan_official_api",
+          "kind": "official_api",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "api_key",
+          "credential_scope": "step_plan_api_key",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "provider_official"
+        }
+      ]
+    },
+    {
+      "id": "xai",
+      "display_name": "xAI",
+      "category": "api",
+      "metric_families": [
+        "billing",
+        "operational"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "zai",
+      "display_name": "Z.AI",
+      "category": "api",
+      "metric_families": [
+        "billing",
+        "operational",
+        "subscription_quota",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    },
+    {
+      "id": "zed",
+      "display_name": "Zed",
+      "category": "local_tool",
+      "metric_families": [
+        "billing",
+        "token_activity"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "supported",
+        "model_breakdown": "supported",
+        "reset_timestamps": "unknown",
+        "billing": "supported",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "openusage",
+          "kind": "openusage",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "provider_owned",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "pinned",
+          "provenance": "openusage_upstream"
+        }
+      ]
+    }
+  ]
+}

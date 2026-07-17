@@ -1,0 +1,72 @@
+{
+  "kind": "daily",
+  "rows": [
+    {
+      "key": "2026-07-02",
+      "label": "2026-07-02",
+      "input_tokens": 350,
+      "output_tokens": 65,
+      "cache_read_tokens": 90,
+      "cache_creation_tokens": 15,
+      "reasoning_tokens": 5,
+      "total_tokens": 525,
+      "cost_usd": 1.75,
+      "models": ["gpt-5.5", "o3", "(unknown)", "unknown"],
+      "model_breakdown": [
+        {
+          "key": "gpt-5.5",
+          "label": "GPT 5.5",
+          "input_tokens": 100,
+          "output_tokens": 20,
+          "cache_read_tokens": 30,
+          "cache_creation_tokens": 5,
+          "reasoning_tokens": null,
+          "total_tokens": 155,
+          "cost_usd": 1.0
+        },
+        {
+          "key": "o3",
+          "label": "o3",
+          "input_tokens": 220,
+          "output_tokens": 39,
+          "cache_read_tokens": 51,
+          "cache_creation_tokens": 7,
+          "reasoning_tokens": null,
+          "total_tokens": 317,
+          "cost_usd": 0.25
+        },
+        {
+          "key": "(unknown)",
+          "label": "(unknown)",
+          "input_tokens": 10,
+          "output_tokens": 2,
+          "cache_read_tokens": 3,
+          "cache_creation_tokens": 1,
+          "reasoning_tokens": null,
+          "total_tokens": 16,
+          "cost_usd": null
+        },
+        {
+          "key": "unknown",
+          "label": "unknown",
+          "input_tokens": 20,
+          "output_tokens": 4,
+          "cache_read_tokens": 6,
+          "cache_creation_tokens": 2,
+          "reasoning_tokens": 5,
+          "total_tokens": 37,
+          "cost_usd": 0.5
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "input_tokens": 350,
+    "output_tokens": 65,
+    "cache_read_tokens": 90,
+    "cache_creation_tokens": 15,
+    "reasoning_tokens": 5,
+    "total_tokens": 525,
+    "cost_usd": 1.75
+  }
+}
