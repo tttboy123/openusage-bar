@@ -515,8 +515,10 @@ class QueryServiceTests(unittest.TestCase):
         page = self.query.changes(after=0, limit=1)
         self.assertEqual(page.next_cursor, page.records[-1].change_seq)
         self.assertEqual(page.data_revision, self.store.current_change_seq)
+        self.assertTrue(page.has_more)
         empty = self.query.changes(after=self.store.current_change_seq, limit=10)
         self.assertEqual(empty.next_cursor, self.store.current_change_seq)
+        self.assertFalse(empty.has_more)
         self.assertLessEqual(page.next_cursor, first_cursor)
         for bad in (True, -1):
             with self.assertRaises(ValueError):

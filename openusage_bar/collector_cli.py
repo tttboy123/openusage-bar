@@ -91,6 +91,8 @@ def _parser() -> SafeArgumentParser:
         return child
 
     common("status", ("json",))
+    snapshot = common("snapshot", ("json",))
+    snapshot.add_argument("--today")
     usage = common("usage", ("json", "jsonl"))
     usage.add_argument("--from", dest="from_day", required=True)
     usage.add_argument("--to", dest="to_day", required=True)
@@ -407,6 +409,12 @@ def _evaluate_command(
     if args.command == "status":
         result = query.summary(today)
         return CommandEvaluation(to_wire(result), (), None, bool(health and health.partial))
+    if args.command == "snapshot":
+        selected = _day(args.today) if args.today is not None else today
+        result = query.resource_snapshot(selected)
+        return CommandEvaluation(
+            to_wire(result), (), None, bool(health and health.partial)
+        )
     if args.command == "usage":
         result = query.activity(_day(args.from_day), _day(args.to_day))
         payload = to_wire(result)
@@ -461,6 +469,7 @@ def _evaluate_command(
             "type": "checkpoint", "schemaVersion": result.schema_version,
             "dataRevision": result.data_revision, "generatedAt": result.generated_at,
             "nextCursor": result.next_cursor,
+            "hasMore": result.has_more,
         }
         return CommandEvaluation(
             None, tuple(payload["records"]), checkpoint, bool(health and health.partial)

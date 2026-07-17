@@ -238,6 +238,7 @@ class ChangeItem:
 class ChangePage(ResultEnvelope):
     records: tuple[ChangeItem, ...]
     next_cursor: int
+    has_more: bool
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "records", tuple(self.records))
@@ -604,4 +605,5 @@ class QueryService:
         return ChangePage(
             SCHEMA_VERSION, snapshot.cursor, generated, changes,
             changes[-1].change_seq if changes else after,
+            (changes[-1].change_seq if changes else after) < snapshot.cursor,
         )

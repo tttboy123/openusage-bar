@@ -252,7 +252,8 @@ class LocalAPIRouter:
     """Pure request router with injected query, clock, registry, and verifier."""
 
     ROUTES = (
-        "/v1/health", "/v1/schema", "/v1/summary", "/v1/capabilities",
+        "/v1/health", "/v1/schema", "/v1/summary", "/v1/snapshot",
+        "/v1/capabilities",
         "/v1/providers", "/v1/capacity", "/v1/activity/daily",
         "/v1/costs/daily",
         "/v1/quotas/history",
@@ -391,6 +392,7 @@ class LocalAPIRouter:
             "/v1/health": (),
             "/v1/schema": (),
             "/v1/summary": ("today",),
+            "/v1/snapshot": ("today",),
             "/v1/capabilities": (),
             "/v1/providers": ("providerIds",),
             "/v1/capacity": ("limit",),
@@ -415,8 +417,15 @@ class LocalAPIRouter:
         try:
             if route == "/v1/summary":
                 now = self.clock()
-                selected = _day(params["today"], "today") if "today" in params else now.astimezone(timezone.utc).date()
+                selected = _day(params["today"], "today") if "today" in params else now.astimezone().date()
                 return to_wire(self.query.summary(selected))
+            if route == "/v1/snapshot":
+                now = self.clock()
+                selected = (
+                    _day(params["today"], "today")
+                    if "today" in params else now.astimezone().date()
+                )
+                return to_wire(self.query.resource_snapshot(selected))
             if route == "/v1/capacity":
                 limit = _integer(params["limit"], "limit", minimum=1, maximum=MAX_LIMIT) if "limit" in params else None
                 return to_wire(self.query.capacity(limit))

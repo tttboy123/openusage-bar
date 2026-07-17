@@ -25,7 +25,7 @@ from openusage_bar.collector_cli import CLIError, DEFAULT_FRESH_TIMEOUT_SECONDS,
 from openusage_bar.collector_cli import _default_refresh_command
 from openusage_bar.daily_history import DAILY_TIMEOUT_SECONDS
 from openusage_bar.openusage_adapter import AUTO_TIMEOUT_SECONDS, DIRECT_TIMEOUT_SECONDS
-from openusage_bar.query import QueryService
+from openusage_bar.query import QueryService, to_wire
 
 
 NOW = datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc)
@@ -221,6 +221,7 @@ class CollectorCLITests(unittest.TestCase):
     def test_json_commands_write_only_canonical_payload(self):
         for command in (
             ["status", "--format", "json"],
+            ["snapshot", "--today", "2026-07-14", "--format", "json"],
             ["quotas", "--format", "json"],
             ["sources", "--format", "json"],
             ["providers", "--format", "json"],
@@ -232,6 +233,20 @@ class CollectorCLITests(unittest.TestCase):
                 payload = json.loads(out)
                 self.assertEqual(payload["schemaVersion"], "1.0")
                 self.assertNotIn("\n\n", out)
+
+    def test_snapshot_command_uses_the_canonical_resource_payload(self):
+        code, out, err = self.run_cli(
+            [
+                "snapshot", "--today", "2026-07-14",
+                "--format", "json", "--offline",
+            ]
+        )
+
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(
+            json.loads(out),
+            to_wire(self.query.resource_snapshot(datetime(2026, 7, 14).date())),
+        )
 
     def test_providers_json_reuses_query_boundary_and_whitelists_instance_fields(self):
         self.store.upsert_provider_instance(ProviderInstance(
@@ -345,13 +360,16 @@ class CollectorCLITests(unittest.TestCase):
             "changes", "--after", "0", "--limit", "1", "--format", "json"
         ], offline=True)
         self.assertEqual((code, err), (0, ""))
-        self.assertIn("nextCursor", json.loads(out))
+        payload = json.loads(out)
+        self.assertIn("nextCursor", payload)
+        self.assertTrue(payload["hasMore"])
 
     def test_changes_jsonl_checkpoint_uses_next_cursor(self):
         code, out, _ = self.run_cli(["changes", "--after", "0", "--limit", "100", "--format", "jsonl"], offline=True)
         lines = [json.loads(line) for line in out.splitlines()]
         self.assertEqual(code, 0)
         self.assertEqual(lines[-1]["nextCursor"], self.store.current_change_seq)
+        self.assertFalse(lines[-1]["hasMore"])
 
     def test_changes_ahead_cursor_is_invalid_without_business_stdout(self):
         code, out, err = self.run_cli([
