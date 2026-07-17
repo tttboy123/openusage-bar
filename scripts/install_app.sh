@@ -56,8 +56,34 @@ wait_unloaded() {
   return 1
 }
 
+wait_for_health() {
+  local attempt
+  for attempt in {1..100}; do
+    if [[ -S "$SOCKET" ]] && \
+      curl --fail --silent --unix-socket "$SOCKET" \
+        http://localhost/v1/health >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  curl --fail --silent --show-error --unix-socket "$SOCKET" \
+    http://localhost/v1/health >/dev/null
+}
+
+wait_for_socket_release() {
+  local attempt
+  for attempt in {1..100}; do
+    if ! curl --fail --silent --unix-socket "$SOCKET" \
+      http://localhost/v1/health >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 rollback() {
-  local code=$?
+  local code=${1:-$?}
   local bundle_restored=1
   local activity_runtime_cleared=1
   local activity_clear_rc=0
@@ -134,7 +160,10 @@ for label in "$STATUS_LABEL" "$COLLECTOR_LABEL"; do
   template_program=$(plutil -extract ProgramArguments.0 raw "$BACKUP/$label.new.plist")
   resolved_program=${template_program/__APP__/$TARGET}
   [[ "$resolved_program" != "$template_program" ]] || exit 1
-  plutil -replace ProgramArguments.0 -string "$resolved_program" "$BACKUP/$label.new.plist"
+  /usr/libexec/PlistBuddy -c \
+    "Set :ProgramArguments:0 $resolved_program" "$BACKUP/$label.new.plist"
+  [[ $(plutil -extract ProgramArguments.0 raw "$BACKUP/$label.new.plist") == "$resolved_program" ]]
+  [[ $(plutil -extract ProgramArguments.1 raw "$BACKUP/$label.new.plist") != __APP__/* ]]
   plutil -lint "$BACKUP/$label.new.plist" >/dev/null
 done
 
@@ -145,6 +174,7 @@ launchctl bootout "$DOMAIN/$COLLECTOR_LABEL" >/dev/null 2>&1 || true
 wait_unloaded "$OLD_LABEL"
 wait_unloaded "$STATUS_LABEL"
 wait_unloaded "$COLLECTOR_LABEL"
+wait_for_socket_release
 rm -f "$AGENTS"/com.lune.openusage-menubar*.plist(N)
 if (( ACTIVITY_WAS_RUNNING )); then
   stop_exact_activity_processes "$ACTIVITY_EXECUTABLE"
@@ -166,7 +196,9 @@ bootstrap_agent "$STATUS_LABEL" "$STATUS_PLIST"
 
 launchctl print "$DOMAIN/$COLLECTOR_LABEL" >/dev/null
 launchctl print "$DOMAIN/$STATUS_LABEL" >/dev/null
-curl --fail --silent --show-error --unix-socket "$SOCKET" http://localhost/v1/health >/dev/null
+if ! wait_for_health; then
+  rollback 1
+fi
 codesign --verify --deep --strict "$TARGET"
 if (( ACTIVITY_STOPPED )); then
   reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"

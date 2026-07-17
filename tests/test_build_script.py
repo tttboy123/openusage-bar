@@ -170,6 +170,12 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn('OpenUsage\\ Bar.app.previous-', transaction)
         self.assertIn('curl --fail --silent --show-error --unix-socket "$SOCKET"', source)
         self.assertIn("/v1/health", source)
+        self.assertIn("wait_for_health", source)
+        self.assertIn("wait_for_socket_release", source)
+        self.assertIn('[[ -S "$SOCKET" ]]', source)
+        self.assertIn("/usr/libexec/PlistBuddy", source)
+        self.assertNotIn("plutil -replace ProgramArguments.0", source)
+        self.assertIn("rollback 1", source)
 
     def test_public_install_and_release_scripts_are_relocatable_and_data_safe(self):
         install = (ROOT / "scripts/install_app.sh").read_text(encoding="utf-8")
