@@ -1,8 +1,16 @@
+import AppKit
 import SwiftUI
 import UsageCore
 
+final class ActivityAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+}
+
 @main
 struct OpenUsageActivityApp: App {
+    @NSApplicationDelegateAdaptor(ActivityAppDelegate.self) private var appDelegate
     @State private var store = ActivityViewStore()
     @State private var coordinator: ActivityRouteCoordinator
     @State private var windowRegistry: ActivityWindowRegistry

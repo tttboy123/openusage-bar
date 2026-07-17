@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import OpenUsageActivity
@@ -6,6 +7,13 @@ import Testing
 @Suite("Usage Details app contracts")
 struct ActivityAppLogicTests {
     private func day(_ value: String) -> LocalDay { try! LocalDay(value) }
+
+    @MainActor
+    @Test("Usage Details exits after its last window closes")
+    func terminateAfterLastWindow() {
+        let delegate = ActivityAppDelegate()
+        #expect(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
+    }
 
     @Test("Isolated preferences stay in memory and create no preference files")
     func isolatedPreferencesCleanup() {
