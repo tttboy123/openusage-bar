@@ -33,6 +33,10 @@ public enum MenuCopy {
     ]
 }
 
+enum MenuDestination {
+    static let allProviders = UsageDetailsRoute.providersAndAccounts
+}
+
 public enum MenuKey: Sendable, Hashable {
     case commandRefresh, commandDetails, commandSettings
     case escape, up, down, returnKey, space

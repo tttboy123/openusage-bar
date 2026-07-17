@@ -31,6 +31,12 @@ struct MenuLogicTests {
         #expect(!visible.contains("–"))
     }
 
+    @Test("View all providers opens Provider Center instead of capacity")
+    func allProvidersDestination() {
+        #expect(MenuDestination.allProviders == .providersAndAccounts)
+        #expect(MenuDestination.allProviders.transportValue == "providers")
+    }
+
     @Test("Keyboard commands map to deterministic actions")
     func keyboard() {
         #expect(MenuKeyRouter.action(for: .commandRefresh) == .refresh)

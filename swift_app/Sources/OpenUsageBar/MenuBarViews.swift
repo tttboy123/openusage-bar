@@ -26,7 +26,9 @@ struct MenuBarPopover: View {
                 }
             }
             .frame(minHeight: 120, maxHeight: 330)
-            Button("View all providers") { HelperLauncher.openActivity(route: "capacity") }
+            Button("View all providers") {
+                HelperLauncher.openActivity(route: MenuDestination.allProviders.transportValue)
+            }
                 .buttonStyle(.plain).foregroundStyle(.tint).padding(.vertical, 10)
             Divider()
             footer
