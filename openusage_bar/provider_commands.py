@@ -8,7 +8,7 @@ from .keychain import MacOSKeychain
 
 
 MAX_REQUEST_BYTES = 131_072
-STEP_PLAN_FIELDS = frozenset({
+CONNECTION_EDIT_FIELDS = frozenset({
     "version", "action", "providerId", "name", "apiKey", "sessionCookie",
 })
 
@@ -54,9 +54,11 @@ def run_provider_mutation(
         if len(raw.encode("utf-8")) > MAX_REQUEST_BYTES:
             raise ValueError("Provider edit request is too large")
         payload = json.loads(raw)
-        if not isinstance(payload, dict) or set(payload) != STEP_PLAN_FIELDS:
+        if not isinstance(payload, dict) or set(payload) != CONNECTION_EDIT_FIELDS:
             raise ValueError("Provider edit request has unsupported fields")
-        if payload.get("version") != 1 or payload.get("action") != "update_step_plan":
+        if payload.get("version") != 1 or payload.get("action") not in {
+            "update_connection", "update_step_plan",
+        }:
             raise ValueError("Provider edit request is unsupported")
 
         provider_id = _text_field(payload, "providerId", 128, required=True)
@@ -70,15 +72,18 @@ def run_provider_mutation(
         resolved_keychain = keychain or MacOSKeychain()
         configs = resolved_store.load()
         existing = next(
-            (
-                item for item in configs
-                if item.provider_id == provider_id and isinstance(item, StepPlanConfig)
-            ),
-            None,
+            (item for item in configs if item.provider_id == provider_id), None
         )
         if existing is None:
             return _write_response(
-                output_stream, False, "Step Plan connection was not found"
+                output_stream, False, "Provider connection was not found"
+            )
+        if (
+            payload.get("action") == "update_step_plan"
+            and not isinstance(existing, StepPlanConfig)
+        ):
+            return _write_response(
+                output_stream, False, "Provider edit request is unsupported"
             )
 
         # Importing the AppKit-facing module is intentionally delayed until the
@@ -86,8 +91,9 @@ def run_provider_mutation(
         # the single owner of Keychain rollback and site-lock validation.
         from .ui import ProviderController
 
-        result = ProviderController(resolved_store, resolved_keychain).update_step_plan(
-            StepPlanConfig(provider_id, name, site=existing.site),
+        result = ProviderController(resolved_store, resolved_keychain).update_connection(
+            provider_id,
+            name,
             api_key,
             session_cookie,
         )

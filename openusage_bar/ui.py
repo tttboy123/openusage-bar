@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -274,6 +274,57 @@ class ProviderController:
         session_cookie: str,
     ) -> OperationResult:
         return self._configure_step_plan(config, secret, session_cookie, allow_existing=True)
+
+    def update_connection(
+        self,
+        provider_id: str,
+        name: str,
+        secret: str,
+        session_cookie: str = "",
+    ) -> OperationResult:
+        """Update one app-owned connection without accepting client-owned config fields."""
+        try:
+            configs = self.store.load()
+            existing = next(
+                (item for item in configs if item.provider_id == provider_id), None
+            )
+            if existing is None:
+                return OperationResult(False, "Provider connection was not found")
+            updated = replace(existing, name=name.strip())
+            validate_provider_config(updated)
+            if isinstance(existing, StepPlanConfig):
+                return self.update_step_plan(updated, secret, session_cookie)
+            if session_cookie.strip():
+                return OperationResult(
+                    False, "Web session is not supported for this provider"
+                )
+
+            replacement_secret = secret.strip()
+            previous_secret = self.keychain.get(provider_id)
+            if not replacement_secret and previous_secret is None:
+                return OperationResult(False, "API key is required")
+            try:
+                if replacement_secret:
+                    self.keychain.set(provider_id, replacement_secret)
+                self.store.save([
+                    updated if item.provider_id == provider_id else item
+                    for item in configs
+                ])
+            except Exception:
+                if replacement_secret:
+                    try:
+                        if previous_secret is None:
+                            self.keychain.delete(provider_id)
+                        else:
+                            self.keychain.set(provider_id, previous_secret)
+                    except Exception:
+                        pass
+                raise
+            return OperationResult(True, "Provider connection updated")
+        except ValueError as error:
+            return OperationResult(False, str(error))
+        except Exception:
+            return OperationResult(False, "Provider connection could not be updated")
 
     def _configure_step_plan(
         self,

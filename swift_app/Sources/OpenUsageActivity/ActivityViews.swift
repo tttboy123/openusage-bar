@@ -1805,8 +1805,8 @@ private struct ProviderConnectionDetail: View {
                     Button("Refresh Data", systemImage: "arrow.clockwise", action: reload)
                         .controlSize(.large)
                 }
-                if connections.contains(where: { $0.isStepPlan }) {
-                    Text("Existing Step Plan accounts are edited in Connections above.")
+                if connections.contains(where: { $0.isManaged }) {
+                    Text("Existing app-managed accounts are edited in Connections above.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -1871,8 +1871,8 @@ private struct ProviderConnectionDetail: View {
     private var instanceSection: some View {
         ProviderDetailSection(
             title: "Connections",
-            detail: connections.contains { $0.isStepPlan }
-                ? "Use Edit Connection to change the account label or replace saved credentials in this pane."
+            detail: connections.contains { $0.isManaged }
+                ? "Edit app-managed account labels and replace saved credentials here. Blank credential fields keep their current Keychain values."
                 : "These connections are discovered from local tools or OpenUsage and are read only here."
         ) {
             VStack(alignment: .leading, spacing: 10) {
@@ -1890,7 +1890,7 @@ private struct ProviderConnectionDetail: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if connection.isStepPlan {
+                        if connection.isManaged {
                             Button("Edit Connection", systemImage: "pencil") {
                                 beginEditing(connection)
                             }
@@ -1935,7 +1935,9 @@ private struct ProviderConnectionDetail: View {
                 Text("Edit \(connection.displayName)")
                     .font(.headline)
                 Spacer()
-                Text("Site remains locked to this connection")
+                Text(connection.isStepPlan
+                    ? "Site remains locked to this connection"
+                    : "Connection type remains unchanged")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -1946,25 +1948,28 @@ private struct ProviderConnectionDetail: View {
                     .focused($focusedField, equals: .name)
                     .disabled(isSaving)
             }
-            LabeledContent(
-                "Site",
-                value: ProviderCenterText.region(connection.site ?? "fixed")
-            )
-            LabeledContent("Replacement API key") {
-                SecureField("Leave blank to keep the saved key", text: $replacementAPIKey)
+            if let site = connection.site {
+                LabeledContent("Site", value: ProviderCenterText.region(site))
+            }
+            LabeledContent(connection.credentialLabel) {
+                SecureField(connection.credentialPlaceholder, text: $replacementAPIKey)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 390)
                     .focused($focusedField, equals: .apiKey)
                     .disabled(isSaving)
             }
-            LabeledContent("Replacement web session") {
-                SecureField("Leave blank to keep the saved session", text: $replacementSession)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 390)
-                    .focused($focusedField, equals: .session)
-                    .disabled(isSaving)
+            if connection.isStepPlan {
+                LabeledContent("Replacement web session") {
+                    SecureField("Leave blank to keep the saved session", text: $replacementSession)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 390)
+                        .focused($focusedField, equals: .session)
+                        .disabled(isSaving)
+                }
             }
-            Text("Blank credential fields keep the existing values. The helper preserves the connection's China or International site.")
+            Text(connection.isStepPlan
+                ? "Blank credential fields keep the existing values. China and International credentials cannot be moved between sites."
+                : "Blank credential fields keep the existing Keychain value. Provider protocol and endpoint settings remain unchanged.")
                 .font(.caption).foregroundStyle(.secondary)
 
             if let editError {
@@ -2033,7 +2038,7 @@ private struct ProviderConnectionDetail: View {
             editError = ProviderMutationFailure.unavailable.message
             return
         }
-        let request = StepPlanEditRequest(
+        let request = ProviderEditRequest(
             providerID: connection.providerID,
             name: accountName.trimmingCharacters(in: .whitespacesAndNewlines),
             apiKey: replacementAPIKey,

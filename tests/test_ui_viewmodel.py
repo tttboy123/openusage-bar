@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 from openusage_bar.config import (
     DailyUsageFeedConfig,
     GenericProviderConfig,
+    MiniMaxConfig,
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
@@ -100,6 +101,76 @@ class UIModelTests(unittest.TestCase):
 
         self.assertFalse(result.ok)
         keychain.set.assert_not_called()
+
+    def test_update_managed_connection_replaces_minimax_key_and_preserves_type(self):
+        existing = MiniMaxConfig("minimax-work", "MiniMax")
+        store = Mock()
+        store.load.return_value = [existing]
+        keychain = Mock()
+        keychain.get.return_value = "old-key"
+
+        result = ProviderController(store, keychain).update_connection(
+            "minimax-work", "MiniMax Work", "  new-key  "
+        )
+
+        self.assertTrue(result.ok)
+        keychain.set.assert_called_once_with("minimax-work", "new-key")
+        saved = store.save.call_args.args[0]
+        self.assertEqual(saved, [MiniMaxConfig("minimax-work", "MiniMax Work")])
+
+    def test_update_managed_connection_keeps_existing_key_when_blank(self):
+        existing = generic()
+        store = Mock()
+        store.load.return_value = [existing]
+        keychain = Mock()
+        keychain.get.return_value = "saved-key"
+
+        result = ProviderController(store, keychain).update_connection(
+            existing.provider_id, "Renamed API", ""
+        )
+
+        self.assertTrue(result.ok)
+        keychain.set.assert_not_called()
+        saved = store.save.call_args.args[0][0]
+        self.assertEqual(saved.name, "Renamed API")
+        self.assertEqual(saved.endpoint, existing.endpoint)
+        self.assertEqual(saved.primary_path, existing.primary_path)
+
+    def test_update_managed_connection_requires_an_existing_or_replacement_key(self):
+        existing = daily_feed()
+        store = Mock()
+        store.load.return_value = [existing]
+        keychain = Mock()
+        keychain.get.return_value = None
+
+        result = ProviderController(store, keychain).update_connection(
+            existing.provider_id, existing.name, ""
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.message, "API key is required")
+        store.save.assert_not_called()
+
+    def test_update_managed_connection_rolls_back_replaced_key_on_save_failure(self):
+        existing = OpenAIOrganizationConfig("openai", "OpenAI Organization")
+        store = Mock()
+        store.load.return_value = [existing]
+        store.save.side_effect = OSError("disk full")
+        keychain = Mock()
+        keychain.get.return_value = "old-key"
+
+        result = ProviderController(store, keychain).update_connection(
+            "openai", "Work Organization", "new-key"
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            keychain.set.call_args_list,
+            [
+                unittest.mock.call("openai", "new-key"),
+                unittest.mock.call("openai", "old-key"),
+            ],
+        )
 
     def test_settings_only_launch_never_creates_a_status_item(self):
         status_bar = Mock()

@@ -249,6 +249,20 @@ struct ProviderConnectionSummary: Sendable, Hashable, Identifiable {
 
     var id: String { providerID }
     var isStepPlan: Bool { kind == "step_plan" && familyID == "step_plan" }
+    var isManaged: Bool {
+        ["minimax", "step_plan", "openai_organization", "generic", "daily_usage_feed"]
+            .contains(kind)
+    }
+    var credentialLabel: String {
+        switch kind {
+        case "minimax": "Replacement Coding Plan key"
+        case "openai_organization": "Replacement Admin API key"
+        default: "Replacement API key"
+        }
+    }
+    var credentialPlaceholder: String {
+        "Leave blank to keep the saved credential"
+    }
 }
 
 enum ProviderConnectionSummaryError: Error { case invalidConfiguration }
@@ -447,9 +461,9 @@ struct ProviderMutationCommand: Sendable, Hashable {
     }
 }
 
-struct StepPlanEditRequest: Encodable, Sendable, Hashable {
+struct ProviderEditRequest: Encodable, Sendable, Hashable {
     let version = 1
-    let action = "update_step_plan"
+    let action = "update_connection"
     let providerID: String
     let name: String
     let apiKey: String
@@ -481,7 +495,7 @@ enum ProviderMutationFailure: Error, Sendable, Hashable {
 
 enum ProviderMutationService {
     static func submit(
-        _ request: StepPlanEditRequest,
+        _ request: ProviderEditRequest,
         command: ProviderMutationCommand
     ) async -> Result<ProviderMutationResponse, ProviderMutationFailure> {
         await Task.detached(priority: .userInitiated) {

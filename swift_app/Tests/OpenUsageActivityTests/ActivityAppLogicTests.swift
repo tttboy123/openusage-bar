@@ -35,7 +35,7 @@ struct ActivityAppLogicTests {
 
     @Test("Provider edit wire payload is scoped and does not contain site or endpoint")
     func providerEditWirePayload() throws {
-        let request = StepPlanEditRequest(
+        let request = ProviderEditRequest(
             providerID: "step-plan-main", name: "Main",
             apiKey: "replacement", sessionCookie: ""
         )
@@ -44,7 +44,7 @@ struct ActivityAppLogicTests {
         )
 
         #expect(object["version"] as? Int == 1)
-        #expect(object["action"] as? String == "update_step_plan")
+        #expect(object["action"] as? String == "update_connection")
         #expect(object["providerId"] as? String == "step-plan-main")
         #expect(object["site"] == nil)
         #expect(object["endpoint"] == nil)
@@ -91,8 +91,11 @@ struct ActivityAppLogicTests {
         #expect(connections[0].familyID == "step_plan")
         #expect(connections[0].site == "china")
         #expect(connections[0].isStepPlan)
+        #expect(connections[0].isManaged)
         #expect(connections[1].familyID == "zai")
         #expect(!connections[1].isStepPlan)
+        #expect(connections[1].isManaged)
+        #expect(connections[1].credentialLabel == "Replacement API key")
     }
 
     @Test("Stale background loads cannot publish over a newer filter")
