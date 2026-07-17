@@ -11,7 +11,7 @@ PYTHON_BIN=${PYTHON_BIN:-${commands[python3]:-}}
   exit 1
 }
 [[ $(uname -m) == arm64 ]] || {
-  print -u2 "OpenUsage Bar 0.2 supports Apple Silicon only"
+  print -u2 "OpenUsage Bar 0.3 supports Apple Silicon only"
   exit 1
 }
 [[ -n "$PYTHON_BIN" && -x "$PYTHON_BIN" ]] || {

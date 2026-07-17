@@ -28,6 +28,26 @@ These adapters fill gaps that OpenUsage does not currently expose:
 | Generic HTTPS Provider | Configured remaining-capacity fact from a bounded HTTPS JSON endpoint |
 | Custom Daily Token Feed | Configured daily/provider/model Token history from a bounded HTTPS JSON feed |
 
+Connection-specific notes:
+
+- **OpenAI Organization** accepts one canonical connection in this release. It
+  uses an Admin API key for official daily usage and billed organization cost;
+  it does not expose ChatGPT or Codex subscription quota. Credentials stay in
+  Keychain and failures preserve the last-good ledger. Token activity comes
+  from official daily completions usage; billed cost comes from the official
+  organization costs endpoint. Cached input is treated as part of input tokens
+  and is not added twice. Usage and cost health are tracked as separate
+  sources, and rows are committed only after the required cursor pages validate.
+- **StepFun Step Plan** supports China and International accounts, but a web
+  session is never retried against the other region. Follow the
+  [StepFun quick start](stepfun-quick-start.md) for the safe connection flow.
+- **MiniMax** keeps documented Coding Plan capacity separate from delayed
+  platform billing activity. Missing or incomplete billing coverage remains
+  unavailable instead of becoming a real-time zero.
+- **Custom Daily Token Feed** accepts only bounded, range-aware HTTPS JSON. It
+  rejects embedded credentials, cross-host redirects, private-address targets,
+  executable templates, and ambiguous partial pagination.
+
 ## OpenUsage-reused catalog
 
 OpenUsage Bar reuses the released OpenUsage JSON boundary for these 35 catalog

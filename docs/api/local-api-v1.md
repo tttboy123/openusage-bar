@@ -27,6 +27,7 @@ The remaining fields are the same fields emitted by the existing collector CLI:
 | `GET /v1/providers` | optional comma-separated `providerIds` | observed/configured provider instances, sorted by `providerId` |
 | `GET /v1/capacity` | optional `limit=1..1000` | `providers`, in canonical urgency order |
 | `GET /v1/activity/daily` | required `from`, `to`; optional comma-separated `providerIds`, `modelIds` | `rows`, `coverage`, canonical chronological order; at most 731 days |
+| `GET /v1/costs/daily` | required `from`, `to`; optional comma-separated `providerIds`, `currencies` | provider-reported daily cost rows and coverage in canonical chronological order |
 | `GET /v1/quotas/history` | optional `providerId`, `accountRef`, `limit`; `from` and `to` must be supplied together | `snapshots`; newest selected page returned in chronological order |
 | `GET /v1/sources/status` | none | `sources`, canonical provider/source order |
 | `GET /v1/changes` | optional `after` (default 0), `limit` (default 100) | `records`, `nextCursor`; an ahead cursor is invalid |
@@ -179,6 +180,6 @@ Errors use `Cache-Control: no-store`; successful resources use
 
 There are no POST/PUT/PATCH/DELETE/OPTIONS operations, refresh routes,
 credential or provider configuration routes, remote binds, TLS termination, or
-API-managed background process in v1. Packaging and launch are separate work.
-The persistent daemon and launch integration remain an explicit Task 9 delivery
-gate.
+API lifecycle controls in v1. The installed collector daemon owns the private
+Unix-socket listener; callers cannot start, stop, refresh, or reconfigure it
+through this API.

@@ -1,19 +1,22 @@
 # OpenUsage Bar release quick start
 
-OpenUsage Bar 0.2 supports Apple Silicon Macs running macOS 15 or later.
+OpenUsage Bar 0.3 supports Apple Silicon Macs running macOS 15 or later.
 
 ## Install
 
-1. Download the macOS arm64 ZIP and matching `.sha256` file from Releases.
+1. Download the macOS arm64 ZIP and matching `.sha256` file from Releases into
+   the same directory.
 2. Verify the download:
 
    ```bash
-   shasum -a 256 -c OpenUsage-Bar-v0.2.0-macos-arm64.zip.sha256
+   shasum -a 256 -c OpenUsage-Bar-v0.3.0-macos-arm64.zip.sha256
    ```
 
-3. Unzip it, open Terminal in the extracted directory, and run:
+3. Unzip it, enter the extracted directory, and run the bundled installer:
 
    ```bash
+   unzip OpenUsage-Bar-v0.3.0-macos-arm64.zip
+   cd OpenUsage-Bar-v0.3.0-macos-arm64
    scripts/install_app.sh
    ```
 

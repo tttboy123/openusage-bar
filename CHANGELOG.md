@@ -4,11 +4,27 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.3.0 - 2026-07-18
+
 ### Added
 
+- Chinese-first README with a concise English companion README.
+- Inline Provider Center credential editing for managed providers.
+- Multi-account provider management without credential echoing.
+- Simplified Step Plan management through the Provider interface.
+- Simplified Chinese localization for provider management.
 - Reproducible source bootstrap and public release verification.
 - Repository and Git-history credential scanning.
 - GitHub Actions gates for Python, Swift, privacy, and clean-checkout builds.
+
+### Fixed
+
+- Public release documentation excludes internal research notes and real local
+  usage screenshots.
+- Provider and source health are reported separately.
+- Installer waits for the collector during app replacement.
+- Swift tests keep isolated preferences in memory instead of leaking plist
+  files.
 
 ## 0.2.0 - 2026-07-17
 
