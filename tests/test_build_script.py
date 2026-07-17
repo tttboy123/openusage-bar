@@ -54,6 +54,8 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("--module unittest discover -s tests -v", source)
         self.assertIn("openusage_bar.bounded_process", source)
         self.assertIn("openusage_bar.openusage_catalog", source)
+        self.assertIn("openusage_bar.activity_records", source)
+        self.assertIn("openusage_bar.activity_schema", source)
 
     def test_build_runs_a_failure_propagating_python_suite_before_trace(self):
         source = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")

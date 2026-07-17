@@ -15,6 +15,8 @@ SWIFT_MIN_LINE_COVERAGE=80
 PYTHON_MIN_LINE_COVERAGE=80
 CODESIGN_IDENTITY=${OPENUSAGE_CODESIGN_IDENTITY:--}
 PYTHON_TOUCHED_MODULES=(
+  openusage_bar.activity_records
+  openusage_bar.activity_schema
   openusage_bar.activity_store
   openusage_bar.aggregator
   openusage_bar.bounded_process
