@@ -1461,8 +1461,8 @@ private struct ProvidersPage: View {
     let openSystemIntegrations: () -> Void
 
     @State private var selectedCategory = ProviderBrowseCategory.all
-    @State private var selectedFamilyID: String? = "minimax"
-    @State private var selectedRegionID: String? = "cn"
+    @State private var selectedFamilyID: String?
+    @State private var selectedRegionID: String?
     @State private var searchText = ""
     @State private var configuredConnections: [ProviderConnectionSummary] = []
 
@@ -1646,8 +1646,10 @@ private struct ProvidersPage: View {
     }
 
     private func synchronizeSelection() {
-        guard !filteredItems.contains(where: { $0.id == selectedFamilyID }) else { return }
-        selectedFamilyID = filteredItems.first?.id
+        selectedFamilyID = ProviderCenterPresentation.selection(
+            current: selectedFamilyID,
+            visibleIDs: filteredItems.map(\.id)
+        )
     }
 
     private func synchronizeRegion() {

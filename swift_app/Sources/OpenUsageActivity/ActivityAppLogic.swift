@@ -213,6 +213,11 @@ enum ProviderCenterPresentation {
                     || item.descriptor.familyID.localizedCaseInsensitiveContains(needle))
         }
     }
+
+    static func selection(current: String?, visibleIDs: [String]) -> String? {
+        guard let current, visibleIDs.contains(current) else { return visibleIDs.first }
+        return current
+    }
 }
 
 enum ProviderCenterText {

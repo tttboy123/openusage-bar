@@ -49,6 +49,15 @@ struct ProviderCenterPresentationTests {
         #expect(ProviderCenterPresentation.filter(items, category: .all, query: "openclaw").map(\.id) == ["openclaw"])
     }
 
+    @Test("Selection follows visible order without a hard-coded Provider")
+    func selection() {
+        let visibleIDs = ["codex", "deepseek", "minimax"]
+        #expect(ProviderCenterPresentation.selection(current: nil, visibleIDs: visibleIDs) == "codex")
+        #expect(ProviderCenterPresentation.selection(current: "deepseek", visibleIDs: visibleIDs) == "deepseek")
+        #expect(ProviderCenterPresentation.selection(current: "hidden", visibleIDs: visibleIDs) == "codex")
+        #expect(ProviderCenterPresentation.selection(current: "minimax", visibleIDs: []) == nil)
+    }
+
     @Test("Status distinguishes available, connected, and attention")
     func status() throws {
         #expect(ProviderCenterItem(
