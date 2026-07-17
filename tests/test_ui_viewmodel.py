@@ -29,6 +29,7 @@ from openusage_bar.ui import (
     _build_aggregator,
     create_status_item,
     finish_settings_helper,
+    editable_step_plan_configs,
     run_provider_settings,
 )
 
@@ -412,6 +413,148 @@ class UIModelTests(unittest.TestCase):
             ],
         )
         self.assertNotIn("stripe", str(keychain.set.call_args_list).lower())
+
+    def test_editable_step_plans_are_explicit_and_stably_sorted(self):
+        configs = [
+            generic(),
+            StepPlanConfig("step-plan-z", "Zeta", site="china"),
+            StepPlanConfig("step-plan-a", "Alpha", site="international"),
+        ]
+
+        editable = editable_step_plan_configs(configs)
+
+        self.assertEqual(
+            [(item.provider_id, item.name) for item in editable],
+            [("step-plan-a", "Alpha"), ("step-plan-z", "Zeta")],
+        )
+
+    def test_update_step_plan_replaces_the_selected_accounts_api_key(self):
+        existing = StepPlanConfig("step-plan-work", "Work", site="china")
+        updated = StepPlanConfig("step-plan-work", "Work Updated", site="china")
+        store = Mock()
+        store.load.return_value = [existing]
+        keychain = Mock()
+        keychain.get.return_value = "old-key"
+
+        result = ProviderController(store, keychain).update_step_plan(
+            updated, "  new-key  ", ""
+        )
+
+        self.assertTrue(result.ok)
+        keychain.set.assert_called_once_with("step-plan-work", "new-key")
+        store.save.assert_called_once_with([updated])
+
+    def test_update_step_plan_keeps_existing_credentials_when_fields_are_blank(self):
+        existing = StepPlanConfig("step-plan-work", "Work", site="china")
+        updated = StepPlanConfig("step-plan-work", "Renamed", site="china")
+        store = Mock()
+        store.load.return_value = [existing]
+        keychain = Mock()
+        keychain.get.side_effect = lambda account: (
+            "saved-key" if account == "step-plan-work" else None
+        )
+
+        result = ProviderController(store, keychain).update_step_plan(
+            updated, "", ""
+        )
+
+        self.assertTrue(result.ok)
+        keychain.set.assert_not_called()
+        store.save.assert_called_once_with([updated])
+
+    def test_update_step_plan_rejects_blank_fields_without_saved_credentials(self):
+        existing = StepPlanConfig("step-plan-work", "Work", site="china")
+        store = Mock()
+        store.load.return_value = [existing]
+        keychain = Mock()
+        keychain.get.return_value = None
+
+        result = ProviderController(store, keychain).update_step_plan(
+            existing, "", ""
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.message, "Step API key or web session is required")
+        keychain.set.assert_not_called()
+        store.save.assert_not_called()
+
+    def test_update_step_plan_rejects_site_changes_without_touching_keychain(self):
+        existing = StepPlanConfig("step-plan-work", "Work", site="china")
+        changed = StepPlanConfig(
+            "step-plan-work", "Work", site="international"
+        )
+        store = Mock()
+        store.load.return_value = [existing]
+        keychain = Mock()
+
+        result = ProviderController(store, keychain).update_step_plan(
+            changed, "new-key", ""
+        )
+
+        self.assertFalse(result.ok)
+        self.assertIn("site cannot be changed", result.message)
+        keychain.set.assert_not_called()
+        store.save.assert_not_called()
+
+    def test_update_step_plan_rolls_back_keychain_when_config_save_fails(self):
+        existing = StepPlanConfig("step-plan-work", "Work", site="china")
+        updated = StepPlanConfig("step-plan-work", "Renamed", site="china")
+        store = Mock()
+        store.load.return_value = [existing]
+        store.save.side_effect = OSError("disk full")
+        keychain = Mock()
+        keychain.get.return_value = "old-key"
+
+        result = ProviderController(store, keychain).update_step_plan(
+            updated, "new-key", ""
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            keychain.set.call_args_list,
+            [
+                unittest.mock.call("step-plan-work", "new-key"),
+                unittest.mock.call("step-plan-work", "old-key"),
+            ],
+        )
+
+    def test_update_step_plan_rolls_back_partial_session_keychain_write(self):
+        existing = StepPlanConfig("step-plan-work", "Work", site="china")
+        store = Mock()
+        store.load.return_value = [existing]
+        keychain = Mock()
+        old_values = {
+            "step-plan-work" + STEP_PLAN_TOKEN_SUFFIX: "old-token",
+            "step-plan-work" + STEP_PLAN_WEBID_SUFFIX: "old-webid",
+        }
+        keychain.get.side_effect = old_values.get
+        keychain.set.side_effect = [None, OSError("write failed"), None, None]
+
+        result = ProviderController(store, keychain).update_step_plan(
+            existing,
+            "",
+            "Oasis-Token=new-token; Oasis-Webid=new-webid",
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            keychain.set.call_args_list,
+            [
+                unittest.mock.call(
+                    "step-plan-work" + STEP_PLAN_TOKEN_SUFFIX, "new-token"
+                ),
+                unittest.mock.call(
+                    "step-plan-work" + STEP_PLAN_WEBID_SUFFIX, "new-webid"
+                ),
+                unittest.mock.call(
+                    "step-plan-work" + STEP_PLAN_TOKEN_SUFFIX, "old-token"
+                ),
+                unittest.mock.call(
+                    "step-plan-work" + STEP_PLAN_WEBID_SUFFIX, "old-webid"
+                ),
+            ],
+        )
+        store.save.assert_not_called()
 
     def test_add_provider_rolls_back_keychain_when_config_save_fails(self):
         store = Mock()

@@ -66,6 +66,14 @@ class OperationResult:
     message: str
 
 
+def editable_step_plan_configs(configs) -> list[StepPlanConfig]:
+    """Return exact editable Step Plan accounts without exposing credentials."""
+    return sorted(
+        (config for config in configs if isinstance(config, StepPlanConfig)),
+        key=lambda config: (config.name.casefold(), config.provider_id),
+    )
+
+
 def configure_status_item(status_item, target, icon):
     """Configure an unmanaged status item that macOS cannot auto-hide by identity."""
     status_item.setVisible_(True)
@@ -282,8 +290,6 @@ class ProviderController:
                 session = StepPlanSession.parse(session_cookie)
                 credentials[config.provider_id + STEP_PLAN_TOKEN_SUFFIX] = session.token
                 credentials[config.provider_id + STEP_PLAN_WEBID_SUFFIX] = session.webid
-            if not credentials:
-                raise StepPlanParseError("Step API key or web session is required")
 
             configs = self.store.load()
             existing = next(
@@ -292,13 +298,32 @@ class ProviderController:
             )
             if existing is not None and not allow_existing:
                 return OperationResult(False, "Provider ID already exists")
+            if existing is None and allow_existing:
+                return OperationResult(False, "Provider no longer exists")
             if existing is not None and not isinstance(existing, StepPlanConfig):
                 return OperationResult(False, "Provider ID belongs to another provider")
+            if isinstance(existing, StepPlanConfig) and existing.site != config.site:
+                return OperationResult(
+                    False,
+                    "StepFun site cannot be changed; add a new connection instead",
+                )
+            if not credentials:
+                saved_accounts = (
+                    config.provider_id,
+                    config.provider_id + STEP_PLAN_TOKEN_SUFFIX,
+                    config.provider_id + STEP_PLAN_WEBID_SUFFIX,
+                )
+                if existing is None or not any(
+                    self.keychain.get(account) for account in saved_accounts
+                ):
+                    raise StepPlanParseError(
+                        "Step API key or web session is required"
+                    )
 
             previous = {account: self.keychain.get(account) for account in credentials}
-            for account, value in credentials.items():
-                self.keychain.set(account, value)
             try:
+                for account, value in credentials.items():
+                    self.keychain.set(account, value)
                 updated = [
                     config if item.provider_id == config.provider_id else item
                     for item in configs
@@ -308,10 +333,13 @@ class ProviderController:
                 self.store.save(updated)
             except Exception:
                 for account, old_value in previous.items():
-                    if old_value is None:
-                        self.keychain.delete(account)
-                    else:
-                        self.keychain.set(account, old_value)
+                    try:
+                        if old_value is None:
+                            self.keychain.delete(account)
+                        else:
+                            self.keychain.set(account, old_value)
+                    except Exception:
+                        pass
                 raise
             return OperationResult(
                 True,
@@ -540,7 +568,7 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
         def _build_settings_window(self):
             style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
             self.settings_window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-                NSMakeRect(0, 0, 420, 180), style, NSBackingStoreBuffered, False
+                NSMakeRect(0, 0, 440, 210), style, NSBackingStoreBuffered, False
             )
             self.settings_window.setTitle_("OpenUsage Bar Settings")
             self.settings_window.setDelegate_(self)
@@ -548,7 +576,7 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             content.addSubview_(
                 label(
                     "Providers and visibility",
-                    NSMakeRect(24, 130, 372, 24),
+                    NSMakeRect(24, 160, 392, 24),
                     16,
                     True,
                 )
@@ -556,19 +584,30 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             content.addSubview_(
                 label(
                     "Credentials stay in Keychain. Provider validation is shared with OpenUsage Bar.",
-                    NSMakeRect(24, 102, 372, 20),
+                    NSMakeRect(24, 132, 392, 20),
                     11,
                     False,
                     NSColor.secondaryLabelColor(),
                 )
             )
             add = NSButton.buttonWithTitle_target_action_("Add Provider", self, "addProvider:")
-            add.setFrame_(NSMakeRect(24, 52, 140, 32))
+            add.setFrame_(NSMakeRect(24, 82, 126, 32))
             content.addSubview_(add)
+            self.settings_edit = NSButton.buttonWithTitle_target_action_(
+                "Edit Step Plan", self, "editStepPlan:"
+            )
+            self.settings_edit.setFrame_(NSMakeRect(158, 82, 126, 32))
+            try:
+                self.settings_edit.setEnabled_(
+                    bool(editable_step_plan_configs(self.store.load()))
+                )
+            except (OSError, ValueError):
+                self.settings_edit.setEnabled_(False)
+            content.addSubview_(self.settings_edit)
             self.settings_manage = NSButton.buttonWithTitle_target_action_(
                 "Provider Visibility", self, "manageProviders:"
             )
-            self.settings_manage.setFrame_(NSMakeRect(176, 52, 180, 32))
+            self.settings_manage.setFrame_(NSMakeRect(292, 82, 124, 32))
             self.settings_manage.setEnabled_(False)
             content.addSubview_(self.settings_manage)
             self.settings_window.center()
@@ -583,6 +622,12 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             self.all_overview = overview
             self.last_overview = visible_overview(overview, self.hidden_provider_ids)
             self.settings_manage.setEnabled_(True)
+            try:
+                self.settings_edit.setEnabled_(
+                    bool(editable_step_plan_configs(self.store.load()))
+                )
+            except (OSError, ValueError):
+                self.settings_edit.setEnabled_(False)
 
         def windowWillClose_(self, _notification):
             finish_settings_helper(NSApplication.sharedApplication(), settings_only)
@@ -1045,7 +1090,7 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             chooser.addButtonWithTitle_("Cancel")
             response = chooser.runModal()
             if response == NSAlertFirstButtonReturn:
-                self._add_step_plan_dialog()
+                self._add_step_plan_dialog(None)
             elif response == NSAlertSecondButtonReturn:
                 self._add_minimax_dialog()
             elif response == NSAlertThirdButtonReturn:
@@ -1054,6 +1099,43 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
                 self._add_daily_feed_dialog()
             elif response == NSAlertThirdButtonReturn + 2:
                 self._add_generic_dialog()
+
+        def editStepPlan_(self, _sender):
+            try:
+                configs = editable_step_plan_configs(self.store.load())
+            except (OSError, ValueError):
+                configs = []
+            if not configs:
+                message = NSAlert.alloc().init()
+                message.setMessageText_("No Step Plan connections")
+                message.setInformativeText_(
+                    "Add a Step Plan connection before editing it."
+                )
+                message.runModal()
+                return
+
+            chooser = NSAlert.alloc().init()
+            chooser.setMessageText_("Edit Step Plan")
+            chooser.setInformativeText_(
+                "Choose the exact account whose label or credentials should change."
+            )
+            chooser.addButtonWithTitle_("Continue")
+            chooser.addButtonWithTitle_("Cancel")
+            accounts = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+                NSMakeRect(0, 0, 360, 26), False
+            )
+            accounts.addItemsWithTitles_([
+                f"{config.name} · "
+                f"{'International' if config.site == 'international' else 'China'} · "
+                f"{config.provider_id}"
+                for config in configs
+            ])
+            chooser.setAccessoryView_(accounts)
+            if chooser.runModal() != NSAlertFirstButtonReturn:
+                return
+            index = accounts.indexOfSelectedItem()
+            if 0 <= index < len(configs):
+                self._add_step_plan_dialog(configs[index])
 
         def _add_daily_feed_dialog(self):
             alert = NSAlert.alloc().init()
@@ -1145,23 +1227,53 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             )
             self._finish_add(result)
 
-        def _add_step_plan_dialog(self):
+        def _add_step_plan_dialog(self, existing):
+            is_editing = existing is not None
             alert = NSAlert.alloc().init()
-            alert.setMessageText_("Connect StepFun Step Plan")
-            alert.setInformativeText_(
-                "Choose the matching StepFun site, then paste its Session Cookie. Credentials are never sent across China and International hosts."
+            alert.setMessageText_(
+                "Edit StepFun Step Plan"
+                if is_editing
+                else "Connect StepFun Step Plan"
             )
-            alert.addButtonWithTitle_("Save")
+            alert.setInformativeText_(
+                (
+                    "Paste a replacement API key or web session. Leave both credential fields blank to keep the saved credentials. The site is fixed to prevent cross-region reuse."
+                    if is_editing
+                    else "Choose the matching StepFun site, then paste its API key or Session Cookie. Credentials are never sent across China and International hosts."
+                )
+            )
+            alert.addButtonWithTitle_("Save Changes" if is_editing else "Save")
             alert.addButtonWithTitle_("Cancel")
             accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 360, 134))
             site = NSPopUpButton.alloc().initWithFrame_pullsDown_(
                 NSMakeRect(0, 104, 360, 24), False
             )
             site.addItemsWithTitles_(["China (.com)", "International (.ai)"])
+            if is_editing:
+                site.selectItemAtIndex_(
+                    1 if existing.site == "international" else 0
+                )
+                site.setEnabled_(False)
             name = input_field("Account label", NSMakeRect(0, 72, 360, 24))
-            secret = input_field("Step API key (optional)", NSMakeRect(0, 40, 360, 24), secure=True)
+            if is_editing:
+                name.setStringValue_(existing.name)
+            secret = input_field(
+                (
+                    "Replacement Step API key (optional)"
+                    if is_editing
+                    else "Step API key (optional)"
+                ),
+                NSMakeRect(0, 40, 360, 24),
+                secure=True,
+            )
             session_cookie = input_field(
-                "Full Session Cookie or Oasis-Token", NSMakeRect(0, 8, 360, 24), secure=True
+                (
+                    "Replacement Session Cookie or Oasis-Token"
+                    if is_editing
+                    else "Full Session Cookie or Oasis-Token"
+                ),
+                NSMakeRect(0, 8, 360, 24),
+                secure=True,
             )
             accessory.addSubview_(site)
             accessory.addSubview_(name)
@@ -1173,18 +1285,6 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             selected_site = (
                 "international" if site.indexOfSelectedItem() == 1 else "china"
             )
-            try:
-                existing = next(
-                    (
-                        item
-                        for item in self.store.load()
-                        if isinstance(item, StepPlanConfig)
-                        and item.site == selected_site
-                    ),
-                    None,
-                )
-            except (OSError, ValueError):
-                existing = None
             provider_id = (
                 existing.provider_id
                 if existing is not None
@@ -1260,13 +1360,16 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
 
         def _finish_add(self, result):
             message = NSAlert.alloc().init()
-            message.setMessageText_("Provider added" if result.ok else "Could not add provider")
+            message.setMessageText_(
+                result.message if result.ok else "Could not save provider"
+            )
             message.setInformativeText_(result.message)
             message.runModal()
             if result.ok:
                 self.aggregator = _build_aggregator(self.store, self.keychain)
                 if settings_only:
                     self.settings_manage.setEnabled_(False)
+                    self.settings_edit.setEnabled_(False)
                     threading.Thread(target=self._settings_refresh_worker, daemon=True).start()
                 else:
                     self.refresh_(None)
