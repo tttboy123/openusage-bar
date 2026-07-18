@@ -11,7 +11,8 @@ struct UsageDetailsTests {
         provider: String = "codex",
         model: String,
         tokens: Int64,
-        quality: String = "exact"
+        quality: String = "exact",
+        sourceID: String = "legacy"
     ) -> DailyUsage {
         DailyUsage(
             day: day(dayValue), providerID: provider, accountRef: "", modelID: model,
@@ -19,7 +20,7 @@ struct UsageDetailsTests {
             cacheCreationTokens: 0, reasoningTokens: nil, totalTokens: tokens,
             costAmount: nil, costCurrency: nil, costBasis: nil, quality: quality,
             importedAt: "2026-07-14T09:00:00Z", revision: 1,
-            recordID: "\(dayValue).\(provider).\(model)"
+            recordID: "\(dayValue).\(provider).\(model)", sourceID: sourceID
         )
     }
 
@@ -275,6 +276,34 @@ struct UsageDetailsTests {
         #expect(payload.accessibilitySummary.contains("74.2M Tokens"))
         #expect(payload.accessibilitySummary.contains("GPT-5.5"))
         #expect(payload.accessibilitySummary.contains("2026-07-14T09:00:00Z"))
+    }
+
+    @Test("Chart day exposes selected source quality and collection time")
+    func chartDayProvenance() throws {
+        let dataset = ActivityDataset(
+            records: [record(
+                "2026-07-14", model: "gpt-5.6-sol", tokens: 300,
+                quality: "fallback", sourceID: "openusage.daily"
+            )],
+            coverage: [CoverageDay(
+                day: day("2026-07-14"), providerID: "codex", accountRef: "",
+                isCovered: true, sourceID: "openusage.daily"
+            )],
+            knownScopes: [ProviderScope(providerID: "codex", accountRef: "")],
+            revision: 2
+        )
+
+        let model = UsageDetailsAggregator.make(
+            from: dataset,
+            metricRange: day("2026-07-14")...day("2026-07-14")
+        )
+        let value = try #require(model.chartDays.last)
+
+        #expect(value.sourceIDs == ["openusage.daily"])
+        #expect(value.qualityIDs == ["fallback"])
+        #expect(value.lastCollectionAt == "2026-07-14T09:00:00Z")
+        #expect(value.accessibilitySummary.contains("openusage.daily"))
+        #expect(value.accessibilitySummary.contains("fallback"))
     }
 
     @Test("Period ranges are calendar bounded and never exceed repository limits")

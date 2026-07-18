@@ -428,9 +428,11 @@ def build_headless_refresher(activity_store):
         if hasattr(adapter, "last_quota_result")
     )
     eager_usage_provider_ids = tuple(sorted(
-        provider_id
-        for provider_id, importer in official_importers.items()
-        if getattr(importer, "eager_local", False) is True
+        {"codex"} | {
+            provider_id
+            for provider_id, importer in official_importers.items()
+            if getattr(importer, "eager_local", False) is True
+        }
     ))
     return LedgerRefresher(
         aggregator, collector, quota_sources,

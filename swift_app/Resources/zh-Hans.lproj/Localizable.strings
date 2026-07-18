@@ -235,6 +235,8 @@
 "Local API response invalid" = "本地 API 响应无效";
 "The local endpoint returned malformed or unsupported data." = "本地接口返回了格式错误或不受支持的数据。";
 "Collected %@" = "采集于 %@";
+"Source %@" = "来源 %@";
+"Quality %@" = "质量 %@";
 "%lld days" = "%lld 天";
 "Copy %@" = "复制%@";
 "Day" = "日";

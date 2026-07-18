@@ -85,6 +85,8 @@ public struct DailyChartDay: Identifiable, Sendable, Hashable {
     public let observedTokens: Int64
     public let composition: [ModelComposition]
     public let quality: ActivityQuality
+    public let sourceIDs: [String]
+    public let qualityIDs: [String]
     public let lastCollectionAt: String?
     public var id: LocalDay { day }
 
@@ -94,9 +96,13 @@ public struct DailyChartDay: Identifiable, Sendable, Hashable {
             "\(DisplayText.model($0.modelID)), \(TokenText.compact($0.tokens))"
         }.joined(separator: ", ")
         let collected = lastCollectionAt.map { AppLocalization.format("Collected %@", $0) } ?? ""
+        let sources = sourceIDs.isEmpty
+            ? "" : AppLocalization.format("Source %@", sourceIDs.joined(separator: ", "))
+        let qualities = qualityIDs.isEmpty
+            ? "" : AppLocalization.format("Quality %@", qualityIDs.joined(separator: ", "))
         return [
             day.rawValue, AppLocalization.format("%@ Tokens", total),
-            models, quality.displayName, collected,
+            models, quality.displayName, sources, qualities, collected,
         ]
             .filter { !$0.isEmpty }.joined(separator: ", ")
     }
@@ -311,6 +317,8 @@ public struct UsageDetailsModel: Sendable, Hashable {
                 observedTokens: day.observedTokens,
                 composition: day.composition.filter { visible.contains($0.modelID) },
                 quality: day.quality,
+                sourceIDs: day.sourceIDs,
+                qualityIDs: day.qualityIDs,
                 lastCollectionAt: day.lastCollectionAt
             )
         }
@@ -705,6 +713,8 @@ public enum UsageDetailsAggregator {
                 day: activityDay.day, state: activityDay.state,
                 totalTokens: activityDay.totalTokens, observedTokens: activityDay.observedTokens,
                 composition: values, quality: quality,
+                sourceIDs: Set(records.map(\.sourceID)).sorted(),
+                qualityIDs: Set(records.map(\.quality)).sorted(),
                 lastCollectionAt: records.map(\.importedAt).max()
             )
         }

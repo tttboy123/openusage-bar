@@ -653,6 +653,18 @@ private struct ChartTooltip: View {
             }
             Label(day.quality.displayName, systemImage: day.quality.symbol)
                 .font(.caption).foregroundStyle(.secondary)
+            if !day.sourceIDs.isEmpty {
+                Text(AppLocalization.format(
+                    "Source %@", day.sourceIDs.joined(separator: ", ")
+                ))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if !day.qualityIDs.isEmpty {
+                Text(AppLocalization.format(
+                    "Quality %@", day.qualityIDs.joined(separator: ", ")
+                ))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let collected = day.lastCollectionAt {
                 Text(AppLocalization.format("Collected %@", DateText.display(collected)))
                     .font(.caption).foregroundStyle(.secondary)

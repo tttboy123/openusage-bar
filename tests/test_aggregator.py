@@ -209,7 +209,7 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         self.assertIsInstance(importer.keychain, BoundedReadOnlyKeychain)
         self.assertEqual(importer.client.allowed_redirect_hosts, frozenset())
 
-    def test_codex_local_sessions_are_registered_for_eager_collection(self):
+    def test_codex_openusage_is_registered_for_eager_collection(self):
         from openusage_bar.aggregator import build_headless_refresher
 
         with patch("openusage_bar.config.ProviderConfigStore.load", return_value=[]):

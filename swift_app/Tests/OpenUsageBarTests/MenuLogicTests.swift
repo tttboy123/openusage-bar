@@ -302,7 +302,7 @@ struct MenuLogicTests {
         #expect(!joined.contains("token"))
         #expect(!joined.contains("cookie"))
         #expect(!joined.contains("key"))
-        #expect(RefreshCommand.interactiveTimeout == 90)
+        #expect(RefreshCommand.interactiveTimeout == 120)
         #expect(command.timeout == RefreshCommand.interactiveTimeout)
     }
 

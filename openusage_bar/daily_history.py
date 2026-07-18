@@ -41,7 +41,7 @@ from .providers.contracts import (
 from .openai_organization import COST_SOURCE_ID, USAGE_SOURCE_ID
 
 
-DAILY_TIMEOUT_SECONDS = 30
+DAILY_TIMEOUT_SECONDS = 60
 MAX_DAILY_EXPORT_BYTES = 16 * 1024 * 1024
 MAX_DAILY_DAYS = 5000
 MAX_DAILY_MODELS_PER_DAY = 4096
@@ -505,6 +505,30 @@ class ActivityCollector:
         except Exception:
             pass
 
+    def _safe_openusage_failure(
+        self,
+        provider_id: str,
+        error_code: str,
+        attempted_at: datetime,
+        account_ref: str = "",
+    ) -> None:
+        """Keep last-good usage visible while marking a failed refresh stale."""
+        try:
+            if self.store.has_daily_history(provider_id, account_ref):
+                self.store.record_source_status(
+                    provider_id,
+                    DAILY_SOURCE_ID,
+                    "stale",
+                    attempted_at,
+                    error_code,
+                )
+                return
+        except Exception:
+            pass
+        self._safe_source_failure(
+            provider_id, error_code, attempted_at, DAILY_SOURCE_ID
+        )
+
     def _refresh_official_costs(
         self,
         provider_id: str,
@@ -776,9 +800,21 @@ class ActivityCollector:
         today: date,
         attempted_at: datetime,
     ) -> None:
+        fallback_families = {
+            card.provider_id: card.family_id or card.provider_id
+            for card in overview.cards
+        }
+        fallback_family_counts: dict[str, int] = {}
+        for configured_id in self.official_importers:
+            family_id = fallback_families.get(configured_id, configured_id)
+            fallback_family_counts[family_id] = (
+                fallback_family_counts.get(family_id, 0) + 1
+            )
         for provider_id in provider_ids:
             official = self.official_importers.get(provider_id)
             use_openusage_fallback = official is None
+            openusage_is_fallback = False
+            account_ref = ""
             if official is not None:
                 try:
                     account_ref = self._account_ref(official)
@@ -799,6 +835,8 @@ class ActivityCollector:
                 if official is None:
                     pass
                 else:
+                    openusage_is_fallback = True
+                    use_openusage_fallback = True
                     try:
                         had_official_usage = self.store.has_source_success(
                             provider_id, usage_source_id
@@ -834,12 +872,12 @@ class ActivityCollector:
                                     official_usage.rows, attempted_at,
                                     account_ref=account_ref,
                                 )
+                                use_openusage_fallback = False
                             except Exception:
                                 self._safe_source_failure(
                                     provider_id, "persistence_failed", attempted_at,
                                     usage_source_id,
                                 )
-                        use_openusage_fallback = False
                     else:
                         error_code = (
                             official_usage.error_code
@@ -849,36 +887,76 @@ class ActivityCollector:
                         self._safe_source_failure(
                             provider_id, error_code, attempted_at, usage_source_id
                         )
-                        use_openusage_fallback = not had_official_usage
+                        use_openusage_fallback = True
 
             if not use_openusage_fallback:
                 continue
+            openusage_provider_id = fallback_families.get(provider_id, provider_id)
+            if (
+                openusage_provider_id != provider_id
+                and fallback_family_counts.get(openusage_provider_id, 0) > 1
+            ):
+                self._safe_openusage_failure(
+                    provider_id,
+                    "ambiguous_fallback_scope",
+                    attempted_at,
+                    account_ref,
+                )
+                continue
             try:
                 since = today - timedelta(
-                    days=0 if self.store.has_daily_history(provider_id) else 364
+                    days=0
+                    if self.store.has_daily_history(provider_id, account_ref)
+                    else 364
                 )
-                result = self.importer.fetch(provider_id, since, today)
+                result = self.importer.fetch(openusage_provider_id, since, today)
             except Exception:
-                self._safe_source_failure(provider_id, "import_failed", attempted_at)
+                self._safe_openusage_failure(
+                    provider_id, "import_failed", attempted_at, account_ref
+                )
+                continue
+            if not isinstance(result, DailyImportResult):
+                self._safe_openusage_failure(
+                    provider_id, "invalid_import_result", attempted_at, account_ref
+                )
                 continue
             if not result.ok:
-                self._safe_source_failure(
-                    provider_id, result.error_code or "import_failed", attempted_at
+                self._safe_openusage_failure(
+                    provider_id,
+                    result.error_code or "import_failed",
+                    attempted_at,
+                    account_ref,
                 )
                 continue
-            if not self._rows_match_scope(result.rows, provider_id, since, today):
-                self._safe_source_failure(
-                    provider_id, "invalid_import_rows", attempted_at
+            if not result.rows:
+                self._safe_openusage_failure(
+                    provider_id, "empty_result", attempted_at, account_ref
+                )
+                continue
+            selected_rows = tuple(
+                replace(
+                    row,
+                    provider_id=provider_id,
+                    account_ref=account_ref,
+                    quality="fallback" if openusage_is_fallback else row.quality,
+                )
+                for row in result.rows
+            )
+            if not self._rows_match_scope(
+                selected_rows, provider_id, since, today, account_ref
+            ):
+                self._safe_openusage_failure(
+                    provider_id, "invalid_import_rows", attempted_at, account_ref
                 )
                 continue
             try:
-                self.store.replace_provider_days(provider_id, since, today, result.rows)
-                self.store.record_source_success(
-                    provider_id, DAILY_SOURCE_ID, attempted_at
+                self.store.commit_usage_import_success(
+                    provider_id, DAILY_SOURCE_ID, since, today,
+                    selected_rows, attempted_at, account_ref=account_ref,
                 )
             except Exception:
-                self._safe_source_failure(
-                    provider_id, "persistence_failed", attempted_at
+                self._safe_openusage_failure(
+                    provider_id, "persistence_failed", attempted_at, account_ref
                 )
 
     def _refresh_cost_sources(
@@ -930,9 +1008,9 @@ class ActivityCollector:
             return False
         try:
             selected = tuple(dict.fromkeys(
-                provider_id
-                for provider_id in provider_ids
-                if provider_id in self.official_importers
+                provider_id for provider_id in provider_ids
+                if isinstance(provider_id, str)
+                and ID_PATTERN.fullmatch(provider_id) is not None
             ))
             if not selected:
                 return True

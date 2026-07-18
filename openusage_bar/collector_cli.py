@@ -23,10 +23,10 @@ from .query import QueryService, SCHEMA_VERSION, to_wire
 DEFAULT_LEDGER_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "activity.sqlite3"
 DEFAULT_API_SOCKET_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "openusage.sock"
 # An interactive attempt may legitimately use OpenUsage's bounded auto -> direct
-# fallback (12s + 40s) followed by a bounded daily-history import (30s). Ninety
-# seconds avoids killing that common slow path, but remains a hard attempt limit;
+# fallback (12s + 40s) followed by a bounded daily-history import (60s). One
+# hundred twenty seconds avoids killing that slow path, but remains a hard limit;
 # it is not a completion guarantee for an arbitrary number of configured sources.
-DEFAULT_FRESH_TIMEOUT_SECONDS = 90
+DEFAULT_FRESH_TIMEOUT_SECONDS = 120
 MIN_DAEMON_INTERVAL_SECONDS = 60
 INTERNAL_REFRESH_COMMAND = "__refresh-once"
 

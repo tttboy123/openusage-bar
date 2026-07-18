@@ -235,6 +235,8 @@
 "Local API response invalid" = "Local API response invalid";
 "The local endpoint returned malformed or unsupported data." = "The local endpoint returned malformed or unsupported data.";
 "Collected %@" = "Collected %@";
+"Source %@" = "Source %@";
+"Quality %@" = "Quality %@";
 "%lld days" = "%lld days";
 "Copy %@" = "Copy %@";
 "Day" = "Day";
