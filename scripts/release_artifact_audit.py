@@ -30,6 +30,7 @@ MACHO_MAGICS = {
     b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
     b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
 }
+HOME_PATH_PATTERN = re.compile(rb"/(?:Users|home)/[A-Za-z0-9._-]+(?:/|\b)")
 
 
 class ArtifactError(ValueError):
@@ -90,7 +91,7 @@ def inspect_members(archive: zipfile.ZipFile, expected_root: str) -> None:
             raise ArtifactError("private_material")
         if info.file_size <= 1024 * 1024 and not info.is_dir():
             payload = archive.read(info)
-            if b"\0" not in payload and (b"/Users/" in payload or b"/home/" in payload):
+            if b"\0" not in payload and HOME_PATH_PATTERN.search(payload):
                 raise ArtifactError("home_path")
 
 
