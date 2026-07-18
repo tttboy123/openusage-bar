@@ -407,6 +407,11 @@ struct ActivityAppLogicTests {
         #expect(metrics.contains("Active Days"))
         #expect(metrics.contains("Observed Peak"))
         #expect(metrics.contains("Observed Active Days"))
+        #expect(metrics.contains("Input Tokens"))
+        #expect(metrics.contains("Output Tokens"))
+        #expect(metrics.contains("Cache Read"))
+        #expect(metrics.contains("Cache Write"))
+        #expect(metrics.contains("Cache reads are included in Input Tokens"))
         #expect(!metrics.contains("Longest Task"))
     }
 

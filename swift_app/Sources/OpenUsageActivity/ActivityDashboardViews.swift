@@ -79,40 +79,18 @@ private struct MetricStrip: View {
     let period: UsagePeriod
 
     var body: some View {
-        HStack(spacing: 0) {
-            MetricValue(
-                value: metrics.totalTokens.map(TokenText.compact)
-                    ?? (metrics.observedTokens > 0
-                        ? TokenText.compact(metrics.observedTokens)
-                        : AppLocalization.text("Unavailable")),
-                label: metrics.isComplete ? "Total Tokens" : "Observed Tokens",
-                state: metrics.isComplete ? nil : (metrics.observedTokens > 0 ? "Partial" : "Missing")
-            )
-            stripDivider
-            MetricValue(
-                value: metrics.peak.map { TokenText.compact($0.tokens) }
-                    ?? AppLocalization.text("Unavailable"),
-                label: metrics.isComplete ? "Peak Day" : "Observed Peak",
-                state: metrics.peak.map { $0.day.rawValue }
-            )
-            stripDivider
-            MetricValue(
-                value: "\(metrics.activeDays)",
-                label: metrics.isComplete ? "Active Days" : "Observed Active Days",
-                state: "days"
-            )
-            stripDivider
-            MetricValue(
-                value: "\(metrics.currentStreak)",
-                label: metrics.isComplete ? "Current Streak" : "Observed Streak",
-                state: "days"
-            )
-            stripDivider
-            MetricValue(
-                value: "\(metrics.longestStreak)",
-                label: metrics.isComplete ? "Longest Streak" : "Longest Observed Streak",
-                state: "days"
-            )
+        VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                tokenMetricsRow
+                tokenMetricsGrid
+            }
+            Label("Cache reads are included in Input Tokens", systemImage: "info.circle")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
+            ViewThatFits(in: .horizontal) {
+                activityMetricsRow
+                activityMetricsGrid
+            }
         }
         .padding(.vertical, 14)
         .overlay(alignment: .top) { Divider() }
@@ -120,7 +98,108 @@ private struct MetricStrip: View {
         .accessibilityElement(children: .contain)
     }
 
+    private var tokenMetricsRow: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(tokenMetrics.enumerated()), id: \.offset) { index, metric in
+                if index > 0 { stripDivider }
+                MetricValue(value: metric.value, label: metric.label, state: metric.state)
+            }
+        }
+    }
+
+    private var tokenMetricsGrid: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 140), spacing: 20)],
+            alignment: .leading, spacing: 12
+        ) {
+            ForEach(Array(tokenMetrics.enumerated()), id: \.offset) { _, metric in
+                MetricValue(value: metric.value, label: metric.label, state: metric.state)
+            }
+        }
+    }
+
+    private var activityMetricsRow: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(activityMetrics.enumerated()), id: \.offset) { index, metric in
+                if index > 0 { stripDivider }
+                MetricValue(value: metric.value, label: metric.label, state: metric.state)
+            }
+        }
+    }
+
+    private var activityMetricsGrid: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 150), spacing: 20)],
+            alignment: .leading, spacing: 12
+        ) {
+            ForEach(Array(activityMetrics.enumerated()), id: \.offset) { _, metric in
+                MetricValue(value: metric.value, label: metric.label, state: metric.state)
+            }
+        }
+    }
+
+    private var tokenMetrics: [MetricDatum] {
+        let breakdown = metrics.observedBreakdown
+        return [
+            MetricDatum(
+                value: metrics.totalTokens.map(TokenText.compact)
+                    ?? (metrics.observedTokens > 0
+                        ? TokenText.compact(metrics.observedTokens)
+                        : AppLocalization.text("Unavailable")),
+                label: metrics.isComplete ? "Total Tokens" : "Observed Tokens",
+                state: metrics.isComplete ? nil : (metrics.observedTokens > 0 ? "Partial" : "Missing")
+            ),
+            MetricDatum(value: componentValue(breakdown.inputTokens), label: "Input Tokens"),
+            MetricDatum(value: componentValue(breakdown.outputTokens), label: "Output Tokens"),
+            MetricDatum(value: componentValue(breakdown.cacheReadTokens), label: "Cache Read"),
+            MetricDatum(value: componentValue(breakdown.cacheCreationTokens), label: "Cache Write"),
+        ]
+    }
+
+    private func componentValue(_ value: Int64) -> String {
+        metrics.hasObservedBreakdown
+            ? TokenText.compact(value) : AppLocalization.text("Unavailable")
+    }
+
+    private var activityMetrics: [MetricDatum] {
+        [
+            MetricDatum(
+                value: metrics.peak.map { TokenText.compact($0.tokens) }
+                    ?? AppLocalization.text("Unavailable"),
+                label: metrics.isComplete ? "Peak Day" : "Observed Peak",
+                state: metrics.peak.map { $0.day.rawValue }
+            ),
+            MetricDatum(
+                value: "\(metrics.activeDays)",
+                label: metrics.isComplete ? "Active Days" : "Observed Active Days",
+                state: "days"
+            ),
+            MetricDatum(
+                value: "\(metrics.currentStreak)",
+                label: metrics.isComplete ? "Current Streak" : "Observed Streak",
+                state: "days"
+            ),
+            MetricDatum(
+                value: "\(metrics.longestStreak)",
+                label: metrics.isComplete ? "Longest Streak" : "Longest Observed Streak",
+                state: "days"
+            ),
+        ]
+    }
+
     private var stripDivider: some View { Divider().frame(height: 48).padding(.horizontal, 18) }
+}
+
+private struct MetricDatum {
+    let value: String
+    let label: String
+    let state: String?
+
+    init(value: String, label: String, state: String? = nil) {
+        self.value = value
+        self.label = label
+        self.state = state
+    }
 }
 
 private struct MetricValue: View {
@@ -641,9 +720,20 @@ private struct ChartTooltip: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(AppLocalization.format(
                 "%@ · %@ Tokens", day.day.rawValue,
-                day.totalTokens.map(TokenText.compact) ?? AppLocalization.text("Unavailable")
+                displayedTotal
             ))
                 .font(.headline).monospacedDigit()
+            Divider()
+            TokenDetailRow(label: "Input Tokens", value: componentValue(day.observedBreakdown.inputTokens))
+            TokenDetailRow(label: "Output Tokens", value: componentValue(day.observedBreakdown.outputTokens))
+            TokenDetailRow(label: "Cache Read", value: componentValue(day.observedBreakdown.cacheReadTokens))
+            TokenDetailRow(label: "Cache Write", value: componentValue(day.observedBreakdown.cacheCreationTokens))
+            Text("Cache reads are included in Input Tokens")
+                .font(.caption2).foregroundStyle(.secondary)
+            if !day.composition.isEmpty {
+                Divider()
+                Text("Model breakdown").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            }
             ForEach(day.composition, id: \.modelID) { item in
                 HStack {
                     Text(DisplayText.model(item.modelID))
@@ -670,9 +760,36 @@ private struct ChartTooltip: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(10).frame(width: 230)
+        .padding(10).frame(width: 280)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         .overlay { RoundedRectangle(cornerRadius: 8).stroke(.separator, lineWidth: 0.5) }
         .accessibilityElement(children: .combine)
+    }
+
+    private var displayedTotal: String {
+        if let total = day.totalTokens { return TokenText.compact(total) }
+        if day.state == .partial, day.observedTokens > 0 {
+            return TokenText.compact(day.observedTokens)
+        }
+        return AppLocalization.text("Unavailable")
+    }
+
+    private func componentValue(_ value: Int64) -> String {
+        day.hasObservedBreakdown
+            ? TokenText.compact(value) : AppLocalization.text("Unavailable")
+    }
+}
+
+private struct TokenDetailRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(AppLocalization.text(label)).foregroundStyle(.secondary)
+            Spacer(minLength: 18)
+            Text(value).monospacedDigit()
+        }
+        .font(.caption)
     }
 }

@@ -83,12 +83,17 @@ public struct DailyChartDay: Identifiable, Sendable, Hashable {
     public let state: ActivityDayState
     public let totalTokens: Int64?
     public let observedTokens: Int64
+    public let observedBreakdown: TokenBreakdown
     public let composition: [ModelComposition]
     public let quality: ActivityQuality
     public let sourceIDs: [String]
     public let qualityIDs: [String]
     public let lastCollectionAt: String?
     public var id: LocalDay { day }
+
+    public var hasObservedBreakdown: Bool {
+        state == .coveredZero || state == .coveredActive || observedBreakdown != .zero
+    }
 
     public var accessibilitySummary: String {
         let total = totalTokens.map(TokenText.compact) ?? AppLocalization.text("Unavailable")
@@ -100,9 +105,20 @@ public struct DailyChartDay: Identifiable, Sendable, Hashable {
             ? "" : AppLocalization.format("Source %@", sourceIDs.joined(separator: ", "))
         let qualities = qualityIDs.isEmpty
             ? "" : AppLocalization.format("Quality %@", qualityIDs.joined(separator: ", "))
+        let breakdown = hasObservedBreakdown ? [
+            AppLocalization.format("Input %@", TokenText.compact(observedBreakdown.inputTokens)),
+            AppLocalization.format("Output %@", TokenText.compact(observedBreakdown.outputTokens)),
+            AppLocalization.format(
+                "Cache Read %@", TokenText.compact(observedBreakdown.cacheReadTokens)
+            ),
+            AppLocalization.format(
+                "Cache Write %@", TokenText.compact(observedBreakdown.cacheCreationTokens)
+            ),
+        ] : []
         return [
             day.rawValue, AppLocalization.format("%@ Tokens", total),
-            models, quality.displayName, sources, qualities, collected,
+            breakdown.joined(separator: ", "), models, quality.displayName,
+            sources, qualities, collected,
         ]
             .filter { !$0.isEmpty }.joined(separator: ", ")
     }
@@ -282,7 +298,8 @@ public struct UsageDetailsModel: Sendable, Hashable {
         Self(
             heatmapDays: [], heatmapDetails: [],
             metrics: ActivityMetrics(
-                totalTokens: nil, observedTokens: 0, isComplete: false,
+                totalTokens: nil, observedTokens: 0, observedBreakdown: .zero,
+                isComplete: false,
                 peak: nil, activeDays: 0, currentStreak: 0, longestStreak: 0
             ),
             seriesPoints: [], chartDays: [], providerIDs: [], modelIDs: [],
@@ -315,6 +332,7 @@ public struct UsageDetailsModel: Sendable, Hashable {
                 state: day.state,
                 totalTokens: day.totalTokens,
                 observedTokens: day.observedTokens,
+                observedBreakdown: day.observedBreakdown,
                 composition: day.composition.filter { visible.contains($0.modelID) },
                 quality: day.quality,
                 sourceIDs: day.sourceIDs,
@@ -712,6 +730,7 @@ public enum UsageDetailsAggregator {
             return DailyChartDay(
                 day: activityDay.day, state: activityDay.state,
                 totalTokens: activityDay.totalTokens, observedTokens: activityDay.observedTokens,
+                observedBreakdown: TokenBreakdown(records: records),
                 composition: values, quality: quality,
                 sourceIDs: Set(records.map(\.sourceID)).sorted(),
                 qualityIDs: Set(records.map(\.quality)).sorted(),

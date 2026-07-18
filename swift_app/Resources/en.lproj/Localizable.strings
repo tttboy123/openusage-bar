@@ -245,6 +245,16 @@
 "Year" = "Year";
 "days" = "days";
 "Observed Tokens" = "Observed Tokens";
+"Total Tokens" = "Total Tokens";
+"Input Tokens" = "Input Tokens";
+"Output Tokens" = "Output Tokens";
+"Cache Read" = "Cache Read";
+"Cache Write" = "Cache Write";
+"Cache reads are included in Input Tokens" = "Cache reads are included in Input Tokens";
+"Input %@" = "Input %@";
+"Output %@" = "Output %@";
+"Cache Read %@" = "Cache Read %@";
+"Cache Write %@" = "Cache Write %@";
 "Peak Day" = "Peak Day";
 "Observed Peak" = "Observed Peak";
 "Observed Active Days" = "Observed Active Days";

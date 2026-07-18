@@ -56,6 +56,8 @@ struct UsageDetailsTests {
         #expect(model.chartDays.first { $0.day == day("2026-07-02") }?.state == .coveredActive)
         #expect(model.chartDays.first { $0.day == day("2026-07-03") }?.state == .missing)
         #expect(model.chartDays.first { $0.day == day("2026-07-03") }?.totalTokens == nil)
+        #expect(model.chartDays.first { $0.day == day("2026-07-03") }?.hasObservedBreakdown == false)
+        #expect(model.chartDays.first { $0.day == day("2026-07-03") }?.accessibilitySummary.contains("Input 0") == false)
         #expect(model.chartDays.first { $0.day == day("2026-07-04") }?.quality == .estimated)
         #expect(model.seriesPoints.filter { $0.day == day("2026-07-02") }.reduce(0) { $0 + $1.tokens } == 28_000_000)
     }
@@ -276,6 +278,36 @@ struct UsageDetailsTests {
         #expect(payload.accessibilitySummary.contains("74.2M Tokens"))
         #expect(payload.accessibilitySummary.contains("GPT-5.5"))
         #expect(payload.accessibilitySummary.contains("2026-07-14T09:00:00Z"))
+    }
+
+    @Test("Daily chart carries a complete non-additive Token breakdown")
+    func dailyChartTokenBreakdown() throws {
+        let value = DailyUsage(
+            day: day("2026-07-02"), providerID: "codex", accountRef: "",
+            modelID: "gpt-5.6-sol", inputTokens: 100, outputTokens: 20,
+            cacheReadTokens: 80, cacheCreationTokens: 4, reasoningTokens: 3,
+            totalTokens: 120, costAmount: nil, costCurrency: nil, costBasis: nil,
+            quality: "exact", importedAt: "2026-07-14T09:00:00Z", revision: 1,
+            recordID: "breakdown"
+        )
+        let model = UsageDetailsAggregator.make(
+            from: ActivityDataset(
+                records: [value], coverage: [coverage("2026-07-02")],
+                knownScopes: [ProviderScope(providerID: "codex", accountRef: "")], revision: 1
+            ),
+            metricRange: day("2026-07-02")...day("2026-07-02")
+        )
+        let payload = try #require(model.chartDays.last)
+
+        #expect(payload.observedBreakdown.totalTokens == 120)
+        #expect(payload.observedBreakdown.inputTokens == 100)
+        #expect(payload.observedBreakdown.outputTokens == 20)
+        #expect(payload.observedBreakdown.cacheReadTokens == 80)
+        #expect(payload.observedBreakdown.cacheCreationTokens == 4)
+        #expect(payload.accessibilitySummary.contains("Input 100"))
+        #expect(payload.accessibilitySummary.contains("Output 20"))
+        #expect(payload.accessibilitySummary.contains("Cache Read 80"))
+        #expect(payload.accessibilitySummary.contains("Cache Write 4"))
     }
 
     @Test("Chart day exposes selected source quality and collection time")

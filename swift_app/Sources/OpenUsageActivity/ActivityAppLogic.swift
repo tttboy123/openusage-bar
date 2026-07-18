@@ -90,6 +90,7 @@ enum DetailsCopy {
     ]
     static let visibleText = sidebar + [
         "Usage Details", "Refresh", "All Providers", "All Models", "Total Tokens",
+        "Input Tokens", "Output Tokens", "Cache Read", "Cache Write",
         "Peak Tokens", "Active Days", "Current Streak", "Longest Streak",
         "Daily Token Activity", "Daily Model Trend", "Subscription Capacity",
         "Manage Credentials", "Retry", "Missing", "Covered zero",

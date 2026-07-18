@@ -245,6 +245,16 @@
 "Year" = "年";
 "days" = "天";
 "Observed Tokens" = "已观测 Token";
+"Total Tokens" = "总 Token";
+"Input Tokens" = "输入 Token";
+"Output Tokens" = "输出 Token";
+"Cache Read" = "缓存读取";
+"Cache Write" = "缓存写入";
+"Cache reads are included in Input Tokens" = "缓存读取已包含在输入 Token 中";
+"Input %@" = "输入 %@";
+"Output %@" = "输出 %@";
+"Cache Read %@" = "缓存读取 %@";
+"Cache Write %@" = "缓存写入 %@";
 "Peak Day" = "峰值日";
 "Observed Peak" = "已观测峰值";
 "Observed Active Days" = "已观测活跃天数";
