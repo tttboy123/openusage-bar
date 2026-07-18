@@ -35,7 +35,10 @@ HOME_PATH_PATTERN = re.compile(rb"/(?:Users|home)/[A-Za-z0-9._-]+(?:/|\b)")
 
 
 class ArtifactError(ValueError):
-    pass
+    def __init__(self, reason: str, member: str | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.member = member
 
 
 SAFE_REASONS = frozenset({
@@ -100,7 +103,7 @@ def inspect_members(archive: zipfile.ZipFile, expected_root: str) -> None:
         if info.file_size <= 1024 * 1024 and not info.is_dir():
             payload = archive.read(info)
             if b"\0" not in payload and HOME_PATH_PATTERN.search(payload):
-                raise ArtifactError("home_path")
+                raise ArtifactError("home_path", path.name)
 
 
 def _verify_checksum(archive_path: Path) -> None:
@@ -199,10 +202,17 @@ def main(arguments: list[str]) -> int:
     try:
         audit(Path(arguments[0]))
     except ArtifactError as error:
-        reason = str(error)
+        reason = error.reason
         if reason not in SAFE_REASONS:
             reason = "unknown"
-        print(f"release_artifact_invalid reason={reason}", file=sys.stderr)
+        member = error.member
+        if member is not None and re.fullmatch(r"[A-Za-z0-9._ -]{1,100}", member):
+            print(
+                f"release_artifact_invalid reason={reason} member={member}",
+                file=sys.stderr,
+            )
+        else:
+            print(f"release_artifact_invalid reason={reason}", file=sys.stderr)
         return 1
     except (OSError, UnicodeError, zipfile.BadZipFile):
         print("release_artifact_invalid reason=unknown", file=sys.stderr)

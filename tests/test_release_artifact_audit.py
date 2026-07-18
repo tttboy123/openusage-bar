@@ -34,6 +34,17 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(error.getvalue(), "release_artifact_invalid reason=archive\n")
 
+    def test_home_path_error_carries_only_the_validated_member_basename(self):
+        archive = archive_with(((
+            f"{ROOT_NAME}/release-quick-start.md", "/Users/example/private"
+        ),))
+
+        with self.assertRaises(ArtifactError) as raised:
+            inspect_members(archive, ROOT_NAME)
+
+        self.assertEqual(raised.exception.reason, "home_path")
+        self.assertEqual(raised.exception.member, "release-quick-start.md")
+
     def test_documented_members_are_accepted(self):
         archive = archive_with((
             (f"{ROOT_NAME}/LICENSE", "license"),
