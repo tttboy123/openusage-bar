@@ -3,6 +3,7 @@ import SwiftUI
 
 final class AppLaunchDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        BackgroundServicePresenter.showIfNeeded(BackgroundServiceBootstrap.start())
         recover(reopened: false)
     }
 

@@ -407,3 +407,9 @@
 "Subscription remaining quota history" = "订阅剩余额度历史";
 "Use arrow keys to inspect calendar days" = "使用方向键查看日期";
 "Changing quota series" = "变化中的额度序列";
+"Background access needs attention" = "后台访问需要处理";
+"Allow OpenUsage Bar in System Settings > General > Login Items so capacity and Token data can refresh automatically." = "请在“系统设置 > 通用 > 登录项”中允许 OpenUsage Bar，以便自动刷新额度和 Token 数据。";
+"Open Login Items" = "打开登录项";
+"Later" = "稍后";
+"OpenUsage Bar could not start its bundled collector. Reinstall the app from the official DMG or use the advanced repair package." = "OpenUsage Bar 无法启动内置采集器。请从官方 DMG 重新安装，或使用高级修复包。";
+"OK" = "好";

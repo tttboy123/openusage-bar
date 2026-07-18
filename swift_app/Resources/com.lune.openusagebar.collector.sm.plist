@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.lune.openusagebar.collector</string>
+  <key>BundleProgram</key><string>Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings</string>
+  <key>ProgramArguments</key><array>
+    <string>OpenUsage Provider Settings</string>
+    <string>daemon</string><string>--interval</string><string>300</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>ThrottleInterval</key><integer>30</integer>
+</dict></plist>

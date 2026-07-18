@@ -407,3 +407,9 @@
 "Subscription remaining quota history" = "Subscription remaining quota history";
 "Use arrow keys to inspect calendar days" = "Use arrow keys to inspect calendar days";
 "Changing quota series" = "Changing quota series";
+"Background access needs attention" = "Background access needs attention";
+"Allow OpenUsage Bar in System Settings > General > Login Items so capacity and Token data can refresh automatically." = "Allow OpenUsage Bar in System Settings > General > Login Items so capacity and Token data can refresh automatically.";
+"Open Login Items" = "Open Login Items";
+"Later" = "Later";
+"OpenUsage Bar could not start its bundled collector. Reinstall the app from the official DMG or use the advanced repair package." = "OpenUsage Bar could not start its bundled collector. Reinstall the app from the official DMG or use the advanced repair package.";
+"OK" = "OK";

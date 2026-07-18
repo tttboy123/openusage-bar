@@ -138,9 +138,9 @@ enum RecoveryDecision: Sendable, Hashable {
     case showNativeRecovery
 
     static func decide(background: Bool, reopened: Bool, helperAvailable: Bool) -> Self {
-        if background && !reopened { return .none }
+        if !reopened { return .none }
         guard helperAvailable else { return .showNativeRecovery }
-        return .launchActivity(route: reopened ? "health" : "activity")
+        return .launchActivity(route: "health")
     }
 }
 

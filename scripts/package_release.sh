@@ -14,10 +14,13 @@ NAME="OpenUsage-Bar-v${VERSION}-macos-${ARCH}"
 STAGE="$ROOT/build/release/$NAME"
 ARCHIVE="$ROOT/dist/$NAME.zip"
 CHECKSUM="$ARCHIVE.sha256"
+DMG="$ROOT/dist/$NAME.dmg"
+DMG_CHECKSUM="$DMG.sha256"
+DMG_STAGE="$ROOT/build/release/dmg-$NAME"
 MANIFEST="$ROOT/dist/OpenUsage-Bar-v${VERSION}-manifest.json"
 SBOM="$ROOT/dist/OpenUsage-Bar-v${VERSION}-sbom.spdx.json"
 
-rm -rf "$STAGE" "$ARCHIVE" "$CHECKSUM" "$MANIFEST" "$SBOM"
+rm -rf "$STAGE" "$DMG_STAGE" "$ARCHIVE" "$CHECKSUM" "$DMG" "$DMG_CHECKSUM" "$MANIFEST" "$SBOM"
 mkdir -p "$STAGE/dist" "$STAGE/scripts"
 /usr/bin/ditto "$APP" "$STAGE/dist/OpenUsage Bar.app"
 cp \
@@ -51,6 +54,24 @@ chmod 755 "$STAGE/scripts/"*.sh "$STAGE/scripts/"*.py
   cd "$ARCHIVE:h"
   shasum -a 256 -c "$CHECKSUM:t"
 )
+mkdir -p "$DMG_STAGE"
+/usr/bin/ditto "$APP" "$DMG_STAGE/OpenUsage Bar.app"
+ln -s /Applications "$DMG_STAGE/Applications"
+hdiutil create \
+  -volname "OpenUsage Bar" \
+  -srcfolder "$DMG_STAGE" \
+  -format UDZO \
+  -ov \
+  "$DMG"
+hdiutil verify "$DMG"
+(
+  cd "$DMG:h"
+  shasum -a 256 "$DMG:t"
+) > "$DMG_CHECKSUM"
+(
+  cd "$DMG:h"
+  shasum -a 256 -c "$DMG_CHECKSUM:t"
+)
 "$PYTHON" "$ROOT/scripts/generate_release_manifest.py" \
   --app "$APP" \
   --archive "$ARCHIVE" \
@@ -60,5 +81,7 @@ chmod 755 "$STAGE/scripts/"*.sh "$STAGE/scripts/"*.py
   --sbom-output "$SBOM"
 print "release_archive=$ARCHIVE"
 print "release_checksum=$CHECKSUM"
+print "release_dmg=$DMG"
+print "release_dmg_checksum=$DMG_CHECKSUM"
 print "release_manifest=$MANIFEST"
 print "release_sbom=$SBOM"

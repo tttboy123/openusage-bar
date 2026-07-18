@@ -24,6 +24,24 @@ This project follows [Semantic Versioning](https://semver.org/).
 - Daily activity details now expose each day's raw source IDs, quality IDs, and
   collection time in the chart tooltip and accessibility summary.
 
+## 0.4.2 - 2026-07-18
+
+### Added
+
+- A drag-to-install DMG with a standard Applications shortcut for normal macOS
+  installation without Terminal commands.
+- First-launch registration of the menu-bar login item and bundled collector
+  through Apple's Service Management framework.
+
+### Changed
+
+- Initial and login launches stay in the menu bar; explicitly reopening the app
+  continues to open recovery details when needed.
+- The ZIP and transactional scripts remain available for advanced repair,
+  rollback, and automation instead of being the primary install path.
+- Gatekeeper documentation uses per-app Privacy & Security approval and never
+  asks users to disable system protection globally.
+
 ## 0.4.1 - 2026-07-18
 
 ### Changed

@@ -88,7 +88,11 @@ swift build --package-path "$SWIFT_PACKAGE" -c release --product OpenUsageBar -X
 swift build --package-path "$SWIFT_PACKAGE" -c release --product OpenUsageActivity -Xswiftc -warnings-as-errors
 
 rm -rf "$BUILD_ROOT" "$DIST"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources/LaunchAgents"
+mkdir -p \
+  "$APP/Contents/MacOS" \
+  "$APP/Contents/Helpers" \
+  "$APP/Contents/Resources/LaunchAgents" \
+  "$APP/Contents/Library/LaunchAgents"
 /usr/bin/clang -Wall -Wextra -Werror -mmacosx-version-min=15.0 \
   "$ROOT/scripts/atomic_swap.c" -o "$ATOMIC_SWAP"
 chmod 755 "$ATOMIC_SWAP"
@@ -140,13 +144,16 @@ find "$SETTINGS_APP/Contents/Resources" -type f \
 
 cp "$RESOURCES/com.lune.openusagebar.plist" "$APP/Contents/Resources/LaunchAgents/"
 cp "$RESOURCES/com.lune.openusagebar.collector.plist" "$APP/Contents/Resources/LaunchAgents/"
+cp "$RESOURCES/com.lune.openusagebar.collector.sm.plist" \
+  "$APP/Contents/Library/LaunchAgents/com.lune.openusagebar.collector.plist"
 find "$APP" -type f -name Makefile -delete
 
 "$PYTHON" scripts/privacy_scan.py \
   "$APP/Contents/Info.plist" \
   "$ACTIVITY_APP/Contents/Info.plist" \
   "$SETTINGS_APP/Contents/Info.plist" \
-  "$APP/Contents/Resources/LaunchAgents"
+  "$APP/Contents/Resources/LaunchAgents" \
+  "$APP/Contents/Library/LaunchAgents"
 
 plutil -lint "$APP/Contents/Info.plist" "$ACTIVITY_APP/Contents/Info.plist" "$SETTINGS_APP/Contents/Info.plist"
 codesign --force --deep --sign "$CODESIGN_IDENTITY" "$SETTINGS_APP"
