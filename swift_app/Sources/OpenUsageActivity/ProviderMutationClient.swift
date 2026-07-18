@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import UsageCore
 
 struct ProviderMutationLimits: Sendable, Equatable {
     let timeout: Duration
@@ -12,9 +13,14 @@ struct ProviderMutationLimits: Sendable, Equatable {
 
 struct ProviderMutationClient: Sendable {
     let limits: ProviderMutationLimits
+    private let environment: [String: String]
 
-    init(limits: ProviderMutationLimits = .production) {
+    init(
+        limits: ProviderMutationLimits = .production,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
         self.limits = limits
+        self.environment = ChildProcessEnvironment.sanitized(environment)
     }
 
     func submit<Request: Encodable & Sendable>(
@@ -27,7 +33,7 @@ struct ProviderMutationClient: Sendable {
                   requestData.count <= 131_072
             else { return .failure(.invalidResponse) }
 
-            switch ProviderMutationProcessRunner().run(
+            switch ProviderMutationProcessRunner(environment: environment).run(
                 requestData, command: command, limits: limits
             ) {
             case let .failure(failure):
@@ -46,6 +52,8 @@ struct ProviderMutationClient: Sendable {
 }
 
 private struct ProviderMutationProcessRunner: Sendable {
+    let environment: [String: String]
+
     func run(
         _ input: Data,
         command: ProviderMutationCommand,
@@ -179,7 +187,7 @@ private struct ProviderMutationProcessRunner: Sendable {
         else { return nil }
 
         let arguments = [command.executableURL.path] + command.arguments
-        let environment = ProcessInfo.processInfo.environment.sorted { $0.key < $1.key }
+        let environment = environment.sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value)" }
         return withCStringArray(arguments) { argv in
             withCStringArray(environment) { envp in
