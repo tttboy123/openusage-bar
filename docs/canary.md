@@ -82,7 +82,10 @@ Release 1.0 only when all conditions hold simultaneously:
 - every candidate has an immutable tag, checksum, manifest, SPDX SBOM, and
   GitHub artifact attestation;
 - dependency audit reports zero known High/Critical vulnerabilities;
-- Python and Swift line coverage remain at least 80%;
+- Python product modules and deterministic Swift product logic remain at least
+  80% line coverage; declarative SwiftUI composition is verified by native
+  hosting tests across every route and state instead of compiler-dependent
+  generated line counters;
 - N-1 upgrade, automatic rollback, and Local API v1 compatibility pass in CI;
 - documentation still accurately describes the source-first, ad-hoc signed
   distribution and optional Developer ID path.

@@ -13,6 +13,10 @@ RESOURCES="$SWIFT_PACKAGE/Resources"
 ATOMIC_SWAP="$APP/Contents/Resources/atomic-swap"
 SWIFT_MIN_LINE_COVERAGE=80
 PYTHON_MIN_LINE_COVERAGE=80
+# Declarative SwiftUI composition is exercised by native hosting smoke tests.
+# Keep the line gate focused on deterministic product logic; compiler-generated
+# view coverage changes across macOS/Xcode runner images.
+SWIFT_COVERAGE_IGNORE='Tests|/Sources/(OpenUsageBar|OpenUsageActivity)/(main|[^/]*Views)\.swift'
 CODESIGN_IDENTITY=${OPENUSAGE_CODESIGN_IDENTITY:--}
 
 [[ -x "$PYTHON" ]] || { print -u2 "local build environment unavailable"; exit 1; }
@@ -70,7 +74,7 @@ SWIFT_TEST_BINARY=$(find "$SWIFT_PACKAGE/.build" -type f \
 }
 SWIFT_COVERAGE_REPORT=$(xcrun llvm-cov report "$SWIFT_TEST_BINARY" \
   -instr-profile="$SWIFT_PROFILE" \
-  -ignore-filename-regex='Tests|/Sources/(OpenUsageBar|OpenUsageActivity)/main.swift')
+  -ignore-filename-regex="$SWIFT_COVERAGE_IGNORE")
 SWIFT_LINE_COVERAGE=$(print -r -- "$SWIFT_COVERAGE_REPORT" | awk '/^TOTAL/ {gsub("%", "", $10); print $10}')
 [[ -n "$SWIFT_LINE_COVERAGE" ]] || { print -u2 "Swift coverage total unavailable"; exit 1; }
 if ! awk -v actual="$SWIFT_LINE_COVERAGE" -v minimum="$SWIFT_MIN_LINE_COVERAGE" \

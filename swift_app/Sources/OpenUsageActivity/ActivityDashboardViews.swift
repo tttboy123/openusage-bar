@@ -100,7 +100,7 @@ private struct MetricStrip: View {
 
     private var tokenMetricsRow: some View {
         HStack(spacing: 0) {
-            ForEach(Array(tokenMetrics.enumerated()), id: \.offset) { index, metric in
+            ForEach(Array(presentation.tokenMetrics.enumerated()), id: \.offset) { index, metric in
                 if index > 0 { stripDivider }
                 MetricValue(value: metric.value, label: metric.label, state: metric.state)
             }
@@ -112,7 +112,7 @@ private struct MetricStrip: View {
             columns: [GridItem(.adaptive(minimum: 140), spacing: 20)],
             alignment: .leading, spacing: 12
         ) {
-            ForEach(Array(tokenMetrics.enumerated()), id: \.offset) { _, metric in
+            ForEach(Array(presentation.tokenMetrics.enumerated()), id: \.offset) { _, metric in
                 MetricValue(value: metric.value, label: metric.label, state: metric.state)
             }
         }
@@ -120,7 +120,7 @@ private struct MetricStrip: View {
 
     private var activityMetricsRow: some View {
         HStack(spacing: 0) {
-            ForEach(Array(activityMetrics.enumerated()), id: \.offset) { index, metric in
+            ForEach(Array(presentation.activityMetrics.enumerated()), id: \.offset) { index, metric in
                 if index > 0 { stripDivider }
                 MetricValue(value: metric.value, label: metric.label, state: metric.state)
             }
@@ -132,13 +132,23 @@ private struct MetricStrip: View {
             columns: [GridItem(.adaptive(minimum: 150), spacing: 20)],
             alignment: .leading, spacing: 12
         ) {
-            ForEach(Array(activityMetrics.enumerated()), id: \.offset) { _, metric in
+            ForEach(Array(presentation.activityMetrics.enumerated()), id: \.offset) { _, metric in
                 MetricValue(value: metric.value, label: metric.label, state: metric.state)
             }
         }
     }
 
-    private var tokenMetrics: [MetricDatum] {
+    private var presentation: MetricStripPresentation {
+        MetricStripPresentation(metrics: metrics)
+    }
+
+    private var stripDivider: some View { Divider().frame(height: 48).padding(.horizontal, 18) }
+}
+
+struct MetricStripPresentation {
+    let metrics: ActivityMetrics
+
+    var tokenMetrics: [MetricDatum] {
         let breakdown = metrics.observedBreakdown
         return [
             MetricDatum(
@@ -156,12 +166,12 @@ private struct MetricStrip: View {
         ]
     }
 
-    private func componentValue(_ value: Int64) -> String {
+    func componentValue(_ value: Int64) -> String {
         metrics.hasObservedBreakdown
             ? TokenText.compact(value) : AppLocalization.text("Unavailable")
     }
 
-    private var activityMetrics: [MetricDatum] {
+    var activityMetrics: [MetricDatum] {
         [
             MetricDatum(
                 value: metrics.peak.map { TokenText.compact($0.tokens) }
@@ -187,10 +197,9 @@ private struct MetricStrip: View {
         ]
     }
 
-    private var stripDivider: some View { Divider().frame(height: 48).padding(.horizontal, 18) }
 }
 
-private struct MetricDatum {
+struct MetricDatum: Equatable {
     let value: String
     let label: String
     let state: String?

@@ -418,6 +418,38 @@ struct ActivityAppLogicTests {
         #expect(!metrics.contains("Longest Task"))
     }
 
+    @Test("Token metric presentation keeps complete and partial component facts distinct")
+    func tokenMetricPresentation() throws {
+        let complete = MetricStripPresentation(metrics: ActivityMetrics(
+            totalTokens: 100, observedTokens: 100,
+            observedBreakdown: TokenBreakdown(
+                totalTokens: 100, inputTokens: 70, outputTokens: 30,
+                cacheReadTokens: 20, cacheCreationTokens: 5
+            ),
+            isComplete: true, peak: PeakUsage(day: try LocalDay("2026-07-18"), tokens: 100),
+            activeDays: 1, currentStreak: 1, longestStreak: 1
+        ))
+        #expect(complete.tokenMetrics.map(\.label) == [
+            "Total Tokens", "Input Tokens", "Output Tokens", "Cache Read", "Cache Write",
+        ])
+        #expect(complete.tokenMetrics.map(\.value) == ["100", "70", "30", "20", "5"])
+        #expect(complete.activityMetrics.map(\.label) == [
+            "Peak Day", "Active Days", "Current Streak", "Longest Streak",
+        ])
+
+        let missing = MetricStripPresentation(metrics: ActivityMetrics(
+            totalTokens: nil, observedTokens: 0, observedBreakdown: .zero,
+            isComplete: false, peak: nil, activeDays: 0, currentStreak: 0, longestStreak: 0
+        ))
+        #expect(missing.tokenMetrics.first?.label == "Observed Tokens")
+        #expect(missing.tokenMetrics.first?.state == "Missing")
+        #expect(missing.tokenMetrics.dropFirst().allSatisfy {
+            $0.value == AppLocalization.text("Unavailable")
+        })
+        #expect(missing.activityMetrics.first?.label == "Observed Peak")
+        #expect(missing.activityMetrics.first?.value == AppLocalization.text("Unavailable"))
+    }
+
     @Test("Visibility preserves hidden Claude Code and fails open on malformed data")
     func visibility() throws {
         let valid = Data(#"{"version":1,"hidden_provider_ids":["claude_code"]}"#.utf8)
