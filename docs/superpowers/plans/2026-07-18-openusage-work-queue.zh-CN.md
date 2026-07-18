@@ -168,6 +168,14 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - 重启 Mac，验证登录项、collector、本地 API 和菜单栏恢复。
 - 从 N-1 版本升级并执行一次回滚；确认账本事实数、change cursor 和 Keychain 不倒退。
 
+**当前实机进度（2026-07-19）：**
+
+- [x] `0.4.3 (7)` 已安装到 `/Applications`；菜单栏 `chart.bar.xaxis + 18%` 标签、Usage Details 与 Provider Center 均已实际显示。
+- [x] 已完成 `0.4.3 → 0.4.2 → 0.4.3` 真实回滚与恢复；SQLite integrity 保持 `ok`，核心事实表行数不变，change cursor 单调推进，4/4 Keychain 项仍存在且未读取值。
+- [x] 真实回滚发现的 launchd 瞬时注册失败已用 RED → GREEN 回归覆盖；回滚与安装现在都使用有界重试和卸载等待。
+- [ ] 两个无人点击的五分钟采集周期已开始验证，但候选 helper 的本地签名变化触发了一次 macOS Keychain ACL 授权；必须由用户确认后，再以 `dataRevision` 与最新 `lastAttemptAt` 的两次真实推进完成验收。
+- [ ] `~/Applications` 实机回退路径与真实重启后恢复尚未验收；隔离 smoke 不能替代这两项。
+
 **验收：**
 
 - [ ] 用户可直接确认菜单栏、详情窗口和后台刷新都正常。
@@ -182,10 +190,10 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 
 ### Checkpoint 0.4.x
 
-- [ ] `scripts/build_app.sh` 通过。
-- [ ] `scripts/package_release.sh` 通过。
-- [ ] `scripts/release_smoke.sh` 通过。
-- [ ] Token 对账能解释至少一个真实差异日期。
+- [x] `scripts/build_app.sh` 通过。
+- [x] `scripts/package_release.sh` 通过。
+- [x] `scripts/release_smoke.sh` 通过，包含 launchd 瞬时失败后的真实回滚重试回归。
+- [x] Token 对账能解释至少一个真实差异日期，并分别保留来源总量、Input、Output、Cache 与计数口径。
 - [ ] 干净安装、自动刷新、重启、升级与回滚通过可见验收。
 - [ ] 只有存在实际代码或发布修复时才发布下一补丁版。
 
