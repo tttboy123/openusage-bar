@@ -173,8 +173,11 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] `0.4.3 (7)` 已安装到 `/Applications`；菜单栏 `chart.bar.xaxis + 18%` 标签、Usage Details 与 Provider Center 均已实际显示。
 - [x] 已完成 `0.4.3 → 0.4.2 → 0.4.3` 真实回滚与恢复；SQLite integrity 保持 `ok`，核心事实表行数不变，change cursor 单调推进，4/4 Keychain 项仍存在且未读取值。
 - [x] 真实回滚发现的 launchd 瞬时注册失败已用 RED → GREEN 回归覆盖；回滚与安装现在都使用有界重试和卸载等待。
-- [ ] 两个无人点击的五分钟采集周期已开始验证，但候选 helper 的本地签名变化触发了一次 macOS Keychain ACL 授权；必须由用户确认后，再以 `dataRevision` 与最新 `lastAttemptAt` 的两次真实推进完成验收。
-- [ ] `~/Applications` 实机回退路径与真实重启后恢复尚未验收；隔离 smoke 不能替代这两项。
+- [x] 已真实安装到 `~/Applications` 并恢复 `/Applications`；两个位置的菜单栏标签和本地 API 均正常，账本与 4/4 Keychain 项未倒退。
+- [x] 回退迁移暴露的旧路径 Activity 与旧应用副本残留已加入双安装位置回归；真实双副本清理、旧 bundle 已删除但 Activity 仍运行两种场景均已通过。卸载只删除 bundle id 已确认为 OpenUsage Bar 的已知副本；磁盘副本已消失时，只有运行时 bundle id 精确等于 `com.lune.openusagebar.activity` 的旧路径进程才会被停止，同名异构应用及其进程保持不动。
+- [x] 安装/卸载隔离 smoke 现在把显式 `OPENUSAGE_INSTALL_DIR` 视为严格作用域，不再扫描或清理真实 `/Applications` 与 `~/Applications`；19 项 Activity 生命周期回归和完整 release smoke 均已通过。
+- [ ] 两个无人点击的五分钟采集周期已开始验证。候选 helper 的本地签名变化曾触发一次 macOS Keychain ACL 授权，当前 Keychain 读取已恢复且 MiniMax、Step Plan、Codex、Kiro 最新直连状态均为 `ok`；仍需以 `dataRevision` 与最新 `lastAttemptAt` 的两次自然推进完成验收。
+- [ ] 真实重启后登录项、collector、本地 API 与菜单栏恢复尚未验收；`launchctl` 等价检查不能替代 reboot。
 
 **验收：**
 
