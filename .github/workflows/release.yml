@@ -6,6 +6,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -32,6 +34,14 @@ jobs:
         run: scripts/package_release.sh
       - name: Audit packaged artifact
         run: .build-venv/bin/python scripts/release_artifact_audit.py dist/OpenUsage-Bar-*.zip
+      - name: Attest release assets
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: |
+            dist/OpenUsage-Bar-*.zip
+            dist/OpenUsage-Bar-*.zip.sha256
+            dist/OpenUsage-Bar-*-manifest.json
+            dist/OpenUsage-Bar-*-sbom.spdx.json
       - name: Publish pre-release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -39,6 +49,8 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             dist/OpenUsage-Bar-*.zip \
             dist/OpenUsage-Bar-*.zip.sha256 \
+            dist/OpenUsage-Bar-*-manifest.json \
+            dist/OpenUsage-Bar-*-sbom.spdx.json \
             --prerelease \
             --generate-notes \
             --title "OpenUsage Bar $GITHUB_REF_NAME"

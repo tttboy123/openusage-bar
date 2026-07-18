@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT=${0:A:h:h}
+PYTHON="$ROOT/.build-venv/bin/python"
 APP="$ROOT/dist/OpenUsage Bar.app"
 INFO="$APP/Contents/Info.plist"
 [[ -d "$APP" ]] || { print -u2 "build artifact unavailable"; exit 1; }
@@ -13,8 +14,10 @@ NAME="OpenUsage-Bar-v${VERSION}-macos-${ARCH}"
 STAGE="$ROOT/build/release/$NAME"
 ARCHIVE="$ROOT/dist/$NAME.zip"
 CHECKSUM="$ARCHIVE.sha256"
+MANIFEST="$ROOT/dist/OpenUsage-Bar-v${VERSION}-manifest.json"
+SBOM="$ROOT/dist/OpenUsage-Bar-v${VERSION}-sbom.spdx.json"
 
-rm -rf "$STAGE" "$ARCHIVE" "$CHECKSUM"
+rm -rf "$STAGE" "$ARCHIVE" "$CHECKSUM" "$MANIFEST" "$SBOM"
 mkdir -p "$STAGE/dist" "$STAGE/scripts"
 /usr/bin/ditto "$APP" "$STAGE/dist/OpenUsage Bar.app"
 cp \
@@ -38,5 +41,14 @@ chmod 755 "$STAGE/scripts/"*.sh
   cd "$ARCHIVE:h"
   shasum -a 256 -c "$CHECKSUM:t"
 )
+"$PYTHON" "$ROOT/scripts/generate_release_manifest.py" \
+  --app "$APP" \
+  --archive "$ARCHIVE" \
+  --requirements "$ROOT/requirements-build.txt" \
+  --swift-package "$ROOT/swift_app" \
+  --output "$MANIFEST" \
+  --sbom-output "$SBOM"
 print "release_archive=$ARCHIVE"
 print "release_checksum=$CHECKSUM"
+print "release_manifest=$MANIFEST"
+print "release_sbom=$SBOM"

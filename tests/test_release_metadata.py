@@ -120,6 +120,7 @@ class CommittedWorkflowMetadataTests(unittest.TestCase):
             "actions/checkout": "v5",
             "actions/setup-python": "v6",
             "actions/upload-artifact": "v4",
+            "actions/attest": "v4",
         }
         for workflow_name in ("ci.yml", "release.yml"):
             source = (ROOT / ".github/workflows" / workflow_name).read_text("utf-8")

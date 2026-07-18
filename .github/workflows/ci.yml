@@ -45,5 +45,7 @@ jobs:
           path: |
             dist/OpenUsage-Bar-*.zip
             dist/OpenUsage-Bar-*.zip.sha256
+            dist/OpenUsage-Bar-*-manifest.json
+            dist/OpenUsage-Bar-*-sbom.spdx.json
           if-no-files-found: error
           retention-days: 14
