@@ -126,6 +126,10 @@ fi
 # extensions at runtime. Hosted Python's pyconfig.h can contain its build-home
 # prefix, so remove the unused development-only tree before signing/package audit.
 rm -rf "$SETTINGS_APP/Contents/Resources/include"
+# Package-manager metadata is not used by the frozen helper. Some hosted
+# Python distributions record their absolute installation prefix in METADATA.
+find "$SETTINGS_APP/Contents/Resources" -type d \
+  \( -name '*.dist-info' -o -name '*.egg-info' \) -prune -exec rm -rf {} +
 
 cp "$RESOURCES/com.lune.openusagebar.plist" "$APP/Contents/Resources/LaunchAgents/"
 cp "$RESOURCES/com.lune.openusagebar.collector.plist" "$APP/Contents/Resources/LaunchAgents/"
