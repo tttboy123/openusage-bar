@@ -176,13 +176,13 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] 已真实安装到 `~/Applications` 并恢复 `/Applications`；两个位置的菜单栏标签和本地 API 均正常，账本与 4/4 Keychain 项未倒退。
 - [x] 回退迁移暴露的旧路径 Activity 与旧应用副本残留已加入双安装位置回归；真实双副本清理、旧 bundle 已删除但 Activity 仍运行两种场景均已通过。卸载只删除 bundle id 已确认为 OpenUsage Bar 的已知副本；磁盘副本已消失时，只有运行时 bundle id 精确等于 `com.lune.openusagebar.activity` 的旧路径进程才会被停止，同名异构应用及其进程保持不动。
 - [x] 安装/卸载隔离 smoke 现在把显式 `OPENUSAGE_INSTALL_DIR` 视为严格作用域，不再扫描或清理真实 `/Applications` 与 `~/Applications`；19 项 Activity 生命周期回归和完整 release smoke 均已通过。
-- [ ] 两个无人点击的五分钟采集周期已开始验证。候选 helper 的本地签名变化曾触发一次 macOS Keychain ACL 授权，当前 Keychain 读取已恢复且 MiniMax、Step Plan、Codex、Kiro 最新直连状态均为 `ok`；仍需以 `dataRevision` 与最新 `lastAttemptAt` 的两次自然推进完成验收。
+- [x] 两个无人点击的五分钟采集周期已通过。以 `minimax-1783978290 / minimax.coding_plan` 为固定哨兵：T0=`2026-07-18T20:14:46.677591Z`、`dataRevision=5784`；T1=`2026-07-18T20:21:34.749783Z`、`dataRevision=5801`；T2=`2026-07-18T20:27:42.947299Z`、观察时 `dataRevision=5818`，最终 API 复核继续推进到 `5826`。T2 时 MiniMax、Step Plan、Codex、Kiro 四个直连来源的 `lastAttemptAt` 与 `lastSuccessAt` 相同且均为 `ok`，全程未点击 Refresh。候选 helper 的本地签名变化曾触发一次 macOS Keychain ACL 授权，当前 Keychain 读取已恢复。
 - [ ] 真实重启后登录项、collector、本地 API 与菜单栏恢复尚未验收；`launchctl` 等价检查不能替代 reboot。
 
 **验收：**
 
 - [ ] 用户可直接确认菜单栏、详情窗口和后台刷新都正常。
-- [ ] 手动 Refresh 不是数据更新的必要条件。
+- [x] 手动 Refresh 不是数据更新的必要条件。
 - [ ] 安装、升级、重启和回滚后 Unknown 仍不变成 0，历史数据不丢失。
 
 **验证：** `scripts/release_smoke.sh`、`scripts/verify_local_api.py`、安装前后数据库计数与一次人工可见验收。
