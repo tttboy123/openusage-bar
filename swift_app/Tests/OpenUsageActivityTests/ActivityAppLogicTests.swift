@@ -84,11 +84,11 @@ struct ActivityAppLogicTests {
         let source = try String(
             contentsOf: URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                .appendingPathComponent("Sources/OpenUsageActivity/ActivityViews.swift"),
+                .appendingPathComponent("Sources/OpenUsageActivity/ProviderCenterViews.swift"),
             encoding: .utf8
         )
         let detail = try #require(source.range(of: "private struct ProviderConnectionDetail"))
-        let nextPage = try #require(source.range(of: "private struct DataHealthPage"))
+        let nextPage = try #require(source.range(of: "private struct ProviderDetailSection"))
         let section = String(source[detail.lowerBound..<nextPage.lowerBound])
 
         #expect(section.contains("Edit Connection"))
@@ -216,7 +216,7 @@ struct ActivityAppLogicTests {
         let source = try String(
             contentsOf: URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                .appendingPathComponent("Sources/OpenUsageActivity/ActivityViews.swift"),
+                .appendingPathComponent("Sources/OpenUsageActivity/ActivityDashboardViews.swift"),
             encoding: .utf8
         )
         let heatmap = try #require(source.range(of: "private struct HeatmapSection"))
