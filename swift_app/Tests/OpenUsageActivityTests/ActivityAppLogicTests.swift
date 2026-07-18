@@ -79,6 +79,87 @@ struct ActivityAppLogicTests {
         #expect(object["endpoint"] == nil)
     }
 
+    @Test("Provider mutation helper is terminated at its time bound")
+    func providerMutationTimeout() async {
+        let client = ProviderMutationClient(limits: .init(
+            timeout: .milliseconds(50), maximumResponseBytes: 1_024
+        ))
+        let start = ContinuousClock.now
+        let result = await client.submit(
+            providerEditRequest(),
+            command: .init(
+                executableURL: URL(fileURLWithPath: "/bin/sleep"), arguments: ["5"]
+            )
+        )
+
+        #expect(result == .failure(.timedOut))
+        #expect(start.duration(to: .now) < .seconds(2))
+    }
+
+    @Test("Provider mutation helper rejects oversized output")
+    func providerMutationOversizedOutput() async {
+        let result = await mutationClient(maximumResponseBytes: 64).submit(
+            providerEditRequest(),
+            command: shellCommand("head -c 65 /dev/zero")
+        )
+        #expect(result == .failure(.responseTooLarge))
+    }
+
+    @Test("Provider mutation helper rejects invalid UTF-8")
+    func providerMutationInvalidUTF8() async {
+        let result = await mutationClient().submit(
+            providerEditRequest(),
+            command: shellCommand("printf '\\377'")
+        )
+        #expect(result == .failure(.invalidResponse))
+    }
+
+    @Test("Provider mutation helper sanitizes nonzero and truncated responses")
+    func providerMutationFailures() async {
+        let nonzero = await mutationClient().submit(
+            providerEditRequest(),
+            command: .init(executableURL: URL(fileURLWithPath: "/usr/bin/false"), arguments: [])
+        )
+        let truncated = await mutationClient().submit(
+            providerEditRequest(),
+            command: shellCommand("printf '{\\\"version\\\":1'")
+        )
+
+        #expect(nonzero == .failure(.couldNotLaunch))
+        #expect(truncated == .failure(.invalidResponse))
+    }
+
+    @Test("Provider mutation helper decodes one bounded successful response")
+    func providerMutationSuccess() async {
+        let result = await mutationClient().submit(
+            providerEditRequest(),
+            command: shellCommand(
+                "printf '{\\\"version\\\":1,\\\"ok\\\":true,\\\"message\\\":\\\"Saved\\\"}'"
+            )
+        )
+
+        #expect(result == .success(.init(version: 1, ok: true, message: "Saved")))
+    }
+
+    private func mutationClient(maximumResponseBytes: Int = 1_024) -> ProviderMutationClient {
+        ProviderMutationClient(limits: .init(
+            timeout: .seconds(1), maximumResponseBytes: maximumResponseBytes
+        ))
+    }
+
+    private func providerEditRequest() -> ProviderEditRequest {
+        ProviderEditRequest(
+            providerID: "step-plan-main", name: "Main",
+            apiKey: "replacement", sessionCookie: ""
+        )
+    }
+
+    private func shellCommand(_ script: String) -> ProviderMutationCommand {
+        ProviderMutationCommand(
+            executableURL: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script]
+        )
+    }
+
     @Test("Provider modification stays in the selected detail pane")
     func providerModificationIsInline() throws {
         let source = try String(

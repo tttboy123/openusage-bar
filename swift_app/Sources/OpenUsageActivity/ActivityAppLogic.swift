@@ -496,12 +496,14 @@ struct ProviderMutationResponse: Decodable, Sendable, Hashable {
 }
 
 enum ProviderMutationFailure: Error, Sendable, Hashable {
-    case unavailable, couldNotLaunch, invalidResponse
+    case unavailable, couldNotLaunch, timedOut, responseTooLarge, invalidResponse
 
     var message: String {
         switch self {
         case .unavailable: "Provider editor is unavailable. Reinstall OpenUsage Bar."
         case .couldNotLaunch: "Provider connection could not be updated."
+        case .timedOut: "Provider editor timed out."
+        case .responseTooLarge: "Provider editor returned too much data."
         case .invalidResponse: "Provider editor returned an invalid response."
         }
     }
@@ -512,36 +514,7 @@ enum ProviderMutationService {
         _ request: ProviderEditRequest,
         command: ProviderMutationCommand
     ) async -> Result<ProviderMutationResponse, ProviderMutationFailure> {
-        await Task.detached(priority: .userInitiated) {
-            do {
-                let requestData = try JSONEncoder().encode(request)
-                let process = Process()
-                let input = Pipe()
-                let output = Pipe()
-                process.executableURL = command.executableURL
-                process.arguments = command.arguments
-                process.standardInput = input
-                process.standardOutput = output
-                process.standardError = FileHandle.nullDevice
-                try process.run()
-                input.fileHandleForWriting.write(requestData)
-                try input.fileHandleForWriting.close()
-                let responseData = output.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                guard process.terminationStatus == 0 else {
-                    return .failure(.couldNotLaunch)
-                }
-                let response = try JSONDecoder().decode(
-                    ProviderMutationResponse.self, from: responseData
-                )
-                guard response.version == 1 else { return .failure(.invalidResponse) }
-                return .success(response)
-            } catch is DecodingError {
-                return .failure(.invalidResponse)
-            } catch {
-                return .failure(.couldNotLaunch)
-            }
-        }.value
+        await ProviderMutationClient().submit(request, command: command)
     }
 }
 
