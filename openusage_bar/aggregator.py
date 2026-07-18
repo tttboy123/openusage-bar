@@ -346,84 +346,50 @@ class LedgerRefresher:
 
 def build_headless_refresher(activity_store):
     """Build the production collector without importing the AppKit UI module."""
-    from .codex_subscription import CodexSubscriptionAdapter
-    from .config import (
-        GenericProviderConfig,
-        DailyUsageFeedConfig,
-        MiniMaxConfig,
-        OpenAIOrganizationConfig,
-        ProviderConfigStore,
-        StepPlanConfig,
-    )
-    from .daily_history import ActivityCollector, OpenUsageDailyImporter
-    from .daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
-    from .generic import GenericHTTPSAdapter
-    from .kiro import KiroQuotaAdapter
-    from .keychain import MacOSKeychain
-    from .minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
-    from .network import BoundedHTTPClient
-    from .openusage_adapter import OpenUsageAdapter
-    from .openai_organization import (
-        OpenAIOrganizationCardAdapter,
-        OpenAIOrganizationImporter,
-    )
-    from .step_plan import StepPlanAdapter, endpoints_for_site
+    from .config import ProviderConfigStore
+    from .daily_history import ActivityCollector
+    from .providers.builtins import default_registry
 
     clock = lambda: datetime.now(timezone.utc)
     keychain = BoundedReadOnlyKeychain()
-    step_plan_keychain = None
     config_store = ProviderConfigStore()
-    generic_client = BoundedHTTPClient()
-    daily_feed_client = BoundedHTTPClient(allowed_redirect_hosts=set())
-    minimax_client = BoundedHTTPClient(
-        allowed_reserved_hosts={"www.minimaxi.com"},
-        allowed_redirect_hosts=set(),
-    )
-    openai_client = BoundedHTTPClient(allowed_redirect_hosts=set())
-    official_importers = {}
-    adapters = [
-        OpenUsageAdapter(clock),
-        KiroQuotaAdapter(clock=clock),
-        CodexSubscriptionAdapter(clock=clock),
-    ]
     try:
         configs = config_store.load()
     except (OSError, ValueError):
         configs = []
-    for config in configs:
-        if isinstance(config, MiniMaxConfig):
-            adapters.append(MiniMaxCodingPlanAdapter(config, keychain, minimax_client, clock))
-            official_importers[config.provider_id] = MiniMaxBillingImporter(
-                config, keychain, minimax_client, clock
+    bindings = default_registry(clock=clock, keychain=keychain).build(configs)
+    adapters = [item[4] for item in sorted(
+        (
+            getattr(adapter, "source_priority", 100),
+            binding.provider_id,
+            getattr(adapter, "source_id", type(adapter).__name__),
+            type(adapter).__qualname__,
+            adapter,
+        )
+        for binding in bindings for adapter in binding.quota_sources
+    )]
+    openusage_importer = next(
+        source
+        for binding in bindings if binding.provider_id == "openusage"
+        for source in binding.usage_sources
+    )
+    official_importers = {}
+    for binding in bindings:
+        if binding.provider_id == "openusage":
+            continue
+        sources = {id(source): source for source in (
+            *binding.usage_sources, *binding.cost_sources,
+        )}
+        if len(sources) > 1:
+            raise ValueError(
+                "legacy collector requires one combined importer per Provider"
             )
-        elif isinstance(config, OpenAIOrganizationConfig):
-            adapters.append(OpenAIOrganizationCardAdapter(config, keychain, clock))
-            official_importers[config.provider_id] = OpenAIOrganizationImporter(
-                config, keychain, openai_client, clock
-            )
-        elif isinstance(config, DailyUsageFeedConfig):
-            adapters.append(DailyUsageFeedCardAdapter(config, keychain, clock))
-            official_importers[config.provider_id] = DailyUsageFeedImporter(
-                config, keychain, daily_feed_client, clock
-            )
-        elif isinstance(config, StepPlanConfig):
-            if step_plan_keychain is None:
-                try:
-                    step_plan_keychain = MacOSKeychain()
-                except (ImportError, OSError, RuntimeError):
-                    step_plan_keychain = keychain
-            endpoints = endpoints_for_site(config.site)
-            client = BoundedHTTPClient(
-                allowed_reserved_hosts={endpoints.api_host, endpoints.platform_host},
-                allowed_redirect_hosts=set(),
-            )
-            adapters.append(StepPlanAdapter(config, step_plan_keychain, client, clock))
-        elif isinstance(config, GenericProviderConfig):
-            adapters.append(GenericHTTPSAdapter(config, keychain, generic_client, clock))
+        if sources:
+            official_importers[binding.provider_id] = next(iter(sources.values()))
     aggregator = Aggregator(adapters, CardCache(), clock)
     collector = ActivityCollector(
         activity_store,
-        OpenUsageDailyImporter(clock=clock),
+        openusage_importer,
         official_importers=official_importers,
         clock=clock,
     )
