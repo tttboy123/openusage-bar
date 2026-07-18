@@ -65,6 +65,12 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("--module unittest discover -s tests -v", source)
         self.assertIn('--package-root "$ROOT/openusage_bar"', source)
         self.assertNotIn("PYTHON_TOUCHED_MODULES", source)
+        self.assertIn('actual=${SWIFT_LINE_COVERAGE}%', source)
+
+    def test_ci_and_release_pin_the_same_xcode_toolchain_as_local_release_validation(self):
+        for name in ("ci.yml", "release.yml"):
+            workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+            self.assertIn("DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer", workflow)
 
     def test_build_runs_a_failure_propagating_python_suite_before_trace(self):
         source = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")

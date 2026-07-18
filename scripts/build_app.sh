@@ -75,7 +75,7 @@ SWIFT_LINE_COVERAGE=$(print -r -- "$SWIFT_COVERAGE_REPORT" | awk '/^TOTAL/ {gsub
 [[ -n "$SWIFT_LINE_COVERAGE" ]] || { print -u2 "Swift coverage total unavailable"; exit 1; }
 if ! awk -v actual="$SWIFT_LINE_COVERAGE" -v minimum="$SWIFT_MIN_LINE_COVERAGE" \
   'BEGIN { exit !(actual + 0 >= minimum + 0) }'; then
-  print -u2 "Swift product line coverage below ${SWIFT_MIN_LINE_COVERAGE}%"
+  print -u2 "Swift product line coverage below ${SWIFT_MIN_LINE_COVERAGE}% (actual=${SWIFT_LINE_COVERAGE}%)"
   exit 1
 fi
 print "swift_product_line_coverage=${SWIFT_LINE_COVERAGE}%"
