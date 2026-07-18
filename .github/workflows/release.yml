@@ -30,6 +30,8 @@ jobs:
         run: scripts/build_app.sh
       - name: Package
         run: scripts/package_release.sh
+      - name: Audit packaged artifact
+        run: .build-venv/bin/python scripts/release_artifact_audit.py dist/OpenUsage-Bar-*.zip
       - name: Publish pre-release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -29,12 +29,16 @@ jobs:
         run: scripts/bootstrap.sh
       - name: Verify release metadata consistency
         run: .build-venv/bin/python scripts/verify_release_metadata.py
+      - name: Audit locked Python dependencies
+        run: scripts/audit_dependencies.sh
       - name: Scan the complete Git history for credentials
         run: scripts/release_secret_scan.py --history
       - name: Test and build the release bundle
         run: scripts/build_app.sh
       - name: Package the development-signed artifact
         run: scripts/package_release.sh
+      - name: Audit packaged artifact
+        run: .build-venv/bin/python scripts/release_artifact_audit.py dist/OpenUsage-Bar-*.zip
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: openusage-bar-macos-arm64

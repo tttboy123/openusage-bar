@@ -15,15 +15,21 @@ class BuildScriptContractTests(unittest.TestCase):
 
         self.assertIn('python3', source)
         self.assertIn('-m venv "$VENV"', source)
-        self.assertIn('pip==26.1.2', source)
-        self.assertIn('--no-deps --requirement "$REQUIREMENTS"', source)
+        self.assertIn('pip==26.1.2', requirements)
+        self.assertIn(
+            '--no-deps --require-hashes --requirement "$REQUIREMENTS"', source
+        )
         self.assertIn('pip check', source)
         self.assertIn('release_secret_scan.py', source)
         self.assertNotIn('curl ', source)
         self.assertNotIn('/Users/', source)
         for line in requirements.splitlines():
             if line.strip():
-                self.assertRegex(line, r"^[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9_.-]*$")
+                self.assertRegex(
+                    line,
+                    r"^[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9_.-]* "
+                    r"--hash=sha256:[0-9a-f]{64}$",
+                )
 
     def test_build_uses_local_native_toolchain_and_verifies_release(self):
         source = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
@@ -48,6 +54,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("swift_product_line_coverage", source)
         self.assertIn("scripts/privacy_scan.py", source)
         self.assertIn("scripts/release_secret_scan.py", source)
+        self.assertIn("Delete :PythonInfoDict:PythonExecutable", source)
         self.assertIn("provider-catalog.v1.json", source)
         self.assertIn("GeneratedProviderCatalog.swift", source)
         self.assertIn("generate_local_api_schema.py --output", source)
@@ -56,10 +63,8 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("local-api-v1.schema.json", source)
         self.assertIn("python_coverage_gate.py", source)
         self.assertIn("--module unittest discover -s tests -v", source)
-        self.assertIn("openusage_bar.bounded_process", source)
-        self.assertIn("openusage_bar.openusage_catalog", source)
-        self.assertIn("openusage_bar.activity_records", source)
-        self.assertIn("openusage_bar.activity_schema", source)
+        self.assertIn('--package-root "$ROOT/openusage_bar"', source)
+        self.assertNotIn("PYTHON_TOUCHED_MODULES", source)
 
     def test_build_runs_a_failure_propagating_python_suite_before_trace(self):
         source = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")

@@ -28,7 +28,7 @@ chmod 755 "$STAGE/scripts/"*.sh
 
 (
   cd "$STAGE:h"
-  /usr/bin/ditto -c -k --keepParent --sequesterRsrc "$NAME" "$ARCHIVE"
+  /usr/bin/ditto -c -k --keepParent --norsrc "$NAME" "$ARCHIVE"
 )
 (
   cd "$ARCHIVE:h"

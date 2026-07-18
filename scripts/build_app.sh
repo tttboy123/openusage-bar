@@ -14,36 +14,6 @@ ATOMIC_SWAP="$APP/Contents/Resources/atomic-swap"
 SWIFT_MIN_LINE_COVERAGE=80
 PYTHON_MIN_LINE_COVERAGE=80
 CODESIGN_IDENTITY=${OPENUSAGE_CODESIGN_IDENTITY:--}
-PYTHON_TOUCHED_MODULES=(
-  openusage_bar.activity_records
-  openusage_bar.activity_schema
-  openusage_bar.activity_store
-  openusage_bar.aggregator
-  openusage_bar.bounded_process
-  openusage_bar.capabilities
-  openusage_bar.codex_subscription
-  openusage_bar.collector_cli
-  openusage_bar.config
-  openusage_bar.cost_feed
-  openusage_bar.daily_feed
-  openusage_bar.daily_history
-  openusage_bar.generic
-  openusage_bar.kiro
-  openusage_bar.local_api
-  openusage_bar.minimax
-  openusage_bar.model_ids
-  openusage_bar.models
-  openusage_bar.openusage_adapter
-  openusage_bar.openusage_catalog
-  openusage_bar.openai_organization
-  openusage_bar.provider_catalog
-  openusage_bar.provider_commands
-  openusage_bar.providers.builtins
-  openusage_bar.providers.contracts
-  openusage_bar.providers.registry
-  openusage_bar.query
-  openusage_bar.step_plan
-)
 
 [[ -x "$PYTHON" ]] || { print -u2 "local build environment unavailable"; exit 1; }
 
@@ -83,7 +53,7 @@ PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
 "$PYTHON" scripts/python_coverage_gate.py \
   --report "$PYTHON_COVERAGE_REPORT" \
   --minimum "$PYTHON_MIN_LINE_COVERAGE" \
-  "${PYTHON_TOUCHED_MODULES[@]}"
+  --package-root "$ROOT/openusage_bar"
 "$PYTHON" scripts/privacy_scan.py \
   "$ROOT/openusage_bar/resources/provider-catalog.v1.json" \
   "$ROOT/openusage_bar/resources/local-api-v1.schema.json" \
@@ -146,6 +116,8 @@ if [[ ! -x "$SETTINGS_APP/Contents/MacOS/OpenUsage Provider Settings" ]]; then
   [[ -n "$PY_EXEC" ]] || { print -u2 "settings helper executable unavailable"; exit 1; }
   mv "$PY_EXEC" "$SETTINGS_APP/Contents/MacOS/OpenUsage Provider Settings"
 fi
+/usr/libexec/PlistBuddy -c "Delete :PythonInfoDict:PythonExecutable" \
+  "$SETTINGS_APP/Contents/Info.plist"
 
 cp "$RESOURCES/com.lune.openusagebar.plist" "$APP/Contents/Resources/LaunchAgents/"
 cp "$RESOURCES/com.lune.openusagebar.collector.plist" "$APP/Contents/Resources/LaunchAgents/"
