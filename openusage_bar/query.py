@@ -54,6 +54,15 @@ class SummaryResult(ResultEnvelope):
 
 
 @dataclass(frozen=True)
+class QuotaAppliesTo:
+    kind: str
+    model_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "model_ids", tuple(self.model_ids))
+
+
+@dataclass(frozen=True)
 class CapacityProvider:
     record_id: str
     provider_id: str
@@ -73,6 +82,9 @@ class CapacityProvider:
     quality: str
     stale: bool
     revision: int
+    source_id: str
+    quota_window: str
+    applies_to: QuotaAppliesTo
     estimated_cost_per_million_tokens: str | None = None
     constraints: tuple[str, ...] = ()
 
@@ -173,6 +185,9 @@ class QuotaHistoryItem:
     remaining_ratio: float | None
     state: str
     stale: bool
+    source_id: str
+    quota_window: str
+    applies_to: QuotaAppliesTo
 
 
 @dataclass(frozen=True)
@@ -330,6 +345,11 @@ class QueryService:
             quality=state.quality,
             stale=state.stale,
             revision=state.revision,
+            source_id=state.source_id,
+            quota_window=state.quota_window,
+            applies_to=QuotaAppliesTo(
+                state.applies_to_kind, state.applies_to_model_ids
+            ),
         )
 
     @staticmethod
@@ -567,6 +587,8 @@ class QueryService:
                 row.snapshot_id, row.record_id, row.observed_at, row.provider_id,
                 row.account_ref or None, row.quota_name, payload.get("remaining_ratio"),
                 str(payload.get("state", "temporarily_unavailable")), bool(payload.get("stale", False)),
+                row.source_id, row.quota_window,
+                QuotaAppliesTo(row.applies_to_kind, row.applies_to_model_ids),
             ))
         _, generated = self._generated()
         return QuotaHistoryResult(SCHEMA_VERSION, snapshot.cursor, generated, tuple(items))

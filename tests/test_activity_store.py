@@ -120,11 +120,11 @@ def provider_instance(
 
 
 class ActivityStoreSchemaTests(unittest.TestCase):
-    def test_schema_v4_is_idempotent_and_has_required_tables(self):
+    def test_schema_v5_is_idempotent_and_has_required_tables(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "activity.sqlite3"
             with ActivityStore(path) as store:
-                self.assertEqual(store.schema_version, 4)
+                self.assertEqual(store.schema_version, 5)
                 self.assertEqual(
                     store.table_names(),
                     {
@@ -169,7 +169,27 @@ class ActivityStoreSchemaTests(unittest.TestCase):
                     )
                 )
             with ActivityStore(path) as reopened:
-                self.assertEqual(reopened.schema_version, 4)
+                self.assertEqual(reopened.schema_version, 5)
+
+    def test_quota_schema_has_explicit_non_identity_scope_columns(self):
+        with ActivityStore(":memory:") as store:
+            state_columns = {
+                row[1] for row in store._connection.execute(
+                    "PRAGMA table_info(quota_state)"
+                )
+            }
+            history_columns = {
+                row[1] for row in store._connection.execute(
+                    "PRAGMA table_info(quota_snapshots)"
+                )
+            }
+
+        expected = {
+            "source_id", "quota_window", "applies_to_kind",
+            "applies_to_model_ids",
+        }
+        self.assertTrue(expected <= state_columns)
+        self.assertTrue(expected <= history_columns)
 
     def test_daily_cost_schema_contains_no_private_upstream_identity_fields(self):
         with ActivityStore(":memory:") as store:
@@ -241,7 +261,7 @@ class ActivityStoreSchemaTests(unittest.TestCase):
             connection.close()
 
             with ActivityStore(path) as reopened:
-                self.assertEqual(reopened.schema_version, 4)
+                self.assertEqual(reopened.schema_version, 5)
                 self.assertEqual(reopened.daily_costs("2020-01-01", "2030-01-01"), [])
                 changes = reopened.changes(before_cursor)
                 self.assertEqual([row.record_type for row in changes], ["ledger_schema"])
@@ -290,7 +310,7 @@ class ActivityStoreSchemaTests(unittest.TestCase):
             connection.close()
 
             with ActivityStore(path) as reopened:
-                self.assertEqual(reopened.schema_version, 4)
+                self.assertEqual(reopened.schema_version, 5)
                 snapshot = reopened.snapshot_daily_usage("2026-07-02", "2026-07-02")
                 self.assertEqual(snapshot.rows[0].source_id, "legacy")
                 self.assertEqual(
@@ -339,11 +359,52 @@ class ActivityStoreSchemaTests(unittest.TestCase):
                 self.assertEqual([row.record_type for row in changes], ["ledger_schema"])
                 self.assertGreater(reopened.current_change_seq, before_cursor)
 
+    def test_v4_quota_scope_migrates_conservatively_without_fact_churn(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "activity.sqlite3"
+            with ActivityStore(path) as store:
+                original = store.record_quota(quota())
+                snapshot_id = store.quota_snapshots(original.record_id)[0].snapshot_id
+
+            connection = sqlite3.connect(path)
+            before_cursor = connection.execute(
+                "SELECT COALESCE(MAX(change_seq),0) FROM change_log"
+            ).fetchone()[0]
+            for table in ("quota_state", "quota_snapshots"):
+                for column in (
+                    "applies_to_model_ids", "applies_to_kind",
+                    "quota_window", "source_id",
+                ):
+                    connection.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+            connection.execute("PRAGMA user_version=4")
+            connection.commit()
+            connection.close()
+
+            with ActivityStore(path) as reopened:
+                self.assertEqual(reopened.schema_version, 5)
+                state = reopened.quota_states()[0]
+                history = reopened.quota_snapshots(state.record_id)
+                self.assertEqual(state.source_id, "current.quota")
+                self.assertEqual(state.quota_window, "subscription")
+                self.assertEqual(state.applies_to_kind, "account")
+                self.assertEqual(state.applies_to_model_ids, ())
+                self.assertEqual(state.resets_at, original.resets_at)
+                self.assertEqual(history[0].snapshot_id, snapshot_id)
+                self.assertEqual(history[0].applies_to_kind, "account")
+                self.assertEqual(
+                    [row.record_type for row in reopened.changes(before_cursor)],
+                    ["ledger_schema"],
+                )
+                unchanged = reopened.record_quota(
+                    quota(observed_at="2026-07-14T02:15:00Z")
+                )
+                self.assertEqual(unchanged.revision, original.revision)
+
     def test_rejects_database_from_newer_schema_version(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "future.sqlite3"
             connection = sqlite3.connect(path)
-            connection.execute("PRAGMA user_version=5")
+            connection.execute("PRAGMA user_version=6")
             connection.close()
             with self.assertRaisesRegex(RuntimeError, "newer schema version"):
                 ActivityStore(path)
@@ -1302,6 +1363,49 @@ class QuotaTests(unittest.TestCase):
     def test_quota_validation_rejects_bool_invalid_ids_and_ratio(self):
         base = quota()
         for changes in ({"remaining_ratio": True}, {"remaining_ratio": 1.01}, {"provider_id": "bad/id"}, {"account_ref": "bad account"}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                QuotaObservation(**(base.__dict__ | changes))
+
+    def test_quota_scope_is_canonical_and_participates_in_semantic_revision(self):
+        base = quota()
+        model = QuotaObservation(**(
+            base.__dict__
+            | {
+                "source_id": "codex.local",
+                "quota_window": "weekly",
+                "applies_to_kind": "model",
+                "applies_to_model_ids": ("gpt-5.6-sol",),
+            }
+        ))
+        first = self.store.record_quota(model)
+        changed = self.store.record_quota(QuotaObservation(**(
+            model.__dict__
+            | {
+                "observed_at": "2026-07-14T02:15:00Z",
+                "applies_to_model_ids": ("gpt-5.6-sol", "gpt-5.6-terra"),
+            }
+        )))
+
+        self.assertEqual(first.applies_to_kind, "model")
+        self.assertEqual(first.revision, 1)
+        self.assertEqual(changed.revision, 2)
+        self.assertEqual(
+            changed.applies_to_model_ids,
+            ("gpt-5.6-sol", "gpt-5.6-terra"),
+        )
+
+    def test_quota_scope_rejects_ambiguous_or_numeric_unknown_facts(self):
+        base = quota()
+        invalid = (
+            {"applies_to_kind": "model", "applies_to_model_ids": ()},
+            {"applies_to_kind": "account", "applies_to_model_ids": ("gpt-5.6-sol",)},
+            {"applies_to_kind": "model", "applies_to_model_ids": ("z", "a")},
+            {"applies_to_kind": "workspace"},
+            {"state": "unknown", "remaining_ratio": 0.0},
+            {"source_id": "bad/source"},
+            {"quota_window": "bad window"},
+        )
+        for changes in invalid:
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 QuotaObservation(**(base.__dict__ | changes))
 

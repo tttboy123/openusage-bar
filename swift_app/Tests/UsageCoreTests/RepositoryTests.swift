@@ -325,6 +325,38 @@ struct RepositoryTests {
         #expect(rows.map(\.remainingRatio) == [0.0, 0.05])
     }
 
+    @Test("Version five publishes explicit quota source window and model scope")
+    func quotaScopeFacts() throws {
+        let fixture = try SQLiteFixture(userVersion: 5, extraSQL: """
+            UPDATE quota_state
+            SET source_id='codex.local', quota_window='weekly', applies_to_kind='model',
+                applies_to_model_ids='["gpt-5.5"]'
+            WHERE record_id='codex.weekly';
+            """)
+        let repository = try UsageRepository(databaseURL: fixture.databaseURL, now: { now })
+        defer { repository.close() }
+
+        let codex = try #require(
+            repository.capacity(limit: nil).first { $0.recordID == "codex.weekly" }
+        )
+        #expect(codex.sourceID == "codex.local")
+        #expect(codex.quotaWindow == "weekly")
+        #expect(codex.appliesTo == QuotaAppliesTo(kind: .model, modelIDs: ["gpt-5.5"]))
+
+        let malformed = try SQLiteFixture(userVersion: 5, extraSQL: """
+            UPDATE quota_state
+            SET applies_to_kind='account', applies_to_model_ids='["gpt-5.5"]'
+            WHERE record_id='codex.weekly';
+            """)
+        let malformedRepository = try UsageRepository(
+            databaseURL: malformed.databaseURL, now: { now }
+        )
+        defer { malformedRepository.close() }
+        #expect(throws: RepositoryError.self) {
+            try malformedRepository.capacity(limit: nil)
+        }
+    }
+
     @Test("Source health applies stale-at strictly and keeps stored facts")
     func sourceHealthSemantics() throws {
         let fixture = try SQLiteFixture()
@@ -591,7 +623,7 @@ struct RepositoryTests {
             #expect(!String(describing: error).contains("private-account"))
         }
 
-        let newer = try SQLiteFixture(userVersion: 5)
+        let newer = try SQLiteFixture(userVersion: 6)
         do {
             _ = try UsageRepository(databaseURL: newer.databaseURL)
             Issue.record("newer schema unexpectedly opened")

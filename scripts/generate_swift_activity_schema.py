@@ -15,6 +15,7 @@ from openusage_bar.activity_schema import (  # noqa: E402
     EXPECTED_INDEXES,
     EXPECTED_SCHEMA,
     LEGACY_SOURCE_SCHEMAS,
+    SCHEMA_VERSION,
 )
 
 
@@ -49,6 +50,9 @@ def table_contract(version: int) -> dict[str, tuple[tuple[str, str, int, str | N
         result["daily_coverage"] = LEGACY_SOURCE_SCHEMAS["daily_coverage"]
     if version < 4:
         result["source_status"] = LEGACY_SOURCE_SCHEMAS["source_status"]
+    if version < 5:
+        result["quota_state"] = LEGACY_SOURCE_SCHEMAS["quota_state"]
+        result["quota_snapshots"] = LEGACY_SOURCE_SCHEMAS["quota_snapshots"]
     return result
 
 
@@ -60,7 +64,7 @@ def render() -> str:
         "    static func expectedTables(version: Int64) -> [String: [SchemaColumn]] {",
         "        switch version {",
     ]
-    for version in range(1, 5):
+    for version in range(1, SCHEMA_VERSION + 1):
         lines.extend([f"        case {version}:", "            return ["])
         for table, columns in table_contract(version).items():
             lines.append(f"                {swift_string(table)}: [")

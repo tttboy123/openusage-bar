@@ -265,12 +265,30 @@ class QuotaObservation:
     quality: str
     stale: bool
     account_ref: str = ""
+    source_id: str = "current.quota"
+    quota_window: str = "subscription"
+    applies_to_kind: str = "account"
+    applies_to_model_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         validate_id("record_id", self.record_id)
         validate_id("provider_id", self.provider_id)
         if self.account_ref:
             validate_id("account_ref", self.account_ref)
+        validate_id("source_id", self.source_id)
+        validate_id("quota_window", self.quota_window)
+        if self.applies_to_kind not in {"subscription", "account", "model"}:
+            raise ValueError("applies_to_kind must be subscription, account, or model")
+        model_ids = tuple(self.applies_to_model_ids)
+        if any(not isinstance(item, str) for item in model_ids):
+            raise ValueError("applies_to_model_ids must contain stable identifiers")
+        for model_id in model_ids:
+            validate_id("applies_to_model_ids", model_id)
+        if model_ids != tuple(sorted(set(model_ids))):
+            raise ValueError("applies_to_model_ids must be sorted and unique")
+        if (self.applies_to_kind == "model") != bool(model_ids):
+            raise ValueError("model scope requires model IDs and broader scopes forbid them")
+        object.__setattr__(self, "applies_to_model_ids", model_ids)
         if not isinstance(self.quota_name, str) or not self.quota_name.strip():
             raise ValueError("quota_name must not be empty")
         validate_id("unit", self.unit)
@@ -292,6 +310,11 @@ class QuotaObservation:
         if ratio is not None:
             canonical_ratio = float(ratio)
             object.__setattr__(self, "remaining_ratio", 0.0 if canonical_ratio == 0 else canonical_ratio)
+        if self.state == "unknown" and any(
+            value is not None
+            for value in (self.used, self.quota_limit, self.remaining, self.remaining_ratio)
+        ):
+            raise ValueError("unknown quota facts must not carry numeric values")
         if not isinstance(self.stale, bool):
             raise ValueError("stale must be boolean")
 
@@ -312,6 +335,10 @@ class QuotaSnapshot:
     quota_name: str
     payload_json: str
     payload_hash: str
+    source_id: str = "current.quota"
+    quota_window: str = "subscription"
+    applies_to_kind: str = "account"
+    applies_to_model_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -5,7 +5,7 @@ compatibility rules separate from the repository implementation makes them
 auditable without importing the store's mutation logic.
 """
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DAILY_ACTIVITY_SOURCE_ID = "openusage.daily"
 PUBLIC_CHANGE_TYPES = frozenset(
     {
@@ -87,6 +87,10 @@ EXPECTED_SCHEMA = {
         ("stale", "INTEGER", 1, None, 0),
         ("revision", "INTEGER", 1, None, 0),
         ("payload_hash", "TEXT", 1, None, 0),
+        ("source_id", "TEXT", 1, "'current.quota'", 0),
+        ("quota_window", "TEXT", 1, "'subscription'", 0),
+        ("applies_to_kind", "TEXT", 1, "'account'", 0),
+        ("applies_to_model_ids", "TEXT", 1, "'[]'", 0),
     ),
     "quota_snapshots": (
         ("snapshot_id", "INTEGER", 0, None, 1),
@@ -97,6 +101,10 @@ EXPECTED_SCHEMA = {
         ("quota_name", "TEXT", 1, None, 0),
         ("payload_json", "TEXT", 1, None, 0),
         ("payload_hash", "TEXT", 1, None, 0),
+        ("source_id", "TEXT", 1, "'current.quota'", 0),
+        ("quota_window", "TEXT", 1, "'subscription'", 0),
+        ("applies_to_kind", "TEXT", 1, "'account'", 0),
+        ("applies_to_model_ids", "TEXT", 1, "'[]'", 0),
     ),
     "source_status": (
         ("provider_id", "TEXT", 1, None, 1),
@@ -140,6 +148,8 @@ LEGACY_SOURCE_SCHEMAS = {
     "daily_model_usage": EXPECTED_SCHEMA["daily_model_usage"][:-1],
     "daily_coverage": EXPECTED_SCHEMA["daily_coverage"][:-1],
     "source_status": EXPECTED_SCHEMA["source_status"][:-2],
+    "quota_state": EXPECTED_SCHEMA["quota_state"][:-4],
+    "quota_snapshots": EXPECTED_SCHEMA["quota_snapshots"][:-4],
 }
 
 EXPECTED_INDEXES = {

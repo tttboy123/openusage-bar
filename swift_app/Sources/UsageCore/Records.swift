@@ -228,6 +228,24 @@ public struct DailyCostDataset: Sendable, Hashable {
     }
 }
 
+public enum QuotaScopeKind: String, Sendable, Hashable {
+    case subscription
+    case account
+    case model
+}
+
+public struct QuotaAppliesTo: Sendable, Hashable {
+    public let kind: QuotaScopeKind
+    public let modelIDs: [String]
+
+    public init(kind: QuotaScopeKind, modelIDs: [String] = []) {
+        self.kind = kind
+        self.modelIDs = modelIDs
+    }
+
+    public static let conservativeAccount = QuotaAppliesTo(kind: .account)
+}
+
 public struct CapacityItem: Sendable, Hashable {
     public let recordID: String
     public let providerID: String
@@ -247,6 +265,9 @@ public struct CapacityItem: Sendable, Hashable {
     public let quality: String
     public let stale: Bool
     public let revision: Int64
+    public let sourceID: String
+    public let quotaWindow: String
+    public let appliesTo: QuotaAppliesTo
     public let providerDescriptor: ProviderDisplayDescriptor
 
     public init(
@@ -255,6 +276,9 @@ public struct CapacityItem: Sendable, Hashable {
         remainingRatio: Double?, resetsAt: String?, periodStart: String?, periodEnd: String?,
         observedAt: String, freshnessSeconds: Int64, state: String, quality: String,
         stale: Bool, revision: Int64,
+        sourceID: String = "current.quota",
+        quotaWindow: String = "subscription",
+        appliesTo: QuotaAppliesTo = .conservativeAccount,
         providerDescriptor: ProviderDisplayDescriptor? = nil
     ) {
         self.recordID = recordID
@@ -275,6 +299,9 @@ public struct CapacityItem: Sendable, Hashable {
         self.quality = quality
         self.stale = stale
         self.revision = revision
+        self.sourceID = sourceID
+        self.quotaWindow = quotaWindow
+        self.appliesTo = appliesTo
         self.providerDescriptor = providerDescriptor ?? ProviderCatalog.descriptor(for: providerID)
     }
 }
@@ -313,6 +340,9 @@ public struct QuotaHistoryItem: Identifiable, Sendable, Hashable {
     public let resetsAt: String?
     public let state: String
     public let stale: Bool
+    public let sourceID: String
+    public let quotaWindow: String
+    public let appliesTo: QuotaAppliesTo
     public var id: Int64 { snapshotID }
     public var seriesID: String {
         [providerID, accountRef, recordID, quotaName].joined(separator: "|")
@@ -322,7 +352,10 @@ public struct QuotaHistoryItem: Identifiable, Sendable, Hashable {
         snapshotID: Int64, recordID: String, observedAt: String,
         providerID: String, accountRef: String, quotaName: String,
         remainingRatio: Double?, resetsAt: String? = nil,
-        state: String, stale: Bool
+        state: String, stale: Bool,
+        sourceID: String = "current.quota",
+        quotaWindow: String = "subscription",
+        appliesTo: QuotaAppliesTo = .conservativeAccount
     ) {
         self.snapshotID = snapshotID
         self.recordID = recordID
@@ -334,6 +367,9 @@ public struct QuotaHistoryItem: Identifiable, Sendable, Hashable {
         self.resetsAt = resetsAt
         self.state = state
         self.stale = stale
+        self.sourceID = sourceID
+        self.quotaWindow = quotaWindow
+        self.appliesTo = appliesTo
     }
 }
 

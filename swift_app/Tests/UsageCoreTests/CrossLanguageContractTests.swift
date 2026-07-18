@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Python and Swift ledger contract")
 struct CrossLanguageContractTests {
-    @Test("Python-produced version four facts are read identically by Swift")
+    @Test("Python-produced version five quota scope is read identically by Swift")
     func pythonLedgerMatchesSwiftFacts() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -52,6 +52,11 @@ struct CrossLanguageContractTests {
         #expect(quota.recordID == expectedQuota["recordId"] as? String)
         #expect(quota.remainingRatio == expectedQuota["remainingRatio"] as? Double)
         #expect(quota.resetsAt == expectedQuota["resetsAt"] as? String)
+        #expect(quota.sourceID == expectedQuota["sourceId"] as? String)
+        #expect(quota.quotaWindow == expectedQuota["quotaWindow"] as? String)
+        let expectedScope = try #require(expectedQuota["appliesTo"] as? [String: Any])
+        #expect(quota.appliesTo.kind.rawValue == expectedScope["kind"] as? String)
+        #expect(quota.appliesTo.modelIDs == expectedScope["modelIds"] as? [String])
         #expect(provider.providerID == expectedProvider["providerId"] as? String)
         #expect(provider.familyID == expectedProvider["familyId"] as? String)
         #expect(health.sources.first?.providerID == expectedSource["providerId"] as? String)

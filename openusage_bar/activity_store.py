@@ -47,7 +47,7 @@ from .activity_schema import (
     SCHEMA_VERSION,
 )
 
-def _json(payload: dict[str, Any]) -> str:
+def _json(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
@@ -79,6 +79,7 @@ class ActivityStore:
                     allow_legacy_source_columns=version < SCHEMA_VERSION,
                 )
                 self._migrate_source_provenance()
+                self._migrate_quota_scope()
                 self._migrate_public_revisions(version)
                 try:
                     self._initialize_schema()
@@ -236,6 +237,49 @@ class ActivityStore:
                     _hash(payload_json),
                 )
 
+    def _migrate_quota_scope(self) -> None:
+        for table in ("quota_state", "quota_snapshots"):
+            exists = self._connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()
+            if exists is None:
+                continue
+            columns = {
+                str(row[1]) for row in self._connection.execute(
+                    f"PRAGMA table_info({table})"
+                )
+            }
+            additions = (
+                ("source_id", "TEXT NOT NULL DEFAULT 'current.quota'"),
+                ("quota_window", "TEXT NOT NULL DEFAULT 'subscription'"),
+                ("applies_to_kind", "TEXT NOT NULL DEFAULT 'account'"),
+                ("applies_to_model_ids", "TEXT NOT NULL DEFAULT '[]'"),
+            )
+            with self._connection:
+                for name, declaration in additions:
+                    if name not in columns:
+                        self._connection.execute(
+                            f"ALTER TABLE {table} ADD COLUMN {name} {declaration}"
+                        )
+                if table == "quota_state":
+                    for row in self._connection.execute(
+                        "SELECT * FROM quota_state"
+                    ).fetchall():
+                        values = dict(row)
+                        values["stale"] = bool(values["stale"])
+                        values["applies_to_model_ids"] = tuple(
+                            json.loads(str(values["applies_to_model_ids"]))
+                        )
+                        observation = QuotaObservation(**{
+                            key: value for key, value in values.items()
+                            if key not in {"revision", "payload_hash"}
+                        })
+                        _, payload_hash = self._quota_semantic_payload(observation)
+                        self._connection.execute(
+                            "UPDATE quota_state SET payload_hash=? WHERE record_id=?",
+                            (payload_hash, observation.record_id),
+                        )
+
     def _validate_required_indexes(self) -> None:
         for index_name, (table, expected_unique, expected_terms) in _EXPECTED_INDEXES.items():
             indexes = {
@@ -288,12 +332,20 @@ class ActivityStore:
             account_ref TEXT NOT NULL DEFAULT '', quota_name TEXT NOT NULL, unit TEXT NOT NULL, used TEXT,
             quota_limit TEXT, remaining TEXT, remaining_ratio REAL, resets_at TEXT,
             period_start TEXT, period_end TEXT, state TEXT NOT NULL, quality TEXT NOT NULL,
-            stale INTEGER NOT NULL, revision INTEGER NOT NULL, payload_hash TEXT NOT NULL);
+            stale INTEGER NOT NULL, revision INTEGER NOT NULL, payload_hash TEXT NOT NULL,
+            source_id TEXT NOT NULL DEFAULT 'current.quota',
+            quota_window TEXT NOT NULL DEFAULT 'subscription',
+            applies_to_kind TEXT NOT NULL DEFAULT 'account',
+            applies_to_model_ids TEXT NOT NULL DEFAULT '[]');
         CREATE TABLE IF NOT EXISTS quota_snapshots(
             snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL,
             observed_at TEXT NOT NULL, provider_id TEXT NOT NULL,
             account_ref TEXT NOT NULL DEFAULT '', quota_name TEXT NOT NULL,
-            payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL);
+            payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL,
+            source_id TEXT NOT NULL DEFAULT 'current.quota',
+            quota_window TEXT NOT NULL DEFAULT 'subscription',
+            applies_to_kind TEXT NOT NULL DEFAULT 'account',
+            applies_to_model_ids TEXT NOT NULL DEFAULT '[]');
         CREATE INDEX IF NOT EXISTS quota_snapshot_record_time
             ON quota_snapshots(record_id, observed_at DESC);
         CREATE INDEX IF NOT EXISTS quota_snapshot_provider_account_time
@@ -1265,7 +1317,7 @@ class ActivityStore:
                 ).fetchone()
                 if duplicate is None:
                     inserted = self._connection.execute(
-                        "INSERT INTO quota_snapshots(record_id,observed_at,provider_id,account_ref,quota_name,payload_json,payload_hash) VALUES(?,?,?,?,?,?,?)",
+                        "INSERT INTO quota_snapshots(record_id,observed_at,provider_id,account_ref,quota_name,payload_json,payload_hash,source_id,quota_window,applies_to_kind,applies_to_model_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             observation.record_id,
                             observation.observed_at,
@@ -1274,6 +1326,10 @@ class ActivityStore:
                             observation.quota_name,
                             snapshot_json,
                             snapshot_hash,
+                            observation.source_id,
+                            observation.quota_window,
+                            observation.applies_to_kind,
+                            _json(list(observation.applies_to_model_ids)),
                         ),
                     )
                     self._append_quota_snapshot_change_locked(
@@ -1299,6 +1355,9 @@ class ActivityStore:
                     should_snapshot = (current_time - previous_time).total_seconds() >= 3600
 
             values = asdict(observation)
+            values["applies_to_model_ids"] = _json(
+                list(observation.applies_to_model_ids)
+            )
             columns = list(values) + ["revision", "payload_hash"]
             self._connection.execute(
                 f"INSERT OR REPLACE INTO quota_state({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
@@ -1306,9 +1365,12 @@ class ActivityStore:
             )
             if should_snapshot:
                 inserted = self._connection.execute(
-                    "INSERT INTO quota_snapshots(record_id,observed_at,provider_id,account_ref,quota_name,payload_json,payload_hash) VALUES(?,?,?,?,?,?,?)",
+                    "INSERT INTO quota_snapshots(record_id,observed_at,provider_id,account_ref,quota_name,payload_json,payload_hash,source_id,quota_window,applies_to_kind,applies_to_model_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     (observation.record_id, observation.observed_at, observation.provider_id,
-                     observation.account_ref, observation.quota_name, snapshot_json, snapshot_hash),
+                     observation.account_ref, observation.quota_name, snapshot_json, snapshot_hash,
+                     observation.source_id, observation.quota_window,
+                     observation.applies_to_kind,
+                     _json(list(observation.applies_to_model_ids))),
                 )
                 self._append_quota_snapshot_change_locked(
                     int(inserted.lastrowid),
@@ -1327,6 +1389,9 @@ class ActivityStore:
     def _row_to_quota_state(row: sqlite3.Row) -> QuotaState:
         values = dict(row)
         values["stale"] = bool(values["stale"])
+        values["applies_to_model_ids"] = tuple(
+            json.loads(str(values["applies_to_model_ids"]))
+        )
         return QuotaState(**values)
 
     def _quota_state_by_id_locked(self, record_id: str) -> QuotaState:
@@ -1360,7 +1425,15 @@ class ActivityStore:
                 "SELECT * FROM quota_snapshots WHERE record_id=? ORDER BY observed_at,snapshot_id",
                 (record_id,),
             ).fetchall()
-            return [QuotaSnapshot(**dict(row)) for row in rows]
+            return [self._row_to_quota_snapshot(row) for row in rows]
+
+    @staticmethod
+    def _row_to_quota_snapshot(row: sqlite3.Row) -> QuotaSnapshot:
+        values = dict(row)
+        values["applies_to_model_ids"] = tuple(
+            json.loads(str(values["applies_to_model_ids"]))
+        )
+        return QuotaSnapshot(**values)
 
     def snapshot_quota_history(
         self,
@@ -1404,7 +1477,7 @@ class ActivityStore:
                 [*arguments, limit],
             ).fetchall()
             return QuotaHistorySnapshot(
-                tuple(QuotaSnapshot(**dict(row)) for row in rows),
+                tuple(self._row_to_quota_snapshot(row) for row in rows),
                 self._current_change_seq_locked(),
             )
 

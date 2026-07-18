@@ -36,6 +36,22 @@ def envelope(properties: dict[str, object], required: list[str]) -> dict[str, ob
 
 
 def render_schema() -> dict[str, object]:
+    applies_to = closed(
+        {
+            "kind": {"enum": ["subscription", "account", "model"]},
+            "modelIds": {
+                "type": "array", "items": {"type": "string"}, "uniqueItems": True,
+            },
+        },
+        ["kind", "modelIds"],
+    )
+    applies_to["allOf"] = [
+        {
+            "if": {"properties": {"kind": {"const": "model"}}, "required": ["kind"]},
+            "then": {"properties": {"modelIds": {"minItems": 1}}},
+            "else": {"properties": {"modelIds": {"maxItems": 0}}},
+        }
+    ]
     quota = closed(
         {
             "recordId": {"type": "string"},
@@ -56,6 +72,9 @@ def render_schema() -> dict[str, object]:
             "quality": {"type": "string"},
             "stale": {"type": "boolean"},
             "revision": {"type": "integer", "minimum": 1},
+            "sourceId": {"type": "string"},
+            "quotaWindow": {"type": "string"},
+            "appliesTo": applies_to,
             "estimatedCostPerMillionTokens": nullable("string"),
             "constraints": {"type": "array", "items": {"type": "string"}},
         },
@@ -63,7 +82,8 @@ def render_schema() -> dict[str, object]:
             "recordId", "providerId", "accountRef", "quotaName", "unit",
             "used", "quotaLimit", "remaining", "remainingRatio", "resetsAt",
             "periodStart", "periodEnd", "observedAt", "freshnessSeconds",
-            "state", "quality", "stale", "revision",
+            "state", "quality", "stale", "revision", "sourceId",
+            "quotaWindow", "appliesTo",
             "estimatedCostPerMillionTokens", "constraints",
         ],
     )

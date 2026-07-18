@@ -105,6 +105,58 @@
                   "null"
                 ]
               },
+              "appliesTo": {
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "else": {
+                      "properties": {
+                        "modelIds": {
+                          "maxItems": 0
+                        }
+                      }
+                    },
+                    "if": {
+                      "properties": {
+                        "kind": {
+                          "const": "model"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "modelIds": {
+                          "minItems": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "subscription",
+                      "account",
+                      "model"
+                    ]
+                  },
+                  "modelIds": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "kind",
+                  "modelIds"
+                ],
+                "type": "object"
+              },
               "constraints": {
                 "items": {
                   "type": "string"
@@ -152,6 +204,9 @@
               "quotaName": {
                 "type": "string"
               },
+              "quotaWindow": {
+                "type": "string"
+              },
               "recordId": {
                 "type": "string"
               },
@@ -176,6 +231,9 @@
               "revision": {
                 "minimum": 1,
                 "type": "integer"
+              },
+              "sourceId": {
+                "type": "string"
               },
               "stale": {
                 "type": "boolean"
@@ -212,6 +270,9 @@
               "quality",
               "stale",
               "revision",
+              "sourceId",
+              "quotaWindow",
+              "appliesTo",
               "estimatedCostPerMillionTokens",
               "constraints"
             ],

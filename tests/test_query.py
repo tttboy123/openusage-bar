@@ -164,6 +164,19 @@ class QueryServiceTests(unittest.TestCase):
         self.assertTrue(row.stale)
         self.assertEqual(row.freshness_seconds, 3600)
 
+    def test_capacity_and_snapshot_publish_conservative_quota_scope(self):
+        self.store.record_quota(quota("codex.weekly", "codex", 0.8))
+
+        capacity = to_wire(self.query.capacity())
+        snapshot = to_wire(self.query.resource_snapshot(date(2026, 7, 14)))
+
+        for row in (capacity["providers"][0], snapshot["quotaWindows"][0]):
+            self.assertEqual(row["sourceId"], "current.quota")
+            self.assertEqual(row["quotaWindow"], "subscription")
+            self.assertEqual(
+                row["appliesTo"], {"kind": "account", "modelIds": []}
+            )
+
     def test_activity_preserves_zero_missing_token_fields_cost_and_coverage(self):
         row = usage(total_tokens=0)
         row = DailyUsageRow(**(row.__dict__ | {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cost_amount": None}))

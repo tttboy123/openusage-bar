@@ -34,6 +34,9 @@ final class SQLiteFixture {
         if userVersion >= 4 {
             try execute(handle, Self.publicRevisionSchema)
         }
+        if userVersion >= 5 {
+            try execute(handle, Self.quotaScopeSchema)
+        }
         try execute(handle, "PRAGMA user_version=\(userVersion)")
         try execute(handle, malformedToken ? Self.malformedRows : Self.rows)
         if userVersion >= 2 {
@@ -126,6 +129,25 @@ final class SQLiteFixture {
       ADD COLUMN payload_hash TEXT NOT NULL DEFAULT '';
     """
 
+    private static let quotaScopeSchema = """
+    ALTER TABLE quota_state
+      ADD COLUMN source_id TEXT NOT NULL DEFAULT 'current.quota';
+    ALTER TABLE quota_state
+      ADD COLUMN quota_window TEXT NOT NULL DEFAULT 'subscription';
+    ALTER TABLE quota_state
+      ADD COLUMN applies_to_kind TEXT NOT NULL DEFAULT 'account';
+    ALTER TABLE quota_state
+      ADD COLUMN applies_to_model_ids TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE quota_snapshots
+      ADD COLUMN source_id TEXT NOT NULL DEFAULT 'current.quota';
+    ALTER TABLE quota_snapshots
+      ADD COLUMN quota_window TEXT NOT NULL DEFAULT 'subscription';
+    ALTER TABLE quota_snapshots
+      ADD COLUMN applies_to_kind TEXT NOT NULL DEFAULT 'account';
+    ALTER TABLE quota_snapshots
+      ADD COLUMN applies_to_model_ids TEXT NOT NULL DEFAULT '[]';
+    """
+
     private static let costRows = """
     INSERT INTO daily_costs VALUES
       ('2026-07-01','openai','','actual','USD','0','provider_reported','direct','2026-07-02T00:05:00Z',1,'cost-zero'),
@@ -149,7 +171,11 @@ final class SQLiteFixture {
       ('2026-07-02','codex','','2026-07-02T23:59:00Z'),
       ('2026-07-03','codex','','2026-07-03T23:59:00Z'),
       ('2026-06-01','stepfun','','2026-06-01T23:59:00Z');
-    INSERT INTO quota_state VALUES
+    INSERT INTO quota_state(
+      record_id,observed_at,provider_id,account_ref,quota_name,unit,used,quota_limit,
+      remaining,remaining_ratio,resets_at,period_start,period_end,state,quality,stale,
+      revision,payload_hash
+    ) VALUES
       ('minimax.five-hour','2026-07-14T08:00:00Z','minimax','','5-hour','requests',
        '82','100','18',0.18,'2026-07-14T10:00:00Z','2026-07-14T05:00:00Z',
        '2026-07-14T10:00:00Z','ok','live',0,3,'quota-low'),

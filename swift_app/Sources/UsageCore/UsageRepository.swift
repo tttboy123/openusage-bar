@@ -329,6 +329,11 @@ public final class UsageRepository {
         else { throw RepositoryError.invalidRequest }
 
         return try withReadTransaction { database in
+            let version = try scalarInt64(database, sql: "PRAGMA user_version")
+            let scopeColumns = version >= 5
+                ? ",source_id,quota_window,applies_to_kind,applies_to_model_ids"
+                : ",'current.quota' AS source_id,'subscription' AS quota_window,"
+                    + "'account' AS applies_to_kind,'[]' AS applies_to_model_ids"
             var clauses: [String] = []
             var bindings: [String] = []
             if let providerID {
@@ -342,7 +347,7 @@ public final class UsageRepository {
             let whereClause = clauses.isEmpty ? "" : " WHERE " + clauses.joined(separator: " AND ")
             let sql = """
                 SELECT * FROM (
-                  SELECT snapshot_id,record_id,observed_at,provider_id,account_ref,quota_name,payload_json
+                  SELECT snapshot_id,record_id,observed_at,provider_id,account_ref,quota_name,payload_json\(scopeColumns)
                   FROM quota_snapshots\(whereClause)
                   ORDER BY observed_at DESC,snapshot_id DESC LIMIT \(limit)
                 ) ORDER BY observed_at,snapshot_id
@@ -363,7 +368,13 @@ public final class UsageRepository {
                             remainingRatio: payload.remainingRatio,
                             resetsAt: payload.resetsAt,
                             state: payload.state,
-                            stale: payload.stale
+                            stale: payload.stale,
+                            sourceID: try stableQuotaIdentifier(requiredText(statement, 7)),
+                            quotaWindow: try stableQuotaIdentifier(requiredText(statement, 8)),
+                            appliesTo: try quotaAppliesTo(
+                                kind: requiredText(statement, 9),
+                                modelIDsJSON: requiredText(statement, 10)
+                            )
                         ))
                     case SQLITE_DONE: return result
                     default: throw RepositoryError.corruptData
@@ -395,13 +406,18 @@ public final class UsageRepository {
         }
 
         return try withReadTransaction { database in
+            let version = try scalarInt64(database, sql: "PRAGMA user_version")
+            let scopeColumns = version >= 5
+                ? ",source_id,quota_window,applies_to_kind,applies_to_model_ids"
+                : ",'current.quota' AS source_id,'subscription' AS quota_window,"
+                    + "'account' AS applies_to_kind,'[]' AS applies_to_model_ids"
             let orderedProviders = providerIDs.sorted()
             let bindings = orderedProviders + [
                 Self.canonicalTimestamp(start), Self.canonicalTimestamp(end),
             ]
             let sql = """
                 WITH ranked AS (
-                  SELECT snapshot_id,record_id,observed_at,provider_id,account_ref,quota_name,payload_json,
+                  SELECT snapshot_id,record_id,observed_at,provider_id,account_ref,quota_name,payload_json\(scopeColumns),
                     ROW_NUMBER() OVER (
                       PARTITION BY provider_id,account_ref,record_id,quota_name
                       ORDER BY observed_at DESC,snapshot_id DESC
@@ -410,7 +426,8 @@ public final class UsageRepository {
                   WHERE provider_id IN (\(Self.placeholders(orderedProviders.count)))
                     AND observed_at>=? AND observed_at<?
                 )
-                SELECT snapshot_id,record_id,observed_at,provider_id,account_ref,quota_name,payload_json,series_rank
+                SELECT snapshot_id,record_id,observed_at,provider_id,account_ref,quota_name,payload_json,
+                  source_id,quota_window,applies_to_kind,applies_to_model_ids,series_rank
                 FROM ranked WHERE series_rank<=\(perSeriesLimit + 1)
                 ORDER BY observed_at,snapshot_id
                 """
@@ -420,7 +437,7 @@ public final class UsageRepository {
                 while true {
                     switch sqlite3_step(statement) {
                     case SQLITE_ROW:
-                        let rank = try requiredInt64(statement, 7)
+                        let rank = try requiredInt64(statement, 11)
                         if rank > perSeriesLimit {
                             truncatedSeriesIDs.insert([
                                 try requiredText(statement, 3),
@@ -441,7 +458,13 @@ public final class UsageRepository {
                             remainingRatio: payload.remainingRatio,
                             resetsAt: payload.resetsAt,
                             state: payload.state,
-                            stale: payload.stale
+                            stale: payload.stale,
+                            sourceID: try stableQuotaIdentifier(requiredText(statement, 7)),
+                            quotaWindow: try stableQuotaIdentifier(requiredText(statement, 8)),
+                            appliesTo: try quotaAppliesTo(
+                                kind: requiredText(statement, 9),
+                                modelIDsJSON: requiredText(statement, 10)
+                            )
                         ))
                     case SQLITE_DONE:
                         return QuotaHistoryResult(
@@ -489,9 +512,28 @@ public final class UsageRepository {
         return (remainingRatio, resetsAt, state, stale)
     }
 
+    private func quotaAppliesTo(
+        kind: String, modelIDsJSON: String
+    ) throws -> QuotaAppliesTo {
+        guard let scopeKind = QuotaScopeKind(rawValue: kind),
+              let data = modelIDsJSON.data(using: .utf8),
+              let modelIDs = try JSONSerialization.jsonObject(with: data) as? [String],
+              modelIDs.allSatisfy(Self.isStableID),
+              modelIDs == modelIDs.sorted(),
+              Set(modelIDs).count == modelIDs.count,
+              (scopeKind == .model ? !modelIDs.isEmpty : modelIDs.isEmpty)
+        else { throw RepositoryError.corruptData }
+        return QuotaAppliesTo(kind: scopeKind, modelIDs: modelIDs)
+    }
+
+    private func stableQuotaIdentifier(_ value: String) throws -> String {
+        guard Self.isStableID(value) else { throw RepositoryError.corruptData }
+        return value
+    }
+
     private func validateSchema(_ database: OpaquePointer) throws {
         let version = try scalarInt64(database, sql: "PRAGMA user_version")
-        guard (1...4).contains(version) else { throw RepositoryError.incompatibleSchema }
+        guard (1...5).contains(version) else { throw RepositoryError.incompatibleSchema }
         let expected = GeneratedActivitySchema.expectedTables(version: version)
         for (table, signature) in expected {
             let actual = try queryColumnSignature(database, table: table)
@@ -766,6 +808,7 @@ public final class UsageRepository {
     }
 
     private func queryCapacity(_ database: OpaquePointer, limit: Int?) throws -> [CapacityItem] {
+        let version = try scalarInt64(database, sql: "PRAGMA user_version")
         let descriptors = Dictionary(
             uniqueKeysWithValues: try queryProviderInstances(database).map { ($0.providerID, $0.descriptor) }
         )
@@ -797,6 +840,15 @@ public final class UsageRepository {
                         quality: try requiredText(statement, 14),
                         stale: try requiredBool(statement, 15),
                         revision: try requiredInt64(statement, 16),
+                        sourceID: version >= 5
+                            ? try stableQuotaIdentifier(requiredText(statement, 18)) : "current.quota",
+                        quotaWindow: version >= 5
+                            ? try stableQuotaIdentifier(requiredText(statement, 19)) : "subscription",
+                        appliesTo: version >= 5
+                            ? try quotaAppliesTo(
+                                kind: requiredText(statement, 20),
+                                modelIDsJSON: requiredText(statement, 21)
+                            ) : .conservativeAccount,
                         providerDescriptor: descriptors[try requiredText(statement, 2)]
                     ))
                 case SQLITE_DONE: return rows

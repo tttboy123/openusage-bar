@@ -585,6 +585,10 @@ class ActivityCollector:
             state=state_from_card(card.status, card.stale).value,
             quality="direct",
             stale=card.stale,
+            source_id="current.quota",
+            quota_window="subscription",
+            applies_to_kind="account",
+            applies_to_model_ids=(),
         )
 
     @staticmethod
