@@ -378,7 +378,7 @@ struct ProviderConnectionSummaryStore {
             throw ProviderConnectionSummaryError.invalidConfiguration
         }
         let envelope = try JSONDecoder().decode(Envelope.self, from: data)
-        guard envelope.version == 1 else {
+        guard [1, 2].contains(envelope.version) else {
             throw ProviderConnectionSummaryError.invalidConfiguration
         }
         return try envelope.providers.map { row in
@@ -390,7 +390,7 @@ struct ProviderConnectionSummaryStore {
             case "step_plan": "step_plan"
             case "minimax": "minimax"
             case "openai_organization": "openai"
-            case "daily_usage_feed": row.familyID ?? row.providerID
+            case "daily_usage_feed", "daily_cost_feed": row.familyID ?? row.providerID
             default: row.providerID
             }
             guard Self.isStableID(familyID) else {

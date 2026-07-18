@@ -189,17 +189,18 @@ struct ActivityAppLogicTests {
         let url = directory.appendingPathComponent("providers.json")
         try Data(#"""
         {
-          "version": 1,
+          "version": 2,
           "providers": [
             {"provider_id":"step-plan-main","name":"Main","type":"step_plan","site":"china"},
-            {"provider_id":"feed-zai","name":"ZAI Feed","type":"daily_usage_feed","family_id":"zai","endpoint":"https://example.com"}
+            {"provider_id":"feed-zai","name":"ZAI Feed","type":"daily_usage_feed","family_id":"zai","endpoint":"https://example.com"},
+            {"provider_id":"cost-openai","name":"OpenAI Cost","type":"daily_cost_feed","family_id":"openai","endpoint":"https://example.com"}
           ]
         }
         """#.utf8).write(to: url)
 
         let connections = try ProviderConnectionSummaryStore(url: url).load()
 
-        #expect(connections.map(\.providerID) == ["step-plan-main", "feed-zai"])
+        #expect(connections.map(\.providerID) == ["step-plan-main", "feed-zai", "cost-openai"])
         #expect(connections[0].familyID == "step_plan")
         #expect(connections[0].site == "china")
         #expect(connections[0].isStepPlan)
@@ -208,6 +209,8 @@ struct ActivityAppLogicTests {
         #expect(!connections[1].isStepPlan)
         #expect(connections[1].isManaged)
         #expect(connections[1].credentialLabel == "Replacement API key")
+        #expect(connections[2].familyID == "openai")
+        #expect(connections[2].kind == "daily_cost_feed")
     }
 
     @Test("Stale background loads cannot publish over a newer filter")

@@ -97,6 +97,7 @@ class DailyUsageFeedImporter:
         monotonic: Callable[[], float] | None = None,
     ) -> None:
         self.config = config
+        self.account_ref = config.account_ref
         self.keychain = keychain
         self.client = client
         self.clock = clock or (lambda: datetime.now(timezone.utc))

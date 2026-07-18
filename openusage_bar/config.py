@@ -76,6 +76,36 @@ class DailyUsageFeedConfig:
 
 
 @dataclass(frozen=True)
+class DailyCostFeedConfig:
+    provider_id: str
+    name: str
+    family_id: str
+    endpoint: str
+    method: str
+    header_name: str
+    auth_prefix: str
+    items_path: str
+    date_path: str
+    amount_path: str
+    currency_path: str
+    timestamp_format: str = "date"
+    timezone: str = "UTC"
+    pagination: str = "none"
+    page_parameter: str = "page"
+    limit_parameter: str = "limit"
+    cursor_parameter: str = "cursor"
+    next_cursor_path: str | None = None
+    page_size: int = 100
+    since_parameter: str | None = None
+    until_parameter: str | None = None
+    request_body: dict[str, Any] | None = None
+    cost_kind: str = "actual"
+    basis: str = "provider_reported"
+    type: str = "daily_cost_feed"
+    account_ref: str = ""
+
+
+@dataclass(frozen=True)
 class GenericProviderConfig:
     provider_id: str
     name: str
@@ -88,6 +118,10 @@ class GenericProviderConfig:
     detail_path: str | None = None
     type: str = "generic"
     account_ref: str = ""
+    family_id: str = ""
+    quota_window: str | None = "subscription"
+    quota_name: str = "Subscription"
+    unit: str = "percent"
 
 
 ProviderConfig = (
@@ -95,6 +129,7 @@ ProviderConfig = (
     | StepPlanConfig
     | OpenAIOrganizationConfig
     | DailyUsageFeedConfig
+    | DailyCostFeedConfig
     | GenericProviderConfig
 )
 
@@ -132,6 +167,22 @@ def _validate_config(config: ProviderConfig) -> None:
         "international",
     }:
         raise ValueError("StepFun site must be china or international")
+    if isinstance(config, GenericProviderConfig):
+        if config.family_id and ID_PATTERN.fullmatch(config.family_id) is None:
+            raise ValueError("Generic quota family ID is invalid")
+        if config.quota_window is not None and (
+            not config.quota_window
+            or ID_PATTERN.fullmatch(config.quota_window) is None
+        ):
+            raise ValueError("Generic quota window is invalid")
+        if not config.quota_name.strip() or len(config.quota_name) > 128:
+            raise ValueError("Generic quota name is invalid")
+        if config.unit not in {"percent", "credits", "tokens", "currency"}:
+            raise ValueError("Generic quota unit is invalid")
+        if config.remaining_percent_path and config.unit != "percent":
+            raise ValueError("Remaining percent mapping requires percent unit")
+        if config.reset_path and config.quota_window is None:
+            raise ValueError("Reset mapping requires a declared quota window")
     if isinstance(config, DailyUsageFeedConfig):
         if not ID_PATTERN.fullmatch(config.family_id):
             raise ValueError("Daily feed family ID is invalid")
@@ -200,6 +251,58 @@ def _validate_config(config: ProviderConfig) -> None:
         if config.request_body is not None and not isinstance(config.request_body, dict):
             raise ValueError("Daily feed request body must be an object")
         _validate_no_secrets(config.request_body)
+    if isinstance(config, DailyCostFeedConfig):
+        if not ID_PATTERN.fullmatch(config.family_id):
+            raise ValueError("Daily cost feed family ID is invalid")
+        endpoint = urllib.parse.urlsplit(config.endpoint)
+        if (
+            endpoint.scheme.lower() != "https"
+            or not endpoint.hostname
+            or endpoint.username is not None
+            or endpoint.password is not None
+            or endpoint.fragment
+        ):
+            raise ValueError("Daily cost feed endpoint must be credential-free HTTPS")
+        if config.method not in {"GET", "POST"}:
+            raise ValueError("Daily cost feed method must be GET or POST")
+        if not _HEADER_NAME.fullmatch(config.header_name):
+            raise ValueError("Daily cost feed header name is invalid")
+        if config.header_name.casefold() in {"cookie", "set-cookie", "proxy-authorization"}:
+            raise ValueError("Daily cost feed cookie or proxy credentials are not supported")
+        paths = (
+            config.items_path, config.date_path, config.amount_path,
+            config.currency_path, config.next_cursor_path,
+        )
+        if any(path is not None and _DOTTED_PATH.fullmatch(path) is None for path in paths):
+            raise ValueError("Daily cost feed field path is invalid")
+        if config.timestamp_format not in {
+            "date", "iso8601", "unix_seconds", "unix_milliseconds"
+        }:
+            raise ValueError("Daily cost feed timestamp format is invalid")
+        if config.pagination not in {"none", "page", "offset", "cursor"}:
+            raise ValueError("Daily cost feed pagination is invalid")
+        if config.pagination == "cursor" and not config.next_cursor_path:
+            raise ValueError("Cursor pagination requires a next cursor path")
+        if not config.since_parameter or not config.until_parameter:
+            raise ValueError("Daily cost feed must declare bounded date parameters")
+        if isinstance(config.page_size, bool) or not 1 <= config.page_size <= 1000:
+            raise ValueError("Daily cost feed page size must be between 1 and 1000")
+        parameters = (
+            config.page_parameter, config.limit_parameter, config.cursor_parameter,
+            config.since_parameter, config.until_parameter,
+        )
+        if any(
+            parameter is not None and _PARAMETER_NAME.fullmatch(parameter) is None
+            for parameter in parameters
+        ):
+            raise ValueError("Daily cost feed parameter name is invalid")
+        if config.cost_kind not in {"actual", "estimated"}:
+            raise ValueError("Daily cost feed cost kind is invalid")
+        if config.basis not in {"provider_reported", "invoice_reported"}:
+            raise ValueError("Daily cost feed basis is invalid")
+        if config.request_body is not None and not isinstance(config.request_body, dict):
+            raise ValueError("Daily cost feed request body must be an object")
+        _validate_no_secrets(config.request_body)
 
 
 def validate_provider_config(config: ProviderConfig) -> None:
@@ -217,7 +320,7 @@ class ProviderConfigStore:
             raise ValueError("Provider IDs must be unique")
         for config in configs:
             validate_provider_config(config)
-        payload = {"version": 1, "providers": [asdict(config) for config in configs]}
+        payload = {"version": 2, "providers": [asdict(config) for config in configs]}
         _validate_no_secrets(payload)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix="providers.", suffix=".json", dir=self.path.parent)
@@ -236,7 +339,7 @@ class ProviderConfigStore:
             return []
         payload = json.loads(self.path.read_text(encoding="utf-8"))
         _validate_no_secrets(payload)
-        if not isinstance(payload, dict) or payload.get("version") != 1:
+        if not isinstance(payload, dict) or payload.get("version") not in {1, 2}:
             raise ValueError("Unsupported provider configuration version")
         raw_configs = payload.get("providers")
         if not isinstance(raw_configs, list):
@@ -254,6 +357,8 @@ class ProviderConfigStore:
                 config = OpenAIOrganizationConfig(**raw)
             elif kind == "daily_usage_feed":
                 config = DailyUsageFeedConfig(**raw)
+            elif kind == "daily_cost_feed":
+                config = DailyCostFeedConfig(**raw)
             elif kind == "generic":
                 config = GenericProviderConfig(**raw)
             else:

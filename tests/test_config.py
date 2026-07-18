@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from openusage_bar.config import (
+    DailyCostFeedConfig,
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
@@ -37,6 +38,79 @@ def daily_feed_config(**overrides):
 
 
 class ProviderConfigTests(unittest.TestCase):
+    def test_v1_custom_feeds_migrate_without_changing_identity_or_mappings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "providers.json"
+            legacy = {
+                "version": 1,
+                "providers": [
+                    {
+                        "type": "generic", "provider_id": "quota-work",
+                        "name": "Quota Work", "endpoint": "https://api.example.com/quota",
+                        "header_name": "Authorization", "auth_prefix": "Bearer",
+                        "primary_path": "data.remaining",
+                        "remaining_percent_path": "data.percent",
+                        "reset_path": "data.reset", "detail_path": None,
+                    },
+                    {
+                        "type": "daily_usage_feed", "provider_id": "usage-work",
+                        "name": "Usage Work", "family_id": "zai",
+                        "endpoint": "https://api.example.com/usage", "method": "GET",
+                        "header_name": "Authorization", "auth_prefix": "Bearer",
+                        "items_path": "data.items", "date_path": "day",
+                        "model_path": "model", "input_tokens_path": "input",
+                        "output_tokens_path": "output", "total_tokens_path": "total",
+                        "since_parameter": "from", "until_parameter": "to",
+                    },
+                ],
+            }
+            path.write_text(json.dumps(legacy))
+
+            loaded = ProviderConfigStore(path).load()
+            ProviderConfigStore(path).save(loaded)
+            reloaded = ProviderConfigStore(path).load()
+
+            self.assertEqual(reloaded, loaded)
+            self.assertEqual(json.loads(path.read_text())["version"], 2)
+            self.assertEqual(
+                [(item.provider_id, item.endpoint) for item in reloaded],
+                [("quota-work", "https://api.example.com/quota"),
+                 ("usage-work", "https://api.example.com/usage")],
+            )
+
+    def test_generic_quota_declaration_is_explicit_and_consistent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProviderConfigStore(Path(directory) / "providers.json")
+            base = GenericProviderConfig(
+                provider_id="quota-work", name="Quota Work", family_id="zai",
+                endpoint="https://api.example.com/quota",
+                header_name="Authorization", auth_prefix="Bearer",
+                primary_path="data.remaining", remaining_percent_path="data.percent",
+                reset_path="data.reset", quota_window="weekly",
+                quota_name="Weekly Plan", unit="percent",
+            )
+            store.save([base])
+            self.assertEqual(store.load(), [base])
+            for invalid in (
+                GenericProviderConfig(**(base.__dict__ | {"unit": "credits"})),
+                GenericProviderConfig(**(base.__dict__ | {"quota_window": None})),
+            ):
+                with self.assertRaises(ValueError):
+                    store.save([invalid])
+
+    def test_daily_cost_feed_requires_bounded_monetary_mappings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProviderConfigStore(Path(directory) / "providers.json")
+            config = DailyCostFeedConfig(
+                provider_id="cost-work", name="Cost Work", family_id="openai",
+                endpoint="https://api.example.com/costs", method="GET",
+                header_name="Authorization", auth_prefix="Bearer",
+                items_path="data.items", date_path="day",
+                amount_path="amount", currency_path="currency",
+                since_parameter="from", until_parameter="to",
+            )
+            store.save([config])
+            self.assertEqual(store.load(), [config])
     def test_daily_feed_round_trip_is_secret_free(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "providers.json"

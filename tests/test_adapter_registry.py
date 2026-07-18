@@ -8,12 +8,14 @@ from unittest.mock import Mock, patch
 from openusage_bar.aggregator import BoundedReadOnlyKeychain, build_headless_refresher
 from openusage_bar.codex_subscription import CodexSubscriptionAdapter
 from openusage_bar.config import (
+    DailyCostFeedConfig,
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
+from openusage_bar.cost_feed import DailyCostFeedCardAdapter, DailyCostFeedImporter
 from openusage_bar.daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
 from openusage_bar.daily_history import OpenUsageDailyImporter
 from openusage_bar.generic import GenericHTTPSAdapter
@@ -52,6 +54,14 @@ class AdapterRegistryTests(unittest.TestCase):
                 total_tokens_path="total", since_parameter="from",
                 until_parameter="to",
             ),
+            DailyCostFeedConfig(
+                provider_id="cost-work", name="Cost Work", family_id="openai",
+                endpoint="https://api.example.test/cost", method="GET",
+                header_name="Authorization", auth_prefix="Bearer",
+                items_path="data.items", date_path="day",
+                amount_path="amount", currency_path="currency",
+                since_parameter="from", until_parameter="to",
+            ),
             StepPlanConfig("step-work", "Step Plan", site="international"),
             GenericProviderConfig(
                 provider_id="generic-work", name="Generic Work",
@@ -71,6 +81,7 @@ class AdapterRegistryTests(unittest.TestCase):
             "openusage": ((OpenUsageAdapter,), (OpenUsageDailyImporter,), ()),
             "kiro_cli": ((KiroQuotaAdapter,), (), ()),
             "codex": ((CodexSubscriptionAdapter,), (), ()),
+            "cost-work": ((DailyCostFeedCardAdapter,), (), (DailyCostFeedImporter,)),
             "minimax-work": (
                 (MiniMaxCodingPlanAdapter,), (MiniMaxBillingImporter,), (),
             ),

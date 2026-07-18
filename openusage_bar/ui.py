@@ -8,6 +8,7 @@ from typing import Callable
 
 from .aggregator import Aggregator, CardCache
 from .config import (
+    DailyCostFeedConfig,
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
@@ -16,6 +17,7 @@ from .config import (
     StepPlanConfig,
     validate_provider_config,
 )
+from .cost_feed import DailyCostFeedCardAdapter
 from .daily_feed import DailyUsageFeedCardAdapter
 from .codex_subscription import CodexSubscriptionAdapter
 from .generic import GenericHTTPSAdapter
@@ -395,6 +397,14 @@ class ProviderController:
             # Account scope is an opaque ledger identity. The native editor does
             # not expose it, so a public-config edit must preserve the scope.
             config = replace(config, account_ref=existing.account_ref)
+            if isinstance(existing, GenericProviderConfig):
+                config = replace(
+                    config,
+                    family_id=existing.family_id,
+                    quota_window=existing.quota_window,
+                    quota_name=existing.quota_name,
+                    unit=existing.unit,
+                )
             if isinstance(existing, StepPlanConfig):
                 return self.update_step_plan(config, secret, session_cookie)
             if session_cookie.strip():
@@ -694,6 +704,8 @@ def _build_aggregator(store: ProviderConfigStore, keychain: MacOSKeychain) -> Ag
             adapters.append(StepPlanAdapter(config, keychain, step_plan_client, clock))
         elif isinstance(config, DailyUsageFeedConfig):
             adapters.append(DailyUsageFeedCardAdapter(config, keychain, clock))
+        elif isinstance(config, DailyCostFeedConfig):
+            adapters.append(DailyCostFeedCardAdapter(config, keychain, clock))
         elif isinstance(config, GenericProviderConfig):
             adapters.append(GenericHTTPSAdapter(config, keychain, client, clock))
     return Aggregator(adapters, CardCache(), clock)

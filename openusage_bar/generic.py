@@ -7,6 +7,8 @@ from .config import GenericProviderConfig
 from .keychain import MacOSKeychain
 from .models import Category, ProviderCard, ProviderStatus
 from .network import AuthenticationRequired, BoundedHTTPClient, NetworkError, RateLimited
+from .providers.contracts import QuotaFetchFailure, QuotaFetchSuccess
+from .providers.quota import percent_observation
 
 
 class MissingField(ValueError):
@@ -46,6 +48,7 @@ class GenericHTTPSAdapter:
         self.keychain = keychain
         self.client = client
         self.clock = clock
+        self.last_quota_result = QuotaFetchFailure("not_collected")
 
     @staticmethod
     def parse(config: GenericProviderConfig, payload: dict[str, Any], now: datetime) -> ProviderCard:
@@ -68,7 +71,7 @@ class GenericHTTPSAdapter:
             resets_at=resets_at,
             source="Direct API",
             refreshed_at=now,
-            family_id=config.provider_id,
+            family_id=config.family_id or config.provider_id,
             credential_source="api_key",
             source_kind="generic_https",
             account_ref=config.account_ref,
@@ -78,18 +81,37 @@ class GenericHTTPSAdapter:
         now = self.clock()
         secret = self.keychain.get(self.config.provider_id)
         if not secret:
+            self.last_quota_result = QuotaFetchFailure("auth_required")
             return self._error_card(ProviderStatus.AUTH, "Credential required", now)
         value = f"{self.config.auth_prefix} {secret}".strip()
         try:
             payload = self.client.get_json(
                 self.config.endpoint, {self.config.header_name: value}
             )
-            return self.parse(self.config, payload, now)
+            card = self.parse(self.config, payload, now)
+            if card.remaining_percent is not None and self.config.quota_window:
+                self.last_quota_result = QuotaFetchSuccess((percent_observation(
+                    provider_id=self.config.provider_id,
+                    account_ref=self.config.account_ref,
+                    source_id="generic.quota",
+                    quota_name=self.config.quota_name,
+                    quota_window=self.config.quota_window,
+                    remaining_percent=card.remaining_percent,
+                    resets_at=card.resets_at,
+                    observed_at=now,
+                    applies_to_kind="account",
+                ),))
+            else:
+                self.last_quota_result = QuotaFetchFailure("quota_unavailable")
+            return card
         except AuthenticationRequired:
+            self.last_quota_result = QuotaFetchFailure("auth_rejected")
             return self._error_card(ProviderStatus.AUTH, "Credential rejected", now)
         except RateLimited:
+            self.last_quota_result = QuotaFetchFailure("rate_limited")
             return self._error_card(ProviderStatus.RATE_LIMITED, "Rate limited", now)
         except (NetworkError, MissingField, TypeError, ValueError):
+            self.last_quota_result = QuotaFetchFailure("invalid_response")
             return self._error_card(ProviderStatus.ERROR, "Provider refresh failed", now)
 
     def _error_card(self, status: ProviderStatus, error: str, now: datetime) -> ProviderCard:
@@ -105,7 +127,7 @@ class GenericHTTPSAdapter:
             source="Direct API",
             refreshed_at=now,
             last_error=error,
-            family_id=self.config.provider_id,
+            family_id=self.config.family_id or self.config.provider_id,
             credential_source="api_key",
             source_kind="generic_https",
             account_ref=self.config.account_ref,

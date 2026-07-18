@@ -5,12 +5,14 @@ from datetime import datetime
 
 from ..codex_subscription import CodexSubscriptionAdapter
 from ..config import (
+    DailyCostFeedConfig,
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
+from ..cost_feed import DailyCostFeedCardAdapter, DailyCostFeedImporter
 from ..daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
 from ..daily_history import OpenUsageDailyImporter
 from ..generic import GenericHTTPSAdapter
@@ -102,6 +104,19 @@ def default_registry(
             usage_sources=(importer,),
         )
 
+    def cost_feed(config: DailyCostFeedConfig) -> ProviderBinding:
+        importer = DailyCostFeedImporter(
+            config, keychain, daily_feed_client, clock
+        )
+        return ProviderBinding(
+            provider_id=config.provider_id, family_id=config.family_id,
+            quota_sources=(_quota_source(
+                DailyCostFeedCardAdapter(config, keychain, clock),
+                "custom.cost", 20
+            ),),
+            cost_sources=(importer,),
+        )
+
     def step_plan(config: StepPlanConfig) -> ProviderBinding:
         nonlocal step_plan_keychain
         if step_plan_keychain is None:
@@ -126,7 +141,8 @@ def default_registry(
 
     def generic(config: GenericProviderConfig) -> ProviderBinding:
         return ProviderBinding(
-            provider_id=config.provider_id, family_id=config.provider_id,
+            provider_id=config.provider_id,
+            family_id=config.family_id or config.provider_id,
             quota_sources=(_quota_source(GenericHTTPSAdapter(
                 config, keychain, generic_client, clock
             ), "generic.quota", 20),),
@@ -135,6 +151,7 @@ def default_registry(
     registry.register_config(MiniMaxConfig, minimax)
     registry.register_config(OpenAIOrganizationConfig, openai)
     registry.register_config(DailyUsageFeedConfig, daily_feed)
+    registry.register_config(DailyCostFeedConfig, cost_feed)
     registry.register_config(StepPlanConfig, step_plan)
     registry.register_config(GenericProviderConfig, generic)
     return registry

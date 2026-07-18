@@ -790,60 +790,66 @@ class ActivityCollector:
                 usage_source_id = self._source_id(
                     official, "usage_source_id", USAGE_SOURCE_ID
                 )
-                assert usage_source_id is not None
-                try:
-                    had_official_usage = self.store.has_source_success(
-                        provider_id, usage_source_id
-                    )
-                except Exception:
-                    had_official_usage = True
-                usage_since = today - timedelta(
-                    days=6 if had_official_usage else 364
-                )
-                try:
-                    official_usage = official.fetch_usage(usage_since, today)
-                except Exception:
-                    official_usage = ImportFailure("import_failed")
-                if isinstance(official_usage, UsageImportSuccess):
-                    if not self._success_bounds_match(
-                        official_usage, usage_since, today
-                    ) or not self._rows_match_scope(
-                        official_usage.rows,
-                        provider_id,
-                        official_usage.since,
-                        official_usage.until,
-                        account_ref,
-                    ):
-                        self._safe_source_failure(
-                            provider_id, "invalid_import_rows", attempted_at,
-                            usage_source_id,
+                if usage_source_id is None:
+                    # Cost-only bindings deliberately leave Token history to the
+                    # shared OpenUsage importer when it is available.
+                    official = None
+                    use_openusage_fallback = True
+                    usage_source_id = USAGE_SOURCE_ID
+                if official is None:
+                    pass
+                else:
+                    try:
+                        had_official_usage = self.store.has_source_success(
+                            provider_id, usage_source_id
                         )
-                    else:
-                        try:
-                            self.store.commit_usage_import_success(
-                                provider_id, usage_source_id,
-                                official_usage.since, official_usage.until,
-                                official_usage.rows, attempted_at,
-                                account_ref=account_ref,
-                            )
-                        except Exception:
+                    except Exception:
+                        had_official_usage = True
+                    usage_since = today - timedelta(
+                        days=6 if had_official_usage else 364
+                    )
+                    try:
+                        official_usage = official.fetch_usage(usage_since, today)
+                    except Exception:
+                        official_usage = ImportFailure("import_failed")
+                    if isinstance(official_usage, UsageImportSuccess):
+                        if not self._success_bounds_match(
+                            official_usage, usage_since, today
+                        ) or not self._rows_match_scope(
+                            official_usage.rows,
+                            provider_id,
+                            official_usage.since,
+                            official_usage.until,
+                            account_ref,
+                        ):
                             self._safe_source_failure(
-                                provider_id, "persistence_failed", attempted_at,
+                                provider_id, "invalid_import_rows", attempted_at,
                                 usage_source_id,
                             )
-                    use_openusage_fallback = False
-                else:
-                    error_code = (
-                        official_usage.error_code
-                        if isinstance(official_usage, ImportFailure)
-                        else "invalid_import_result"
-                    )
-                    self._safe_source_failure(
-                        provider_id, error_code, attempted_at, usage_source_id
-                    )
-                    # The shared token table has no source provenance. Seed a cold
-                    # start only; never overwrite last-good official rows.
-                    use_openusage_fallback = not had_official_usage
+                        else:
+                            try:
+                                self.store.commit_usage_import_success(
+                                    provider_id, usage_source_id,
+                                    official_usage.since, official_usage.until,
+                                    official_usage.rows, attempted_at,
+                                    account_ref=account_ref,
+                                )
+                            except Exception:
+                                self._safe_source_failure(
+                                    provider_id, "persistence_failed", attempted_at,
+                                    usage_source_id,
+                                )
+                        use_openusage_fallback = False
+                    else:
+                        error_code = (
+                            official_usage.error_code
+                            if isinstance(official_usage, ImportFailure)
+                            else "invalid_import_result"
+                        )
+                        self._safe_source_failure(
+                            provider_id, error_code, attempted_at, usage_source_id
+                        )
+                        use_openusage_fallback = not had_official_usage
 
             if not use_openusage_fallback:
                 continue
