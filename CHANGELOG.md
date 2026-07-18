@@ -24,6 +24,23 @@ This project follows [Semantic Versioning](https://semver.org/).
 - Daily activity details now expose each day's raw source IDs, quality IDs, and
   collection time in the chart tooltip and accessibility summary.
 
+## 0.4.1 - 2026-07-18
+
+### Changed
+
+- Release and CI builds use the same Xcode 26.6 toolchain and keep the 80%
+  coverage gate focused on deterministic Swift product logic; native hosting
+  tests continue to render every SwiftUI route and state.
+- The frozen Provider Settings helper no longer ships Python development
+  headers, compiler Makefiles, package-manager metadata, or test modules.
+
+### Fixed
+
+- Release metadata tests now isolate their temporary repositories from GitHub
+  tag environment variables, allowing immutable-tag builds to run correctly.
+- Artifact-audit failures report only safe rule identifiers and validated member
+  names while continuing to reject build-machine home paths.
+
 ## 0.4.0 - 2026-07-18
 
 ### Added

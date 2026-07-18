@@ -9,14 +9,14 @@ OpenUsage Bar 0.4 supports Apple Silicon Macs running macOS 15 or later.
 2. Verify the download:
 
    ```bash
-   shasum -a 256 -c OpenUsage-Bar-v0.4.0-macos-arm64.zip.sha256
+   shasum -a 256 -c OpenUsage-Bar-v0.4.1-macos-arm64.zip.sha256
    ```
 
 3. Unzip it, enter the extracted directory, and run the bundled installer:
 
    ```bash
-   unzip OpenUsage-Bar-v0.4.0-macos-arm64.zip
-   cd OpenUsage-Bar-v0.4.0-macos-arm64
+   unzip OpenUsage-Bar-v0.4.1-macos-arm64.zip
+   cd OpenUsage-Bar-v0.4.1-macos-arm64
    scripts/install_app.sh
    ```
 

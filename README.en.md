@@ -24,7 +24,7 @@ OpenUsage Bar is a local-first native macOS dashboard for AI subscriptions, API 
 
 <p align="center"><sub>Real SwiftUI interface rendered from an isolated synthetic ledger. No user ledger, Keychain data, or real quota was read.</sub></p>
 
-> Current version: **0.4.0 pre-release**. Apple Silicon and macOS 15 or later are required. Developer ID notarization is not available yet; read the Gatekeeper note before installing a downloaded build, or build from source.
+> Current version: **0.4.1 pre-release**. Apple Silicon and macOS 15 or later are required. Developer ID notarization is not available yet; read the Gatekeeper note before installing a downloaded build, or build from source.
 
 ## What it does
 
@@ -49,9 +49,9 @@ flowchart LR
 Download the macOS arm64 ZIP and matching checksum from GitHub Releases:
 
 ```bash
-shasum -a 256 -c OpenUsage-Bar-v0.4.0-macos-arm64.zip.sha256
-unzip OpenUsage-Bar-v0.4.0-macos-arm64.zip
-cd OpenUsage-Bar-v0.4.0-macos-arm64
+shasum -a 256 -c OpenUsage-Bar-v0.4.1-macos-arm64.zip.sha256
+unzip OpenUsage-Bar-v0.4.1-macos-arm64.zip
+cd OpenUsage-Bar-v0.4.1-macos-arm64
 scripts/install_app.sh
 ```
 
@@ -119,7 +119,7 @@ HELPER="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/Ope
 
 OpenUsage Bar is an independent repository and release. OpenUsage.sh is an optional CLI data source consumed through validated JSON only; its Go internals, credentials, and release lifecycle are not embedded here.
 
-Version 0.4.0 includes the OpenUsage 0.23.0 provider catalog plus built-in enhancements for MiniMax, StepFun, Codex, Cursor, Kiro, OpenAI Organization, Generic HTTPS Provider, and Custom Daily Token Feed. See [Provider support](docs/provider-support.md).
+Version 0.4.1 includes the OpenUsage 0.23.0 provider catalog plus built-in enhancements for MiniMax, StepFun, Codex, Cursor, Kiro, OpenAI Organization, Generic HTTPS Provider, and Custom Daily Token Feed. See [Provider support](docs/provider-support.md).
 
 ## License
 
