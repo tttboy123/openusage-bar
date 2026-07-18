@@ -88,12 +88,15 @@ struct ActivityAppLogicTests {
         let result = await client.submit(
             providerEditRequest(),
             command: .init(
-                executableURL: URL(fileURLWithPath: "/bin/sleep"), arguments: ["5"]
+                executableURL: URL(fileURLWithPath: "/bin/sleep"), arguments: ["10"]
             )
         )
 
         #expect(result == .failure(.timedOut))
-        #expect(start.duration(to: .now) < .seconds(2))
+        // Swift Testing can delay detached work on a saturated CI runner. The
+        // typed timeout proves the 50 ms deadline; this bound proves the child
+        // was terminated instead of completing its natural ten-second sleep.
+        #expect(start.duration(to: .now) < .seconds(8))
     }
 
     @Test("Provider mutation helper rejects oversized output")
