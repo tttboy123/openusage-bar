@@ -102,12 +102,12 @@ struct HelperLaunchTests {
         #expect(HelperLaunchPlan.resolve(kind: .activity, route: nil, helpersURL: URL(fileURLWithPath: "/missing"), exists: { _ in false }, isExecutable: { _ in false }) == nil)
     }
 
-    @Test("Background is silent while explicit and reopen launches recover visibly")
+    @Test("Initial and login launches stay silent while an explicit reopen recovers visibly")
     func recoveryDecision() {
         #expect(RecoveryDecision.decide(background: true, reopened: false, helperAvailable: false) == .none)
         #expect(RecoveryDecision.decide(background: true, reopened: true, helperAvailable: true) == .launchActivity(route: "health"))
-        #expect(RecoveryDecision.decide(background: false, reopened: false, helperAvailable: true) == .launchActivity(route: "activity"))
+        #expect(RecoveryDecision.decide(background: false, reopened: false, helperAvailable: true) == .none)
         #expect(RecoveryDecision.decide(background: false, reopened: true, helperAvailable: true) == .launchActivity(route: "health"))
-        #expect(RecoveryDecision.decide(background: false, reopened: false, helperAvailable: false) == .showNativeRecovery)
+        #expect(RecoveryDecision.decide(background: false, reopened: false, helperAvailable: false) == .none)
     }
 }

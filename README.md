@@ -25,7 +25,7 @@ OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Tok
 
 <p align="center"><sub>真实 SwiftUI 界面，使用隔离的合成账本生成。未读取用户账本、Keychain 或真实额度。</sub></p>
 
-> 当前版本：**0.4.1 预发布版**。支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple Developer ID 公证包；下载构建请阅读 Gatekeeper 说明，或直接从源码构建。
+> 当前版本：**0.4.2 预发布版**。支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple Developer ID 公证包；首次打开时按下方 Gatekeeper 指引仅放行本 App 即可。
 
 ## 为什么需要它
 
@@ -70,31 +70,30 @@ flowchart LR
 
 ## 快速安装
 
-从 GitHub Releases 下载 macOS arm64 ZIP 和对应 `.sha256` 文件，放在同一个目录后先校验：
+[下载 OpenUsage Bar v0.4.2 DMG（Apple Silicon）](https://github.com/tttboy123/openusage-bar/releases/download/v0.4.2/OpenUsage-Bar-v0.4.2-macos-arm64.dmg)
 
-```bash
-shasum -a 256 -c OpenUsage-Bar-v0.4.1-macos-arm64.zip.sha256
-unzip OpenUsage-Bar-v0.4.1-macos-arm64.zip
-cd OpenUsage-Bar-v0.4.1-macos-arm64
-scripts/install_app.sh
-```
+1. 打开下载的 DMG。
+2. 将 **OpenUsage Bar** 拖入 **Applications**。
+3. 从访达的“应用程序”打开 **OpenUsage Bar**。
+4. App 自动注册登录启动项和后台采集器，不需要打开终端。
 
-安装器优先使用访达侧边栏对应的 `/Applications`；如果该目录不可写，会自动降级到
-`~/Applications`。安装完成后会在访达中直接定位 `OpenUsage Bar.app`，终端也会输出
-完整安装路径。只有需要自定义目录时才要显式设置：
+如果 macOS 提示无法验证开发者：
 
-```bash
-OPENUSAGE_INSTALL_DIR="$HOME/My Apps" scripts/install_app.sh
-```
+1. 先在访达中尝试打开一次 App。
+2. 打开 **系统设置 > 隐私与安全性**。
+3. 在安全性区域找到 OpenUsage Bar，点击 **仍要打开**，然后再次确认。
+
+只放行 OpenUsage Bar，不要全局关闭 Gatekeeper。首次启动若提示后台访问，请在
+**系统设置 > 通用 > 登录项**中允许 OpenUsage Bar。
 
 首次打开后：
 
 1. 点击菜单栏里的 **OpenUsage Bar**。
 2. 进入 **Open Usage Details** 查看账本。
 3. 进入 **Settings / Providers** 添加或编辑 Provider。
-4. 如果下载包未公证，在 **System Settings > Privacy & Security** 中仅允许该 App；不要关闭 Gatekeeper。
+4. 后续通常只需查看菜单栏；登录后自动启动，采集器每五分钟刷新。
 
-更多细节见 [release quick start](docs/release-quick-start.md)。
+更多细节、SHA-256 校验和高级修复脚本见[安装指南](docs/release-quick-start.md)。
 
 ## 从源码构建
 

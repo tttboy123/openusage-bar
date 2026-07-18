@@ -164,6 +164,27 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("--api-socket", collector["ProgramArguments"])
         self.assertNotEqual(status["ProgramArguments"][0], collector["ProgramArguments"][0])
 
+    def test_app_embeds_a_service_management_collector(self):
+        resources = ROOT / "swift_app/Resources"
+        with (resources / "com.lune.openusagebar.collector.sm.plist").open("rb") as handle:
+            collector = plistlib.load(handle)
+
+        self.assertEqual(collector["Label"], "com.lune.openusagebar.collector")
+        self.assertEqual(
+            collector["BundleProgram"],
+            "Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings",
+        )
+        self.assertEqual(
+            collector["ProgramArguments"],
+            ["OpenUsage Provider Settings", "daemon", "--interval", "300"],
+        )
+        self.assertNotIn("StandardOutPath", collector)
+        self.assertNotIn("StandardErrorPath", collector)
+
+        build = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
+        self.assertIn('Contents/Library/LaunchAgents', build)
+        self.assertIn('com.lune.openusagebar.collector.sm.plist', build)
+
     def test_install_is_backup_first_atomic_and_has_rollback(self):
         source = (ROOT / "scripts/install_app.sh").read_text(encoding="utf-8")
         transaction = (ROOT / "scripts/install_app_transaction.sh").read_text(encoding="utf-8")
@@ -229,6 +250,23 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("docs/canary.md", package)
         self.assertIn("THIRD_PARTY_NOTICES.md", package)
         self.assertIn("shasum -a 256", package)
+
+    def test_release_adds_a_drag_install_dmg_and_keeps_the_zip_for_advanced_repair(self):
+        package = (ROOT / "scripts/package_release.sh").read_text(encoding="utf-8")
+        audit = (ROOT / "scripts/release_dmg_audit.sh").read_text(encoding="utf-8")
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+        self.assertIn('hdiutil create', package)
+        self.assertIn('Applications', package)
+        self.assertIn('.dmg', package)
+        self.assertIn('OpenUsage-Bar-*.dmg', workflow)
+        self.assertIn('OpenUsage-Bar-*.dmg.sha256', workflow)
+        self.assertIn('hdiutil attach -readonly -nobrowse', audit)
+        self.assertIn('Applications', audit)
+        self.assertIn('codesign --verify --deep --strict', audit)
+        self.assertIn('scripts/release_dmg_audit.sh', ci)
+        self.assertIn('scripts/release_dmg_audit.sh', workflow)
 
     def test_atomic_swap_helper_exchanges_two_directories_without_a_missing_target_window(self):
         helper = ROOT / "scripts/atomic_swap.c"

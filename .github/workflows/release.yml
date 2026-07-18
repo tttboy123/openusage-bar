@@ -35,11 +35,15 @@ jobs:
       - name: Package
         run: scripts/package_release.sh
       - name: Audit packaged artifact
-        run: .build-venv/bin/python scripts/release_artifact_audit.py dist/OpenUsage-Bar-*.zip
+        run: |
+          .build-venv/bin/python scripts/release_artifact_audit.py dist/OpenUsage-Bar-*.zip
+          scripts/release_dmg_audit.sh dist/OpenUsage-Bar-*.dmg
       - name: Attest release assets
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: |
+            dist/OpenUsage-Bar-*.dmg
+            dist/OpenUsage-Bar-*.dmg.sha256
             dist/OpenUsage-Bar-*.zip
             dist/OpenUsage-Bar-*.zip.sha256
             dist/OpenUsage-Bar-*-manifest.json
@@ -49,6 +53,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
+            dist/OpenUsage-Bar-*.dmg \
+            dist/OpenUsage-Bar-*.dmg.sha256 \
             dist/OpenUsage-Bar-*.zip \
             dist/OpenUsage-Bar-*.zip.sha256 \
             dist/OpenUsage-Bar-*-manifest.json \

@@ -1,43 +1,54 @@
-# OpenUsage Bar release quick start
+# OpenUsage Bar 安装指南 / Install guide
 
-OpenUsage Bar 0.4 supports Apple Silicon Macs running macOS 15 or later.
+OpenUsage Bar 0.4.2 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
 
-## Install
+## 图形化安装（推荐）
 
-1. Download the macOS arm64 ZIP and matching `.sha256` file from Releases into
-   the same directory.
-2. Verify the download:
+1. 从 [v0.4.2 发布页](https://github.com/tttboy123/openusage-bar/releases/tag/v0.4.2)
+   下载 `OpenUsage-Bar-v0.4.2-macos-arm64.dmg`。
+2. 双击 DMG，将 **OpenUsage Bar** 拖入 **Applications**。
+3. 在访达“应用程序”中打开。App 会自动注册登录项和内置采集器。
+4. 若 macOS 拦截，进入 **系统设置 > 隐私与安全性**，仅对 OpenUsage Bar
+   选择 **仍要打开**。不要全局关闭 Gatekeeper。
+5. 若出现后台访问提示，在 **系统设置 > 通用 > 登录项**允许 OpenUsage Bar。
 
-   ```bash
-   shasum -a 256 -c OpenUsage-Bar-v0.4.1-macos-arm64.zip.sha256
-   ```
+OpenUsage Bar 是菜单栏工具，不会出现在 Dock 或 Command-Tab。采集器每五分钟刷新。
 
-3. Unzip it, enter the extracted directory, and run the bundled installer:
+## Install (English)
 
-   ```bash
-   unzip OpenUsage-Bar-v0.4.1-macos-arm64.zip
-   cd OpenUsage-Bar-v0.4.1-macos-arm64
-   scripts/install_app.sh
-   ```
+Download the v0.4.2 DMG, open it, drag **OpenUsage Bar** to **Applications**,
+then open it from Finder. The app registers its login item and bundled collector
+on first launch. If Gatekeeper blocks it, use **System Settings > Privacy &
+Security > Open Anyway** for this app only. Allow it under **General > Login
+Items** if macOS requests background approval.
 
-   The installer prefers `/Applications`. If it is not writable, it
-   automatically installs in `~/Applications` instead. Finder reveals the
-   exact installed app when installation succeeds. To choose a custom location:
+## 可选完整性校验 / Optional checksum
 
-   ```bash
-   OPENUSAGE_INSTALL_DIR="$HOME/My Apps" scripts/install_app.sh
-   ```
+将 DMG 和 `.dmg.sha256` 放在同一目录后执行：
 
-4. Finder highlights **OpenUsage Bar.app** after installation. The app is a
-   menu-bar utility, so it does not appear in the Dock or Command-Tab. Its
-   menu-bar item starts at login and the collector refreshes every five minutes.
-5. Choose **Settings** to add provider credentials. Credentials are written to
-   macOS Keychain; provider configuration stores only non-secret metadata.
+```bash
+shasum -a 256 -c OpenUsage-Bar-v0.4.2-macos-arm64.dmg.sha256
+```
 
-The GitHub convenience build is ad-hoc signed. Build from source or explicitly
-allow the downloaded app
-in **System Settings > Privacy & Security**. Never run a command that disables
-Gatekeeper globally.
+## 高级修复与自动化 / Advanced repair
+
+普通用户不需要执行脚本。ZIP 中仍附带事务式安装、回滚和卸载工具：
+
+```bash
+shasum -a 256 -c OpenUsage-Bar-v0.4.2-macos-arm64.zip.sha256
+unzip OpenUsage-Bar-v0.4.2-macos-arm64.zip
+cd OpenUsage-Bar-v0.4.2-macos-arm64
+scripts/install_app.sh
+```
+
+安装器优先使用 `/Applications`，不可写时降级到 `~/Applications`。自定义目录：
+
+```bash
+OPENUSAGE_INSTALL_DIR="$HOME/My Apps" scripts/install_app.sh
+```
+
+GitHub 构建使用 ad-hoc 签名，未进行 Developer ID 公证。不要运行全局关闭
+Gatekeeper 的命令。
 
 Every release must use an immutable `vX.Y.Z` tag whose version and build agree
 with all three app bundles, the Python helper, and the matching CHANGELOG entry.
