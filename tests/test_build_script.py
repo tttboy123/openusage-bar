@@ -254,6 +254,7 @@ class BuildScriptContractTests(unittest.TestCase):
     def test_release_adds_a_drag_install_dmg_and_keeps_the_zip_for_advanced_repair(self):
         package = (ROOT / "scripts/package_release.sh").read_text(encoding="utf-8")
         audit = (ROOT / "scripts/release_dmg_audit.sh").read_text(encoding="utf-8")
+        guide = (ROOT / "docs/dmg-install-readme.txt").read_text(encoding="utf-8")
         ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
@@ -265,6 +266,13 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn('hdiutil attach -readonly -nobrowse', audit)
         self.assertIn('Applications', audit)
         self.assertIn('codesign --verify --deep --strict', audit)
+        self.assertIn('dmg-install-readme.txt', package)
+        self.assertIn('Installation Guide.txt', audit)
+        self.assertIn(
+            'xattr -dr com.apple.quarantine "/Applications/OpenUsage Bar.app"',
+            guide,
+        )
+        self.assertIn('不要全局关闭 Gatekeeper', guide)
         self.assertIn('scripts/release_dmg_audit.sh', ci)
         self.assertIn('scripts/release_dmg_audit.sh', workflow)
 

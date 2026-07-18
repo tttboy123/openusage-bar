@@ -36,6 +36,20 @@ struct BackgroundServiceTests {
         #expect(!plan.hasPackagingError)
     }
 
+    @Test("Legacy services suppress Service Management not-found states during upgrade")
+    func legacyNotFoundPlan() {
+        let plan = BackgroundServicePlan.make(
+            loginItem: .notFound,
+            collector: .notFound,
+            legacyLoginItem: true,
+            legacyCollector: true
+        )
+
+        #expect(plan.actions.isEmpty)
+        #expect(!plan.requiresApproval)
+        #expect(!plan.hasPackagingError)
+    }
+
     @Test("System approval and missing bundle resources are surfaced")
     func attentionPlan() {
         let approval = BackgroundServicePlan.make(
