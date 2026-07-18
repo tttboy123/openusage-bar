@@ -83,3 +83,16 @@ scripts/uninstall_app.sh --purge-data
 Keychain entries are deliberately not deleted automatically. Remove them in
 Keychain Access only after confirming that no other local installation uses
 the same service entries.
+
+## Opt-in canary diagnostics
+
+OpenUsage Bar sends no telemetry. A canary tester may explicitly create a
+redacted aggregate for a GitHub canary report:
+
+```bash
+scripts/export_diagnostics.py --output /tmp/openusage-diagnostics.json
+scripts/privacy_scan.py /tmp/openusage-diagnostics.json
+```
+
+Review the file before attaching it. The full 30-day process and the 1.0
+release gate are documented in [canary.md](canary.md).

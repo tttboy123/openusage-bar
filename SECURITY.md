@@ -28,3 +28,16 @@ bug bounty program.
 - The SQLite ledger and exported JSON exclude credentials, prompts, responses,
   and direct account identity.
 - Releases must pass the repository and Git-history secret scanner.
+
+## Canary diagnostics
+
+Canary participation is manual and opt-in; the application sends no telemetry.
+`scripts/export_diagnostics.py` reads only the read-only Local API snapshot and
+public capability catalog, then writes an aggregate mode-`0600` JSON file. It
+does not read Provider configuration or Keychain and does not export Provider
+instance names, account references, source IDs, quota values, raw change
+payloads, prompts, or responses.
+
+Run `scripts/privacy_scan.py` on the file and inspect it before attaching it to
+a public canary report. If diagnostics appear to contain private material, do
+not attach them: delete the local export and use the repository Security tab.

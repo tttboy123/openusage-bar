@@ -28,7 +28,9 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
     def test_documented_members_are_accepted(self):
         archive = archive_with((
             (f"{ROOT_NAME}/LICENSE", "license"),
+            (f"{ROOT_NAME}/canary.md", "canary"),
             (f"{ROOT_NAME}/release-quick-start.md", "docs"),
+            (f"{ROOT_NAME}/scripts/export_diagnostics.py", "#!/usr/bin/env python3"),
             (f"{ROOT_NAME}/scripts/install_app.sh", "#!/bin/zsh"),
             (f"{ROOT_NAME}/dist/OpenUsage Bar.app/Contents/Info.plist", "plist"),
         ))

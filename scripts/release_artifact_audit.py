@@ -17,7 +17,7 @@ ARCHIVE_PATTERN = re.compile(r"^OpenUsage-Bar-v(\d+\.\d+\.\d+)-macos-arm64\.zip$
 ALLOWED_SCRIPTS = frozenset({
     "activity_install_process.sh", "install_app.sh",
     "install_app_transaction.sh", "rollback_app.sh", "uninstall_app.sh",
-    "verify_local_api.py",
+    "export_diagnostics.py", "privacy_scan.py", "verify_local_api.py",
 })
 SENSITIVE_NAMES = frozenset({
     ".env", "providers.json", "activity.sqlite3", "activity.sqlite3-wal",
@@ -80,7 +80,8 @@ def inspect_members(archive: zipfile.ZipFile, expected_root: str) -> None:
             and len(relative) == 2
             and relative[1] in ALLOWED_SCRIPTS
         ) or relative in {
-            ("LICENSE",), ("THIRD_PARTY_NOTICES.md",), ("release-quick-start.md",)
+            ("LICENSE",), ("THIRD_PARTY_NOTICES.md",), ("release-quick-start.md",),
+            ("canary.md",),
         }
         if not allowed:
             raise ArtifactError("unexpected_member")

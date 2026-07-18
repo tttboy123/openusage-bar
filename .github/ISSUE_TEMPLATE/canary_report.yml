@@ -1,0 +1,107 @@
+name: OpenUsage Bar canary report
+description: Submit an opt-in, credential-free 1.0 canary result.
+title: "[Canary] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never include API keys, cookies, account names, prompts, responses, raw Provider payloads, device serial numbers, or unredacted logs. Security issues belong in a private vulnerability report.
+  - type: input
+    id: canary-label
+    attributes:
+      label: Random canary label
+      description: Use a random label, not a username, hostname, email, serial number, or account name.
+      placeholder: canary-a1b2
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Product version and build
+      placeholder: 0.4.0 (4)
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: 15.6 or 26.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install-scope
+    attributes:
+      label: Installation scope
+      options:
+        - /Applications
+        - ~/Applications
+    validations:
+      required: true
+  - type: dropdown
+    id: setup-class
+    attributes:
+      label: Provider configuration class
+      options:
+        - Empty setup
+        - Local clients only
+        - One quota Provider
+        - Custom daily usage or cost feed
+        - Multiple Providers
+    validations:
+      required: true
+  - type: input
+    id: period
+    attributes:
+      label: Observation period in UTC
+      placeholder: 2026-07-18 through 2026-08-16
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Completed checks
+      options:
+        - label: Checksum, manifest, SBOM, and attestation verified
+          required: true
+        - label: Clean install and first trustworthy fact completed
+          required: true
+        - label: Scheduled refresh and collector restart completed
+          required: true
+        - label: Mac restart completed
+          required: true
+        - label: N-1 upgrade completed without data decrease
+          required: true
+        - label: Rollback drill and candidate reinstall completed
+          required: true
+        - label: No credentials, identity, prompts, responses, or raw payloads are included
+          required: true
+  - type: dropdown
+    id: blocking-incident
+    attributes:
+      label: Blocking incident observed
+      options:
+        - No
+        - Yes - details below contain only sanitized codes and reproduction steps
+    validations:
+      required: true
+  - type: dropdown
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics attached
+      options:
+        - No
+        - Yes - reviewed locally before attachment
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Sanitized notes
+      description: Use fixed error codes and reproduction steps only. Report suspected disclosure privately.
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Consent
+      options:
+        - label: I am intentionally submitting this canary evidence and have reviewed it for private data.
+          required: true

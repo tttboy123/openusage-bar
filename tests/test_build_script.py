@@ -204,6 +204,9 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertNotIn("security delete-generic-password", uninstall)
         self.assertIn("scripts/install_app.sh", package)
         self.assertIn("scripts/uninstall_app.sh", package)
+        self.assertIn("scripts/rollback_app.sh", package)
+        self.assertIn("scripts/export_diagnostics.py", package)
+        self.assertIn("docs/canary.md", package)
         self.assertIn("THIRD_PARTY_NOTICES.md", package)
         self.assertIn("shasum -a 256", package)
 

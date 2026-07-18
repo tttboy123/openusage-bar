@@ -24,12 +24,19 @@ cp \
   "$ROOT/scripts/install_app.sh" \
   "$ROOT/scripts/install_app_transaction.sh" \
   "$ROOT/scripts/activity_install_process.sh" \
+  "$ROOT/scripts/export_diagnostics.py" \
   "$ROOT/scripts/rollback_app.sh" \
   "$ROOT/scripts/uninstall_app.sh" \
+  "$ROOT/scripts/privacy_scan.py" \
   "$ROOT/scripts/verify_local_api.py" \
   "$STAGE/scripts/"
-cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$ROOT/docs/release-quick-start.md" "$STAGE/"
-chmod 755 "$STAGE/scripts/"*.sh "$STAGE/scripts/verify_local_api.py"
+cp \
+  "$ROOT/LICENSE" \
+  "$ROOT/THIRD_PARTY_NOTICES.md" \
+  "$ROOT/docs/release-quick-start.md" \
+  "$ROOT/docs/canary.md" \
+  "$STAGE/"
+chmod 755 "$STAGE/scripts/"*.sh "$STAGE/scripts/"*.py
 
 (
   cd "$STAGE:h"
