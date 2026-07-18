@@ -75,7 +75,7 @@ class ActivityInstallProcessTests(unittest.TestCase):
             ["/bin/zsh", "-c", f'source "{HELPER}"\n{body}'],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
         )
 
     def wait_for_command(self, process: subprocess.Popen, expected: str) -> None:

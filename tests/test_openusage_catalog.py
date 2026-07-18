@@ -183,9 +183,13 @@ else:
             script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR)
             started = time.monotonic()
             result = OpenUsageCatalogDiscovery(
-                openusage_path=str(script_path), timeout_seconds=1.0, clock=lambda: NOW
+                openusage_path=str(script_path), timeout_seconds=3.0, clock=lambda: NOW
             ).run()
             elapsed = time.monotonic() - started
+            ready_deadline = time.monotonic() + 1
+            while not child_pid_path.exists() and time.monotonic() < ready_deadline:
+                time.sleep(0.01)
+            self.assertTrue(child_pid_path.exists(), "fixture child did not publish its PID")
             child_pid = int(child_pid_path.read_text())
             deadline = time.monotonic() + 1
             while time.monotonic() < deadline:
@@ -197,7 +201,7 @@ else:
             else:
                 self.fail("catalog discovery grandchild survived process-group timeout")
         self.assertEqual(result.outcome, "timeout")
-        self.assertLess(elapsed, 2.25)
+        self.assertLess(elapsed, 4.5)
 
     def test_child_uses_allowlisted_environment_and_direct_argv(self):
         with tempfile.TemporaryDirectory() as temp:

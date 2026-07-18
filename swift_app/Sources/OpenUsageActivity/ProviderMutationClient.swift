@@ -17,8 +17,8 @@ struct ProviderMutationClient: Sendable {
         self.limits = limits
     }
 
-    func submit(
-        _ request: ProviderEditRequest,
+    func submit<Request: Encodable & Sendable>(
+        _ request: Request,
         command: ProviderMutationCommand
     ) async -> Result<ProviderMutationResponse, ProviderMutationFailure> {
         await Task.detached(priority: .userInitiated) {

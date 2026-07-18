@@ -12,9 +12,14 @@ struct ProvidersPage: View {
     @State private var selectedRegionID: String?
     @State private var searchText = ""
     @State private var configuredConnections: [ProviderConnectionSummary] = []
+    @State private var discoveredConnections: [ProviderInstanceRecord] = []
+
+    private var providerInstances: [ProviderInstanceRecord] {
+        discoveredConnections.isEmpty ? data.providerInstances : discoveredConnections
+    }
 
     private var allItems: [ProviderCenterItem] {
-        let instances = Dictionary(grouping: data.providerInstances, by: \.familyID)
+        let instances = Dictionary(grouping: providerInstances, by: \.familyID)
         let configured = Dictionary(grouping: configuredConnections, by: \.familyID)
         let observedFamilies = Set(data.availableProviderIDs.map {
             data.providerDescriptor(for: $0).familyID
@@ -94,12 +99,13 @@ struct ProvidersPage: View {
                 if let selectedItem {
                     ProviderConnectionDetail(
                         item: selectedItem,
-                        instances: data.providerInstances.filter {
+                        instances: providerInstances.filter {
                             $0.familyID == selectedItem.descriptor.familyID
                         },
                         connections: configuredConnections.filter {
                             $0.familyID == selectedItem.descriptor.familyID
                         },
+                        hiddenProviderIDs: data.hiddenProviderIDs,
                         sources: providerSources(for: selectedItem.descriptor.familyID),
                         selectedRegionID: $selectedRegionID,
                         reload: {
@@ -211,9 +217,17 @@ struct ProvidersPage: View {
 
     private func loadConfiguredConnections() {
         Task { @MainActor in
-            configuredConnections = await Task.detached(priority: .utility) {
-                (try? ProviderConnectionSummaryStore().load()) ?? []
-            }.value.filter { !data.hiddenProviderIDs.contains($0.providerID) }
+            let loaded = await Task.detached(priority: .utility) { () -> (
+                [ProviderConnectionSummary], [ProviderInstanceRecord]
+            ) in
+                let configured = (try? ProviderConnectionSummaryStore().load()) ?? []
+                guard let repository = try? UsageRepository(databaseURL: ActivityPaths.ledger)
+                else { return (configured, []) }
+                defer { repository.close() }
+                return (configured, (try? repository.providerInstances()) ?? [])
+            }.value
+            configuredConnections = loaded.0
+            discoveredConnections = loaded.1
             synchronizeSelection()
         }
     }
@@ -252,6 +266,7 @@ private struct ProviderConnectionDetail: View {
     let item: ProviderCenterItem
     let instances: [ProviderInstanceRecord]
     let connections: [ProviderConnectionSummary]
+    let hiddenProviderIDs: Set<String>
     let sources: [SourceHealthItem]
     @Binding var selectedRegionID: String?
     let reload: () -> Void
@@ -264,6 +279,8 @@ private struct ProviderConnectionDetail: View {
     @State private var isSaving = false
     @State private var editError: String?
     @State private var savedMessage: String?
+    @State private var showingAddConnection = false
+    @State private var pendingRemoval: ProviderConnectionSummary?
     @FocusState private var focusedField: EditField?
 
     private enum EditField: Hashable { case name, apiKey, session }
@@ -295,6 +312,32 @@ private struct ProviderConnectionDetail: View {
             .frame(maxWidth: 720, alignment: .leading)
             .padding(.horizontal, 34)
             .padding(.vertical, 28)
+        }
+        .sheet(isPresented: $showingAddConnection) {
+            NativeProviderConnectionSheet(
+                descriptor: descriptor,
+                selectedSite: selectedRegionID,
+                onSaved: {
+                    showingAddConnection = false
+                    reload()
+                }
+            )
+        }
+        .confirmationDialog(
+            "Remove this connection?", isPresented: Binding(
+                get: { pendingRemoval != nil },
+                set: { if !$0 { pendingRemoval = nil } }
+            ), titleVisibility: .visible
+        ) {
+            if let pendingRemoval {
+                Button("Remove Connection", role: .destructive) {
+                    remove(pendingRemoval)
+                    self.pendingRemoval = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+        } message: {
+            Text("Its app-managed credentials will be removed from Keychain. Usage history remains local.")
         }
     }
 
@@ -350,7 +393,7 @@ private struct ProviderConnectionDetail: View {
                         connections.isEmpty ? "Add Connection" : "Add Account",
                         systemImage: "plus"
                     ) {
-                        SettingsHelper.open()
+                        showingAddConnection = true
                     }
                     .controlSize(.large)
                     Button("Refresh Data", systemImage: "arrow.clockwise", action: reload)
@@ -446,17 +489,32 @@ private struct ProviderConnectionDetail: View {
                         }
                         Spacer()
                         if connection.isManaged {
-                            Button("Edit Connection", systemImage: "pencil") {
-                                beginEditing(connection)
+                            HStack(spacing: 8) {
+                                Button("Edit Connection", systemImage: "pencil") {
+                                    beginEditing(connection)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.accentColor)
+                                .controlSize(.small)
+                                .disabled(isSaving)
+                                Button("Remove", systemImage: "trash", role: .destructive) {
+                                    pendingRemoval = connection
+                                }
+                                .controlSize(.small)
+                                .disabled(isSaving)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.accentColor)
-                            .controlSize(.small)
-                            .disabled(isSaving)
                         } else {
                             Text("Read only")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        Button(hiddenProviderIDs.contains(connection.providerID) ? "Show" : "Hide") {
+                            setHidden(
+                                connection.providerID,
+                                hidden: !hiddenProviderIDs.contains(connection.providerID)
+                            )
+                        }
+                        .controlSize(.small)
+                        .disabled(isSaving)
                     }
                     .frame(minHeight: 44)
                     if editingProviderID == connection.providerID {
@@ -477,6 +535,14 @@ private struct ProviderConnectionDetail: View {
                         Spacer()
                         Text("Read only")
                             .font(.caption).foregroundStyle(.secondary)
+                        Button(hiddenProviderIDs.contains(instance.providerID) ? "Show" : "Hide") {
+                            setHidden(
+                                instance.providerID,
+                                hidden: !hiddenProviderIDs.contains(instance.providerID)
+                            )
+                        }
+                        .controlSize(.small)
+                        .disabled(isSaving)
                     }
                     .frame(minHeight: 44)
                     Divider()
@@ -595,16 +661,22 @@ private struct ProviderConnectionDetail: View {
             editError = ProviderMutationFailure.unavailable.message
             return
         }
-        let request = ProviderEditRequest(
-            providerID: connection.providerID,
+        guard let draft = connection.managedDraft(
             name: accountName.trimmingCharacters(in: .whitespacesAndNewlines),
-            apiKey: replacementAPIKey,
-            sessionCookie: replacementSession
-        )
+            replacementCredential: replacementAPIKey,
+            replacementSession: replacementSession
+        ) else {
+            editError = AppLocalization.text(
+                "Saved connection configuration is incomplete. Re-add this connection."
+            )
+            return
+        }
         isSaving = true
         editError = nil
         Task { @MainActor in
-            let result = await ProviderMutationService.submit(request, command: command)
+            let result = await ProviderMutationService.submit(
+                draft.request(action: .updateConnection), command: command
+            )
             isSaving = false
             switch result {
             case let .success(response) where response.ok:
@@ -621,6 +693,63 @@ private struct ProviderConnectionDetail: View {
         }
     }
 
+    private func remove(_ connection: ProviderConnectionSummary) {
+        guard let command = ProviderMutationCommand.resolve(
+            activityBundleURL: Bundle.main.bundleURL,
+            activityExecutableURL: Bundle.main.executableURL ?? Bundle.main.bundleURL
+        ) else {
+            editError = ProviderMutationFailure.unavailable.message
+            return
+        }
+        let draft: ManagedConnectionDraft = switch connection.kind {
+        case "step_plan": .stepPlan(
+            providerID: connection.providerID, name: connection.displayName,
+            site: connection.site ?? "china", replacementCredential: "",
+            replacementSession: ""
+        )
+        case "openai_organization": .openAIOrganization(
+            providerID: connection.providerID, name: connection.displayName,
+            replacementCredential: ""
+        )
+        case "generic": .generic(.init(
+            providerID: connection.providerID, name: connection.displayName,
+            familyID: connection.familyID, endpoint: "", headerName: "",
+            authPrefix: "", primaryPath: "", remainingPercentPath: nil,
+            resetPath: nil, detailPath: nil, replacementCredential: ""
+        ))
+        case "daily_usage_feed": .dailyUsageFeed(.init(
+            providerID: connection.providerID, name: connection.displayName,
+            familyID: connection.familyID, endpoint: "", headerName: "",
+            authPrefix: "", itemsPath: "", datePath: "", modelPath: "",
+            inputTokensPath: "", outputTokensPath: "", cacheReadTokensPath: nil,
+            cacheCreationTokensPath: nil, reasoningTokensPath: nil,
+            totalTokensPath: "", sinceParameter: "", untilParameter: "",
+            replacementCredential: ""
+        ))
+        default: .minimax(
+            providerID: connection.providerID, name: connection.displayName,
+            replacementCredential: ""
+        )
+        }
+        isSaving = true
+        editError = nil
+        Task { @MainActor in
+            let result = await ProviderMutationService.submit(
+                draft.request(action: .removeConnection), command: command
+            )
+            isSaving = false
+            switch result {
+            case let .success(response) where response.ok:
+                savedMessage = response.message
+                cancelEditing()
+                savedMessage = response.message
+                reload()
+            case let .success(response): editError = response.message
+            case let .failure(failure): editError = failure.message
+            }
+        }
+    }
+
     private func connectionMetadata(_ connection: ProviderConnectionSummary) -> String {
         let site = ProviderCenterText.region(connection.site ?? "Configured")
         guard let observed = instances.first(where: {
@@ -628,6 +757,229 @@ private struct ProviderConnectionDetail: View {
         }) else { return "\(site) · \(AppLocalization.text("Not collected yet"))" }
         return "\(site) · \(DateText.display(observed.observedAt))"
     }
+
+    private func setHidden(_ providerID: String, hidden: Bool) {
+        isSaving = true
+        editError = nil
+        Task { @MainActor in
+            let result: Result<Void, Error> = await Task.detached(priority: .utility) {
+                do {
+                    let store = VisibilityStore(url: ActivityPaths.visibility)
+                    var values = try store.load().hiddenProviderIDs
+                    if hidden { values.insert(providerID) } else { values.remove(providerID) }
+                    try store.save(hiddenProviderIDs: values)
+                    return .success(())
+                } catch { return .failure(error) }
+            }.value
+            isSaving = false
+            switch result {
+            case .success: reload()
+            case .failure:
+                editError = AppLocalization.text("Provider visibility could not be updated.")
+            }
+        }
+    }
+}
+
+private struct NativeProviderConnectionSheet: View {
+    let descriptor: ProviderDisplayDescriptor
+    let selectedSite: String?
+    let onSaved: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var kind: String
+    @State private var providerID: String
+    @State private var name: String
+    @State private var site: String
+    @State private var endpoint = ""
+    @State private var familyID: String
+    @State private var headerName = "Authorization"
+    @State private var authPrefix = "Bearer"
+    @State private var primaryPath = "data.remaining"
+    @State private var remainingPercentPath = ""
+    @State private var resetPath = ""
+    @State private var detailPath = ""
+    @State private var itemsPath = "data.items"
+    @State private var datePath = "date"
+    @State private var modelPath = "model"
+    @State private var inputTokensPath = "input_tokens"
+    @State private var outputTokensPath = "output_tokens"
+    @State private var totalTokensPath = "total_tokens"
+    @State private var sinceParameter = "since"
+    @State private var untilParameter = "until"
+    @State private var credential = ""
+    @State private var session = ""
+    @State private var error: String?
+    @State private var isSaving = false
+
+    init(
+        descriptor: ProviderDisplayDescriptor, selectedSite: String?,
+        onSaved: @escaping () -> Void
+    ) {
+        self.descriptor = descriptor
+        self.selectedSite = selectedSite
+        self.onSaved = onSaved
+        let initialKind = switch descriptor.familyID {
+        case "minimax": "minimax"
+        case "step_plan": "step_plan"
+        case "openai": "openai_organization"
+        default: "generic"
+        }
+        _kind = State(initialValue: initialKind)
+        _providerID = State(initialValue: descriptor.familyID)
+        _name = State(initialValue: descriptor.displayName)
+        _site = State(initialValue: selectedSite == "cn" ? "china" : selectedSite ?? "china")
+        _familyID = State(initialValue: descriptor.familyID)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Add Connection").font(.title2.weight(.semibold))
+                    Text("Credentials are written to Keychain and never displayed again.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(24)
+            Divider()
+            Form {
+                Picker("Connection type", selection: $kind) {
+                    Text("Quota API").tag("generic")
+                    Text("Daily Usage Feed").tag("daily_usage_feed")
+                    if descriptor.familyID == "minimax" { Text("MiniMax").tag("minimax") }
+                    if descriptor.familyID == "step_plan" { Text("Step Plan").tag("step_plan") }
+                    if descriptor.familyID == "openai" { Text("OpenAI Organization").tag("openai_organization") }
+                }
+                TextField("Connection ID", text: $providerID)
+                TextField("Account label", text: $name)
+                if kind == "step_plan" {
+                    Picker("Site", selection: $site) {
+                        Text("China").tag("china")
+                        Text("International").tag("international")
+                    }
+                }
+                if ["generic", "daily_usage_feed"].contains(kind) {
+                    TextField("Endpoint", text: $endpoint)
+                    TextField("Header name", text: $headerName)
+                    TextField("Authentication prefix", text: $authPrefix)
+                }
+                if kind == "generic" {
+                    TextField("Primary field path", text: $primaryPath)
+                    TextField("Remaining percent path (optional)", text: $remainingPercentPath)
+                    TextField("Reset path (optional)", text: $resetPath)
+                    TextField("Detail path (optional)", text: $detailPath)
+                }
+                if kind == "daily_usage_feed" {
+                    TextField("Provider family ID", text: $familyID)
+                    TextField("Items path", text: $itemsPath)
+                    TextField("Date path", text: $datePath)
+                    TextField("Model path", text: $modelPath)
+                    TextField("Input tokens path", text: $inputTokensPath)
+                    TextField("Output tokens path", text: $outputTokensPath)
+                    TextField("Total tokens path", text: $totalTokensPath)
+                    TextField("Since parameter", text: $sinceParameter)
+                    TextField("Until parameter", text: $untilParameter)
+                }
+                SecureField(kind == "minimax" ? "Coding Plan key" : "API key", text: $credential)
+                if kind == "step_plan" {
+                    SecureField("Web session (optional)", text: $session)
+                }
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                }
+            }
+            .formStyle(.grouped)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cancel") { clearSecrets(); dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(isSaving)
+                Button("Add Connection") { submit() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(isSaving)
+            }
+            .padding(18)
+        }
+        .frame(width: 620, height: 680)
+        .onDisappear(perform: clearSecrets)
+    }
+
+    private func submit() {
+        let draft = makeDraft()
+        if let validation = draft.validation(action: .createConnection) {
+            let message = switch validation {
+            case .missingProviderID: "Connection ID is required."
+            case .missingName: "Account label is required."
+            case .missingCredential: "API key or web session is required."
+            case .invalidSite: "Site is invalid."
+            }
+            error = AppLocalization.text(message)
+            return
+        }
+        guard let command = ProviderMutationCommand.resolve(
+            activityBundleURL: Bundle.main.bundleURL,
+            activityExecutableURL: Bundle.main.executableURL ?? Bundle.main.bundleURL
+        ) else {
+            error = ProviderMutationFailure.unavailable.message
+            return
+        }
+        isSaving = true
+        error = nil
+        Task { @MainActor in
+            let result = await ProviderMutationService.submit(
+                draft.request(action: .createConnection), command: command
+            )
+            isSaving = false
+            switch result {
+            case let .success(response) where response.ok:
+                clearSecrets()
+                onSaved()
+            case let .success(response): error = response.message
+            case let .failure(failure): error = failure.message
+            }
+        }
+    }
+
+    private func makeDraft() -> ManagedConnectionDraft {
+        switch kind {
+        case "minimax": .minimax(
+            providerID: providerID, name: name, replacementCredential: credential
+        )
+        case "step_plan": .stepPlan(
+            providerID: providerID, name: name, site: site,
+            replacementCredential: credential, replacementSession: session
+        )
+        case "openai_organization": .openAIOrganization(
+            providerID: providerID, name: name, replacementCredential: credential
+        )
+        case "daily_usage_feed": .dailyUsageFeed(.init(
+            providerID: providerID, name: name, familyID: familyID,
+            endpoint: endpoint, headerName: headerName, authPrefix: authPrefix,
+            itemsPath: itemsPath, datePath: datePath, modelPath: modelPath,
+            inputTokensPath: inputTokensPath, outputTokensPath: outputTokensPath,
+            cacheReadTokensPath: nil, cacheCreationTokensPath: nil,
+            reasoningTokensPath: nil, totalTokensPath: totalTokensPath,
+            sinceParameter: sinceParameter, untilParameter: untilParameter,
+            replacementCredential: credential
+        ))
+        default: .generic(.init(
+            providerID: providerID, name: name, familyID: familyID,
+            endpoint: endpoint, headerName: headerName, authPrefix: authPrefix,
+            primaryPath: primaryPath,
+            remainingPercentPath: emptyToNil(remainingPercentPath),
+            resetPath: emptyToNil(resetPath), detailPath: emptyToNil(detailPath),
+            replacementCredential: credential
+        ))
+        }
+    }
+
+    private func emptyToNil(_ value: String) -> String? { value.isEmpty ? nil : value }
+    private func clearSecrets() { credential = ""; session = "" }
 }
 
 private struct ProviderDetailSection<Content: View>: View {

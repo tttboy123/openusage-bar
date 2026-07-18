@@ -1,9 +1,51 @@
+import Foundation
 import Testing
 @testable import UsageCore
 @testable import OpenUsageActivity
 
 @Suite("Provider Center presentation")
 struct ProviderCenterPresentationTests {
+    @Test("Managed drafts encode strict v2 create update and remove envelopes")
+    func mutationV2Envelopes() throws {
+        let draft = ManagedConnectionDraft.minimax(
+            providerID: "minimax-work", name: "MiniMax Work",
+            replacementCredential: "private-key"
+        )
+        let create = try mutationObject(draft.request(action: .createConnection))
+        #expect(create["version"] as? Int == 2)
+        #expect(create["action"] as? String == "create_connection")
+        #expect(create["kind"] as? String == "minimax")
+        #expect((create["configuration"] as? [String: Any])?["name"] as? String == "MiniMax Work")
+        #expect((create["credentialMaterial"] as? [String: Any])?["primary"] as? String == "private-key")
+
+        let remove = try mutationObject(draft.request(action: .removeConnection))
+        #expect((remove["configuration"] as? [String: Any])?.isEmpty == true)
+        #expect((remove["credentialMaterial"] as? [String: Any])?.isEmpty == true)
+    }
+
+    @Test("Draft validation keeps credentials transient and rejects incomplete forms")
+    func draftValidation() {
+        let invalid = ManagedConnectionDraft.stepPlan(
+            providerID: "step-work", name: "", site: "china",
+            replacementCredential: "", replacementSession: ""
+        )
+        #expect(invalid.validation(action: .createConnection) == .missingName)
+
+        let missingCredential = ManagedConnectionDraft.minimax(
+            providerID: "minimax-work", name: "MiniMax",
+            replacementCredential: ""
+        )
+        #expect(missingCredential.validation(action: .createConnection) == .missingCredential)
+        #expect(missingCredential.validation(action: .updateConnection) == nil)
+    }
+
+    @Test("Auto-discovered connections never receive mutation actions")
+    func readOnlyDiscovery() {
+        #expect(!ProviderCenterPresentation.canMutate(kind: "codex"))
+        #expect(!ProviderCenterPresentation.canMutate(kind: "cursor"))
+        #expect(ProviderCenterPresentation.canMutate(kind: "minimax"))
+        #expect(ProviderCenterPresentation.canMutate(kind: "daily_usage_feed"))
+    }
     @Test("Browse categories separate cloud services from API providers")
     func categories() throws {
         #expect(ProviderBrowseCategory.classify(try descriptor("minimax")) == .subscription)
@@ -129,5 +171,12 @@ struct ProviderCenterPresentationTests {
 
     private func descriptor(_ familyID: String) throws -> ProviderDisplayDescriptor {
         try #require(ProviderCatalog.allDescriptors.first { $0.familyID == familyID })
+    }
+
+    private func mutationObject(_ request: ProviderMutationRequestV2) throws -> [String: Any] {
+        try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
+                as? [String: Any]
+        )
     }
 }

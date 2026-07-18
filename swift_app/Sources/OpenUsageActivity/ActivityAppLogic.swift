@@ -260,6 +260,7 @@ struct ProviderConnectionSummary: Sendable, Hashable, Identifiable {
     let displayName: String
     let kind: String
     let site: String?
+    let configuration: ProviderConnectionPublicConfiguration
 
     var id: String { providerID }
     var isStepPlan: Bool { kind == "step_plan" && familyID == "step_plan" }
@@ -293,11 +294,46 @@ struct ProviderConnectionSummaryStore {
         let type: String
         let familyID: String?
         let site: String?
+        let endpoint: String?
+        let headerName: String?
+        let authPrefix: String?
+        let primaryPath: String?
+        let remainingPercentPath: String?
+        let resetPath: String?
+        let detailPath: String?
+        let itemsPath: String?
+        let datePath: String?
+        let modelPath: String?
+        let inputTokensPath: String?
+        let outputTokensPath: String?
+        let cacheReadTokensPath: String?
+        let cacheCreationTokensPath: String?
+        let reasoningTokensPath: String?
+        let totalTokensPath: String?
+        let sinceParameter: String?
+        let untilParameter: String?
 
         enum CodingKeys: String, CodingKey {
-            case name, type, site
+            case name, type, site, endpoint
             case providerID = "provider_id"
             case familyID = "family_id"
+            case headerName = "header_name"
+            case authPrefix = "auth_prefix"
+            case primaryPath = "primary_path"
+            case remainingPercentPath = "remaining_percent_path"
+            case resetPath = "reset_path"
+            case detailPath = "detail_path"
+            case itemsPath = "items_path"
+            case datePath = "date_path"
+            case modelPath = "model_path"
+            case inputTokensPath = "input_tokens_path"
+            case outputTokensPath = "output_tokens_path"
+            case cacheReadTokensPath = "cache_read_tokens_path"
+            case cacheCreationTokensPath = "cache_creation_tokens_path"
+            case reasoningTokensPath = "reasoning_tokens_path"
+            case totalTokensPath = "total_tokens_path"
+            case sinceParameter = "since_parameter"
+            case untilParameter = "until_parameter"
         }
     }
 
@@ -341,7 +377,22 @@ struct ProviderConnectionSummaryStore {
                 familyID: familyID,
                 displayName: row.name,
                 kind: row.type,
-                site: row.site
+                site: row.site,
+                configuration: .init(
+                    endpoint: row.endpoint, headerName: row.headerName,
+                    authPrefix: row.authPrefix, primaryPath: row.primaryPath,
+                    remainingPercentPath: row.remainingPercentPath,
+                    resetPath: row.resetPath, detailPath: row.detailPath,
+                    itemsPath: row.itemsPath, datePath: row.datePath,
+                    modelPath: row.modelPath, inputTokensPath: row.inputTokensPath,
+                    outputTokensPath: row.outputTokensPath,
+                    cacheReadTokensPath: row.cacheReadTokensPath,
+                    cacheCreationTokensPath: row.cacheCreationTokensPath,
+                    reasoningTokensPath: row.reasoningTokensPath,
+                    totalTokensPath: row.totalTokensPath,
+                    sinceParameter: row.sinceParameter,
+                    untilParameter: row.untilParameter
+                )
             )
         }
     }
@@ -512,6 +563,13 @@ enum ProviderMutationFailure: Error, Sendable, Hashable {
 enum ProviderMutationService {
     static func submit(
         _ request: ProviderEditRequest,
+        command: ProviderMutationCommand
+    ) async -> Result<ProviderMutationResponse, ProviderMutationFailure> {
+        await ProviderMutationClient().submit(request, command: command)
+    }
+
+    static func submit(
+        _ request: ProviderMutationRequestV2,
         command: ProviderMutationCommand
     ) async -> Result<ProviderMutationResponse, ProviderMutationFailure> {
         await ProviderMutationClient().submit(request, command: command)

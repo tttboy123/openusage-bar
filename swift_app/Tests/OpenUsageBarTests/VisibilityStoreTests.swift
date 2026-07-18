@@ -57,6 +57,23 @@ struct VisibilityStoreTests {
         #expect(snapshot.revision == 0)
     }
 
+    @Test("Swift visibility writes are private deterministic and round trip")
+    func swiftWriteRoundTrip() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("nested/visibility.json")
+        let store = VisibilityStore(url: url)
+
+        try store.save(hiddenProviderIDs: ["minimax", "claude_code"])
+
+        #expect(try store.load().hiddenProviderIDs == ["claude_code", "minimax"])
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        #expect(attributes[.posixPermissions] as? NSNumber == 0o600)
+        #expect(throws: VisibilityStoreError.invalidSchema) {
+            try store.save(hiddenProviderIDs: ["../private"])
+        }
+    }
+
     @Test("Hidden providers disappear from rows and status, then reappear without mutating summary")
     @MainActor
     func liveVisibilityChange() throws {

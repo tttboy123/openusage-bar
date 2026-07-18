@@ -40,15 +40,15 @@ class UILocalizationTests(unittest.TestCase):
     def test_appkit_settings_copy_has_chinese_and_english_fallback(self):
         self.assertEqual(
             localized_ui_text("settings.providers_title", "zh-Hans"),
-            "Provider 与显示设置",
+            "高级与修复",
         )
         self.assertEqual(
-            localized_ui_text("settings.add_provider", "zh-Hans"),
-            "添加 Provider",
+            localized_ui_text("settings.provider_visibility", "zh-Hans"),
+            "修复显示状态",
         )
         self.assertEqual(
-            localized_ui_text("settings.add_provider", "en"),
-            "Add Provider",
+            localized_ui_text("settings.provider_visibility", "en"),
+            "Repair Visibility",
         )
 
     def test_legacy_step_plan_editor_is_absent_from_settings_ui(self):
@@ -57,6 +57,14 @@ class UILocalizationTests(unittest.TestCase):
         self.assertNotIn("Edit Step Plan", source)
         self.assertNotIn("editStepPlan_", source)
         self.assertNotIn("settings_edit", source)
+
+    def test_advanced_settings_no_longer_owns_daily_provider_creation(self):
+        source = (ROOT / "openusage_bar/ui.py").read_text(encoding="utf-8")
+        window = source.split("def _build_settings_window", 1)[1].split(
+            "def _settings_refresh_worker", 1
+        )[0]
+        self.assertNotIn("addProvider:", window)
+        self.assertIn("manageProviders:", window)
 
     def test_swift_apps_ship_complete_chinese_localization_resources(self):
         resources = ROOT / "swift_app/Resources"
