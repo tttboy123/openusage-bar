@@ -4,26 +4,6 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-### Changed
-
-- OpenUsage daily scans now allow 60 seconds so large local histories are not
-  discarded by the previous 30-second process timeout.
-- Providers with an official daily usage adapter now select the official result
-  first and atomically fall back to OpenUsage only when the official source
-  fails. Fallback rows are marked with source `openusage.daily` and quality
-  `fallback`; the two sources are never added together.
-- Codex daily Token history again uses the shared OpenUsage collector as its
-  primary source, while its local rate-limit adapter remains responsible only
-  for subscription capacity.
-
-### Fixed
-
-- Empty or failed OpenUsage scans no longer replace a last-good range with
-  covered zero usage. Source health records `empty_result` or the sanitized
-  failure while preserving the prior rows and coverage.
-- Daily activity details now expose each day's raw source IDs, quality IDs, and
-  collection time in the chart tooltip and accessibility summary.
-
 ## 0.4.2 - 2026-07-18
 
 ### Added
@@ -82,12 +62,26 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- OpenUsage daily scans now allow 60 seconds so large local histories are not
+  discarded by the previous 30-second process timeout.
+- Providers with an official daily usage adapter now select the official result
+  first and atomically fall back to OpenUsage only when the official source
+  fails. Fallback rows are marked with source `openusage.daily` and quality
+  `fallback`; the two sources are never added together.
+- Codex daily Token history again uses the shared OpenUsage collector as its
+  primary source, while its local rate-limit adapter remains responsible only
+  for subscription capacity.
 - All app and helper bundles now share release version 0.4.0 and build 4.
 - Release metadata is verified against immutable tags, build history, and the
   CHANGELOG; GitHub Actions are pinned to full official commit SHAs.
 
 ### Fixed
 
+- Empty or failed OpenUsage scans no longer replace a last-good range with
+  covered zero usage. Source health records `empty_result` or the sanitized
+  failure while preserving the prior rows and coverage.
+- Daily activity details now expose each day's raw source IDs, quality IDs, and
+  collection time in the chart tooltip and accessibility summary.
 - Installation now prefers the standard Finder `/Applications` directory,
   falls back to `~/Applications` when necessary, preserves that location for
   updates, rollback, and uninstall, and reveals the installed app in Finder.

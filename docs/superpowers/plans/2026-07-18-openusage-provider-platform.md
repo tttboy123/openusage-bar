@@ -1,5 +1,12 @@
 # OpenUsage Bar Provider Platform Implementation Plan
 
+> **Status (2026-07-19): Implemented and CI verified; live verification
+> pending.** Registry/contracts, separated fact collection, multi-account
+> isolation, aliases, versioned feeds, and the conformance kit pass repository
+> gates on `main@9cd134a`; authoritative real-account validation remains pending
+> per Provider. Track it in the [roadmap](../../../ROADMAP.md). Historical
+> checkboxes below are preserved as authored.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Provider coverage reuse-first, fact-specific, multi-account capable, and independently testable without growing central conditionals or inventing unsupported quota values.

@@ -1,5 +1,12 @@
 # OpenUsage Bar Core Ledger and API Implementation Plan
 
+> **Status (2026-07-19): Implemented and CI verified; live verification
+> pending.** The repository contract and automated cross-language gates pass on
+> `main@9cd134a`; compatibility evidence from real external Local API consumers
+> is still pending. Track the remaining gate in the
+> [roadmap](../../../ROADMAP.md). Historical checkboxes below are preserved as
+> authored.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the local ledger a complete revisioned fact source and expose one coherent resource snapshot to native clients and optional generic local consumers.

@@ -1,5 +1,13 @@
 # OpenUsage Bar Native Product Surfaces Implementation Plan
 
+> **Status (2026-07-19): Implemented and CI verified; live verification
+> pending.** The native menu bar, Usage Details, Provider Center, Automation,
+> onboarding, localization, and bounded mutation paths pass repository gates on
+> `main@9cd134a`. External-machine bilingual, keyboard, and VoiceOver acceptance
+> is still pending. Track the remaining gate in the
+> [roadmap](../../../ROADMAP.md). Historical checkboxes below are preserved as
+> authored.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver a coherent bilingual macOS product in which users can get a trustworthy first metric, manage providers, inspect usage, and discover the automation API without leaving the native client.

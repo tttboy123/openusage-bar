@@ -13,7 +13,7 @@
 ![Local First](https://img.shields.io/badge/Local--First-Keychain%20%2B%20SQLite-111111?style=flat-square)
 ![License](https://img.shields.io/badge/License-Apache--2.0-111111?style=flat-square)
 
-[English](README.en.md) | [本地 API](docs/api/local-api-v1.md) | [Provider 支持](docs/provider-support.md) | [安装指南](docs/release-quick-start.md)
+[English](README.en.md) | [路线图](ROADMAP.md) | [本地 API](docs/api/local-api-v1.md) | [Provider 支持](docs/provider-support.md) | [安装指南](docs/release-quick-start.md)
 
 </div>
 
@@ -60,7 +60,7 @@ flowchart LR
 | 能力 | 说明 |
 | --- | --- |
 | 菜单栏总览 | Today Token、最紧急 Capacity、刷新状态和详情入口 |
-| Usage Details | Overview、Activity、Capacity、API Spend、Local Tools、Providers、Data Health |
+| Usage Details | Activity、Capacity、API Spend、Local Tools、Providers、Data Health |
 | 每日 Token 活动 | 日、周、月、年维度聚合；支持每日总量、模型堆叠趋势和年度方格热力图 |
 | Provider Center | 添加、编辑、隐藏、恢复 Provider；支持多账号；凭证只写入 Keychain |
 | 订阅额度 | Codex、Cursor、Kiro、MiniMax、StepFun 等可用时显示真实剩余容量 |
@@ -152,7 +152,9 @@ OpenUsage Bar.app
 ```text
 GET /v1/health
 GET /v1/schema
+GET /v1/schema.json
 GET /v1/summary
+GET /v1/snapshot
 GET /v1/capabilities
 GET /v1/providers
 GET /v1/providers?providerIds=codex,minimax-primary

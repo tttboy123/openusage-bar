@@ -12,7 +12,7 @@ A native macOS menu-bar utility. Data stays local; people read the UI and schedu
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-native-111111?style=flat-square&logo=swift&logoColor=white)
 ![Local First](https://img.shields.io/badge/Local--First-Keychain%20%2B%20SQLite-111111?style=flat-square)
 
-[中文](README.md) | [Local API](docs/api/local-api-v1.md) | [Provider support](docs/provider-support.md) | [Install](docs/release-quick-start.md)
+[中文](README.md) | [Roadmap](ROADMAP.md) | [Local API](docs/api/local-api-v1.md) | [Provider support](docs/provider-support.md) | [Install](docs/release-quick-start.md)
 
 </div>
 
@@ -29,7 +29,7 @@ OpenUsage Bar is a local-first native macOS dashboard for AI subscriptions, API 
 ## What it does
 
 - Menu bar: today token total, urgent capacity, refresh state, and details entry.
-- Activity app: overview, token activity, capacity, API spend, local tools, providers, accounts, and data health.
+- Activity app: token activity, capacity, API spend, local tools, providers, accounts, and data health.
 - Provider center: add, edit, hide, restore, and manage multiple accounts without echoing credentials.
 - Local automation surface: stable CLI JSON/JSONL and a private read-only Unix-socket API.
 - Privacy boundary: credentials stay in macOS Keychain; prompts, responses, raw provider payloads, cookies, sessions, and direct account identity are not exported.
@@ -97,7 +97,9 @@ Supported read-only resources include:
 ```text
 GET /v1/health
 GET /v1/schema
+GET /v1/schema.json
 GET /v1/summary
+GET /v1/snapshot
 GET /v1/capabilities
 GET /v1/providers
 GET /v1/capacity

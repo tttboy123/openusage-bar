@@ -1,5 +1,12 @@
 # OpenUsage Bar AI Resource Control Center Implementation Plan
 
+> **Status (2026-07-19): Superseded as the execution entry point.** The core
+> ledger/API, native surfaces, Provider platform, and repository release gates
+> are implemented and CI verified on `main@9cd134a`; live 1.0 evidence remains
+> pending. Use the [roadmap](../../../ROADMAP.md) and
+> [current work queue](2026-07-18-openusage-work-queue.zh-CN.md) for active
+> sequencing. Historical checkboxes below are preserved as authored.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn OpenUsage Bar into a standalone local-first macOS AI resource control center for people and a trustworthy read-only telemetry plane for optional local consumers.

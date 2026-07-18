@@ -69,13 +69,13 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - 将旧计划标记为 `implemented`、`CI verified`、`live verification pending` 或 `superseded`。
 - 修正 README 中重复的 Overview 描述。
 - 在 README 补充 `/v1/snapshot` 和 `/v1/schema.json`。
-- 把已经包含在 v0.4.2 中、却仍位于 `Unreleased` 下的 CHANGELOG 条目归入正确版本。
+- 把已经包含在已发布版本中、却仍位于 `Unreleased` 下的 CHANGELOG 条目归入首次发布它们的正确版本。
 
 **验收：**
 
-- [ ] 一个新贡献者只读 README、ROADMAP 和 CHANGELOG 就能判断当前版本与下一步。
-- [ ] 已发布能力不再出现在待实施队列中。
-- [ ] API 文档列出的路由与生成 Schema、实现完全一致。
+- [x] 一个新贡献者只读 README、ROADMAP 和 CHANGELOG 就能判断当前版本与下一步。
+- [x] 已发布能力不再出现在待实施队列中。
+- [x] API 文档列出的路由与生成 Schema、实现完全一致。
 
 **验证：** 文档链接检查、`scripts/verify_release_metadata.py`、`git diff --check`。
 
@@ -108,20 +108,22 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 
 ### WQ-03：冻结 Token 统计语义并建立脱敏对账 Fixture
 
-**目标：** 先统一“总量、输入、输出、缓存、日期与覆盖范围”的含义，再继续扩 Provider。
+**目标：** 先统一“总量、输入、输出、缓存、计数口径、日期与覆盖范围”的含义，再继续扩 Provider。
 
 **实施：**
 
-- 固定 `total = input + output`；cached input 是 input 子集，不重复加入 total。
-- 明确 cache read、cache creation、reasoning token 的展示与总量口径。
+- 保留来源报告的 `total`，禁止在未知口径下用 breakdown 重新计算或相加覆盖。
+- 为每条日用量声明 `tokenCountingConvention`：`input_includes_cache`、`components_disjoint`、`provider_reported` 或 `unknown`。
+- `input_includes_cache` 中 cache read/cache creation 是 input 的分类、reasoning 是 output 的分类，`total = input + output`；`components_disjoint` 中各组件互斥，`total` 为组件和。
+- 明确 cache read、cache creation、reasoning token 的独立展示；旧数据与无法证明的上游口径保持 `unknown`，不得猜测。
 - 以本地日历日归属事件，覆盖 UTC 跨日、夏令时和 Session 跨日场景。
 - 为官方数据、OpenUsage、本地 Session 与 Last-good 建立脱敏 Fixture。
 - 明确 `exact`、`estimated`、`fallback`、`partial`、`missing` 的判定规则。
 
 **验收：**
 
-- [ ] 同一组 Fixture 在 Python、SQLite、API、CLI 与 Swift 中得到相同的 Token breakdown。
-- [ ] Cache 不会被二次计入 Total，跨日事件不会落入错误日期。
+- [ ] 同一组 Fixture 在 Python、SQLite、API、CLI 与 Swift 中得到相同的 Token breakdown、来源总量和计数口径。
+- [ ] UI 与诊断只按已声明口径解释 Total；Cache 不会被二次计入，跨日事件不会落入错误日期。
 - [ ] 覆盖不完整时返回 `partial`，从未成功时返回 `missing`，两者都不伪装成完整零值。
 
 **验证：** `tests/test_codex_daily.py`、`tests/test_daily_history.py`、`tests/test_openai_organization.py`、`swift_app/Tests/UsageCoreTests/UsageDetailsTests.swift`。

@@ -1,5 +1,11 @@
 # Loom OpenUsage Resource Observer Implementation Plan
 
+> **Status (2026-07-19): Superseded for this repository.** This optional
+> consumer is not implemented or CI verified in OpenUsage Bar. Any implementation
+> belongs in the Loom repository and does not gate the
+> [OpenUsage Bar roadmap](../../../ROADMAP.md). Historical checkboxes below are
+> preserved as authored.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let Loom optionally consume a standalone OpenUsage Bar installation's generic resource facts as bounded, attributable, observe-only evidence without creating a Bar runtime or release dependency.
