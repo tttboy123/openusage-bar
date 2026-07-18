@@ -29,6 +29,11 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Codex daily activity now reads local session deltas incrementally, assigns
+  events to the local calendar day, and treats cached input as a subset of
+  input instead of adding it to the total a second time.
+- Codex history no longer remains stuck on a partial OpenUsage daily snapshot
+  when the upstream aggregation times out on large session archives.
 - Provider-level refresh failures no longer suppress independent facts.
 - Keychain lookup expressions no longer trigger false-positive literal-secret
   scans while hard-coded credentials remain blocked.

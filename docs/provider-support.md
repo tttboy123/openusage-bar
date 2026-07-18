@@ -19,7 +19,7 @@ These adapters fill gaps that OpenUsage does not currently expose:
 
 | Provider | Available facts |
 |---|---|
-| Codex | Local subscription windows and resets; OpenUsage Token activity when available |
+| Codex | Local subscription windows and resets; incremental local-session Token activity with OpenUsage fallback |
 | Cursor | Remaining subscription percentage when the local client exposes it; OpenUsage fallback |
 | Kiro | AWS CodeWhisperer plan quota and reset when Keychain credentials allow it; OpenUsage fallback |
 | MiniMax | Coding Plan capacity plus delayed daily model billing activity when the selected site supplies it |

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "fixture_id": "codex",
   "families": ["codex"],
-  "runtime_sources": ["codex.local_rate_limits"],
+  "runtime_sources": ["codex.local_rate_limits", "codex.local_sessions"],
   "catalog_source_ids": ["codex_local_log"],
   "catalog_provenances": [],
   "cases": ["success", "empty_result", "authentication_expiry", "rate_limit", "timeout", "malformed_response", "oversized_response", "pagination_loop", "partial_coverage", "last_good_preservation", "source_priority", "multi_account_isolation", "secret_non_disclosure", "unknown_not_zero"],

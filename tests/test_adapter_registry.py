@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 from openusage_bar.aggregator import BoundedReadOnlyKeychain, build_headless_refresher
 from openusage_bar.codex_subscription import CodexSubscriptionAdapter
+from openusage_bar.codex_daily import CodexLocalDailyImporter
 from openusage_bar.config import (
     DailyCostFeedConfig,
     DailyUsageFeedConfig,
@@ -80,7 +81,9 @@ class AdapterRegistryTests(unittest.TestCase):
         expected = {
             "openusage": ((OpenUsageAdapter,), (OpenUsageDailyImporter,), ()),
             "kiro_cli": ((KiroQuotaAdapter,), (), ()),
-            "codex": ((CodexSubscriptionAdapter,), (), ()),
+            "codex": (
+                (CodexSubscriptionAdapter,), (CodexLocalDailyImporter,), (),
+            ),
             "cost-work": ((DailyCostFeedCardAdapter,), (), (DailyCostFeedImporter,)),
             "minimax-work": (
                 (MiniMaxCodingPlanAdapter,), (MiniMaxBillingImporter,), (),
