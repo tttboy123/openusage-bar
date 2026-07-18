@@ -58,6 +58,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("scripts/privacy_scan.py", source)
         self.assertIn("scripts/release_secret_scan.py", source)
         self.assertIn("Delete :PythonInfoDict:PythonExecutable", source)
+        self.assertIn('rm -rf "$SETTINGS_APP/Contents/Resources/include"', source)
         self.assertIn("provider-catalog.v1.json", source)
         self.assertIn("GeneratedProviderCatalog.swift", source)
         self.assertIn("generate_local_api_schema.py --output", source)

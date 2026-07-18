@@ -122,6 +122,10 @@ if [[ ! -x "$SETTINGS_APP/Contents/MacOS/OpenUsage Provider Settings" ]]; then
 fi
 /usr/libexec/PlistBuddy -c "Delete :PythonInfoDict:PythonExecutable" \
   "$SETTINGS_APP/Contents/Info.plist"
+# py2app copies Python development headers even though this app never compiles
+# extensions at runtime. Hosted Python's pyconfig.h can contain its build-home
+# prefix, so remove the unused development-only tree before signing/package audit.
+rm -rf "$SETTINGS_APP/Contents/Resources/include"
 
 cp "$RESOURCES/com.lune.openusagebar.plist" "$APP/Contents/Resources/LaunchAgents/"
 cp "$RESOURCES/com.lune.openusagebar.collector.plist" "$APP/Contents/Resources/LaunchAgents/"
