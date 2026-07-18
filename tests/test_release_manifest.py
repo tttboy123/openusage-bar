@@ -5,7 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.generate_release_manifest import generate
+from scripts.generate_release_manifest import (
+    ManifestError,
+    _portable_swift_dependencies,
+    generate,
+)
 
 
 COMMIT = "a" * 40
@@ -13,6 +17,14 @@ COMMIT_TIME = "2026-07-18T12:00:00+00:00"
 
 
 class ReleaseManifestTests(unittest.TestCase):
+    def test_swift_dependency_paths_outside_the_repository_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaises(ManifestError):
+                _portable_swift_dependencies(
+                    {"path": "/Users/example/private/package"}, root
+                )
+
     def test_manifest_and_spdx_are_deterministic_complete_and_sorted(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -43,7 +55,12 @@ class ReleaseManifestTests(unittest.TestCase):
             sbom_path = root / "OpenUsage-Bar-v0.4.0-sbom.spdx.json"
             arguments = dict(
                 root=root, app=app, archive=archive, requirements=requirements,
-                swift_dependencies={"name": "OpenUsageBar", "dependencies": []},
+                swift_dependencies={
+                    "name": "OpenUsageBar",
+                    "path": str(root / "swift_app"),
+                    "url": str(root / "swift_app"),
+                    "dependencies": [],
+                },
                 commit=COMMIT, commit_time=COMMIT_TIME,
             )
 
@@ -62,6 +79,9 @@ class ReleaseManifestTests(unittest.TestCase):
             sbom = json.loads(sbom_path.read_text("utf-8"))
             self.assertEqual(manifest["schemaVersion"], 1)
             self.assertEqual(manifest["gitCommit"], COMMIT)
+            self.assertEqual(manifest["swiftDependencies"]["path"], "swift_app")
+            self.assertEqual(manifest["swiftDependencies"]["url"], "swift_app")
+            self.assertNotIn(str(root), manifest_path.read_text("utf-8"))
             self.assertEqual(
                 manifest["product"],
                 {

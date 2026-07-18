@@ -16,6 +16,7 @@ REQUIREMENT = re.compile(
     r"^([A-Za-z0-9_.-]+)==([A-Za-z0-9_.-]+) --hash=sha256:([0-9a-f]{64})$"
 )
 SHA = re.compile(r"^[0-9a-f]{40}$")
+HOME_PATH = re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+(?:/|\b)")
 
 
 class ManifestError(ValueError):
@@ -65,6 +66,26 @@ def _executables(app: Path) -> list[dict[str, object]]:
                 "size": path.stat().st_size,
             })
     return rows
+
+
+def _portable_swift_dependencies(value: object, root: Path) -> object:
+    if isinstance(value, dict):
+        portable: dict[str, object] = {}
+        for key, item in value.items():
+            if key in {"path", "url"} and isinstance(item, str) and item.startswith("/"):
+                try:
+                    relative = Path(item).resolve().relative_to(root.resolve())
+                except ValueError as error:
+                    raise ManifestError("swift_path") from error
+                portable[key] = relative.as_posix() or "."
+            else:
+                portable[key] = _portable_swift_dependencies(item, root)
+        return portable
+    if isinstance(value, list):
+        return [_portable_swift_dependencies(item, root) for item in value]
+    if isinstance(value, str) and HOME_PATH.search(value):
+        raise ManifestError("swift_path")
+    return value
 
 
 def generate(
@@ -129,6 +150,7 @@ def generate(
         {"name": checksum.name, "sha256": _sha256(checksum), "size": checksum.stat().st_size},
         {"name": sbom_path.name, "sha256": _sha256(sbom_path), "size": sbom_path.stat().st_size},
     ]
+    portable_swift = _portable_swift_dependencies(swift_dependencies, root)
     manifest = {
         "schemaVersion": 1,
         "gitCommit": commit,
@@ -137,7 +159,7 @@ def generate(
             "minimumMacOS": minimum, "architecture": "arm64",
         },
         "pythonDependencies": dependencies,
-        "swiftDependencies": swift_dependencies,
+        "swiftDependencies": portable_swift,
         "executables": executables,
         "publishedAssets": sorted(assets, key=lambda row: row["name"]),
     }
