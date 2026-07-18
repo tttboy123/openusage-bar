@@ -31,8 +31,12 @@ MOUNTED=1
 
 APP="$MOUNT/OpenUsage Bar.app"
 AGENT="$APP/Contents/Library/LaunchAgents/com.lune.openusagebar.collector.plist"
+GUIDE="$MOUNT/安装说明 Installation Guide.txt"
 [[ -d "$APP" && -L "$MOUNT/Applications" ]]
 [[ $(readlink "$MOUNT/Applications") == /Applications ]]
+[[ -f "$GUIDE" && ! -L "$GUIDE" ]]
+grep -F 'xattr -dr com.apple.quarantine "/Applications/OpenUsage Bar.app"' "$GUIDE" >/dev/null
+grep -F '不要全局关闭 Gatekeeper' "$GUIDE" >/dev/null
 codesign --verify --deep --strict "$APP"
 [[ $(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist") == "$VERSION" ]]
 [[ $(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist") == com.lune.openusagebar ]]

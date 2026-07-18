@@ -24,7 +24,7 @@ OpenUsage Bar is a local-first native macOS dashboard for AI subscriptions, API 
 
 <p align="center"><sub>Real SwiftUI interface rendered from an isolated synthetic ledger. No user ledger, Keychain data, or real quota was read.</sub></p>
 
-> Current version: **0.4.2 pre-release**. Apple Silicon and macOS 15 or later are required. Developer ID notarization is not available yet; approve only this app through Privacy & Security on first launch.
+> Current version: **0.4.2 pre-release**. Apple Silicon and macOS 15 or later are required. Developer ID notarization is not available yet; if macOS reports the app as damaged, remove the download quarantine from this app only as described below.
 
 ## What it does
 
@@ -53,10 +53,18 @@ flowchart LR
 3. Open it from Finder's Applications folder. The app registers its login item
    and bundled collector automatically; Terminal is not required.
 
-If macOS cannot verify the developer, try opening the app once, then open
-**System Settings > Privacy & Security** and choose **Open Anyway** for
-OpenUsage Bar. Never disable Gatekeeper globally. If background access needs
-approval, allow OpenUsage Bar in **System Settings > General > Login Items**.
+If macOS says **“OpenUsage Bar is damaged”**, verify that the DMG came from this
+repository and matches its SHA-256 file, then remove quarantine from this app
+only:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/OpenUsage Bar.app"
+```
+
+Open it again from Applications. This does not disable Gatekeeper system-wide.
+The DMG also includes the same bilingual installation guide. If background
+access needs approval, allow OpenUsage Bar in **System Settings > General >
+Login Items**.
 
 The ZIP, checksums, transactional installer, rollback, and uninstall scripts
 remain available on the release page for advanced repair and automation. See

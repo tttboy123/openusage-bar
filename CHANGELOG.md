@@ -29,7 +29,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 ### Added
 
 - A drag-to-install DMG with a standard Applications shortcut for normal macOS
-  installation without Terminal commands.
+  installation; unnotarized downloads may require the scoped command below.
+- A bilingual guide inside the DMG with the scoped quarantine-removal command
+  required when an unnotarized download is reported as damaged by macOS.
 - First-launch registration of the menu-bar login item and bundled collector
   through Apple's Service Management framework.
 
@@ -37,10 +39,12 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 - Initial and login launches stay in the menu bar; explicitly reopening the app
   continues to open recovery details when needed.
+- Existing script-installed LaunchAgents now suppress false Service Management
+  `notFound` packaging alerts during an upgrade.
 - The ZIP and transactional scripts remain available for advanced repair,
   rollback, and automation instead of being the primary install path.
-- Gatekeeper documentation uses per-app Privacy & Security approval and never
-  asks users to disable system protection globally.
+- Gatekeeper documentation uses a scoped quarantine-removal command for this
+  app and never asks users to disable system protection globally.
 
 ## 0.4.1 - 2026-07-18
 

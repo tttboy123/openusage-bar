@@ -35,7 +35,8 @@ struct BackgroundServicePlan: Sendable, Hashable {
         return Self(
             actions: actions,
             requiresApproval: loginItem == .requiresApproval || collector == .requiresApproval,
-            hasPackagingError: loginItem == .notFound || collector == .notFound
+            hasPackagingError: (loginItem == .notFound && !legacyLoginItem)
+                || (collector == .notFound && !legacyCollector)
         )
     }
 }

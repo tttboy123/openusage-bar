@@ -57,6 +57,8 @@ chmod 755 "$STAGE/scripts/"*.sh "$STAGE/scripts/"*.py
 mkdir -p "$DMG_STAGE"
 /usr/bin/ditto "$APP" "$DMG_STAGE/OpenUsage Bar.app"
 ln -s /Applications "$DMG_STAGE/Applications"
+cp "$ROOT/docs/dmg-install-readme.txt" \
+  "$DMG_STAGE/安装说明 Installation Guide.txt"
 hdiutil create \
   -volname "OpenUsage Bar" \
   -srcfolder "$DMG_STAGE" \

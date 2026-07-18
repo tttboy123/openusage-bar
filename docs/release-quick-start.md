@@ -8,8 +8,9 @@ OpenUsage Bar 0.4.2 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
    下载 `OpenUsage-Bar-v0.4.2-macos-arm64.dmg`。
 2. 双击 DMG，将 **OpenUsage Bar** 拖入 **Applications**。
 3. 在访达“应用程序”中打开。App 会自动注册登录项和内置采集器。
-4. 若 macOS 拦截，进入 **系统设置 > 隐私与安全性**，仅对 OpenUsage Bar
-   选择 **仍要打开**。不要全局关闭 Gatekeeper。
+4. 若 macOS 显示“OpenUsage Bar 已损坏”，确认下载来源和 SHA-256 后执行
+   `xattr -dr com.apple.quarantine "/Applications/OpenUsage Bar.app"`，再从
+   “应用程序”打开。不要全局关闭 Gatekeeper。
 5. 若出现后台访问提示，在 **系统设置 > 通用 > 登录项**允许 OpenUsage Bar。
 
 OpenUsage Bar 是菜单栏工具，不会出现在 Dock 或 Command-Tab。采集器每五分钟刷新。
@@ -18,8 +19,9 @@ OpenUsage Bar 是菜单栏工具，不会出现在 Dock 或 Command-Tab。采集
 
 Download the v0.4.2 DMG, open it, drag **OpenUsage Bar** to **Applications**,
 then open it from Finder. The app registers its login item and bundled collector
-on first launch. If Gatekeeper blocks it, use **System Settings > Privacy &
-Security > Open Anyway** for this app only. Allow it under **General > Login
+on first launch. If macOS says the app is damaged, verify the download and run
+`xattr -dr com.apple.quarantine "/Applications/OpenUsage Bar.app"` for this app
+only. Do not disable Gatekeeper system-wide. Allow it under **General > Login
 Items** if macOS requests background approval.
 
 ## 可选完整性校验 / Optional checksum

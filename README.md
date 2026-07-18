@@ -25,7 +25,7 @@ OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Tok
 
 <p align="center"><sub>真实 SwiftUI 界面，使用隔离的合成账本生成。未读取用户账本、Keychain 或真实额度。</sub></p>
 
-> 当前版本：**0.4.2 预发布版**。支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple Developer ID 公证包；首次打开时按下方 Gatekeeper 指引仅放行本 App 即可。
+> 当前版本：**0.4.2 预发布版**。支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple Developer ID 公证包；若 macOS 显示“已损坏”，按下方指引仅移除本 App 的下载隔离属性。
 
 ## 为什么需要它
 
@@ -77,13 +77,15 @@ flowchart LR
 3. 从访达的“应用程序”打开 **OpenUsage Bar**。
 4. App 自动注册登录启动项和后台采集器，不需要打开终端。
 
-如果 macOS 提示无法验证开发者：
+如果 macOS 提示 **“OpenUsage Bar 已损坏”**，这是尚未公证的开源预发布包被添加了
+下载隔离属性。确认 DMG 来自本仓库并已校验 SHA-256 后，在终端中只对该 App 执行：
 
-1. 先在访达中尝试打开一次 App。
-2. 打开 **系统设置 > 隐私与安全性**。
-3. 在安全性区域找到 OpenUsage Bar，点击 **仍要打开**，然后再次确认。
+```bash
+xattr -dr com.apple.quarantine "/Applications/OpenUsage Bar.app"
+```
 
-只放行 OpenUsage Bar，不要全局关闭 Gatekeeper。首次启动若提示后台访问，请在
+再从访达的“应用程序”打开。该命令只移除 OpenUsage Bar 的下载隔离属性；不要
+全局关闭 Gatekeeper。DMG 根目录也附带同样的中英文安装说明。首次启动若提示后台访问，请在
 **系统设置 > 通用 > 登录项**中允许 OpenUsage Bar。
 
 首次打开后：
