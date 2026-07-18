@@ -24,6 +24,7 @@ PYTHON_TOUCHED_MODULES=(
   openusage_bar.codex_subscription
   openusage_bar.collector_cli
   openusage_bar.config
+  openusage_bar.cost_feed
   openusage_bar.daily_feed
   openusage_bar.daily_history
   openusage_bar.generic
@@ -37,6 +38,9 @@ PYTHON_TOUCHED_MODULES=(
   openusage_bar.openai_organization
   openusage_bar.provider_catalog
   openusage_bar.provider_commands
+  openusage_bar.providers.builtins
+  openusage_bar.providers.contracts
+  openusage_bar.providers.registry
   openusage_bar.query
   openusage_bar.step_plan
 )
@@ -70,6 +74,7 @@ if ! cmp -s "$ACTIVITY_SCHEMA_TMP" "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedAc
   exit 1
 fi
 PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
+"$PYTHON" -m unittest tests.test_provider_conformance -v
 "$PYTHON" -m unittest discover -s tests -v
 "$PYTHON" -m trace --count --summary --missing \
   --coverdir "$PYTHON_COVERAGE_DIR" \

@@ -4,10 +4,15 @@ from unittest.mock import Mock
 from urllib.parse import parse_qs, urlsplit
 
 from openusage_bar.config import DailyCostFeedConfig
-from openusage_bar.cost_feed import CUSTOM_COST_FEED_SOURCE_ID, DailyCostFeedImporter
+from openusage_bar.cost_feed import (
+    CUSTOM_COST_FEED_SOURCE_ID,
+    DailyCostFeedCardAdapter,
+    DailyCostFeedImporter,
+)
 from openusage_bar.activity_store import ActivityStore
 from openusage_bar.daily_history import ActivityCollector, DailyImportResult
-from openusage_bar.models import Overview
+from openusage_bar.models import Category, Overview, ProviderStatus
+from openusage_bar.network import AuthenticationRequired, NetworkError, RateLimited
 from openusage_bar.providers.contracts import CostImportSuccess, ImportFailure
 
 
@@ -61,6 +66,31 @@ class DailyCostFeedImporterTests(unittest.TestCase):
         query = parse_qs(urlsplit(client.get_json.call_args.args[0]).query)
         self.assertEqual((query["from"], query["to"]), (["2026-07-17"], ["2026-07-17"]))
 
+    def test_card_reports_only_connection_health_and_catalog_category(self):
+        keychain = Mock()
+        keychain.get.return_value = "safe-test-value"
+        card = DailyCostFeedCardAdapter(
+            config(family_id="codex"), keychain, lambda: NOW
+        ).fetch()
+
+        self.assertEqual(card.status, ProviderStatus.OK)
+        self.assertEqual(card.category, Category.SUBSCRIPTION)
+        self.assertEqual(card.primary, "Configured")
+        self.assertIsNone(card.remaining_percent)
+        self.assertEqual(card.account_ref, "work")
+
+    def test_card_fails_closed_for_keychain_error_and_unknown_family(self):
+        keychain = Mock()
+        keychain.get.side_effect = RuntimeError("unavailable")
+        card = DailyCostFeedCardAdapter(
+            config(family_id="future-provider"), keychain, lambda: NOW
+        ).fetch()
+
+        self.assertEqual(card.status, ProviderStatus.AUTH)
+        self.assertEqual(card.category, Category.API)
+        self.assertIsNone(card.primary)
+        self.assertEqual(card.last_error, "Credential required")
+
     def test_invalid_amount_currency_and_auth_fail_closed(self):
         cases = (
             (None, [], "auth_required"),
@@ -81,6 +111,45 @@ class DailyCostFeedImporterTests(unittest.TestCase):
                 )
                 self.assertIsInstance(result, ImportFailure)
                 self.assertEqual(result.error_code, expected)
+
+    def test_invalid_range_timezone_and_out_of_range_rows_are_bounded(self):
+        invalid_range = self.importer([])[0].fetch_costs(
+            date(2026, 7, 18), date(2026, 7, 17)
+        )
+        invalid_timezone = self.importer(
+            [], configured=config(timezone="Not/A-Timezone")
+        )[0].fetch_costs(date(2026, 7, 17), date(2026, 7, 17))
+        outside = self.importer([{"data": {"items": [
+            {"day": "2026-07-16", "cost": {"amount": "2", "currency": "USD"}}
+        ]}}])[0].fetch_costs(date(2026, 7, 17), date(2026, 7, 17))
+
+        self.assertEqual(invalid_range, ImportFailure("invalid_request"))
+        self.assertEqual(invalid_timezone, ImportFailure("invalid_request"))
+        self.assertIsInstance(outside, CostImportSuccess)
+        self.assertEqual(outside.rows, ())
+
+    def test_transport_failures_are_sanitized(self):
+        for error, expected in (
+            (AuthenticationRequired("private"), "auth_rejected"),
+            (RateLimited("private"), "rate_limited"),
+            (NetworkError("private"), "network_error"),
+        ):
+            with self.subTest(expected=expected):
+                result = self.importer([error])[0].fetch_costs(
+                    date(2026, 7, 17), date(2026, 7, 17)
+                )
+                self.assertEqual(result, ImportFailure(expected))
+
+    def test_non_numeric_boolean_and_nonfinite_amounts_are_rejected(self):
+        for amount in (True, {}, "NaN"):
+            with self.subTest(amount=amount):
+                payload = {"data": {"items": [
+                    {"day": "2026-07-17", "cost": {"amount": amount, "currency": "USD"}}
+                ]}}
+                result = self.importer([payload])[0].fetch_costs(
+                    date(2026, 7, 17), date(2026, 7, 17)
+                )
+                self.assertEqual(result, ImportFailure("invalid_response"))
 
     def test_collector_persists_cost_feed_separately_from_token_activity(self):
         import tempfile

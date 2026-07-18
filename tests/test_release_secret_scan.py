@@ -52,6 +52,34 @@ class ReleaseSecretScanTests(unittest.TestCase):
                 "release_secret_scan_matches=0 scopes=tree,history\n",
             )
 
+    def test_source_code_secret_lookups_do_not_match_as_literal_credentials(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+            (repo / "adapter.py").write_text(
+                "secret = self.keychain.get(self.config.provider_id)\n",
+                encoding="utf-8",
+            )
+            self.commit(repo, "safe lookup")
+
+            result = self.run_scan(repo)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_contextual_literal_credential_still_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+            (repo / "adapter.py").write_text(
+                'api_key = "abcdefghijklmnopqrstuvwxyz012345"\n',
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+
+            result = self.run_scan(repo)
+
+            self.assertNotEqual(result.returncode, 0)
+
     def test_tree_failure_does_not_echo_path_or_secret(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)

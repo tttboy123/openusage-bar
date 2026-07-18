@@ -28,7 +28,10 @@ CONTEXTUAL_PATTERNS = (
     re.compile(
         r"(?:Authorization\s*:\s*Bearer|api[_ -]?key|"
         r"access[_ -]?token|refresh[_ -]?token|password|secret|cookie)"
-        r"\s*[=:]\s*[\"']?[A-Za-z0-9._~+/=-]{20,}",
+        r"\s*[=:]\s*(?:"
+        r"[\"'][A-Za-z0-9._~+/=-]{20,}[\"']|"
+        r"(?!self\.|config\.|keychain\.|os\.|getattr\()"
+        r"[A-Za-z0-9_~+/=-]{20,})",
         re.IGNORECASE,
     ),
 )

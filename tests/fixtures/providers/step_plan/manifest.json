@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "fixture_id": "step_plan",
+  "families": ["step_plan"],
+  "runtime_sources": ["step_plan.quota"],
+  "catalog_source_ids": ["step_plan_browser_session", "step_plan_official_api"],
+  "catalog_provenances": [],
+  "cases": ["success", "empty_result", "authentication_expiry", "rate_limit", "timeout", "malformed_response", "oversized_response", "pagination_loop", "partial_coverage", "last_good_preservation", "source_priority", "multi_account_isolation", "secret_non_disclosure", "unknown_not_zero"],
+  "unknown_value": null,
+  "fake_account_refs": ["fixture-a", "fixture-b"]
+}

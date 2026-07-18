@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "fixture_id": "custom",
+  "families": ["openai"],
+  "runtime_sources": ["custom.cost", "custom.cost_feed", "custom.daily", "custom.daily_feed", "generic.quota", "openai.organization", "openai.organization.usage", "openai.organization.costs"],
+  "catalog_source_ids": ["openai_admin_api"],
+  "catalog_provenances": ["openusage_bar_builtin", "provider_official"],
+  "cases": ["success", "empty_result", "authentication_expiry", "rate_limit", "timeout", "malformed_response", "oversized_response", "pagination_loop", "partial_coverage", "last_good_preservation", "source_priority", "multi_account_isolation", "secret_non_disclosure", "unknown_not_zero"],
+  "unknown_value": null,
+  "fake_account_refs": ["fixture-a", "fixture-b"]
+}
