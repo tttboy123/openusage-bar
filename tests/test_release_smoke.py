@@ -15,9 +15,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class UnixAPI:
-    def __init__(self, path: Path, *, bad_route: str | None = None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        bad_route: str | None = None,
+        summary: dict[str, object] | None = None,
+    ) -> None:
         self.path = path
         self.bad_route = bad_route
+        self.summary = summary if summary is not None else {
+            "todayTokens": None,
+            "modelCount": 0,
+            "coveredDayCount": 0,
+        }
         self.routes: list[str] = []
         self.ready = threading.Event()
         self.thread = threading.Thread(target=self._serve, daemon=True)
@@ -41,7 +52,7 @@ class UnixAPI:
                     elif route == "/v1/schema":
                         payload["routes"] = []
                     elif route == "/v1/summary":
-                        payload["todayTokens"] = 0
+                        payload.update(self.summary)
                     body = json.dumps(payload).encode()
                     client.sendall(
                         f"HTTP/1.1 {status}\r\nContent-Length: {len(body)}\r\n"
@@ -95,6 +106,59 @@ class ReleaseSmokeTests(unittest.TestCase):
                 )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(api.routes, ["/v1/health", "/v1/schema", "/v1/summary"])
+
+    def test_shell_probe_accepts_unknown_and_covered_zero_summaries(self) -> None:
+        transaction = ROOT / "scripts/install_app_transaction.sh"
+        for summary in (
+            {"todayTokens": None, "modelCount": 0, "coveredDayCount": 0},
+            {"todayTokens": 0, "modelCount": 0, "coveredDayCount": 1},
+        ):
+            with self.subTest(summary=summary), tempfile.TemporaryDirectory() as temp:
+                socket_path = Path(temp) / "api.sock"
+                with UnixAPI(socket_path, summary=summary):
+                    result = subprocess.run(
+                        [
+                            "/bin/zsh", "-c",
+                            f'''source "{transaction}"
+verify_local_api_contract "{socket_path}" ""
+''',
+                        ],
+                        capture_output=True,
+                        text=True,
+                    )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_probes_reject_numeric_zero_without_usage_or_coverage(self) -> None:
+        invalid = {"todayTokens": 0, "modelCount": 0, "coveredDayCount": 0}
+        transaction = ROOT / "scripts/install_app_transaction.sh"
+        with tempfile.TemporaryDirectory() as temp:
+            socket_path = Path(temp) / "api.sock"
+            with UnixAPI(socket_path, summary=invalid):
+                result = subprocess.run(
+                    [
+                        str(ROOT / "scripts/verify_local_api.py"),
+                        "--timeout", "0.2", str(socket_path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+        self.assertNotEqual(result.returncode, 0)
+
+        with tempfile.TemporaryDirectory() as temp:
+            socket_path = Path(temp) / "api.sock"
+            with UnixAPI(socket_path, summary=invalid):
+                result = subprocess.run(
+                    [
+                        "/bin/zsh", "-c",
+                        f'''source "{transaction}"
+sleep() {{ return 0 }}
+verify_local_api_contract "{socket_path}" ""
+''',
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+        self.assertNotEqual(result.returncode, 0)
 
     def test_local_api_probe_rejects_an_unhealthy_contract_route(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

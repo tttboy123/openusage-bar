@@ -315,6 +315,8 @@ class RebootRecoveryTests(unittest.TestCase):
                 "schemaVersion": "1.0",
                 "dataRevision": 42,
                 "todayTokens": None,
+                "modelCount": 0,
+                "coveredDayCount": 0,
             },
         }
         with mock.patch.object(
@@ -323,6 +325,26 @@ class RebootRecoveryTests(unittest.TestCase):
             self.assertEqual(
                 self.module._api_state(Path("/private/tmp/openusage.sock")),
                 {"healthOk": True, "schemaVersion": "1.0", "dataRevision": 42},
+            )
+
+        valid["/v1/summary"]["todayTokens"] = 0
+        with mock.patch.object(
+            self.module, "_api_get", side_effect=lambda _socket, route: valid[route]
+        ):
+            self.assertFalse(
+                self.module._api_state(Path("/private/tmp/openusage.sock"))[
+                    "healthOk"
+                ]
+            )
+
+        valid["/v1/summary"]["coveredDayCount"] = 1
+        with mock.patch.object(
+            self.module, "_api_get", side_effect=lambda _socket, route: valid[route]
+        ):
+            self.assertTrue(
+                self.module._api_state(Path("/private/tmp/openusage.sock"))[
+                    "healthOk"
+                ]
             )
 
         del valid["/v1/summary"]["todayTokens"]

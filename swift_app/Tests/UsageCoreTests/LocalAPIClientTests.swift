@@ -22,6 +22,33 @@ struct LocalAPIClientTests {
         #expect(snapshot.localDay == "2026-07-18")
         #expect(snapshot.dataRevision == 9)
         #expect(snapshotServer.request.contains("GET /v1/snapshot?today=2026-07-18 HTTP/1.1"))
+
+        let missingServer = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":10,"generatedAt":"2026-07-18T01:03:00Z","localDay":"2026-07-19","summary":{"todayTokens":null,"modelCount":0,"coveredDayCount":0},"quotaWindows":[],"providers":[],"sources":[],"catalogRevision":"test"}"#)
+        let missing = try await LocalAPIClient(socketURL: missingServer.url)
+            .snapshot(localDay: "2026-07-19")
+        #expect(missing.todayTokens == nil)
+        #expect(missing.coveredDayCount == 0)
+
+        let coveredZeroServer = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":11,"generatedAt":"2026-07-18T01:04:00Z","localDay":"2026-07-20","summary":{"todayTokens":0,"modelCount":0,"coveredDayCount":1},"quotaWindows":[],"providers":[],"sources":[],"catalogRevision":"test"}"#)
+        let coveredZero = try await LocalAPIClient(socketURL: coveredZeroServer.url)
+            .snapshot(localDay: "2026-07-20")
+        #expect(coveredZero.todayTokens == 0)
+        #expect(coveredZero.coveredDayCount == 1)
+    }
+
+    @Test("Snapshot rejects invented zero and contradictory unknown totals")
+    func invalidSummaryTotals() async throws {
+        let inventedZero = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":12,"generatedAt":"2026-07-18T01:05:00Z","localDay":"2026-07-21","summary":{"todayTokens":0,"modelCount":0,"coveredDayCount":0},"quotaWindows":[],"providers":[],"sources":[],"catalogRevision":"test"}"#)
+        await #expect(throws: LocalAPIClientError.invalidResponse) {
+            try await LocalAPIClient(socketURL: inventedZero.url)
+                .snapshot(localDay: "2026-07-21")
+        }
+
+        let contradictoryUnknown = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":13,"generatedAt":"2026-07-18T01:06:00Z","localDay":"2026-07-22","summary":{"todayTokens":null,"modelCount":1,"coveredDayCount":1},"quotaWindows":[],"providers":[],"sources":[],"catalogRevision":"test"}"#)
+        await #expect(throws: LocalAPIClientError.invalidResponse) {
+            try await LocalAPIClient(socketURL: contradictoryUnknown.url)
+                .snapshot(localDay: "2026-07-22")
+        }
     }
 
     @Test("Daily activity preserves counting conventions and old JSON defaults unknown")

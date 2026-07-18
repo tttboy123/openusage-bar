@@ -127,6 +127,24 @@ class QueryServiceTests(unittest.TestCase):
             {"schemaVersion", "dataRevision", "generatedAt", "todayTokens", "modelCount", "coveredDayCount"},
         )
 
+    def test_summary_and_snapshot_distinguish_missing_from_covered_zero(self):
+        missing_summary = self.query.summary(date(2026, 7, 14))
+        missing_snapshot = self.query.resource_snapshot(date(2026, 7, 14))
+
+        self.assertIsNone(missing_summary.today_tokens)
+        self.assertIsNone(missing_snapshot.summary.today_tokens)
+        self.assertEqual(missing_summary.covered_day_count, 0)
+        self.assertEqual(missing_snapshot.summary.covered_day_count, 0)
+
+        self.store.replace_daily_usage("codex", "2026-07-14", [])
+        covered_summary = self.query.summary(date(2026, 7, 14))
+        covered_snapshot = self.query.resource_snapshot(date(2026, 7, 14))
+
+        self.assertEqual(covered_summary.today_tokens, 0)
+        self.assertEqual(covered_snapshot.summary.today_tokens, 0)
+        self.assertEqual(covered_summary.covered_day_count, 1)
+        self.assertEqual(covered_snapshot.summary.covered_day_count, 1)
+
     def test_two_account_connections_remain_isolated_across_public_facts(self):
         for provider_id, account_ref, tokens, amount, ratio in (
             ("openai-personal", "personal", 120, "1.20", 0.8),

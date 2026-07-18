@@ -4,6 +4,92 @@
   "oneOf": [
     {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "if": {
+              "properties": {
+                "modelCount": {
+                  "const": 0
+                }
+              },
+              "required": [
+                "modelCount"
+              ]
+            },
+            "then": {
+              "properties": {
+                "coveredDayCount": {
+                  "minimum": 1
+                },
+                "todayTokens": {
+                  "const": 0
+                }
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "todayTokens": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "todayTokens"
+            ]
+          },
+          "then": {
+            "properties": {
+              "coveredDayCount": {
+                "const": 0
+              },
+              "modelCount": {
+                "const": 0
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "coveredDayCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "modelCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "todayTokens": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "todayTokens",
+        "modelCount",
+        "coveredDayCount"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "properties": {
         "catalogRevision": {
           "type": "string"
@@ -334,6 +420,52 @@
         },
         "summary": {
           "additionalProperties": false,
+          "allOf": [
+            {
+              "else": {
+                "if": {
+                  "properties": {
+                    "modelCount": {
+                      "const": 0
+                    }
+                  },
+                  "required": [
+                    "modelCount"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "coveredDayCount": {
+                      "minimum": 1
+                    },
+                    "todayTokens": {
+                      "const": 0
+                    }
+                  }
+                }
+              },
+              "if": {
+                "properties": {
+                  "todayTokens": {
+                    "type": "null"
+                  }
+                },
+                "required": [
+                  "todayTokens"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "coveredDayCount": {
+                    "const": 0
+                  },
+                  "modelCount": {
+                    "const": 0
+                  }
+                }
+              }
+            }
+          ],
           "properties": {
             "coveredDayCount": {
               "minimum": 0,
@@ -345,7 +477,10 @@
             },
             "todayTokens": {
               "minimum": 0,
-              "type": "integer"
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [

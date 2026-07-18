@@ -35,6 +35,36 @@ def envelope(properties: dict[str, object], required: list[str]) -> dict[str, ob
     )
 
 
+def summary_contract(schema: dict[str, object]) -> dict[str, object]:
+    schema["allOf"] = [
+        {
+            "if": {
+                "properties": {"todayTokens": {"type": "null"}},
+                "required": ["todayTokens"],
+            },
+            "then": {
+                "properties": {
+                    "modelCount": {"const": 0},
+                    "coveredDayCount": {"const": 0},
+                }
+            },
+            "else": {
+                "if": {
+                    "properties": {"modelCount": {"const": 0}},
+                    "required": ["modelCount"],
+                },
+                "then": {
+                    "properties": {
+                        "todayTokens": {"const": 0},
+                        "coveredDayCount": {"minimum": 1},
+                    }
+                },
+            },
+        }
+    ]
+    return schema
+
+
 def render_schema() -> dict[str, object]:
     applies_to = closed(
         {
@@ -113,16 +143,18 @@ def render_schema() -> dict[str, object]:
         },
         ["providerId", "sourceId", "state", "lastAttemptAt", "lastSuccessAt", "staleAt", "errorCode"],
     )
+    summary_properties = {
+        "todayTokens": {"type": ["integer", "null"], "minimum": 0},
+        "modelCount": {"type": "integer", "minimum": 0},
+        "coveredDayCount": {"type": "integer", "minimum": 0},
+    }
+    summary_required = ["todayTokens", "modelCount", "coveredDayCount"]
+    summary = summary_contract(envelope(summary_properties, summary_required))
     snapshot = envelope(
         {
             "localDay": {"type": "string", "format": "date"},
-            "summary": closed(
-                {
-                    "todayTokens": {"type": "integer", "minimum": 0},
-                    "modelCount": {"type": "integer", "minimum": 0},
-                    "coveredDayCount": {"type": "integer", "minimum": 0},
-                },
-                ["todayTokens", "modelCount", "coveredDayCount"],
+            "summary": summary_contract(
+                closed(dict(summary_properties), list(summary_required))
             ),
             "quotaWindows": {"type": "array", "items": quota},
             "providers": {"type": "array", "items": provider},
@@ -215,7 +247,7 @@ def render_schema() -> dict[str, object]:
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://openusage.bar/schemas/local-api-v1.schema.json",
         "title": "OpenUsage Bar Local API v1",
-        "oneOf": [snapshot, activity, changes, error],
+        "oneOf": [summary, snapshot, activity, changes, error],
     }
 
 

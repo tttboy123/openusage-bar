@@ -201,7 +201,7 @@ The snapshot must contain one cursor and all facts needed by native surfaces and
 class ResourceStateSnapshot:
     local_day: str
     cursor: int
-    today_tokens: int
+    today_tokens: int | None
     model_count: int
     covered_day_count: int
     quota_states: tuple[QuotaState, ...]
@@ -231,7 +231,7 @@ Add these wire dataclasses to `query.py`:
 ```python
 @dataclass(frozen=True)
 class SnapshotSummary:
-    today_tokens: int
+    today_tokens: int | None
     model_count: int
     covered_day_count: int
 

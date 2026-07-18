@@ -211,6 +211,19 @@ class UnixLocalAPITests(unittest.TestCase):
                 self.assertEqual(headers["x-content-type-options"], "nosniff")
                 self.assertNotIn("access-control-allow-origin", headers)
 
+    def test_missing_today_is_null_on_summary_and_snapshot_routes(self):
+        for target, value_path in (
+            ("/v1/summary?today=2026-07-15", ("todayTokens",)),
+            ("/v1/snapshot?today=2026-07-15", ("summary", "todayTokens")),
+        ):
+            with self.subTest(target=target):
+                status, _, body = self.request(target)
+                self.assertEqual(status, 200)
+                value = json.loads(body)
+                for key in value_path:
+                    value = value[key]
+                self.assertIsNone(value)
+
     def test_machine_schema_route_serves_the_committed_draft(self):
         status, _, body = self.request("/v1/schema.json")
         payload = json.loads(body)

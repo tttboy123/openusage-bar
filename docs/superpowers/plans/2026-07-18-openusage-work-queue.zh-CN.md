@@ -141,6 +141,7 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - 按日期、Provider、账号引用和模型输出 Total、Input、Output、Cached Input。
 - 同时输出 `sourceId`、`quality`、`coverage`、`importedAt` 和本地时区。
 - 标记数据缺口、重复来源候选、跨日归属和 Last-good 使用原因。
+- 缺少当天模型行且没有任何覆盖记录时，公共 API 的 `todayTokens` 必须为 `null`，菜单栏显示 Unknown/Unavailable；只有存在覆盖记录的已知零才显示 `0`。
 - 在 CLI 或独立诊断导出中生成脱敏 JSON；不读取 Prompt、Response、原始 Provider payload 或直接账号身份。
 - Usage Details 复用同一事实，在悬浮、键盘焦点和 VoiceOver 中显示一致的来源信息。
 
@@ -149,6 +150,7 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] 任意一天都能追溯总量组成、来源、覆盖状态与采集时间。
 - [x] 诊断结果能够区分“统计口径不同”和“实际丢失/重复数据”。
 - [x] `scripts/privacy_scan.py` 对诊断文件返回零泄漏。
+- [ ] 实机发现的“`coveredDayCount=0`、`modelCount=0` 但 `todayTokens=0`”回归已完成 RED → GREEN：Python 751 项、Swift 251 项、Swift 产品行覆盖率 87.30%、候选 App 隐私与签名门禁均通过。查询层、顶层与快照 JSON Schema、安装/重启探针、诊断导出和 Swift 客户端使用同一条 Unknown/已覆盖零约束；冻结 helper 对空账本返回 `todayTokens=null`；隔离 release smoke 的干净安装、升级、回滚、4 个注入失败、保留与清除数据卸载均通过。仍需安全部署并确认运行中 API 与菜单栏不再显示伪零。
 
 **验证：** 新增专用对账测试、`tests/test_export_diagnostics.py`、Swift Usage Details 测试和隐私扫描。
 
@@ -177,8 +179,11 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] 回退迁移暴露的旧路径 Activity 与旧应用副本残留已加入双安装位置回归；真实双副本清理、旧 bundle 已删除但 Activity 仍运行两种场景均已通过。卸载只删除 bundle id 已确认为 OpenUsage Bar 的已知副本；磁盘副本已消失时，只有运行时 bundle id 精确等于 `com.lune.openusagebar.activity` 的旧路径进程才会被停止，同名异构应用及其进程保持不动。
 - [x] 安装/卸载隔离 smoke 现在把显式 `OPENUSAGE_INSTALL_DIR` 视为严格作用域，不再扫描或清理真实 `/Applications` 与 `~/Applications`；19 项 Activity 生命周期回归和完整 release smoke 均已通过。
 - [x] 两个无人点击的五分钟采集周期已通过。以 `minimax-1783978290 / minimax.coding_plan` 为固定哨兵：T0=`2026-07-18T20:14:46.677591Z`、`dataRevision=5784`；T1=`2026-07-18T20:21:34.749783Z`、`dataRevision=5801`；T2=`2026-07-18T20:27:42.947299Z`、观察时 `dataRevision=5818`，最终 API 复核继续推进到 `5826`。T2 时 MiniMax、Step Plan、Codex、Kiro 四个直连来源的 `lastAttemptAt` 与 `lastSuccessAt` 相同且均为 `ok`，全程未点击 Refresh。候选 helper 的本地签名变化曾触发一次 macOS Keychain ACL 授权，当前 Keychain 读取已恢复。
-- [x] 新增 `scripts/verify_reboot_recovery.py`：重启前以 `0600` 保存无凭证 baseline，重启后只有在 `kern.boottime` 确实推进、baseline 对应当前 canary、新 boot 距 capture 以及验证距新 boot 均不超过 6 小时、两个 LaunchAgent 进程晚于新 boot 启动、签名与应用版本不变、socket 在连接前已确认为当前用户所有且为 `0600`、Local API 三条核心路由通过、SQLite cursor 不倒退、同一轮 5 分钟窗口内的自然采集来源在新 boot 后全部成功推进时才返回通过。它不调用 Keychain、Refresh 或 launchd mutation，并明确保留 `visualMenuCheck=pending`。
-- [x] 重启前最终门禁已在本机通过：验证器 26 项测试、脚本行覆盖率 87%、Python 743 项、Swift 250 项、Swift 产品行覆盖率 87.26%，秘密扫描为 0、依赖审计无已知漏洞、release smoke 的干净安装/升级/回滚/4 个注入失败回滚/保留与清除数据卸载均通过。`0.4.3 (7)` 已重新安装到 `/Applications`，签名与 Local API 通过；`2026-07-18T21:06:32.464096Z` 创建的私密 baseline 为 `0600`、`dataRevision=5914`、覆盖 5 个同轮来源，重启前的即时验证按预期返回 `boot_unchanged`。
+- [x] 新增 `scripts/verify_reboot_recovery.py`：重启前以 `0600` 保存无凭证 baseline，并分别锁定 App bundle、菜单栏 LaunchAgent 可执行文件和 collector LaunchAgent 可执行文件的 CDHash；重启后只有在 `kern.boottime` 确实推进、baseline 对应当前 canary、新 boot 距 capture 以及验证距新 boot 均不超过 6 小时、两个 LaunchAgent 进程晚于新 boot 启动、三个签名指纹与应用版本均不变、socket 在连接前已确认为当前用户所有且为 `0600`、Local API 三条核心路由通过、SQLite cursor 不倒退、同一轮 5 分钟窗口内的自然采集来源在新 boot 后全部成功推进时才返回通过。它不调用 Keychain、Refresh 或 launchd mutation，并明确保留 `visualMenuCheck=pending`。
+- [x] 重启前最终门禁已在本机通过：验证器 26 项测试、脚本行覆盖率 87%、Python 743 项、Swift 250 项、Swift 产品行覆盖率 87.26%，秘密扫描为 0、依赖审计无已知漏洞、release smoke 的干净安装/升级/回滚/4 个注入失败回滚/保留与清除数据卸载均通过。当前 `/Applications/OpenUsage Bar.app` 为此前已获 Keychain ACL 授权且签名有效的 `0.4.3 (7)`；`2026-07-18T22:12:05.412172Z` 创建的 schema v2 私密 baseline 为 `0600`、`dataRevision=6081`、覆盖 5 个同轮来源，并锁定三枚 40 位 CDHash，隐私扫描为 0；重启前即时验证按预期返回 `boot_unchanged`。
+- [ ] 本次重启恢复了 Codex 对 Documents 的访问，但 `kern.boottime` 仍为 `1783987056`（2026-07-14），验证器明确返回 `boot_unchanged`；这只能证明应用会话恢复，不能替代一次真实的 macOS 内核重启。
+- [x] 一次候选安装因旧 shell 健康探针不能解析合法的 `todayTokens=null` 而失败；事务安装自动回滚，当前三枚可执行 CDHash 与 reboot baseline 完全一致，账本未回退。该探针现已与 Python、Swift、Schema 和诊断导出统一，并通过 Unknown、covered zero 和伪零拒绝回归。
+- [ ] 安全审计只读取了进程环境变量名称，发现菜单栏与 collector LaunchAgent 会继承 API-key 形态的父环境键；未读取或输出任何值。下一次真实部署前必须为常驻进程建立最小环境 allowlist，并增加不继承凭证名的回归测试。
 - [ ] 真实重启后登录项、collector、本地 API 与菜单栏恢复尚未验收；`launchctl` 等价检查不能替代 reboot。
 
 **验收：**

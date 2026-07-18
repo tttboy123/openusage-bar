@@ -23,7 +23,7 @@ The remaining fields are the same fields emitted by the existing collector CLI:
 | `GET /v1/schema` | none | `routes`, `errorShape` |
 | `GET /v1/schema.json` | none | committed Draft 2020-12 contract under `schema` |
 | `GET /schema` | none | Compatibility alias of `/v1/schema` |
-| `GET /v1/summary` | optional `today=YYYY-MM-DD` | `todayTokens`, `modelCount`, `coveredDayCount` |
+| `GET /v1/summary` | optional `today=YYYY-MM-DD` | `todayTokens` (`integer | null`), `modelCount`, `coveredDayCount` |
 | `GET /v1/snapshot` | optional `today=YYYY-MM-DD` | one-revision resource view: `localDay`, `summary`, every `quotaWindow`, `providers`, `sources`, `catalogRevision` |
 | `GET /v1/capabilities` | none | `providers`, sorted by `familyId`; nested sources retain declared priority |
 | `GET /v1/providers` | optional comma-separated `providerIds` | observed/configured provider instances, sorted by `providerId` |
@@ -52,6 +52,12 @@ provenance and completeness of each fact. A covered day with no rows is a known
 zero. `covered=false` is missing coverage, not a numeric zero; a selection that
 mixes covered and missing scopes is partial and must not be presented as a
 complete total.
+
+The compact summary follows the same rule. `todayTokens: null` means there are
+no model rows and no coverage facts for that day. A known, covered zero is
+`todayTokens: 0` with `coveredDayCount > 0`. The combination
+`todayTokens=0`, `modelCount=0`, `coveredDayCount=0` violates the contract and
+must be rejected by health probes rather than displayed as real usage.
 
 Unknown or repeated query parameters, malformed percent escapes, controls,
 noncanonical dates, unstable identifiers, oversized ranges, and out-of-range

@@ -48,6 +48,38 @@ class LocalAPISchemaTests(unittest.TestCase):
         self.assertEqual(json.loads(SCHEMA.read_text()), render_schema())
         self.assertEqual(render_schema()["$schema"], "https://json-schema.org/draft/2020-12/schema")
 
+    def test_snapshot_allows_unknown_today_tokens_but_keeps_counts_numeric(self):
+        snapshot = next(
+            branch
+            for branch in render_schema()["oneOf"]
+            if "summary" in branch.get("properties", {})
+        )
+        properties = snapshot["properties"]["summary"]["properties"]
+
+        self.assertEqual(properties["todayTokens"]["type"], ["integer", "null"])
+        self.assertEqual(properties["modelCount"]["type"], "integer")
+        self.assertEqual(properties["coveredDayCount"]["type"], "integer")
+
+    def test_top_level_summary_has_nullable_tokens_and_zero_coverage_invariants(self):
+        summary = next(
+            branch
+            for branch in render_schema()["oneOf"]
+            if "todayTokens" in branch.get("properties", {})
+        )
+
+        self.assertEqual(
+            summary["properties"]["todayTokens"]["type"], ["integer", "null"]
+        )
+        invariant = summary["allOf"][0]
+        self.assertEqual(
+            invariant["then"]["properties"],
+            {"modelCount": {"const": 0}, "coveredDayCount": {"const": 0}},
+        )
+        self.assertEqual(
+            invariant["else"]["then"]["properties"],
+            {"todayTokens": {"const": 0}, "coveredDayCount": {"minimum": 1}},
+        )
+
     def test_activity_schema_declares_token_counting_convention(self):
         activity = next(
             branch

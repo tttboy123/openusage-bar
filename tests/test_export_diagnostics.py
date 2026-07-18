@@ -335,6 +335,38 @@ class ExportDiagnosticsTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, encoded)
 
+    def test_v1_preserves_unknown_today_tokens_instead_of_inventing_zero(self) -> None:
+        missing = snapshot()
+        missing["summary"] = {
+            "todayTokens": None,
+            "modelCount": 0,
+            "coveredDayCount": 0,
+        }
+        payload = self.module.build_diagnostics(
+            missing,
+            capabilities(),
+            product={"version": "0.4.0", "build": "4"},
+            runtime={"macOS": "26.0", "architecture": "arm64"},
+        )
+
+        self.assertIsNone(payload["aggregates"]["todayTokens"])
+
+    def test_v1_rejects_numeric_zero_without_usage_or_coverage(self) -> None:
+        invalid = snapshot()
+        invalid["summary"] = {
+            "todayTokens": 0,
+            "modelCount": 0,
+            "coveredDayCount": 0,
+        }
+
+        with self.assertRaisesRegex(ValueError, "numeric today tokens"):
+            self.module.build_diagnostics(
+                invalid,
+                capabilities(),
+                product={"version": "0.4.0", "build": "4"},
+                runtime={"macOS": "26.0", "architecture": "arm64"},
+            )
+
     def test_sanitizes_untrusted_error_codes_and_rejects_revision_drift(self) -> None:
         unsafe = snapshot()
         unsafe["sources"][1]["errorCode"] = "Bearer secret-value-that-must-not-export"

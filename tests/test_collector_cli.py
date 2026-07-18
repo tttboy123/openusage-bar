@@ -608,7 +608,7 @@ class CollectorCLITests(unittest.TestCase):
                     query=QueryService(empty, clock=lambda: NOW), clock=lambda: NOW,
                 )
             self.assertEqual(code, 3)
-            self.assertEqual(json.loads(stdout.getvalue())["todayTokens"], 0)
+            self.assertIsNone(json.loads(stdout.getvalue())["todayTokens"])
             self.assertIn("refresh unavailable", stderr.getvalue())
             runner.assert_not_called()
         finally:

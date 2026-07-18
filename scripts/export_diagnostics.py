@@ -110,6 +110,24 @@ def _integer(value: Any, name: str) -> int:
     return value
 
 
+def _summary_totals(summary: dict[str, Any]) -> tuple[int | None, int, int]:
+    model_count = _integer(summary.get("modelCount"), "model count")
+    covered_day_count = _integer(summary.get("coveredDayCount"), "covered days")
+    if "todayTokens" not in summary:
+        raise ValueError("today tokens are missing")
+    today_tokens = summary["todayTokens"]
+    if today_tokens is None:
+        if model_count != 0 or covered_day_count != 0:
+            raise ValueError("unknown today tokens cannot have observed coverage")
+        return None, model_count, covered_day_count
+    today_tokens = _integer(today_tokens, "today tokens")
+    if model_count == 0 and not (
+        today_tokens == 0 and covered_day_count > 0
+    ):
+        raise ValueError("numeric today tokens require usage or covered zero")
+    return today_tokens, model_count, covered_day_count
+
+
 def _identifier(value: Any, name: str) -> str:
     if not isinstance(value, str) or IDENTIFIER.fullmatch(value) is None:
         raise ValueError(f"{name} must be a stable identifier")
@@ -382,6 +400,7 @@ def build_diagnostics(
         raise ValueError("invalid architecture")
 
     summary = _mapping(snapshot.get("summary"), "summary")
+    today_tokens, model_count, covered_day_count = _summary_totals(summary)
     providers = _items(snapshot.get("providers"), "providers")
     quotas = [_mapping(item, "quota window") for item in _items(snapshot.get("quotaWindows"), "quota windows")]
     sources = [_mapping(item, "source") for item in _items(snapshot.get("sources"), "sources")]
@@ -402,8 +421,8 @@ def build_diagnostics(
         raise ValueError("clock must be timezone-aware")
     result = {
         "aggregates": {
-            "coveredDayCount": _integer(summary.get("coveredDayCount"), "covered days"),
-            "modelCount": _integer(summary.get("modelCount"), "model count"),
+            "coveredDayCount": covered_day_count,
+            "modelCount": model_count,
             "providerInstanceCount": len(providers),
             "quotaQuality": _counted(quota_quality),
             "quotaStates": _counted(quota_states),
@@ -412,7 +431,7 @@ def build_diagnostics(
             "sourceCount": len(sources),
             "sourceErrorCodes": _counted(errors),
             "sourceStates": _counted(source_states),
-            "todayTokens": _integer(summary.get("todayTokens"), "today tokens"),
+            "todayTokens": today_tokens,
         },
         "capabilityDeclarations": _capability_declarations(capabilities),
         "exportedAt": current.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),

@@ -111,8 +111,17 @@ public struct LocalAPIClient: LocalAPIReading, Sendable {
         let data = try await fetch(target)
         let wire = try decode(SnapshotWire.self, from: data)
         try requireSchema(wire.schemaVersion)
+        let summaryIsValid: Bool
+        if let todayTokens = wire.todayTokens {
+            summaryIsValid = todayTokens >= 0 && (
+                wire.modelCount > 0 ||
+                    (todayTokens == 0 && wire.coveredDayCount > 0)
+            )
+        } else {
+            summaryIsValid = wire.modelCount == 0 && wire.coveredDayCount == 0
+        }
         guard wire.modelCount >= 0, wire.coveredDayCount >= 0,
-              wire.todayTokens.map({ $0 >= 0 }) ?? true,
+              summaryIsValid,
               wire.quotaWindows.count <= 10_000,
               wire.providers.count <= 10_000,
               wire.sources.count <= 10_000

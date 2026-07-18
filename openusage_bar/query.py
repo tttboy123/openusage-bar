@@ -48,7 +48,7 @@ class ResultEnvelope:
 
 @dataclass(frozen=True)
 class SummaryResult(ResultEnvelope):
-    today_tokens: int
+    today_tokens: int | None
     model_count: int
     covered_day_count: int
 
@@ -262,7 +262,7 @@ class ChangePage(ResultEnvelope):
 
 @dataclass(frozen=True)
 class SnapshotSummary:
-    today_tokens: int
+    today_tokens: int | None
     model_count: int
     covered_day_count: int
 
@@ -303,6 +303,14 @@ def _valid_limit(value: int | None, *, default: int | None = None) -> int | None
     return value
 
 
+def _observed_token_total(
+    total_tokens: int, model_count: int, covered_day_count: int
+) -> int | None:
+    if model_count == 0 and covered_day_count == 0:
+        return None
+    return total_tokens
+
+
 class QueryService:
     def __init__(self, store: ActivityStore, *, clock: Callable[[], datetime] | None = None) -> None:
         self.store = store
@@ -318,7 +326,12 @@ class QueryService:
         summary = self.store.summary(current_day, current_day)
         _, generated = self._generated()
         return SummaryResult(
-            SCHEMA_VERSION, summary.cursor, generated, summary.total_tokens,
+            SCHEMA_VERSION,
+            summary.cursor,
+            generated,
+            _observed_token_total(
+                summary.total_tokens, summary.model_count, summary.covered_day_count
+            ),
             summary.model_count, summary.covered_day_count,
         )
 
@@ -385,7 +398,11 @@ class QueryService:
             generated_at=generated,
             local_day=snapshot.local_day,
             summary=SnapshotSummary(
-                snapshot.today_tokens,
+                _observed_token_total(
+                    snapshot.today_tokens,
+                    snapshot.model_count,
+                    snapshot.covered_day_count,
+                ),
                 snapshot.model_count,
                 snapshot.covered_day_count,
             ),

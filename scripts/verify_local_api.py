@@ -42,6 +42,29 @@ def _arguments() -> argparse.Namespace:
     return arguments
 
 
+def _nonnegative_integer(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _valid_summary(payload: dict[str, object]) -> bool:
+    if "todayTokens" not in payload:
+        return False
+    model_count = payload.get("modelCount")
+    covered_day_count = payload.get("coveredDayCount")
+    if not _nonnegative_integer(model_count) or not _nonnegative_integer(
+        covered_day_count
+    ):
+        return False
+    today_tokens = payload["todayTokens"]
+    if today_tokens is None:
+        return model_count == 0 and covered_day_count == 0
+    if not _nonnegative_integer(today_tokens):
+        return False
+    if model_count == 0:
+        return today_tokens == 0 and covered_day_count > 0
+    return True
+
+
 def main() -> int:
     arguments = _arguments()
     path = arguments.socket
@@ -58,7 +81,7 @@ def main() -> int:
                     raise RuntimeError("local API health contract unavailable")
                 if route == "/v1/schema" and not isinstance(payload.get("routes"), list):
                     raise RuntimeError("local API route contract unavailable")
-                if route == "/v1/summary" and "todayTokens" not in payload:
+                if route == "/v1/summary" and not _valid_summary(payload):
                     raise RuntimeError("local API summary contract unavailable")
             return 0
         except (OSError, ValueError, RuntimeError):

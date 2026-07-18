@@ -523,7 +523,7 @@ def _api_state(socket_path: Path) -> dict[str, object]:
         and schema_payload.get("schemaVersion") == API_SCHEMA_VERSION
         and isinstance(schema_payload.get("routes"), list)
         and summary_payload.get("schemaVersion") == API_SCHEMA_VERSION
-        and "todayTokens" in summary_payload
+        and _valid_summary(summary_payload)
         and isinstance(summary_payload.get("dataRevision"), int)
         and not isinstance(summary_payload.get("dataRevision"), bool)
     )
@@ -532,6 +532,28 @@ def _api_state(socket_path: Path) -> dict[str, object]:
         "schemaVersion": summary_payload.get("schemaVersion"),
         "dataRevision": summary_payload.get("dataRevision"),
     }
+
+
+def _valid_summary(payload: dict[str, object]) -> bool:
+    if "todayTokens" not in payload:
+        return False
+    try:
+        model_count = _integer(payload.get("modelCount"), "model count")
+        covered_day_count = _integer(
+            payload.get("coveredDayCount"), "covered day count"
+        )
+    except ValueError:
+        return False
+    today_tokens = payload["todayTokens"]
+    if today_tokens is None:
+        return model_count == 0 and covered_day_count == 0
+    try:
+        today_tokens = _integer(today_tokens, "today tokens")
+    except ValueError:
+        return False
+    if model_count == 0:
+        return today_tokens == 0 and covered_day_count > 0
+    return True
 
 
 def _ledger_state(path: Path) -> dict[str, object]:
