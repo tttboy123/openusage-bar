@@ -63,6 +63,7 @@ struct ProviderCatalogTests {
 
             let id: String
             let displayName: String
+            let aliases: [String]?
             let category: String
             let metricFamilies: [String]
             let regions: [String]
@@ -72,6 +73,7 @@ struct ProviderCatalogTests {
 
             enum CodingKeys: String, CodingKey {
                 case id, category, capabilities, sources
+                case aliases
                 case displayName = "display_name"
                 case metricFamilies = "metric_families"
                 case regions
@@ -145,6 +147,7 @@ struct ProviderCatalogTests {
             #expect(descriptor.providerID == family.id)
             #expect(descriptor.familyID == family.id)
             #expect(descriptor.displayName == family.displayName)
+            #expect(descriptor.aliases == Set(family.aliases ?? []))
             #expect(descriptor.category.manifestName == family.category)
             #expect(descriptor.metricFamilies.map(\.manifestName).sorted() == family.metricFamilies)
             #expect(descriptor.regions == Set(family.regions))
@@ -155,6 +158,17 @@ struct ProviderCatalogTests {
             #expect(descriptor.sourceCapabilities == expectedSources)
             #expect(ProviderCatalog.descriptor(for: family.id) == descriptor)
         }
+    }
+
+    @Test("Discovery aliases find families without changing stable identity")
+    func discoveryAliases() {
+        #expect(ProviderCatalog.search("glm").map(\.familyID) == ["zai"])
+        #expect(ProviderCatalog.search("智谱").map(\.familyID) == ["zai"])
+        #expect(ProviderCatalog.search("kimi").map(\.familyID) == ["kimi_cli", "moonshot"])
+        #expect(ProviderCatalog.search("claude").map(\.familyID) == ["anthropic", "claude_code"])
+        #expect(ProviderCatalog.search("qwen").map(\.familyID) == ["alibaba_cloud", "qwen_cli"])
+        #expect(ProviderCatalog.search("opencode").map(\.familyID) == ["opencode"])
+        #expect(ProviderCatalog.descriptor(for: "glm").familyID == "glm")
     }
 
     @Test("Capability and source enum boundaries are exact")

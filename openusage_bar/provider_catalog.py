@@ -97,6 +97,7 @@ _TOP_LEVEL_FIELDS = frozenset({"schema_version", "upstream", "families"})
 _UPSTREAM_FIELDS = frozenset({"version", "revision", "family_ids"})
 _FAMILY_FIELDS = frozenset(
     {
+        "aliases",
         "id",
         "display_name",
         "category",
@@ -107,6 +108,7 @@ _FAMILY_FIELDS = frozenset(
         "sources",
     }
 )
+_REQUIRED_FAMILY_FIELDS = _FAMILY_FIELDS - {"aliases"}
 _CAPABILITY_FIELDS = frozenset(
     {
         "quota_windows",
@@ -180,6 +182,7 @@ class ProviderFamily:
     supports_accounts: bool
     capabilities: ProviderCapabilities
     sources: tuple[CatalogSource, ...]
+    aliases: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -209,6 +212,26 @@ class ProviderCatalog:
 
     def require(self, family_id: str) -> ProviderFamily:
         return self._families[family_id]
+
+    def search(self, query: str) -> tuple[ProviderFamily, ...]:
+        """Search public labels without rewriting a Provider identity."""
+        if not isinstance(query, str):
+            raise TypeError("Provider search query must be a string")
+        normalized = query.strip().casefold()
+        if not normalized or len(normalized) > 128:
+            return ()
+        return tuple(
+            family
+            for family in self.families
+            if any(
+                normalized in label.casefold()
+                for label in (
+                    family.family_id,
+                    family.display_name,
+                    *sorted(family.aliases),
+                )
+            )
+        )
 
     def resolve(self, family_id: str, display_name: str) -> ProviderFamily:
         existing = self._families.get(family_id)
@@ -354,11 +377,12 @@ def _parse_family(value: Any, index: int) -> ProviderFamily:
     context = f"family[{index}]"
     raw = _require_object(value, context)
     _reject_unknown_fields(raw, _FAMILY_FIELDS, context)
-    _require_exact_fields(raw, _FAMILY_FIELDS, context)
+    _require_exact_fields(raw, _REQUIRED_FAMILY_FIELDS, context)
     family_id = _require_id(raw["id"], f"{context} ID")
     display_name = _require_nonempty_string(
         raw["display_name"], f"{context} display name"
     )
+    aliases = _require_aliases(raw.get("aliases", []), f"{context} aliases")
     category = _require_enum(
         raw["category"], PROVIDER_CATEGORIES, f"{context} category"
     )
@@ -390,6 +414,7 @@ def _parse_family(value: Any, index: int) -> ProviderFamily:
         supports_accounts=raw["supports_accounts"],
         capabilities=capabilities,
         sources=sources,
+        aliases=frozenset(aliases),
     )
 
 
@@ -531,6 +556,23 @@ def _require_sorted_unique_strings(
     if len(set(values)) != len(values):
         raise ValueError(f"{context} must contain unique values")
     return values
+
+
+def _require_aliases(value: Any, context: str) -> tuple[str, ...]:
+    aliases = _require_sorted_unique_strings(value, context)
+    private_markers = (
+        "authorization=", "credential=", "key=", "password=", "secret=", "token=",
+    )
+    for alias in aliases:
+        folded = alias.casefold()
+        if (
+            alias != alias.strip()
+            or len(alias) > 64
+            or any(ord(character) < 32 for character in alias)
+            or any(marker in folded for marker in private_markers)
+        ):
+            raise ValueError(f"{context} must contain bounded public labels")
+    return aliases
 
 
 def _unknown_capabilities() -> ProviderCapabilities:

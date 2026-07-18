@@ -65,6 +65,24 @@ version-one catalog to 37 families. Actual data depends on the installed
 OpenUsage version, local clients, provider authentication, and what each
 upstream source can authoritatively report.
 
+### Provider discovery names
+
+The catalog carries public search aliases so common product names remain easy
+to find without inventing a second Provider identity:
+
+| Search name | Canonical families |
+|---|---|
+| GLM / Zhipu / 智谱 | Z.AI (`zai`) |
+| Kimi | Kimi CLI (`kimi_cli`) and Moonshot API (`moonshot`) |
+| Claude | Anthropic API (`anthropic`) and Claude Code (`claude_code`) |
+| Qwen / 通义千问 | Alibaba Cloud API (`alibaba_cloud`) and Qwen CLI (`qwen_cli`) |
+| OpenCode | OpenCode (`opencode`) |
+| Grok | xAI (`xai`) |
+
+Aliases are discovery metadata only. They never reclassify a configured
+instance: the selected or collected `familyId` remains the sole capability and
+source boundary.
+
 ## Adding another provider
 
 Use this order:

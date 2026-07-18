@@ -45,6 +45,10 @@
     {
       "id": "alibaba_cloud",
       "display_name": "Alibaba Cloud",
+      "aliases": [
+        "Qwen API",
+        "通义千问 API"
+      ],
       "category": "api",
       "metric_families": [
         "billing",
@@ -127,6 +131,9 @@
     {
       "id": "anthropic",
       "display_name": "Anthropic",
+      "aliases": [
+        "Claude API"
+      ],
       "category": "api",
       "metric_families": [
         "operational"
@@ -205,6 +212,9 @@
     {
       "id": "claude_code",
       "display_name": "Claude Code",
+      "aliases": [
+        "Claude CLI"
+      ],
       "category": "subscription",
       "metric_families": [
         "billing",
@@ -542,6 +552,9 @@
     {
       "id": "gemini_api",
       "display_name": "Gemini API",
+      "aliases": [
+        "Google Gemini API"
+      ],
       "category": "api",
       "metric_families": [
         "operational"
@@ -780,6 +793,9 @@
     {
       "id": "kimi_cli",
       "display_name": "Kimi CLI",
+      "aliases": [
+        "Kimi Code"
+      ],
       "category": "local_tool",
       "metric_families": [
         "billing",
@@ -987,6 +1003,10 @@
     {
       "id": "moonshot",
       "display_name": "Moonshot",
+      "aliases": [
+        "Kimi API",
+        "Moonshot AI"
+      ],
       "category": "api",
       "metric_families": [
         "billing",
@@ -1106,6 +1126,9 @@
     {
       "id": "openai",
       "display_name": "OpenAI",
+      "aliases": [
+        "OpenAI API"
+      ],
       "category": "api",
       "metric_families": [
         "billing",
@@ -1362,6 +1385,9 @@
     {
       "id": "qwen_cli",
       "display_name": "Qwen CLI",
+      "aliases": [
+        "Qwen Code"
+      ],
       "category": "local_tool",
       "metric_families": [
         "billing",
@@ -1502,6 +1528,9 @@
     {
       "id": "xai",
       "display_name": "xAI",
+      "aliases": [
+        "Grok API"
+      ],
       "category": "api",
       "metric_families": [
         "billing",
@@ -1542,6 +1571,11 @@
     {
       "id": "zai",
       "display_name": "Z.AI",
+      "aliases": [
+        "GLM",
+        "Zhipu AI",
+        "智谱 AI"
+      ],
       "category": "api",
       "metric_families": [
         "billing",

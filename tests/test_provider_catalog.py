@@ -164,6 +164,7 @@ class ProviderCatalogTests(unittest.TestCase):
                 self.assertTrue(family.display_name.strip())
                 self.assertIsInstance(family.metric_families, frozenset)
                 self.assertIsInstance(family.regions, frozenset)
+                self.assertIsInstance(family.aliases, frozenset)
                 self.assertIsInstance(family.sources, tuple)
                 self.assertTrue(family.sources)
                 self.assertTrue(family.metric_families <= METRIC_FAMILIES)
@@ -195,7 +196,10 @@ class ProviderCatalogTests(unittest.TestCase):
         }
         for family in payload["families"]:
             with self.subTest(family=family["id"]):
-                self.assertEqual(set(family), family_fields)
+                expected_family_fields = family_fields | (
+                    {"aliases"} if "aliases" in family else set()
+                )
+                self.assertEqual(set(family), expected_family_fields)
                 self.assertEqual(set(family["capabilities"]), capability_fields)
                 self.assertEqual(
                     set(family["capabilities"]["quota_windows"]),
@@ -588,6 +592,50 @@ class ProviderCatalogTests(unittest.TestCase):
                 self.assertEqual(
                     family.sources[0].provenance, "openusage_upstream"
                 )
+
+    def test_discovery_aliases_find_families_without_changing_stable_identity(self):
+        self.assertEqual(
+            [family.family_id for family in self.catalog.search("glm")], ["zai"]
+        )
+        self.assertEqual(
+            [family.family_id for family in self.catalog.search("智谱")], ["zai"]
+        )
+        self.assertEqual(
+            [family.family_id for family in self.catalog.search("kimi")],
+            ["kimi_cli", "moonshot"],
+        )
+        self.assertEqual(
+            [family.family_id for family in self.catalog.search("claude")],
+            ["anthropic", "claude_code"],
+        )
+        self.assertEqual(
+            [family.family_id for family in self.catalog.search("qwen")],
+            ["alibaba_cloud", "qwen_cli"],
+        )
+        self.assertEqual(
+            [family.family_id for family in self.catalog.search("opencode")],
+            ["opencode"],
+        )
+        self.assertEqual(self.catalog.resolve("glm", "GLM").family_id, "glm")
+
+    def test_discovery_aliases_are_bounded_sorted_public_labels(self):
+        payload = self._manifest_payload()
+        mutations = (
+            ["Zhipu AI", "GLM"],
+            ["GLM", "GLM"],
+            [""],
+            ["x" * 65],
+            ["token=private-value"],
+        )
+        for aliases in mutations:
+            with self.subTest(aliases=aliases):
+                candidate = json.loads(json.dumps(payload))
+                next(
+                    family for family in candidate["families"]
+                    if family["id"] == "zai"
+                )["aliases"] = aliases
+                with self.assertRaises(ValueError):
+                    self._load_payload(candidate)
 
     def test_unknown_top_level_provider_and_source_fields_are_rejected(self):
         payload = self._manifest_payload()

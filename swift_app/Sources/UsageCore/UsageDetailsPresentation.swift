@@ -827,6 +827,7 @@ public struct ProviderDisplayDescriptor: Sendable, Hashable {
     public let providerID: String
     public let familyID: String
     public let displayName: String
+    public let aliases: Set<String>
     public let category: ProviderProductCategory
     public let metricFamilies: Set<ProviderMetricFamily>
     public let regions: Set<String>
@@ -835,9 +836,47 @@ public struct ProviderDisplayDescriptor: Sendable, Hashable {
     public let acceptedIdentitySources: Set<ProviderIdentitySource>
     public let capabilityProfile: ProviderCapabilityProfile
     public let sourceCapabilities: [ProviderSourceCapability]
+
+    public init(
+        providerID: String,
+        familyID: String,
+        displayName: String,
+        aliases: Set<String> = [],
+        category: ProviderProductCategory,
+        metricFamilies: Set<ProviderMetricFamily>,
+        regions: Set<String>,
+        supportsAccounts: Bool,
+        credentialSourceTypes: Set<CredentialSourceType>,
+        acceptedIdentitySources: Set<ProviderIdentitySource>,
+        capabilityProfile: ProviderCapabilityProfile,
+        sourceCapabilities: [ProviderSourceCapability]
+    ) {
+        self.providerID = providerID
+        self.familyID = familyID
+        self.displayName = displayName
+        self.aliases = aliases
+        self.category = category
+        self.metricFamilies = metricFamilies
+        self.regions = regions
+        self.supportsAccounts = supportsAccounts
+        self.credentialSourceTypes = credentialSourceTypes
+        self.acceptedIdentitySources = acceptedIdentitySources
+        self.capabilityProfile = capabilityProfile
+        self.sourceCapabilities = sourceCapabilities
+    }
 }
 
 public enum ProviderCatalog {
+    public static func search(_ query: String) -> [ProviderDisplayDescriptor] {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty, normalized.count <= 128 else { return [] }
+        return known.values.filter { descriptor in
+            ([descriptor.familyID, descriptor.displayName] + descriptor.aliases).contains {
+                $0.lowercased().contains(normalized)
+            }
+        }.sorted { $0.familyID < $1.familyID }
+    }
+
     public static var allDescriptors: [ProviderDisplayDescriptor] {
         GeneratedProviderCatalog.families.values.sorted {
             let order = $0.displayName.localizedStandardCompare($1.displayName)
@@ -875,6 +914,7 @@ public enum ProviderCatalog {
             providerID: providerID,
             familyID: familyID,
             displayName: resolvedDisplayName,
+            aliases: family.aliases,
             category: category,
             metricFamilies: family.metricFamilies,
             regions: family.regions,
