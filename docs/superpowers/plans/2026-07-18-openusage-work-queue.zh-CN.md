@@ -177,6 +177,7 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] 回退迁移暴露的旧路径 Activity 与旧应用副本残留已加入双安装位置回归；真实双副本清理、旧 bundle 已删除但 Activity 仍运行两种场景均已通过。卸载只删除 bundle id 已确认为 OpenUsage Bar 的已知副本；磁盘副本已消失时，只有运行时 bundle id 精确等于 `com.lune.openusagebar.activity` 的旧路径进程才会被停止，同名异构应用及其进程保持不动。
 - [x] 安装/卸载隔离 smoke 现在把显式 `OPENUSAGE_INSTALL_DIR` 视为严格作用域，不再扫描或清理真实 `/Applications` 与 `~/Applications`；19 项 Activity 生命周期回归和完整 release smoke 均已通过。
 - [x] 两个无人点击的五分钟采集周期已通过。以 `minimax-1783978290 / minimax.coding_plan` 为固定哨兵：T0=`2026-07-18T20:14:46.677591Z`、`dataRevision=5784`；T1=`2026-07-18T20:21:34.749783Z`、`dataRevision=5801`；T2=`2026-07-18T20:27:42.947299Z`、观察时 `dataRevision=5818`，最终 API 复核继续推进到 `5826`。T2 时 MiniMax、Step Plan、Codex、Kiro 四个直连来源的 `lastAttemptAt` 与 `lastSuccessAt` 相同且均为 `ok`，全程未点击 Refresh。候选 helper 的本地签名变化曾触发一次 macOS Keychain ACL 授权，当前 Keychain 读取已恢复。
+- [x] 新增 `scripts/verify_reboot_recovery.py`：重启前以 `0600` 保存无凭证 baseline，重启后只有在 `kern.boottime` 确实推进、baseline 对应当前 canary 且新 boot 距 capture 不超过 6 小时、两个 LaunchAgent 进程晚于新 boot 启动、签名与应用版本不变、socket 仍为当前用户所有且为 `0600`、Local API 三条核心路由通过、SQLite cursor 不倒退、同一批自然采集来源在新 boot 后成功推进时才返回通过。它不调用 Keychain、Refresh 或 launchd mutation，并明确保留 `visualMenuCheck=pending`。
 - [ ] 真实重启后登录项、collector、本地 API 与菜单栏恢复尚未验收；`launchctl` 等价检查不能替代 reboot。
 
 **验收：**
@@ -185,7 +186,7 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] 手动 Refresh 不是数据更新的必要条件。
 - [ ] 安装、升级、重启和回滚后 Unknown 仍不变成 0，历史数据不丢失。
 
-**验证：** `scripts/release_smoke.sh`、`scripts/verify_local_api.py`、安装前后数据库计数与一次人工可见验收。
+**验证：** `scripts/release_smoke.sh`、`scripts/verify_local_api.py`、`scripts/verify_reboot_recovery.py`、安装前后数据库计数与一次人工可见验收。
 
 **依赖：** 可与 WQ-03、WQ-04 并行，0.4.x Checkpoint 前必须完成。
 

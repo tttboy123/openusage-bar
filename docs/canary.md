@@ -30,8 +30,22 @@ Record pass/fail and UTC date for each event:
 2. Perform a clean install and observe the first trustworthy fact. `Unknown`
    is acceptable when the source explicitly reports why; numeric zero is not a
    substitute for missing data.
-3. Refresh, wait through one scheduled refresh interval, and restart both the
-   collector and the Mac.
+3. Refresh and wait through one scheduled refresh interval. Before restarting
+   the Mac, capture a private runtime baseline; after login, verify that a real
+   new boot restored launchd, the local API, the ledger, and a subsequent
+   scheduled collection without invoking Refresh:
+
+   ```bash
+   scripts/verify_reboot_recovery.py capture
+   # Restart macOS normally, then return to the checkout.
+   scripts/verify_reboot_recovery.py verify --timeout 360
+   ```
+
+   The baseline is a short-lived canary artifact; capture it for the current
+   reboot attempt, then verify within six hours of the new boot. A successful
+   verifier intentionally reports `visualMenuCheck=pending`. Separately confirm
+   that the menu-bar item is visibly present and opens its popover; process or
+   launchd state is not visual evidence.
 4. Upgrade from the previous published pre-release. Confirm the SQLite
    integrity check, history counts, and change cursor do not decrease.
 5. Run `scripts/rollback_app.sh`, confirm Local API v1 recovers, then reinstall
