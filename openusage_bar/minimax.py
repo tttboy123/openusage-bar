@@ -11,7 +11,9 @@ from .keychain import MacOSKeychain
 from .model_ids import InvalidModelID, canonical_model_id
 from .models import Category, ProviderCard, ProviderStatus
 from .network import AuthenticationRequired, BoundedHTTPClient, NetworkError, RateLimited
-from .openai_organization import ImportFailure, UsageImportResult, UsageImportSuccess
+from .providers.contracts import ImportFailure, UsageImportResult, UsageImportSuccess
+from .providers.contracts import QuotaFetchFailure, QuotaFetchSuccess
+from .providers.quota import percent_observation
 
 
 MINIMAX_ENDPOINT = "https://www.minimaxi.com/v1/token_plan/remains"
@@ -25,6 +27,108 @@ MAX_TOKEN_VALUE = 9_223_372_036_854_775_807
 
 class MiniMaxParseError(ValueError):
     pass
+
+
+def parse_minimax_quota_observations(
+    config: MiniMaxConfig, payload: dict[str, Any], now: datetime
+) -> QuotaFetchSuccess | QuotaFetchFailure:
+    base = payload.get("base_resp")
+    rows = payload.get("model_remains")
+    if (
+        not isinstance(base, dict) or base.get("status_code") != 0
+        or not isinstance(rows, list)
+    ):
+        return QuotaFetchFailure("invalid_response")
+
+    def percentage(value: Any) -> float | None:
+        return (
+            float(value)
+            if isinstance(value, (int, float))
+            and not isinstance(value, bool) and 0 <= value <= 100
+            else None
+        )
+
+    def reset_at(row: dict[str, Any], *keys: str) -> datetime | None:
+        for key in keys:
+            value = row.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if value > 0:
+                    try:
+                        return datetime.fromtimestamp(
+                            float(value) / 1000, tz=timezone.utc
+                        )
+                    except (OverflowError, OSError, ValueError):
+                        return None
+        return None
+
+    def interval_reset(row: dict[str, Any]) -> datetime | None:
+        reset = reset_at(row, "end_time")
+        if reset is not None:
+            return reset
+        duration = row.get("remains_time")
+        if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration >= 0:
+            return now + timedelta(milliseconds=float(duration))
+        return None
+
+    observations = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("model_name") or "general").strip()
+        if not name:
+            continue
+        if name.casefold() == "general":
+            applies_to_kind = "subscription"
+            model_ids: tuple[str, ...] = ()
+        else:
+            try:
+                model_ids = (canonical_model_id(name),)
+            except InvalidModelID:
+                continue
+            applies_to_kind = "model"
+
+        five_percent = percentage(row.get("current_interval_remaining_percent"))
+        total = row.get("current_interval_total_count")
+        remaining = row.get("current_interval_usage_count")
+        if (
+            five_percent is None and isinstance(total, int)
+            and not isinstance(total, bool) and total > 0
+            and isinstance(remaining, int) and not isinstance(remaining, bool)
+            and 0 <= remaining <= total
+        ):
+            five_percent = remaining / total * 100
+        if five_percent is not None:
+            observations.append(percent_observation(
+                provider_id=config.provider_id, source_id="minimax.coding_plan",
+                quota_name=f"{name} 5h", quota_window="five_hour",
+                remaining_percent=five_percent,
+                resets_at=interval_reset(row), observed_at=now,
+                applies_to_kind=applies_to_kind,
+                applies_to_model_ids=model_ids,
+                account_ref=config.account_ref,
+            ))
+
+        weekly_percent = percentage(row.get("current_weekly_remaining_percent"))
+        if weekly_percent is not None:
+            observations.append(percent_observation(
+                provider_id=config.provider_id, source_id="minimax.coding_plan",
+                quota_name=f"{name} Weekly", quota_window="weekly",
+                remaining_percent=weekly_percent,
+                resets_at=reset_at(
+                    row, "current_weekly_end_time", "weekly_end_time"
+                ),
+                observed_at=now, applies_to_kind=applies_to_kind,
+                applies_to_model_ids=model_ids,
+                account_ref=config.account_ref,
+            ))
+    if not observations:
+        return QuotaFetchFailure("quota_unavailable")
+    return QuotaFetchSuccess(tuple(sorted(
+        observations,
+        key=lambda value: (
+            value.applies_to_model_ids, value.quota_window, value.quota_name
+        ),
+    )))
 
 
 class _MiniMaxBillingResponseError(ValueError):
@@ -52,6 +156,7 @@ class MiniMaxBillingImporter:
         local_timezone=timezone(timedelta(hours=8)),
     ) -> None:
         self.config = config
+        self.account_ref = config.account_ref
         self.keychain = keychain
         self.client = client
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -220,6 +325,7 @@ class MiniMaxBillingImporter:
             DailyUsageRow(
                 day=day,
                 provider_id=self.config.provider_id,
+                account_ref=self.config.account_ref,
                 model_id=model,
                 input_tokens=values[0],
                 output_tokens=values[1],
@@ -257,6 +363,7 @@ class MiniMaxCodingPlanAdapter:
         self.keychain = keychain
         self.client = client
         self.clock = clock
+        self.last_quota_result = QuotaFetchFailure("not_collected")
 
     @staticmethod
     def parse(config: MiniMaxConfig, payload: dict[str, Any], now: datetime) -> ProviderCard:
@@ -361,12 +468,14 @@ class MiniMaxCodingPlanAdapter:
             family_id="minimax",
             credential_source="minimax_builtin_api",
             source_kind="builtin_api",
+            account_ref=config.account_ref,
         )
 
     def fetch(self) -> ProviderCard:
         now = self.clock()
         secret = self.keychain.get(self.config.provider_id)
         if not secret:
+            self.last_quota_result = QuotaFetchFailure("auth_required")
             return self._error_card(ProviderStatus.AUTH, "Credential required", now)
         try:
             payload = self.client.get_json(
@@ -376,14 +485,24 @@ class MiniMaxCodingPlanAdapter:
                     "Content-Type": "application/json",
                 },
             )
+            self.last_quota_result = parse_minimax_quota_observations(
+                self.config, payload, now
+            )
             return self.parse(self.config, payload, now)
         except AuthenticationRequired:
+            self.last_quota_result = QuotaFetchFailure("auth_rejected")
             return self._error_card(ProviderStatus.AUTH, "Credential rejected", now)
         except RateLimited:
+            self.last_quota_result = QuotaFetchFailure("rate_limited")
             return self._error_card(ProviderStatus.RATE_LIMITED, "Rate limited", now)
         except MiniMaxParseError as error:
+            self.last_quota_result = QuotaFetchFailure("invalid_response")
             return self._error_card(ProviderStatus.ERROR, str(error), now)
-        except (NetworkError, TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            self.last_quota_result = QuotaFetchFailure("invalid_response")
+            return self._error_card(ProviderStatus.ERROR, "MiniMax refresh failed", now)
+        except NetworkError:
+            self.last_quota_result = QuotaFetchFailure("network_error")
             return self._error_card(ProviderStatus.ERROR, "MiniMax refresh failed", now)
 
     def _error_card(self, status: ProviderStatus, error: str, now: datetime) -> ProviderCard:
@@ -402,4 +521,5 @@ class MiniMaxCodingPlanAdapter:
             family_id="minimax",
             credential_source="minimax_builtin_api",
             source_kind="builtin_api",
+            account_ref=self.config.account_ref,
         )

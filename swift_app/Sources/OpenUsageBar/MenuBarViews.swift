@@ -26,7 +26,9 @@ struct MenuBarPopover: View {
                 }
             }
             .frame(minHeight: 120, maxHeight: 330)
-            Button("View all providers") { HelperLauncher.openActivity(route: "capacity") }
+            Button("View all providers") {
+                HelperLauncher.openActivity(route: MenuDestination.allProviders.transportValue)
+            }
                 .buttonStyle(.plain).foregroundStyle(.tint).padding(.vertical, 10)
             Divider()
             footer
@@ -154,13 +156,17 @@ struct MenuBarPopover: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 6) {
+        let presentation = model.emptyStatePresentation
+        return VStack(spacing: 6) {
             Image(systemName: "tray").foregroundStyle(.secondary)
-            Text(AppLocalization.text(
-                model.displayError == nil ? "No capacity data" : "Last-good data unavailable"
-            )).fontWeight(.medium)
-            Text(model.displayError ?? AppLocalization.text("Connect a supported provider in Settings."))
+            Text(AppLocalization.text(presentation.titleKey)).fontWeight(.medium)
+            Text(model.displayError ?? AppLocalization.text(presentation.detailKey))
                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Button(AppLocalization.text(presentation.actionKey)) {
+                HelperLauncher.openActivity(route: presentation.primaryRoute.transportValue)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
         }
         .padding(24).frame(maxWidth: .infinity)
     }

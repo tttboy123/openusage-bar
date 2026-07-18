@@ -127,6 +127,68 @@ class QueryServiceTests(unittest.TestCase):
             {"schemaVersion", "dataRevision", "generatedAt", "todayTokens", "modelCount", "coveredDayCount"},
         )
 
+    def test_two_account_connections_remain_isolated_across_public_facts(self):
+        for provider_id, account_ref, tokens, amount, ratio in (
+            ("openai-personal", "personal", 120, "1.20", 0.8),
+            ("openai-work", "work", 340, "3.40", 0.4),
+        ):
+            self.store.replace_daily_usage(
+                provider_id, "2026-07-14",
+                [usage(
+                    provider_id=provider_id, account_ref=account_ref,
+                    total_tokens=tokens,
+                )],
+                account_ref=account_ref,
+            )
+            self.store.replace_daily_costs(
+                provider_id, "2026-07-14",
+                [cost(
+                    provider_id=provider_id, account_ref=account_ref,
+                    amount=amount,
+                )],
+                account_ref=account_ref,
+            )
+            self.store.record_quota(quota(
+                f"{provider_id}.weekly", provider_id, ratio,
+                account_ref=account_ref,
+            ))
+            self.store.record_source_failure(
+                provider_id, "openai.organization.usage", "rate_limited", NOW
+            )
+
+        activity = self.query.activity(
+            date(2026, 7, 14), date(2026, 7, 14),
+            provider_ids=("openai-work",),
+        )
+        costs = self.query.costs(
+            date(2026, 7, 14), date(2026, 7, 14),
+            provider_ids=("openai-work",),
+        )
+        quotas = self.query.quota_history(
+            provider_id="openai-work", account_ref="work"
+        )
+        health = self.query.source_status()
+        changes = self.query.changes(0, limit=1000)
+
+        self.assertEqual(
+            [(row.provider_id, row.account_ref, row.total_tokens) for row in activity.rows],
+            [("openai-work", "work", 340)],
+        )
+        self.assertEqual(
+            [(row.provider_id, row.account_ref, row.amount) for row in costs.rows],
+            [("openai-work", "work", "3.4")],
+        )
+        self.assertEqual(
+            [(row.provider_id, row.account_ref) for row in quotas.snapshots],
+            [("openai-work", "work")],
+        )
+        self.assertEqual(
+            {row.provider_id for row in health.sources},
+            {"openai-personal", "openai-work"},
+        )
+        self.assertTrue(any("openai-work" in row.record_id for row in changes.records))
+        self.assertTrue(any("openai-personal" in row.record_id for row in changes.records))
+
     def test_capacity_selects_most_urgent_window_per_account_and_sorts_zero_before_null(self):
         self.store.record_quota(quota("minimax.weekly", "minimax", 0.7, quota_name="Weekly"))
         self.store.record_quota(quota("minimax.five_hour", "minimax", 0.18))
@@ -163,6 +225,19 @@ class QueryServiceTests(unittest.TestCase):
         row = self.query.capacity().providers[0]
         self.assertTrue(row.stale)
         self.assertEqual(row.freshness_seconds, 3600)
+
+    def test_capacity_and_snapshot_publish_conservative_quota_scope(self):
+        self.store.record_quota(quota("codex.weekly", "codex", 0.8))
+
+        capacity = to_wire(self.query.capacity())
+        snapshot = to_wire(self.query.resource_snapshot(date(2026, 7, 14)))
+
+        for row in (capacity["providers"][0], snapshot["quotaWindows"][0]):
+            self.assertEqual(row["sourceId"], "current.quota")
+            self.assertEqual(row["quotaWindow"], "subscription")
+            self.assertEqual(
+                row["appliesTo"], {"kind": "account", "modelIds": []}
+            )
 
     def test_activity_preserves_zero_missing_token_fields_cost_and_coverage(self):
         row = usage(total_tokens=0)
@@ -465,6 +540,49 @@ class QueryServiceTests(unittest.TestCase):
             corrected_result.data_revision, first_result.data_revision
         )
 
+    def test_resource_snapshot_keeps_every_fact_on_one_public_revision(self):
+        self.store.replace_daily_usage(
+            "codex", "2026-07-14", [usage(total_tokens=42)]
+        )
+        self.store.record_quota(quota(
+            "minimax.five_hour", "minimax", 0.18,
+            quota_name="Five hour",
+        ))
+        self.store.record_quota(quota(
+            "minimax.weekly", "minimax", 0.72,
+            quota_name="Weekly",
+        ))
+        self.store.upsert_provider_instance(ProviderInstance(
+            provider_id="minimax-main", family_id="minimax",
+            display_name="MiniMax Main", category="subscription",
+            credential_source="minimax_builtin_api", source_kind="builtin_api",
+            observed_at="2026-07-14T09:00:00Z",
+        ))
+        self.store.record_source_success(
+            "minimax-main", "current.quota", NOW,
+        )
+
+        result = self.query.resource_snapshot(date(2026, 7, 14))
+        wire = to_wire(result)
+
+        self.assertEqual(result.data_revision, self.store.high_water_cursor())
+        self.assertEqual(result.local_day, "2026-07-14")
+        self.assertEqual(result.summary.today_tokens, 42)
+        self.assertEqual(result.summary.model_count, 1)
+        self.assertEqual(result.summary.covered_day_count, 1)
+        self.assertEqual(
+            [window.record_id for window in result.quota_windows],
+            ["minimax.five_hour", "minimax.weekly"],
+        )
+        self.assertEqual([item.provider_id for item in result.providers], ["minimax-main"])
+        self.assertEqual([item.provider_id for item in result.sources], ["minimax-main"])
+        self.assertEqual(result.catalog_revision, "3059f1b")
+        self.assertEqual(set(wire), {
+            "schemaVersion", "dataRevision", "generatedAt", "localDay",
+            "summary", "quotaWindows", "providers", "sources",
+            "catalogRevision",
+        })
+
     def test_change_pages_have_deterministic_next_cursor_and_snapshot_revision(self):
         self.store.replace_daily_usage("codex", "2026-07-13", [usage(day="2026-07-13")])
         first_cursor = self.store.current_change_seq
@@ -472,12 +590,37 @@ class QueryServiceTests(unittest.TestCase):
         page = self.query.changes(after=0, limit=1)
         self.assertEqual(page.next_cursor, page.records[-1].change_seq)
         self.assertEqual(page.data_revision, self.store.current_change_seq)
+        self.assertTrue(page.has_more)
         empty = self.query.changes(after=self.store.current_change_seq, limit=10)
         self.assertEqual(empty.next_cursor, self.store.current_change_seq)
+        self.assertFalse(empty.has_more)
         self.assertLessEqual(page.next_cursor, first_cursor)
         for bad in (True, -1):
             with self.assertRaises(ValueError):
                 self.query.changes(after=bad)
+
+    def test_known_zero_coverage_changes_are_preserved_on_the_public_wire(self):
+        self.store.replace_daily_usage("codex", "2026-07-18", [])
+        self.store.replace_daily_costs("openai", "2026-07-18", [])
+
+        wire = to_wire(self.query.changes(after=0))
+
+        coverage = [
+            record for record in wire["records"]
+            if record["recordType"] in {
+                "daily_coverage", "daily_cost_coverage",
+            }
+        ]
+        self.assertEqual(
+            [record["recordType"] for record in coverage],
+            ["daily_coverage", "daily_cost_coverage"],
+        )
+        for record in coverage:
+            self.assertEqual(record["operation"], "insert")
+            self.assertIsInstance(record["payloadJson"], str)
+            payload = json.loads(record["payloadJson"])
+            self.assertEqual(payload["day"], "2026-07-18")
+            self.assertNotIn("total_tokens", payload)
 
     def test_changes_reject_cursor_ahead_of_same_snapshot_high_water(self):
         self.store.replace_daily_usage("codex", "2026-07-14", [usage()])

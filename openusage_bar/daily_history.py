@@ -31,16 +31,17 @@ from .openusage_catalog import (
     CatalogDiagnostic,
     OpenUsageCatalogDiscovery,
 )
-from .openai_organization import (
-    COST_SOURCE_ID,
-    USAGE_SOURCE_ID,
+from .providers.contracts import (
     CostImportSuccess,
     ImportFailure,
+    QuotaFetchFailure,
+    QuotaFetchSuccess,
     UsageImportSuccess,
 )
+from .openai_organization import COST_SOURCE_ID, USAGE_SOURCE_ID
 
 
-DAILY_TIMEOUT_SECONDS = 30
+DAILY_TIMEOUT_SECONDS = 60
 MAX_DAILY_EXPORT_BYTES = 16 * 1024 * 1024
 MAX_DAILY_DAYS = 5000
 MAX_DAILY_MODELS_PER_DAY = 4096
@@ -436,12 +437,13 @@ class ActivityCollector:
 
     @staticmethod
     def _rows_match_scope(
-        rows: Iterable[DailyUsageRow], provider_id: str, since: date, until: date
+        rows: Iterable[DailyUsageRow], provider_id: str, since: date, until: date,
+        account_ref: str = "",
     ) -> bool:
         try:
             return all(
                 row.provider_id == provider_id
-                and row.account_ref == ""
+                and row.account_ref == account_ref
                 and since <= date.fromisoformat(row.day) <= until
                 for row in rows
             )
@@ -459,6 +461,21 @@ class ActivityCollector:
         if isinstance(candidate, str) and candidate and len(candidate) <= 128:
             return candidate
         return fallback
+
+    @staticmethod
+    def _account_ref(importer: Any) -> str:
+        missing = object()
+        candidate = vars(importer).get("account_ref", missing)
+        if candidate is missing:
+            candidate = getattr(type(importer), "account_ref", missing)
+        if candidate is missing:
+            return ""
+        if (
+            isinstance(candidate, str)
+            and (not candidate or ID_PATTERN.fullmatch(candidate) is not None)
+        ):
+            return candidate
+        raise ValueError("importer account scope is invalid")
 
     @staticmethod
     def _success_bounds_match(
@@ -488,6 +505,30 @@ class ActivityCollector:
         except Exception:
             pass
 
+    def _safe_openusage_failure(
+        self,
+        provider_id: str,
+        error_code: str,
+        attempted_at: datetime,
+        account_ref: str = "",
+    ) -> None:
+        """Keep last-good usage visible while marking a failed refresh stale."""
+        try:
+            if self.store.has_daily_history(provider_id, account_ref):
+                self.store.record_source_status(
+                    provider_id,
+                    DAILY_SOURCE_ID,
+                    "stale",
+                    attempted_at,
+                    error_code,
+                )
+                return
+        except Exception:
+            pass
+        self._safe_source_failure(
+            provider_id, error_code, attempted_at, DAILY_SOURCE_ID
+        )
+
     def _refresh_official_costs(
         self,
         provider_id: str,
@@ -497,7 +538,14 @@ class ActivityCollector:
         attempted_at: datetime,
     ) -> None:
         try:
-            has_cost_history = self.store.has_cost_history(provider_id)
+            account_ref = self._account_ref(importer)
+        except ValueError:
+            self._safe_source_failure(
+                provider_id, "invalid_import_scope", attempted_at, source_id
+            )
+            return
+        try:
+            has_cost_history = self.store.has_cost_history(provider_id, account_ref)
         except Exception:
             has_cost_history = True
         cost_since = today - timedelta(days=6 if has_cost_history else 364)
@@ -514,6 +562,7 @@ class ActivityCollector:
                     today,
                     official_cost.rows,
                     attempted_at,
+                    account_ref=account_ref,
                 )
             except Exception:
                 self._safe_source_failure(
@@ -570,9 +619,13 @@ class ActivityCollector:
             raise ValueError("quota observation time must include a timezone")
         reset = card.resets_at
         return QuotaObservation(
-            record_id=f"{card.provider_id}.subscription",
+            record_id=(
+                f"{card.provider_id}."
+                f"{card.account_ref + '.' if card.account_ref else ''}subscription"
+            ),
             observed_at=observed_at.astimezone(timezone.utc).isoformat(),
             provider_id=card.provider_id,
+            account_ref=card.account_ref,
             quota_name="Subscription",
             unit="percent",
             used=str(100 - float(remaining)),
@@ -585,6 +638,10 @@ class ActivityCollector:
             state=state_from_card(card.status, card.stale).value,
             quality="direct",
             stale=card.stale,
+            source_id="current.quota",
+            quota_window="subscription",
+            applies_to_kind="account",
+            applies_to_model_ids=(),
         )
 
     @staticmethod
@@ -596,9 +653,12 @@ class ActivityCollector:
         return MetricFamily.SUBSCRIPTION_QUOTA in descriptor.metric_families
 
     def _persist_current_quotas(
-        self, overview: Overview, attempted_at: datetime
+        self, overview: Overview, attempted_at: datetime,
+        explicit_provider_ids: frozenset[str] = frozenset(),
     ) -> None:
         for card in overview.cards:
+            if card.provider_id in explicit_provider_ids:
+                continue
             if not self._tracks_current_quota(card):
                 try:
                     self.store.delete_source_status(
@@ -666,41 +726,117 @@ class ActivityCollector:
             except Exception:
                 pass
 
-    def refresh(self, overview: Overview) -> bool:
-        if not self._lock.acquire(blocking=False):
-            return False
-        try:
-            current = self.clock()
-            attempted_at = current.astimezone(timezone.utc)
-            today = current.astimezone(self.local_timezone).date()
-            # Identity is published before any usage/quota/source facts. Failure is
-            # isolated and upsert semantics preserve the last good binding.
-            for card in sorted(overview.cards, key=lambda item: item.provider_id):
+    @staticmethod
+    def _provider_ids(
+        overview: Overview, official_importers: Mapping[str, Any]
+    ) -> tuple[str, ...]:
+        return tuple(sorted(
+            {
+                card.provider_id
+                for card in overview.cards
+                if card.provider_id != "openusage"
+            }
+            | set(official_importers)
+        ))
+
+    def _publish_provider_instances(
+        self, overview: Overview, attempted_at: datetime
+    ) -> None:
+        for card in sorted(overview.cards, key=lambda item: item.provider_id):
+            try:
+                instance = self._provider_instance(card, attempted_at)
+                if instance is not None:
+                    self.store.upsert_provider_instance(instance)
+            except Exception:
+                pass
+
+    def _refresh_quota_sources(
+        self,
+        overview: Overview,
+        attempted_at: datetime,
+        quota_results: tuple[tuple[str, str, object], ...],
+    ) -> None:
+        # Current capacity publishes before slower history sources and remains an
+        # independent failure domain.
+        explicit_provider_ids: set[str] = set()
+        for provider_id, source_id, result in quota_results:
+            explicit_provider_ids.add(provider_id)
+            if isinstance(result, QuotaFetchSuccess):
                 try:
-                    instance = self._provider_instance(card, attempted_at)
-                    if instance is not None:
-                        self.store.upsert_provider_instance(instance)
-                except Exception:
-                    pass
-            # Current capacity must not wait behind slow historical imports. The
-            # read-only menu monitor observes these revisions while refresh continues.
-            self._persist_current_quotas(overview, attempted_at)
-            provider_ids = sorted(
-                {
-                    card.provider_id
-                    for card in overview.cards
-                    if card.provider_id != "openusage"
-                }
-                | set(self.official_importers)
-            )
-            for provider_id in provider_ids:
-                official = self.official_importers.get(provider_id)
-                use_openusage_fallback = official is None
-                if official is not None:
-                    usage_source_id = self._source_id(
-                        official, "usage_source_id", USAGE_SOURCE_ID
+                    if any(
+                        observation.provider_id != provider_id
+                        or observation.source_id != source_id
+                        for observation in result.observations
+                    ):
+                        raise ValueError("quota result scope mismatch")
+                    for observation in result.observations:
+                        self.store.record_quota(observation)
+                    self.store.record_source_success(
+                        provider_id, source_id, attempted_at
                     )
-                    assert usage_source_id is not None
+                except Exception:
+                    self._safe_source_failure(
+                        provider_id, "persistence_failed", attempted_at, source_id
+                    )
+            elif isinstance(result, QuotaFetchFailure):
+                self._safe_source_failure(
+                    provider_id, result.error_code, attempted_at, source_id
+                )
+            else:
+                self._safe_source_failure(
+                    provider_id, "invalid_import_result", attempted_at, source_id
+                )
+        try:
+            self._persist_current_quotas(
+                overview, attempted_at, frozenset(explicit_provider_ids)
+            )
+        except Exception:
+            pass
+
+    def _refresh_usage_sources(
+        self,
+        overview: Overview,
+        provider_ids: tuple[str, ...],
+        today: date,
+        attempted_at: datetime,
+    ) -> None:
+        fallback_families = {
+            card.provider_id: card.family_id or card.provider_id
+            for card in overview.cards
+        }
+        fallback_family_counts: dict[str, int] = {}
+        for configured_id in self.official_importers:
+            family_id = fallback_families.get(configured_id, configured_id)
+            fallback_family_counts[family_id] = (
+                fallback_family_counts.get(family_id, 0) + 1
+            )
+        for provider_id in provider_ids:
+            official = self.official_importers.get(provider_id)
+            use_openusage_fallback = official is None
+            openusage_is_fallback = False
+            account_ref = ""
+            if official is not None:
+                try:
+                    account_ref = self._account_ref(official)
+                except ValueError:
+                    self._safe_source_failure(
+                        provider_id, "invalid_import_scope", attempted_at
+                    )
+                    continue
+                usage_source_id = self._source_id(
+                    official, "usage_source_id", USAGE_SOURCE_ID
+                )
+                if usage_source_id is None:
+                    # Cost-only bindings deliberately leave Token history to the
+                    # shared OpenUsage importer when it is available.
+                    official = None
+                    use_openusage_fallback = True
+                    usage_source_id = USAGE_SOURCE_ID
+                if official is None:
+                    pass
+                else:
+                    openusage_is_fallback = True
+                    use_openusage_fallback = True
                     try:
                         had_official_usage = self.store.has_source_success(
                             provider_id, usage_source_id
@@ -722,31 +858,26 @@ class ActivityCollector:
                             provider_id,
                             official_usage.since,
                             official_usage.until,
+                            account_ref,
                         ):
                             self._safe_source_failure(
-                                provider_id,
-                                "invalid_import_rows",
-                                attempted_at,
+                                provider_id, "invalid_import_rows", attempted_at,
                                 usage_source_id,
                             )
                         else:
                             try:
                                 self.store.commit_usage_import_success(
-                                    provider_id,
-                                    usage_source_id,
-                                    official_usage.since,
-                                    official_usage.until,
-                                    official_usage.rows,
-                                    attempted_at,
+                                    provider_id, usage_source_id,
+                                    official_usage.since, official_usage.until,
+                                    official_usage.rows, attempted_at,
+                                    account_ref=account_ref,
                                 )
+                                use_openusage_fallback = False
                             except Exception:
                                 self._safe_source_failure(
-                                    provider_id,
-                                    "persistence_failed",
-                                    attempted_at,
+                                    provider_id, "persistence_failed", attempted_at,
                                     usage_source_id,
                                 )
-                        use_openusage_fallback = False
                     else:
                         error_code = (
                             official_usage.error_code
@@ -756,59 +887,139 @@ class ActivityCollector:
                         self._safe_source_failure(
                             provider_id, error_code, attempted_at, usage_source_id
                         )
-                        # The shared token table has no source provenance. A fallback
-                        # may seed a cold start, but must never overwrite last-good
-                        # official rows after the first official success.
-                        use_openusage_fallback = not had_official_usage
+                        use_openusage_fallback = True
 
-                    cost_source_id = self._source_id(
-                        official, "cost_source_id", COST_SOURCE_ID
-                    )
-                    if cost_source_id is not None:
-                        self._refresh_official_costs(
-                            provider_id,
-                            official,
-                            cost_source_id,
-                            today,
-                            attempted_at,
-                        )
+            if not use_openusage_fallback:
+                continue
+            openusage_provider_id = fallback_families.get(provider_id, provider_id)
+            if (
+                openusage_provider_id != provider_id
+                and fallback_family_counts.get(openusage_provider_id, 0) > 1
+            ):
+                self._safe_openusage_failure(
+                    provider_id,
+                    "ambiguous_fallback_scope",
+                    attempted_at,
+                    account_ref,
+                )
+                continue
+            try:
+                since = today - timedelta(
+                    days=0
+                    if self.store.has_daily_history(provider_id, account_ref)
+                    else 364
+                )
+                result = self.importer.fetch(openusage_provider_id, since, today)
+            except Exception:
+                self._safe_openusage_failure(
+                    provider_id, "import_failed", attempted_at, account_ref
+                )
+                continue
+            if not isinstance(result, DailyImportResult):
+                self._safe_openusage_failure(
+                    provider_id, "invalid_import_result", attempted_at, account_ref
+                )
+                continue
+            if not result.ok:
+                self._safe_openusage_failure(
+                    provider_id,
+                    result.error_code or "import_failed",
+                    attempted_at,
+                    account_ref,
+                )
+                continue
+            if not result.rows:
+                self._safe_openusage_failure(
+                    provider_id, "empty_result", attempted_at, account_ref
+                )
+                continue
+            selected_rows = tuple(
+                replace(
+                    row,
+                    provider_id=provider_id,
+                    account_ref=account_ref,
+                    quality="fallback" if openusage_is_fallback else row.quality,
+                )
+                for row in result.rows
+            )
+            if not self._rows_match_scope(
+                selected_rows, provider_id, since, today, account_ref
+            ):
+                self._safe_openusage_failure(
+                    provider_id, "invalid_import_rows", attempted_at, account_ref
+                )
+                continue
+            try:
+                self.store.commit_usage_import_success(
+                    provider_id, DAILY_SOURCE_ID, since, today,
+                    selected_rows, attempted_at, account_ref=account_ref,
+                )
+            except Exception:
+                self._safe_openusage_failure(
+                    provider_id, "persistence_failed", attempted_at, account_ref
+                )
 
-                if not use_openusage_fallback:
-                    continue
-                try:
-                    since = today - timedelta(
-                        days=0 if self.store.has_daily_history(provider_id) else 364
-                    )
-                    result = self.importer.fetch(provider_id, since, today)
-                except Exception:
-                    self._safe_source_failure(provider_id, "import_failed", attempted_at)
-                    continue
-                if not result.ok:
-                    self._safe_source_failure(
-                        provider_id, result.error_code or "import_failed", attempted_at
-                    )
-                    continue
-                if not self._rows_match_scope(result.rows, provider_id, since, today):
-                    self._safe_source_failure(
-                        provider_id, "invalid_import_rows", attempted_at
-                    )
-                    continue
-                try:
-                    self.store.replace_provider_days(
-                        provider_id, since, today, result.rows
-                    )
-                    self.store.record_source_success(
-                        provider_id, DAILY_SOURCE_ID, attempted_at
-                    )
-                except Exception:
-                    self._safe_source_failure(
-                        provider_id, "persistence_failed", attempted_at
-                    )
+    def _refresh_cost_sources(
+        self, provider_ids: tuple[str, ...], today: date, attempted_at: datetime
+    ) -> None:
+        for provider_id in provider_ids:
+            official = self.official_importers.get(provider_id)
+            if official is None:
+                continue
+            cost_source_id = self._source_id(
+                official, "cost_source_id", COST_SOURCE_ID
+            )
+            if cost_source_id is None:
+                continue
+            self._refresh_official_costs(
+                provider_id, official, cost_source_id, today, attempted_at
+            )
 
+    def refresh(
+        self,
+        overview: Overview,
+        *,
+        quota_results: tuple[tuple[str, str, object], ...] = (),
+    ) -> bool:
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            current = self.clock()
+            attempted_at = current.astimezone(timezone.utc)
+            today = current.astimezone(self.local_timezone).date()
+            provider_ids = self._provider_ids(overview, self.official_importers)
+            self._publish_provider_instances(overview, attempted_at)
+            self._refresh_quota_sources(overview, attempted_at, quota_results)
+            self._refresh_usage_sources(
+                overview, provider_ids, today, attempted_at
+            )
+            self._refresh_cost_sources(provider_ids, today, attempted_at)
             try:
                 self.store.apply_retention(730, attempted_at)
             except Exception:
                 pass
+            return True
+        finally:
+            self._lock.release()
+
+    def refresh_usage(self, provider_ids: tuple[str, ...]) -> bool:
+        """Refresh selected local usage sources without waiting for quota I/O."""
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            selected = tuple(dict.fromkeys(
+                provider_id for provider_id in provider_ids
+                if isinstance(provider_id, str)
+                and ID_PATTERN.fullmatch(provider_id) is not None
+            ))
+            if not selected:
+                return True
+            current = self.clock()
+            attempted_at = current.astimezone(timezone.utc)
+            today = current.astimezone(self.local_timezone).date()
+            self._refresh_usage_sources(
+                Overview([]), selected, today, attempted_at
+            )
             return True
         finally:
             self._lock.release()

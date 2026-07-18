@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import http.client
+import io
 import json
 import os
 import socket
@@ -32,6 +33,7 @@ from openusage_bar.capabilities import (
     registry,
 )
 from openusage_bar.local_api import create_tcp_server, create_unix_server
+from openusage_bar.collector_cli import main as collector_main
 from openusage_bar.provider_catalog import catalog
 from openusage_bar.query import QueryService
 
@@ -183,6 +185,7 @@ class UnixLocalAPITests(unittest.TestCase):
     def test_routes_reuse_canonical_query_envelopes(self):
         expectations = {
             "/v1/summary?today=2026-07-14": "todayTokens",
+            "/v1/snapshot?today=2026-07-14": "quotaWindows",
             "/v1/capacity": "providers",
             "/v1/activity/daily?from=2026-07-14&to=2026-07-14": "rows",
             "/v1/costs/daily?from=2026-07-14&to=2026-07-14": "rows",
@@ -193,6 +196,7 @@ class UnixLocalAPITests(unittest.TestCase):
             "/v1/providers": "providers",
             "/v1/health": "health",
             "/v1/schema": "routes",
+            "/v1/schema.json": "schema",
             "/schema": "routes",
         }
         for target, field in expectations.items():
@@ -206,6 +210,36 @@ class UnixLocalAPITests(unittest.TestCase):
                 self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
                 self.assertEqual(headers["x-content-type-options"], "nosniff")
                 self.assertNotIn("access-control-allow-origin", headers)
+
+    def test_machine_schema_route_serves_the_committed_draft(self):
+        status, _, body = self.request("/v1/schema.json")
+        payload = json.loads(body)
+        committed = json.loads(
+            (Path(__file__).parents[1] / "openusage_bar/resources/local-api-v1.schema.json")
+            .read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["schema"], committed)
+        self.assertEqual(payload["schema"]["$schema"], "https://json-schema.org/draft/2020-12/schema")
+
+    def test_snapshot_api_and_cli_are_exactly_identical(self):
+        status, _, body = self.request("/v1/snapshot?today=2026-07-14")
+        stdout, stderr = io.StringIO(), io.StringIO()
+        code = collector_main(
+            [
+                "snapshot", "--today", "2026-07-14",
+                "--format", "json", "--offline",
+            ],
+            stdout=stdout,
+            stderr=stderr,
+            store=self.store,
+            query=self.query,
+            clock=lambda: NOW,
+        )
+
+        self.assertEqual((status, code, stderr.getvalue()), (200, 0, ""))
+        self.assertEqual(json.loads(body), json.loads(stdout.getvalue()))
 
     def test_costs_route_filters_provider_and_currency_and_rejects_bad_parameters(self):
         status, _, body = self.request(

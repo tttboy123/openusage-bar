@@ -10,16 +10,67 @@ public struct PeakUsage: Sendable, Hashable {
     }
 }
 
+/// Raw Token counters reported by a usage source. Cache counters are kept
+/// separate because cache reads can already be included in input Tokens.
+public struct TokenBreakdown: Sendable, Hashable {
+    public let totalTokens: Int64
+    public let inputTokens: Int64
+    public let outputTokens: Int64
+    public let cacheReadTokens: Int64
+    public let cacheCreationTokens: Int64
+
+    public init(
+        totalTokens: Int64, inputTokens: Int64, outputTokens: Int64,
+        cacheReadTokens: Int64, cacheCreationTokens: Int64
+    ) {
+        self.totalTokens = totalTokens
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheCreationTokens = cacheCreationTokens
+    }
+
+    public static let zero = TokenBreakdown(
+        totalTokens: 0, inputTokens: 0, outputTokens: 0,
+        cacheReadTokens: 0, cacheCreationTokens: 0
+    )
+
+    init(records: [DailyUsage]) {
+        var totalTokens: Int64 = 0
+        var inputTokens: Int64 = 0
+        var outputTokens: Int64 = 0
+        var cacheReadTokens: Int64 = 0
+        var cacheCreationTokens: Int64 = 0
+        for record in records {
+            totalTokens += record.totalTokens
+            inputTokens += record.inputTokens
+            outputTokens += record.outputTokens
+            cacheReadTokens += record.cacheReadTokens
+            cacheCreationTokens += record.cacheCreationTokens
+        }
+        self.init(
+            totalTokens: totalTokens, inputTokens: inputTokens, outputTokens: outputTokens,
+            cacheReadTokens: cacheReadTokens, cacheCreationTokens: cacheCreationTokens
+        )
+    }
+}
+
 public struct ActivityMetrics: Sendable, Hashable {
     /// Exact total when every selected provider/account scope is covered.
     public let totalTokens: Int64?
     /// Exact sum of the records that were observed, even when coverage is partial.
     public let observedTokens: Int64
+    /// Observed component counters. These facts are not assumed to be additive.
+    public let observedBreakdown: TokenBreakdown
     public let isComplete: Bool
     public let peak: PeakUsage?
     public let activeDays: Int
     public let currentStreak: Int
     public let longestStreak: Int
+
+    public var hasObservedBreakdown: Bool {
+        isComplete || observedBreakdown != .zero
+    }
 }
 
 public enum ActivityDayState: String, Sendable, Hashable {
@@ -145,7 +196,8 @@ public enum ActivityAggregator {
             )
         }
 
-        let observedTokens = selectedRecords.reduce(Int64(0)) { $0 + $1.totalTokens }
+        let observedBreakdown = TokenBreakdown(records: selectedRecords)
+        let observedTokens = observedBreakdown.totalTokens
         let isComplete = !days.isEmpty && days.allSatisfy {
             $0.state == .coveredZero || $0.state == .coveredActive
         }
@@ -167,7 +219,8 @@ public enum ActivityAggregator {
         }
         let metrics = ActivityMetrics(
             totalTokens: isComplete ? observedTokens : nil,
-            observedTokens: observedTokens, isComplete: isComplete,
+            observedTokens: observedTokens, observedBreakdown: observedBreakdown,
+            isComplete: isComplete,
             peak: peak, activeDays: observedActiveDays.count,
             currentStreak: running, longestStreak: longest
         )

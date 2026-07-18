@@ -209,6 +209,20 @@ struct RepositoryTests {
         }
     }
 
+    @Test("Version four accepts revisioned source health without mutating the ledger")
+    func revisionedSourceHealth() throws {
+        let fixture = try SQLiteFixture(userVersion: 4)
+        let before = try Data(contentsOf: fixture.databaseURL)
+        let repository = try UsageRepository(databaseURL: fixture.databaseURL, now: { now })
+        defer { repository.close() }
+
+        let health = try repository.sourceHealth()
+
+        #expect(health.sources.count == 3)
+        #expect(try repository.dataRevision() == 1842)
+        #expect(try Data(contentsOf: fixture.databaseURL) == before)
+    }
+
     @Test("Version two costs preserve decimals and distinguish known zero from missing")
     func dailyCosts() throws {
         let fixture = try SQLiteFixture(userVersion: 2)
@@ -309,6 +323,38 @@ struct RepositoryTests {
         let rows = try repository.capacity(limit: 2)
         #expect(rows.map(\.recordID) == ["kiro.monthly", "minimax.team"])
         #expect(rows.map(\.remainingRatio) == [0.0, 0.05])
+    }
+
+    @Test("Version five publishes explicit quota source window and model scope")
+    func quotaScopeFacts() throws {
+        let fixture = try SQLiteFixture(userVersion: 5, extraSQL: """
+            UPDATE quota_state
+            SET source_id='codex.local', quota_window='weekly', applies_to_kind='model',
+                applies_to_model_ids='["gpt-5.5"]'
+            WHERE record_id='codex.weekly';
+            """)
+        let repository = try UsageRepository(databaseURL: fixture.databaseURL, now: { now })
+        defer { repository.close() }
+
+        let codex = try #require(
+            repository.capacity(limit: nil).first { $0.recordID == "codex.weekly" }
+        )
+        #expect(codex.sourceID == "codex.local")
+        #expect(codex.quotaWindow == "weekly")
+        #expect(codex.appliesTo == QuotaAppliesTo(kind: .model, modelIDs: ["gpt-5.5"]))
+
+        let malformed = try SQLiteFixture(userVersion: 5, extraSQL: """
+            UPDATE quota_state
+            SET applies_to_kind='account', applies_to_model_ids='["gpt-5.5"]'
+            WHERE record_id='codex.weekly';
+            """)
+        let malformedRepository = try UsageRepository(
+            databaseURL: malformed.databaseURL, now: { now }
+        )
+        defer { malformedRepository.close() }
+        #expect(throws: RepositoryError.self) {
+            try malformedRepository.capacity(limit: nil)
+        }
     }
 
     @Test("Source health applies stale-at strictly and keeps stored facts")
@@ -577,7 +623,7 @@ struct RepositoryTests {
             #expect(!String(describing: error).contains("private-account"))
         }
 
-        let newer = try SQLiteFixture(userVersion: 4)
+        let newer = try SQLiteFixture(userVersion: 6)
         do {
             _ = try UsageRepository(databaseURL: newer.databaseURL)
             Issue.record("newer schema unexpectedly opened")

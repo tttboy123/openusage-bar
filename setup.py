@@ -16,6 +16,7 @@ setup(
         "py2app": {
             "plist": info_plist(),
             "packages": ["openusage_bar"],
+            "excludes": ["test", "tests", "unittest"],
             "arch": "arm64",
         }
     },

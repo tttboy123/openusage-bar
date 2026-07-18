@@ -156,6 +156,9 @@ def render() -> str:
                 f"            providerID: {swift_string(family.family_id)},",
                 f"            familyID: {swift_string(family.family_id)},",
                 f"            displayName: {swift_string(family.display_name)},",
+                "            aliases: ["
+                + ", ".join(swift_string(value) for value in sorted(family.aliases))
+                + "],",
                 f"            category: .{category},",
                 f"            metricFamilies: {swift_cases(metrics)},",
                 f"            regions: {swift_regions},",

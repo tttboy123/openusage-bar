@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 
 public struct RefreshCommand: Sendable, Hashable {
-    public static let interactiveTimeout: TimeInterval = 90
+    public static let interactiveTimeout: TimeInterval = 120
 
     public let executable: URL
     public let arguments: [String]

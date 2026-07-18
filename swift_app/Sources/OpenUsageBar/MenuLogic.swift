@@ -10,17 +10,29 @@ public struct StatusLabel: Sendable, Hashable {
 
     public static func compact(remainingRatio: Double?) -> Self {
         let values = remainingRatio.map { [Format.percent($0)] } ?? []
-        return Self(values: values, accessibilityTitle: "OpenUsage Bar", accessibilityValue: values.first.map { "Most urgent capacity, \($0) remaining" } ?? "Capacity unavailable")
+        return Self(
+            values: values, accessibilityTitle: "OpenUsage Bar",
+            accessibilityValue: values.first.map {
+                AppLocalization.format("Most urgent capacity, %@ remaining", $0)
+            } ?? AppLocalization.text("Capacity unavailable")
+        )
     }
 
     public static func activity(tokens: Int64) -> Self {
         let value = Format.tokens(tokens)
-        return Self(values: [value], accessibilityTitle: "OpenUsage Bar", accessibilityValue: "Today Token, \(value)")
+        return Self(
+            values: [value], accessibilityTitle: "OpenUsage Bar",
+            accessibilityValue: AppLocalization.format("Today Token, %@", value)
+        )
     }
 
     public static func custom(values: [String]) -> Self {
         let short = Array(values.filter { !$0.isEmpty }.prefix(2))
-        return Self(values: short, accessibilityTitle: "OpenUsage Bar", accessibilityValue: short.isEmpty ? "Usage unavailable" : short.joined(separator: ", "))
+        return Self(
+            values: short, accessibilityTitle: "OpenUsage Bar",
+            accessibilityValue: short.isEmpty
+                ? AppLocalization.text("Usage unavailable") : short.joined(separator: ", ")
+        )
     }
 }
 
@@ -31,6 +43,10 @@ public enum MenuCopy {
         "OpenUsage Bar", "Updated", "Refresh", "Today Token", "Capacity",
         "Most urgent first", "View all providers", "Open Usage Details", "Data Health", "Settings",
     ]
+}
+
+enum MenuDestination {
+    static let allProviders = UsageDetailsRoute.providersAndAccounts
 }
 
 public enum MenuKey: Sendable, Hashable {
@@ -93,8 +109,8 @@ enum RefreshErrorPolicy {
     static func next(current: String?, result: RefreshResult) -> String? {
         switch result {
         case .succeeded: nil
-        case .failed: "Refresh failed. Showing last-good data."
-        case .timedOut: "Refresh timed out. Showing last-good data."
+        case .failed: AppLocalization.text("Refresh failed. Showing last-good data.")
+        case .timedOut: AppLocalization.text("Refresh timed out. Showing last-good data.")
         }
     }
 }
@@ -112,8 +128,87 @@ struct TodayTokenPresentation: Sendable, Hashable {
 
     init(tokens: Int64?, isComplete: Bool) {
         value = Format.todayTokens(tokens)
-        coverage = tokens != nil && !isComplete ? "Partial" : nil
+        coverage = tokens != nil && !isComplete ? AppLocalization.text("Partial") : nil
         accessibilityValue = [value, coverage].compactMap { $0 }.joined(separator: ", ")
+    }
+}
+
+struct MenuEmptyStatePresentation: Sendable, Hashable {
+    enum Reason: Sendable, Hashable {
+        case noSources
+        case collecting
+        case sourceFailure
+    }
+
+    let reason: Reason
+    let titleKey: String
+    let detailKey: String
+    let actionKey: String
+    let primaryRoute: UsageDetailsRoute
+
+    static func make(
+        hasSources: Bool, isRefreshing: Bool, hasFailure: Bool
+    ) -> Self {
+        if hasFailure {
+            return Self(
+                reason: .sourceFailure,
+                titleKey: "Last-good data unavailable",
+                detailKey: "Open Data Health to inspect the source failure.",
+                actionKey: "Open Data Health",
+                primaryRoute: .dataHealth
+            )
+        }
+        if isRefreshing || hasSources {
+            return Self(
+                reason: .collecting,
+                titleKey: "Collecting usage data",
+                detailKey: "Refresh is in progress. Existing facts remain available.",
+                actionKey: "View Activity",
+                primaryRoute: .activity
+            )
+        }
+        return Self(
+            reason: .noSources,
+            titleKey: "No capacity data",
+            detailKey: "Connect a supported provider in Settings.",
+            actionKey: "Review Providers",
+            primaryRoute: .providersAndAccounts
+        )
+    }
+}
+
+enum MenuCapacityOrdering {
+    static func sorted(_ rows: [CapacityItem]) -> [CapacityItem] {
+        rows.sorted(by: isBefore)
+    }
+
+    static func isBefore(_ lhs: CapacityItem, _ rhs: CapacityItem) -> Bool {
+        let leftState = usabilityRank(lhs)
+        let rightState = usabilityRank(rhs)
+        if leftState != rightState { return leftState < rightState }
+        switch (lhs.remainingRatio, rhs.remainingRatio) {
+        case let (left?, right?) where left != right: return left < right
+        case (_?, nil): return true
+        case (nil, _?): return false
+        default: break
+        }
+        switch (lhs.resetsAt.flatMap(Format.timestamp), rhs.resetsAt.flatMap(Format.timestamp)) {
+        case let (left?, right?) where left != right: return left < right
+        case (_?, nil): return true
+        case (nil, _?): return false
+        default: break
+        }
+        if lhs.providerID != rhs.providerID { return lhs.providerID < rhs.providerID }
+        if lhs.accountRef != rhs.accountRef { return lhs.accountRef < rhs.accountRef }
+        if lhs.quotaName != rhs.quotaName { return lhs.quotaName < rhs.quotaName }
+        return lhs.recordID < rhs.recordID
+    }
+
+    private static func usabilityRank(_ row: CapacityItem) -> Int {
+        let hasValue = row.remainingRatio != nil || row.remaining != nil
+        if hasValue, row.state.lowercased() == "ok", !row.stale { return 0 }
+        if hasValue { return 1 }
+        return row.state.lowercased() == "unknown" ? 3 : 2
     }
 }
 
@@ -143,15 +238,23 @@ public struct ProviderRowPresentation: Sendable, Hashable {
         } else if let remaining = row.remaining {
             capacity = remaining + (row.unit == "count" ? "" : " \(row.unit)")
         } else {
-            capacity = "Unavailable"
+            capacity = AppLocalization.text("Unavailable")
         }
         reset = Format.reset(row.resetsAt, now: now)
         if row.stale {
-            freshness = "Stale, \(Format.age(row.freshnessSeconds)) old"
+            freshness = AppLocalization.format(
+                "Stale, %@ old", Format.age(row.freshnessSeconds)
+            )
             stateSymbol = "clock.badge.exclamationmark"
+        } else if row.state.lowercased() == "unknown" {
+            freshness = AppLocalization.text("Unknown")
+            stateSymbol = "questionmark.circle"
         } else if row.state != "ok" {
             freshness = Format.state(row.state)
             stateSymbol = "exclamationmark.triangle.fill"
+        } else if row.remainingRatio == nil, row.remaining == nil {
+            freshness = AppLocalization.text("Unavailable")
+            stateSymbol = "xmark.circle"
         } else {
             freshness = nil
             stateSymbol = row.remainingRatio.map { $0 <= 0.2 ? "exclamationmark.triangle.fill" : nil } ?? nil
@@ -167,13 +270,16 @@ public struct ProviderRowPresentation: Sendable, Hashable {
         isWarning = riskLevel == .warning
         qualityText = Format.quality(row.quality)
         switch riskLevel {
-        case .critical: riskText = "Critical capacity"
-        case .warning: riskText = "Warning capacity"
-        case .normal: riskText = "Capacity normal"
+        case .critical: riskText = AppLocalization.text("Critical capacity")
+        case .warning: riskText = AppLocalization.text("Warning capacity")
+        case .normal: riskText = AppLocalization.text("Capacity normal")
         }
         visibleMetadata = [reset, freshness].compactMap { $0 }.filter { !$0.isEmpty }
         accessibilityLabel = "\(provider), \(window)"
-        accessibilityValue = [window, "\(capacity) remaining", reset, freshness, qualityText, riskText]
+        accessibilityValue = [
+            window, AppLocalization.format("%@ remaining", capacity),
+            reset, freshness, qualityText, riskText,
+        ]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 }
@@ -185,10 +291,10 @@ public struct ProviderCapacityGroup: Sendable, Hashable, Identifiable {
     public var secondary: ArraySlice<CapacityItem> { rows.dropFirst() }
 
     public static func make(from rows: [CapacityItem]) -> [Self] {
-        let sorted = CapacityViewModel.sorted(rows)
+        let sorted = MenuCapacityOrdering.sorted(rows)
         let grouped = Dictionary(grouping: sorted) { "\($0.providerID)|\($0.accountRef)" }
-        return grouped.map { Self(id: $0.key, rows: CapacityViewModel.sorted($0.value)) }.sorted {
-            CapacityViewModel.sorted([$0.primary, $1.primary]).first == $0.primary
+        return grouped.map { Self(id: $0.key, rows: MenuCapacityOrdering.sorted($0.value)) }.sorted {
+            MenuCapacityOrdering.isBefore($0.primary, $1.primary)
         }
     }
 }
@@ -207,7 +313,7 @@ enum Format {
     }
 
     static func todayTokens(_ tokens: Int64?) -> String {
-        tokens.map(Self.tokens) ?? "No data"
+        tokens.map(Self.tokens) ?? AppLocalization.text("Unavailable")
     }
 
     static func timestamp(_ value: String) -> Date? {
@@ -227,16 +333,25 @@ enum Format {
     }
 
     static func window(_ value: String) -> String {
-        value.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ").capitalized
+        AppLocalization.text(
+            value.replacingOccurrences(of: "_", with: " ")
+                .replacingOccurrences(of: "-", with: " ").capitalized
+        )
     }
 
     static func reset(_ value: String?, now: Date) -> String {
-        guard let value, let date = timestamp(value) else { return "Reset unavailable" }
+        guard let value, let date = timestamp(value) else {
+            return AppLocalization.text("Reset unavailable")
+        }
         let seconds = Int(date.timeIntervalSince(now))
-        guard seconds > 0 else { return "Reset due" }
-        if seconds < 3_600 { return "resets in \(max(1, seconds / 60))m" }
-        if seconds < 86_400 { return "resets in \(max(1, seconds / 3_600))h" }
-        return "resets in \(max(1, seconds / 86_400))d"
+        guard seconds > 0 else { return AppLocalization.text("Reset due") }
+        if seconds < 3_600 {
+            return AppLocalization.format("resets in %lldm", Int64(max(1, seconds / 60)))
+        }
+        if seconds < 86_400 {
+            return AppLocalization.format("resets in %lldh", Int64(max(1, seconds / 3_600)))
+        }
+        return AppLocalization.format("resets in %lldd", Int64(max(1, seconds / 86_400)))
     }
 
     static func age(_ seconds: Int64) -> String {
@@ -247,14 +362,14 @@ enum Format {
     }
 
     static func state(_ value: String) -> String {
-        value.replacingOccurrences(of: "_", with: " ").capitalized
+        AppLocalization.text(value.replacingOccurrences(of: "_", with: " ").capitalized)
     }
 
     static func quality(_ value: String) -> String {
         switch value.lowercased() {
-        case "derived", "estimated": "Estimated"
-        case "cached": "Cached"
-        case "exact", "live": "Exact"
+        case "derived", "estimated": AppLocalization.text("Estimated")
+        case "cached": AppLocalization.text("Cached")
+        case "exact", "live": AppLocalization.text("Exact")
         default: state(value)
         }
     }

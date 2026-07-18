@@ -21,8 +21,10 @@ The remaining fields are the same fields emitted by the existing collector CLI:
 |---|---|---|
 | `GET /v1/health` | none | `sources`, plus `health` |
 | `GET /v1/schema` | none | `routes`, `errorShape` |
+| `GET /v1/schema.json` | none | committed Draft 2020-12 contract under `schema` |
 | `GET /schema` | none | Compatibility alias of `/v1/schema` |
 | `GET /v1/summary` | optional `today=YYYY-MM-DD` | `todayTokens`, `modelCount`, `coveredDayCount` |
+| `GET /v1/snapshot` | optional `today=YYYY-MM-DD` | one-revision resource view: `localDay`, `summary`, every `quotaWindow`, `providers`, `sources`, `catalogRevision` |
 | `GET /v1/capabilities` | none | `providers`, sorted by `familyId`; nested sources retain declared priority |
 | `GET /v1/providers` | optional comma-separated `providerIds` | observed/configured provider instances, sorted by `providerId` |
 | `GET /v1/capacity` | optional `limit=1..1000` | `providers`, in canonical urgency order |
@@ -30,12 +32,31 @@ The remaining fields are the same fields emitted by the existing collector CLI:
 | `GET /v1/costs/daily` | required `from`, `to`; optional comma-separated `providerIds`, `currencies` | provider-reported daily cost rows and coverage in canonical chronological order |
 | `GET /v1/quotas/history` | optional `providerId`, `accountRef`, `limit`; `from` and `to` must be supplied together | `snapshots`; newest selected page returned in chronological order |
 | `GET /v1/sources/status` | none | `sources`, canonical provider/source order |
-| `GET /v1/changes` | optional `after` (default 0), `limit` (default 100) | `records`, `nextCursor`; an ahead cursor is invalid |
+| `GET /v1/changes` | optional `after` (default 0), `limit` (default 100) | `records`, `nextCursor`, `hasMore`; an ahead cursor is invalid |
 
 Unknown or repeated query parameters, malformed percent escapes, controls,
 noncanonical dates, unstable identifiers, oversized ranges, and out-of-range
 limits/cursors are rejected. Provider and model lists contain at most 50 stable
 IDs. Query strings are at most 4096 bytes.
+
+When `today` is omitted, `/v1/summary`, `/v1/snapshot`, `status`, and
+`snapshot` resolve the same machine-local calendar day. The snapshot is read
+inside one SQLite transaction: its summary, quota windows, Provider instances,
+source health, and top-level `dataRevision` therefore describe one coherent
+ledger state. Unlike `/v1/capacity`, it returns every stored quota window and
+does not select an urgent route or invent a missing numeric value. The exact
+offline CLI equivalent is:
+
+```bash
+openusage-bar snapshot --today 2026-07-18 --format json --offline
+```
+
+Incremental consumers must process a complete `/v1/changes` page before
+persisting `nextCursor`, and continue while `hasMore` is true. They must ignore
+unknown `recordType` values so additive producers remain compatible. A
+`ledger_schema` change requires a fresh `/v1/snapshot`; it is not a synthetic
+backfill of every fact created by a ledger migration. Coverage records are
+public facts: they distinguish an observed zero from unknown data.
 
 `/v1/capabilities` is the static family catalog. It exposes all 35 provider
 families from OpenUsage 0.23.0 plus the MiniMax and Step Plan built-ins. Each
@@ -96,7 +117,9 @@ is logically `openusage-bar providers --format json`. The app does not install
 a global executable; the real signed command path is:
 
 ```bash
-HELPER="/Applications/OpenUsage Bar.app/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
+APP="/Applications/OpenUsage Bar.app"
+[[ -d "$APP" ]] || APP="$HOME/Applications/OpenUsage Bar.app"
+HELPER="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
 "$HELPER" providers --format json --offline
 ```
 

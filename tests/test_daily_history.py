@@ -29,6 +29,8 @@ from openusage_bar.openai_organization import (
     ImportFailure,
     UsageImportSuccess,
 )
+from openusage_bar.providers.contracts import QuotaFetchSuccess
+from openusage_bar.providers.quota import percent_observation
 
 
 NOW = datetime(2026, 7, 14, 2, 0, tzinfo=timezone.utc)
@@ -44,10 +46,12 @@ def model_row(
     provider_id: str = "codex",
     model_id: str = "gpt-5.5",
     total_tokens: int = 11_735_817,
+    account_ref: str = "",
 ) -> DailyUsageRow:
     return DailyUsageRow(
         day=day,
         provider_id=provider_id,
+        account_ref=account_ref,
         model_id=model_id,
         input_tokens=5_000_000,
         output_tokens=1_500_000,
@@ -63,10 +67,14 @@ def model_row(
     )
 
 
-def cost_row(*, day: str = "2026-07-14", provider_id: str = "openai") -> DailyCostRow:
+def cost_row(
+    *, day: str = "2026-07-14", provider_id: str = "openai",
+    account_ref: str = "",
+) -> DailyCostRow:
     return DailyCostRow(
         day=day,
         provider_id=provider_id,
+        account_ref=account_ref,
         cost_kind="actual",
         currency="USD",
         amount="1.25",
@@ -126,6 +134,7 @@ def card(
     family_id: str | None = None,
     credential_source: str = "openusage",
     source_kind: str = "openusage",
+    account_ref: str = "",
 ) -> ProviderCard:
     return ProviderCard(
         provider_id=provider_id,
@@ -143,6 +152,7 @@ def card(
         family_id=family_id or provider_id,
         credential_source=credential_source,
         source_kind=source_kind,
+        account_ref=account_ref,
     )
 
 
@@ -384,7 +394,7 @@ class OpenUsageDailyImporterTests(unittest.TestCase):
         self.assertIs(options["stderr"], subprocess.PIPE)
         self.assertEqual(options["encoding"], "utf-8")
         self.assertEqual(options["errors"], "replace")
-        self.assertEqual(options["timeout"], 30)
+        self.assertEqual(options["timeout"], 60)
         self.assertEqual(options["env"]["PATH"].split(os.pathsep)[0], CURSOR_CLI_DIRECTORIES[1])
 
     def test_requires_daily_kind_and_accepts_valid_empty_payload(self):
@@ -600,11 +610,15 @@ class ActivityCollectorTests(unittest.TestCase):
         store = Mock()
         store.has_daily_history.return_value = True
         store.upsert_provider_instance.side_effect = lambda *_args: calls.append("identity")
-        store.replace_provider_days.side_effect = lambda *_args: calls.append("history")
+        store.commit_usage_import_success.side_effect = (
+            lambda *_args, **_kwargs: calls.append("history")
+        )
         store.record_source_success.side_effect = lambda *_args: calls.append("source")
         store.record_quota.side_effect = lambda *_args: calls.append("quota")
         importer = Mock()
-        importer.fetch.return_value = DailyImportResult(True, ())
+        importer.fetch.return_value = DailyImportResult(
+            True, (model_row(day="2026-07-14"),)
+        )
 
         ActivityCollector(store, importer, clock=lambda: NOW).refresh(
             Overview([card("codex", remaining_percent=18)])
@@ -681,7 +695,9 @@ class ActivityCollectorTests(unittest.TestCase):
                     )
                 )
                 importer = Mock()
-                importer.fetch.return_value = DailyImportResult(True, ())
+                importer.fetch.return_value = DailyImportResult(
+                    True, (model_row(day="2026-07-14"),)
+                )
 
                 ActivityCollector(store, importer, clock=lambda: NOW).refresh(
                     Overview(
@@ -778,16 +794,143 @@ class ActivityCollectorTests(unittest.TestCase):
             (date(2025, 7, 15), date(2026, 7, 14)),
         )
 
+    def test_usage_only_refresh_commits_requested_local_provider_before_quotas(self):
+        store = Mock()
+        store.has_source_success.return_value = False
+        official = Mock()
+        official.usage_source_id = "codex.local_sessions"
+        official.cost_source_id = None
+        official.fetch_usage.return_value = UsageImportSuccess(
+            date(2025, 7, 15), date(2026, 7, 14),
+            (model_row(day="2026-07-14", provider_id="codex"),),
+        )
+        openusage = Mock()
+        collector = ActivityCollector(
+            store, openusage, official_importers={"codex": official},
+            clock=lambda: NOW,
+        )
+
+        self.assertTrue(collector.refresh_usage(("codex",)))
+
+        official.fetch_usage.assert_called_once_with(
+            date(2025, 7, 15), date(2026, 7, 14)
+        )
+        store.commit_usage_import_success.assert_called_once()
+        store.record_quota.assert_not_called()
+        official.fetch_costs.assert_not_called()
+        openusage.fetch.assert_not_called()
+
+    def test_quota_usage_and_cost_failures_are_independent(self):
+        for failed_family in ("quota", "usage", "cost"):
+            with self.subTest(failed_family=failed_family):
+                store = Mock()
+                store.has_source_success.return_value = True
+                store.has_cost_history.return_value = True
+                if failed_family == "quota":
+                    store.record_quota.side_effect = RuntimeError("database unavailable")
+
+                official = Mock()
+                official.usage_source_id = "openai.organization.usage"
+                official.cost_source_id = "openai.organization.costs"
+                official.fetch_usage.return_value = (
+                    ImportFailure("timed_out")
+                    if failed_family == "usage"
+                    else UsageImportSuccess(
+                        date(2026, 7, 8), date(2026, 7, 14),
+                        (model_row(day="2026-07-14", provider_id="openai"),),
+                    )
+                )
+                official.fetch_costs.return_value = (
+                    ImportFailure("timed_out")
+                    if failed_family == "cost"
+                    else CostImportSuccess(
+                        date(2026, 7, 8), date(2026, 7, 14), (cost_row(),)
+                    )
+                )
+
+                ActivityCollector(
+                    store, Mock(), official_importers={"openai": official},
+                    clock=lambda: NOW,
+                ).refresh(Overview([card(
+                    "openai", family_id="minimax", remaining_percent=61
+                )]))
+
+                if failed_family == "quota":
+                    store.record_source_status.assert_any_call(
+                        "openai", "current.quota", "temporarily_unavailable",
+                        NOW, "quota_persistence_failed",
+                    )
+                else:
+                    store.record_quota.assert_called_once()
+
+                if failed_family == "usage":
+                    store.commit_usage_import_success.assert_not_called()
+                    store.record_source_failure.assert_any_call(
+                        "openai", "openai.organization.usage", "timed_out", NOW
+                    )
+                else:
+                    store.commit_usage_import_success.assert_called_once()
+
+                if failed_family == "cost":
+                    store.commit_cost_import_success.assert_not_called()
+                    store.record_source_failure.assert_any_call(
+                        "openai", "openai.organization.costs", "timed_out", NOW
+                    )
+                else:
+                    store.commit_cost_import_success.assert_called_once()
+
+    def test_explicit_multi_window_quota_replaces_legacy_card_projection(self):
+        store = Mock()
+        store.has_daily_history.return_value = True
+        importer = Mock()
+        importer.fetch.return_value = DailyImportResult(True, ())
+        observations = tuple(
+            percent_observation(
+                provider_id="codex", source_id="codex.local_rate_limits",
+                quota_name=name, quota_window=window,
+                remaining_percent=remaining, resets_at=reset,
+                observed_at=NOW,
+            )
+            for name, window, remaining, reset in (
+                ("5h Subscription", "five_hour", 75, NOW + timedelta(hours=5)),
+                ("Weekly Subscription", "weekly", 60, NOW + timedelta(days=5)),
+            )
+        )
+
+        ActivityCollector(store, importer, clock=lambda: NOW).refresh(
+            Overview([card("codex", remaining_percent=75)]),
+            quota_results=((
+                "codex", "codex.local_rate_limits",
+                QuotaFetchSuccess(observations),
+            ),),
+        )
+
+        self.assertEqual(
+            [call.args[0].quota_window for call in store.record_quota.call_args_list],
+            ["five_hour", "weekly"],
+        )
+        store.record_source_success.assert_any_call(
+            "codex", "codex.local_rate_limits", NOW
+        )
+        self.assertFalse(any(
+            call.args[:2] == ("codex", "current.quota")
+            for call in store.record_source_success.call_args_list
+        ))
+
     def test_provider_specific_usage_source_and_coverage_are_preserved(self):
         store = Mock()
         store.has_source_success.return_value = False
         official = Mock()
+        official.account_ref = "primary"
         official.usage_source_id = "minimax.billing"
         official.cost_source_id = None
         official.fetch_usage.return_value = UsageImportSuccess(
             date(2025, 7, 15),
             date(2026, 7, 13),
-            (model_row(day="2026-07-13", provider_id="minimax-main"),),
+            (model_row(
+                day="2026-07-13", provider_id="minimax-main",
+                account_ref="primary",
+            ),),
         )
         openusage = Mock()
 
@@ -808,9 +951,61 @@ class ActivityCollectorTests(unittest.TestCase):
             date(2026, 7, 13),
             official.fetch_usage.return_value.rows,
             NOW,
+            account_ref="primary",
         )
         openusage.fetch.assert_not_called()
         official.fetch_costs.assert_not_called()
+
+    def test_official_importer_rejects_rows_from_another_account_scope(self):
+        store = Mock()
+        store.has_source_success.return_value = False
+        official = Mock()
+        official.account_ref = "work"
+        official.usage_source_id = "provider.billing"
+        official.cost_source_id = None
+        official.fetch_usage.return_value = UsageImportSuccess(
+            date(2025, 7, 15), date(2026, 7, 13),
+            (model_row(
+                day="2026-07-13", provider_id="provider-work",
+                account_ref="personal",
+            ),),
+        )
+
+        ActivityCollector(
+            store, Mock(), official_importers={"provider-work": official},
+            clock=lambda: NOW,
+        ).refresh(Overview([]))
+
+        store.commit_usage_import_success.assert_not_called()
+        store.record_source_failure.assert_any_call(
+            "provider-work", "provider.billing", "invalid_import_rows", NOW
+        )
+
+    def test_official_costs_commit_to_declared_account_scope(self):
+        store = Mock()
+        store.has_source_success.return_value = True
+        store.has_cost_history.return_value = False
+        official = Mock()
+        official.account_ref = "work"
+        official.usage_source_id = "provider.usage"
+        official.cost_source_id = "provider.costs"
+        official.fetch_usage.return_value = ImportFailure("rate_limited")
+        official.fetch_costs.return_value = CostImportSuccess(
+            date(2025, 7, 15), date(2026, 7, 14),
+            (cost_row(provider_id="provider-work", account_ref="work"),),
+        )
+
+        ActivityCollector(
+            store, Mock(), official_importers={"provider-work": official},
+            clock=lambda: NOW,
+        ).refresh(Overview([]))
+
+        store.commit_cost_import_success.assert_called_once_with(
+            "provider-work", "provider.costs",
+            date(2025, 7, 15), date(2026, 7, 14),
+            official.fetch_costs.return_value.rows, NOW,
+            account_ref="work",
+        )
 
     def test_official_success_rejects_coverage_outside_requested_window(self):
         store = Mock()
@@ -836,17 +1031,22 @@ class ActivityCollectorTests(unittest.TestCase):
             "provider", "provider.billing", "invalid_import_rows", NOW
         )
 
-    def test_official_failure_uses_openusage_only_during_cold_start(self):
-        for had_success, expected_fallback_calls in ((False, 1), (True, 0)):
+    def test_official_failure_always_tries_openusage_fallback(self):
+        for had_success in (False, True):
             with self.subTest(had_success=had_success):
                 store = Mock()
                 store.has_source_success.return_value = had_success
                 store.has_cost_history.return_value = False
                 official = Mock()
+                official.account_ref = ""
+                official.usage_source_id = "openai.organization.usage"
+                official.cost_source_id = "openai.organization.costs"
                 official.fetch_usage.return_value = ImportFailure("rate_limited")
                 official.fetch_costs.return_value = ImportFailure("rate_limited")
                 openusage = Mock()
-                openusage.fetch.return_value = DailyImportResult(True, ())
+                openusage.fetch.return_value = DailyImportResult(True, (
+                    model_row(day="2026-07-14", provider_id="openai"),
+                ))
 
                 ActivityCollector(
                     store,
@@ -855,7 +1055,13 @@ class ActivityCollectorTests(unittest.TestCase):
                     clock=lambda: NOW,
                 ).refresh(Overview([]))
 
-                self.assertEqual(openusage.fetch.call_count, expected_fallback_calls)
+                self.assertEqual(openusage.fetch.call_count, 1)
+                fallback_rows = store.commit_usage_import_success.call_args.args[4]
+                self.assertEqual([row.quality for row in fallback_rows], ["fallback"])
+                self.assertEqual(
+                    store.commit_usage_import_success.call_args.args[:2],
+                    ("openai", "openusage.daily"),
+                )
                 store.record_source_failure.assert_any_call(
                     "openai",
                     "openai.organization.usage",
@@ -868,6 +1074,80 @@ class ActivityCollectorTests(unittest.TestCase):
                     "rate_limited",
                     NOW,
                 )
+
+    def test_configured_instance_uses_family_for_openusage_fallback(self):
+        store = Mock()
+        store.has_source_success.return_value = True
+        store.has_daily_history.return_value = True
+        official = Mock()
+        official.account_ref = "work"
+        official.usage_source_id = "openai.organization.usage"
+        official.cost_source_id = None
+        official.fetch_usage.return_value = ImportFailure("rate_limited")
+        openusage = Mock()
+        openusage.fetch.return_value = DailyImportResult(True, (
+            model_row(day="2026-07-14", provider_id="openai"),
+        ))
+
+        ActivityCollector(
+            store,
+            openusage,
+            official_importers={"openai-work": official},
+            clock=lambda: NOW,
+        ).refresh(Overview([card(
+            "openai-work", family_id="openai", account_ref="work"
+        )]))
+
+        openusage.fetch.assert_called_once_with(
+            "openai", date(2026, 7, 14), date(2026, 7, 14)
+        )
+        rows = store.commit_usage_import_success.call_args.args[4]
+        self.assertEqual({row.provider_id for row in rows}, {"openai-work"})
+        self.assertEqual({row.account_ref for row in rows}, {"work"})
+        self.assertEqual({row.quality for row in rows}, {"fallback"})
+
+    def test_family_fallback_refuses_ambiguous_multi_account_attribution(self):
+        store = Mock()
+        store.has_source_success.return_value = True
+        store.has_daily_history.return_value = True
+        official_a = Mock(
+            account_ref="a", usage_source_id="provider.usage", cost_source_id=None
+        )
+        official_b = Mock(
+            account_ref="b", usage_source_id="provider.usage", cost_source_id=None
+        )
+        official_a.fetch_usage.return_value = ImportFailure("rate_limited")
+        official_b.fetch_usage.return_value = ImportFailure("rate_limited")
+        openusage = Mock()
+
+        ActivityCollector(
+            store,
+            openusage,
+            official_importers={
+                "openai-a": official_a,
+                "openai-b": official_b,
+            },
+            clock=lambda: NOW,
+        ).refresh(Overview([
+            card("openai-a", family_id="openai", account_ref="a"),
+            card("openai-b", family_id="openai", account_ref="b"),
+        ]))
+
+        openusage.fetch.assert_not_called()
+        fallback_failures = [
+            call.args for call in store.record_source_status.call_args_list
+            if call.args[1] == "openusage.daily"
+        ]
+        self.assertEqual(fallback_failures, [
+            (
+                "openai-a", "openusage.daily", "stale", NOW,
+                "ambiguous_fallback_scope",
+            ),
+            (
+                "openai-b", "openusage.daily", "stale", NOW,
+                "ambiguous_fallback_scope",
+            ),
+        ])
 
     def test_official_failure_preserves_last_good_rows_and_coverage(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -894,8 +1174,22 @@ class ActivityCollectorTests(unittest.TestCase):
                 collector.refresh(Overview([]))
                 after = store.snapshot_daily_usage("2025-01-01", "2026-12-31")
 
-                self.assertEqual(after, before)
-                openusage.fetch.assert_not_called()
+                self.assertEqual(after.rows, before.rows)
+                self.assertEqual(after.covered, before.covered)
+                self.assertEqual(after.coverage_sources, before.coverage_sources)
+                self.assertEqual(after.known_scopes, before.known_scopes)
+                self.assertGreater(after.cursor, before.cursor)
+                self.assertTrue(all(
+                    change.record_type == "source_status"
+                    for change in store.changes(before.cursor)
+                ))
+                openusage.fetch.assert_called_once()
+                fallback_status = next(
+                    status for status in store.source_statuses()
+                    if status.source_id == "openusage.daily"
+                )
+                self.assertEqual(fallback_status.state, "stale")
+                self.assertEqual(fallback_status.error_code, "empty_result")
 
     def test_failed_import_keeps_history_unchanged_and_records_only_safe_failure(self):
         store = Mock()
@@ -905,16 +1199,18 @@ class ActivityCollectorTests(unittest.TestCase):
 
         ActivityCollector(store, importer, clock=lambda: NOW).refresh(Overview([card("codex")]))
 
-        store.replace_provider_days.assert_not_called()
-        store.record_source_failure.assert_called_once_with(
-            "codex", "openusage.daily", "command_failed", NOW
+        store.commit_usage_import_success.assert_not_called()
+        store.record_source_status.assert_called_once_with(
+            "codex", "openusage.daily", "stale", NOW, "command_failed"
         )
 
     def test_current_quota_is_written_before_slow_history_import(self):
         calls: list[str] = []
         store = Mock()
         store.has_daily_history.return_value = True
-        store.replace_provider_days.side_effect = lambda *_args: calls.append("history")
+        store.commit_usage_import_success.side_effect = (
+            lambda *_args, **_kwargs: calls.append("history")
+        )
         store.record_source_success.side_effect = lambda *_args: calls.append(
             "quota_source" if _args[1] == "current.quota" else "daily_source"
         )
@@ -931,7 +1227,7 @@ class ActivityCollectorTests(unittest.TestCase):
 
         self.assertEqual(
             calls,
-            ["quota", "quota_source", "history", "daily_source", "retention"],
+            ["quota", "quota_source", "history", "retention"],
         )
         observation = store.record_quota.call_args.args[0]
         self.assertEqual(observation.record_id, "codex.subscription")
@@ -939,6 +1235,22 @@ class ActivityCollectorTests(unittest.TestCase):
         self.assertEqual(observation.remaining, "18")
         self.assertEqual(observation.observed_at, "2026-07-14T02:00:00.000000Z")
         self.assertNotIn(":", observation.record_id)
+
+    def test_current_quota_projection_preserves_configured_account_scope(self):
+        store = Mock()
+        store.has_daily_history.return_value = True
+        importer = Mock()
+        importer.fetch.return_value = DailyImportResult(True, ())
+
+        ActivityCollector(store, importer, clock=lambda: NOW).refresh(
+            Overview([card(
+                "generic-work", remaining_percent=64, account_ref="work"
+            )])
+        )
+
+        observation = store.record_quota.call_args.args[0]
+        self.assertEqual(observation.account_ref, "work")
+        self.assertEqual(observation.record_id, "generic-work.work.subscription")
 
     def test_stale_numeric_quota_uses_last_good_time_and_keeps_unhealthy_source(self):
         store = Mock()
@@ -1024,6 +1336,7 @@ class ActivityCollectorTests(unittest.TestCase):
         store.record_quota.assert_not_called()
         current_health = [
             call.args for call in store.record_source_status.call_args_list
+            if call.args[1] == "current.quota"
         ]
         self.assertEqual(
             current_health,
@@ -1055,27 +1368,31 @@ class ActivityCollectorTests(unittest.TestCase):
 
         ActivityCollector(store, importer, clock=lambda: NOW).refresh(Overview([card("codex")]))
 
-        store.replace_provider_days.assert_not_called()
-        store.record_source_failure.assert_called_once_with(
-            "codex", "openusage.daily", "invalid_import_rows", NOW
+        store.commit_usage_import_success.assert_not_called()
+        store.record_source_status.assert_called_once_with(
+            "codex", "openusage.daily", "stale", NOW, "invalid_import_rows"
         )
 
     def test_one_provider_persistence_failure_does_not_block_another_or_retention(self):
         store = Mock()
         store.has_daily_history.return_value = True
-        store.replace_provider_days.side_effect = [RuntimeError("cookie=secret"), None]
+        store.commit_usage_import_success.side_effect = [
+            RuntimeError("cookie=secret"), None
+        ]
         importer = Mock()
-        importer.fetch.return_value = DailyImportResult(True, ())
+        importer.fetch.side_effect = lambda provider_id, _since, _until: DailyImportResult(
+            True, (model_row(day="2026-07-14", provider_id=provider_id),)
+        )
 
         result = ActivityCollector(store, importer, clock=lambda: NOW).refresh(
             Overview([card("codex"), card("zai")])
         )
 
         self.assertTrue(result)
-        self.assertEqual(store.replace_provider_days.call_count, 2)
+        self.assertEqual(store.commit_usage_import_success.call_count, 2)
         self.assertEqual(
-            store.record_source_failure.call_args_list[0].args,
-            ("codex", "openusage.daily", "persistence_failed", NOW),
+            store.record_source_status.call_args_list[0].args,
+            ("codex", "openusage.daily", "stale", NOW, "persistence_failed"),
         )
         store.apply_retention.assert_called_once_with(730, NOW)
 
@@ -1106,6 +1423,48 @@ class ActivityCollectorTests(unittest.TestCase):
 
 
 class ActivityStoreCollectorIntegrationTests(unittest.TestCase):
+    def test_openusage_fallback_replaces_official_rows_without_adding_them(self):
+        with ActivityStore(":memory:") as store:
+            official = Mock()
+            official.account_ref = "work"
+            official.usage_source_id = "openai.organization.usage"
+            official.cost_source_id = None
+            official.fetch_usage.return_value = UsageImportSuccess(
+                date(2025, 7, 15), date(2026, 7, 14),
+                (model_row(
+                    day="2026-07-14", provider_id="openai",
+                    account_ref="work", total_tokens=900,
+                ),),
+            )
+            openusage = Mock()
+            collector = ActivityCollector(
+                store, openusage, official_importers={"openai": official},
+                clock=lambda: NOW,
+            )
+
+            collector.refresh(Overview([]))
+            official.fetch_usage.return_value = ImportFailure("rate_limited")
+            openusage.fetch.return_value = DailyImportResult(True, (
+                model_row(
+                    day="2026-07-14", provider_id="openai",
+                    model_id="gpt-5.6-sol", total_tokens=13_000_000_000,
+                ),
+                model_row(
+                    day="2026-07-14", provider_id="openai",
+                    model_id="gpt-5.6-terra", total_tokens=540_834_572,
+                ),
+            ))
+            collector.refresh(Overview([]))
+
+            rows = store.snapshot_daily_usage(
+                "2026-07-14", "2026-07-14"
+            ).rows
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(sum(row.total_tokens for row in rows), 13_540_834_572)
+            self.assertEqual({row.account_ref for row in rows}, {"work"})
+            self.assertEqual({row.source_id for row in rows}, {"openusage.daily"})
+            self.assertEqual({row.quality for row in rows}, {"fallback"})
+
     def test_non_subscription_cards_clear_obsolete_quota_health(self):
         store = ActivityStore(":memory:")
         try:
@@ -1160,7 +1519,11 @@ class ActivityStoreCollectorIntegrationTests(unittest.TestCase):
                 {
                     row.provider_id
                     for row in statuses
-                    if row.source_id == "openusage.daily" and row.state == "ok"
+                    if (
+                        row.source_id == "openusage.daily"
+                        and row.state == "temporarily_unavailable"
+                        and row.error_code == "empty_result"
+                    )
                 },
                 {"cursor", "deepseek", "hermes", "mistral"},
             )
@@ -1238,6 +1601,34 @@ class ActivityStoreCollectorIntegrationTests(unittest.TestCase):
                     store.source_statuses()[0].error_code, "command_failed"
                 )
 
+    def test_empty_openusage_result_preserves_last_good_instead_of_writing_zero(self):
+        with ActivityStore(":memory:") as store:
+            store.commit_usage_import_success(
+                "codex", "openusage.daily", date(2026, 7, 14),
+                date(2026, 7, 14),
+                (model_row(day="2026-07-14", total_tokens=777),), OLDER,
+            )
+            importer = Mock()
+            importer.fetch.return_value = DailyImportResult(True, ())
+
+            ActivityCollector(store, importer, clock=lambda: NOW).refresh(
+                Overview([card("codex")])
+            )
+
+            rows = store.snapshot_daily_usage(
+                "2026-07-14", "2026-07-14"
+            ).rows
+            self.assertEqual([(row.total_tokens, row.source_id) for row in rows], [
+                (777, "openusage.daily"),
+            ])
+            status = next(
+                row for row in store.source_statuses()
+                if row.provider_id == "codex" and row.source_id == "openusage.daily"
+            )
+            self.assertEqual(status.state, "stale")
+            self.assertEqual(status.last_success_at, "2026-07-14T01:15:00.000000Z")
+            self.assertEqual(status.error_code, "empty_result")
+
     def test_successful_empty_import_atomically_covers_every_day(self):
         with tempfile.TemporaryDirectory() as directory:
             with ActivityStore(Path(directory) / "ledger.sqlite3") as store:
@@ -1274,8 +1665,16 @@ class ActivityStoreCollectorIntegrationTests(unittest.TestCase):
                 statuses = store.source_statuses()
                 self.assertEqual(
                     {status.source_id: status.state for status in statuses},
-                    {"current.quota": "ok", "openusage.daily": "ok"},
+                    {
+                        "current.quota": "ok",
+                        "openusage.daily": "temporarily_unavailable",
+                    },
                 )
+                fallback = next(
+                    status for status in statuses
+                    if status.source_id == "openusage.daily"
+                )
+                self.assertEqual(fallback.error_code, "empty_result")
                 quotas = store.quota_states()
                 self.assertEqual(len(quotas), 1)
                 self.assertEqual(quotas[0].remaining_ratio, 0.18)

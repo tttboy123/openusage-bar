@@ -54,6 +54,15 @@ class SummaryResult(ResultEnvelope):
 
 
 @dataclass(frozen=True)
+class QuotaAppliesTo:
+    kind: str
+    model_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "model_ids", tuple(self.model_ids))
+
+
+@dataclass(frozen=True)
 class CapacityProvider:
     record_id: str
     provider_id: str
@@ -73,6 +82,9 @@ class CapacityProvider:
     quality: str
     stale: bool
     revision: int
+    source_id: str
+    quota_window: str
+    applies_to: QuotaAppliesTo
     estimated_cost_per_million_tokens: str | None = None
     constraints: tuple[str, ...] = ()
 
@@ -173,6 +185,9 @@ class QuotaHistoryItem:
     remaining_ratio: float | None
     state: str
     stale: bool
+    source_id: str
+    quota_window: str
+    applies_to: QuotaAppliesTo
 
 
 @dataclass(frozen=True)
@@ -238,9 +253,32 @@ class ChangeItem:
 class ChangePage(ResultEnvelope):
     records: tuple[ChangeItem, ...]
     next_cursor: int
+    has_more: bool
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "records", tuple(self.records))
+
+
+@dataclass(frozen=True)
+class SnapshotSummary:
+    today_tokens: int
+    model_count: int
+    covered_day_count: int
+
+
+@dataclass(frozen=True)
+class ResourceSnapshotResult(ResultEnvelope):
+    local_day: str
+    summary: SnapshotSummary
+    quota_windows: tuple[CapacityProvider, ...]
+    providers: tuple[ProviderInstanceItem, ...]
+    sources: tuple[SourceStatusItem, ...]
+    catalog_revision: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "quota_windows", tuple(self.quota_windows))
+        object.__setattr__(self, "providers", tuple(self.providers))
+        object.__setattr__(self, "sources", tuple(self.sources))
 
 
 def _valid_day(value: date, name: str) -> date:
@@ -283,6 +321,88 @@ class QueryService:
             summary.model_count, summary.covered_day_count,
         )
 
+    @staticmethod
+    def _capacity_provider(state: Any, generated_dt: datetime) -> CapacityProvider:
+        observed = datetime.fromisoformat(state.observed_at.replace("Z", "+00:00"))
+        return CapacityProvider(
+            record_id=state.record_id,
+            provider_id=state.provider_id,
+            account_ref=state.account_ref or None,
+            quota_name=state.quota_name,
+            unit=state.unit,
+            used=state.used,
+            quota_limit=state.quota_limit,
+            remaining=state.remaining,
+            remaining_ratio=state.remaining_ratio,
+            resets_at=state.resets_at,
+            period_start=state.period_start,
+            period_end=state.period_end,
+            observed_at=state.observed_at,
+            freshness_seconds=max(
+                0, int((generated_dt - observed).total_seconds())
+            ),
+            state=state.state,
+            quality=state.quality,
+            stale=state.stale,
+            revision=state.revision,
+            source_id=state.source_id,
+            quota_window=state.quota_window,
+            applies_to=QuotaAppliesTo(
+                state.applies_to_kind, state.applies_to_model_ids
+            ),
+        )
+
+    @staticmethod
+    def _provider_instance_item(row: Any) -> ProviderInstanceItem:
+        return ProviderInstanceItem(
+            provider_id=row.provider_id,
+            family_id=row.family_id,
+            display_name=catalog.instance_display_name(
+                row.family_id, row.display_name
+            ),
+            category=row.category,
+            credential_source=row.credential_source,
+            source_kind=row.source_kind,
+            observed_at=row.observed_at,
+            revision=row.revision,
+        )
+
+    @staticmethod
+    def _source_status_item(row: Any) -> SourceStatusItem:
+        return SourceStatusItem(
+            row.provider_id, row.source_id, row.state, row.last_attempt_at,
+            row.last_success_at, row.stale_at, row.error_code,
+        )
+
+    def resource_snapshot(self, today: date) -> ResourceSnapshotResult:
+        local_day = _valid_day(today, "today").isoformat()
+        snapshot = self.store.snapshot_resource_state(local_day)
+        generated_dt, generated = self._generated()
+        return ResourceSnapshotResult(
+            schema_version=SCHEMA_VERSION,
+            data_revision=snapshot.cursor,
+            generated_at=generated,
+            local_day=snapshot.local_day,
+            summary=SnapshotSummary(
+                snapshot.today_tokens,
+                snapshot.model_count,
+                snapshot.covered_day_count,
+            ),
+            quota_windows=tuple(
+                self._capacity_provider(state, generated_dt)
+                for state in snapshot.quota_states
+            ),
+            providers=tuple(
+                self._provider_instance_item(row)
+                for row in snapshot.provider_instances
+            ),
+            sources=tuple(
+                self._source_status_item(row)
+                for row in snapshot.source_statuses
+            ),
+            catalog_revision=catalog.upstream_revision,
+        )
+
     def capacity(self, limit: int | None = None) -> CapacityResult:
         selected_limit = _valid_limit(limit)
         snapshot = self.store.snapshot_quota_states()
@@ -305,29 +425,9 @@ class QueryService:
         selected.sort(key=lambda state: window_key(state)[:2] + (state.provider_id, state.account_ref))
         if selected_limit is not None:
             selected = selected[:selected_limit]
-        providers = []
-        for state in selected:
-            observed = datetime.fromisoformat(state.observed_at.replace("Z", "+00:00"))
-            providers.append(CapacityProvider(
-                record_id=state.record_id,
-                provider_id=state.provider_id,
-                account_ref=state.account_ref or None,
-                quota_name=state.quota_name,
-                unit=state.unit,
-                used=state.used,
-                quota_limit=state.quota_limit,
-                remaining=state.remaining,
-                remaining_ratio=state.remaining_ratio,
-                resets_at=state.resets_at,
-                period_start=state.period_start,
-                period_end=state.period_end,
-                observed_at=state.observed_at,
-                freshness_seconds=max(0, int((generated_dt - observed).total_seconds())),
-                state=state.state,
-                quality=state.quality,
-                stale=state.stale,
-                revision=state.revision,
-            ))
+        providers = [
+            self._capacity_provider(state, generated_dt) for state in selected
+        ]
         return CapacityResult(SCHEMA_VERSION, snapshot.cursor, generated, tuple(providers))
 
     def activity(
@@ -487,16 +587,15 @@ class QueryService:
                 row.snapshot_id, row.record_id, row.observed_at, row.provider_id,
                 row.account_ref or None, row.quota_name, payload.get("remaining_ratio"),
                 str(payload.get("state", "temporarily_unavailable")), bool(payload.get("stale", False)),
+                row.source_id, row.quota_window,
+                QuotaAppliesTo(row.applies_to_kind, row.applies_to_model_ids),
             ))
         _, generated = self._generated()
         return QuotaHistoryResult(SCHEMA_VERSION, snapshot.cursor, generated, tuple(items))
 
     def source_status(self) -> SourceStatusResult:
         snapshot = self.store.snapshot_source_statuses()
-        sources = tuple(SourceStatusItem(
-            row.provider_id, row.source_id, row.state, row.last_attempt_at,
-            row.last_success_at, row.stale_at, row.error_code,
-        ) for row in snapshot.rows)
+        sources = tuple(self._source_status_item(row) for row in snapshot.rows)
         _, generated = self._generated()
         return SourceStatusResult(SCHEMA_VERSION, snapshot.cursor, generated, sources)
 
@@ -506,18 +605,7 @@ class QueryService:
         selected = frozenset(_valid_ids(provider_ids, "provider_ids"))
         snapshot = self.store.snapshot_provider_instances()
         providers = tuple(
-            ProviderInstanceItem(
-                provider_id=row.provider_id,
-                family_id=row.family_id,
-                display_name=catalog.instance_display_name(
-                    row.family_id, row.display_name
-                ),
-                category=row.category,
-                credential_source=row.credential_source,
-                source_kind=row.source_kind,
-                observed_at=row.observed_at,
-                revision=row.revision,
-            )
+            self._provider_instance_item(row)
             for row in snapshot.rows
             if not selected or row.provider_id in selected
         )
@@ -539,4 +627,5 @@ class QueryService:
         return ChangePage(
             SCHEMA_VERSION, snapshot.cursor, generated, changes,
             changes[-1].change_seq if changes else after,
+            (changes[-1].change_seq if changes else after) < snapshot.cursor,
         )

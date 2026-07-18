@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import OpenUsageActivity
@@ -6,6 +7,13 @@ import Testing
 @Suite("Usage Details app contracts")
 struct ActivityAppLogicTests {
     private func day(_ value: String) -> LocalDay { try! LocalDay(value) }
+
+    @MainActor
+    @Test("Usage Details exits after its last window closes")
+    func terminateAfterLastWindow() {
+        let delegate = ActivityAppDelegate()
+        #expect(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
+    }
 
     @Test("Isolated preferences stay in memory and create no preference files")
     func isolatedPreferencesCleanup() {
@@ -71,16 +79,100 @@ struct ActivityAppLogicTests {
         #expect(object["endpoint"] == nil)
     }
 
+    @Test("Provider mutation helper is terminated at its time bound")
+    func providerMutationTimeout() async {
+        let client = ProviderMutationClient(limits: .init(
+            timeout: .milliseconds(50), maximumResponseBytes: 1_024
+        ))
+        let start = ContinuousClock.now
+        let result = await client.submit(
+            providerEditRequest(),
+            command: .init(
+                executableURL: URL(fileURLWithPath: "/bin/sleep"), arguments: ["10"]
+            )
+        )
+
+        #expect(result == .failure(.timedOut))
+        // Swift Testing can delay detached work on a saturated CI runner. The
+        // typed timeout proves the 50 ms deadline; this bound proves the child
+        // was terminated instead of completing its natural ten-second sleep.
+        #expect(start.duration(to: .now) < .seconds(8))
+    }
+
+    @Test("Provider mutation helper rejects oversized output")
+    func providerMutationOversizedOutput() async {
+        let result = await mutationClient(maximumResponseBytes: 64).submit(
+            providerEditRequest(),
+            command: shellCommand("head -c 65 /dev/zero")
+        )
+        #expect(result == .failure(.responseTooLarge))
+    }
+
+    @Test("Provider mutation helper rejects invalid UTF-8")
+    func providerMutationInvalidUTF8() async {
+        let result = await mutationClient().submit(
+            providerEditRequest(),
+            command: shellCommand("printf '\\377'")
+        )
+        #expect(result == .failure(.invalidResponse))
+    }
+
+    @Test("Provider mutation helper sanitizes nonzero and truncated responses")
+    func providerMutationFailures() async {
+        let nonzero = await mutationClient().submit(
+            providerEditRequest(),
+            command: .init(executableURL: URL(fileURLWithPath: "/usr/bin/false"), arguments: [])
+        )
+        let truncated = await mutationClient().submit(
+            providerEditRequest(),
+            command: shellCommand("printf '{\\\"version\\\":1'")
+        )
+
+        #expect(nonzero == .failure(.couldNotLaunch))
+        #expect(truncated == .failure(.invalidResponse))
+    }
+
+    @Test("Provider mutation helper decodes one bounded successful response")
+    func providerMutationSuccess() async {
+        let result = await mutationClient().submit(
+            providerEditRequest(),
+            command: shellCommand(
+                "printf '{\\\"version\\\":1,\\\"ok\\\":true,\\\"message\\\":\\\"Saved\\\"}'"
+            )
+        )
+
+        #expect(result == .success(.init(version: 1, ok: true, message: "Saved")))
+    }
+
+    private func mutationClient(maximumResponseBytes: Int = 1_024) -> ProviderMutationClient {
+        ProviderMutationClient(limits: .init(
+            timeout: .seconds(1), maximumResponseBytes: maximumResponseBytes
+        ))
+    }
+
+    private func providerEditRequest() -> ProviderEditRequest {
+        ProviderEditRequest(
+            providerID: "step-plan-main", name: "Main",
+            apiKey: "replacement", sessionCookie: ""
+        )
+    }
+
+    private func shellCommand(_ script: String) -> ProviderMutationCommand {
+        ProviderMutationCommand(
+            executableURL: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script]
+        )
+    }
+
     @Test("Provider modification stays in the selected detail pane")
     func providerModificationIsInline() throws {
         let source = try String(
             contentsOf: URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                .appendingPathComponent("Sources/OpenUsageActivity/ActivityViews.swift"),
+                .appendingPathComponent("Sources/OpenUsageActivity/ProviderCenterViews.swift"),
             encoding: .utf8
         )
         let detail = try #require(source.range(of: "private struct ProviderConnectionDetail"))
-        let nextPage = try #require(source.range(of: "private struct DataHealthPage"))
+        let nextPage = try #require(source.range(of: "private struct ProviderDetailSection"))
         let section = String(source[detail.lowerBound..<nextPage.lowerBound])
 
         #expect(section.contains("Edit Connection"))
@@ -100,17 +192,18 @@ struct ActivityAppLogicTests {
         let url = directory.appendingPathComponent("providers.json")
         try Data(#"""
         {
-          "version": 1,
+          "version": 2,
           "providers": [
             {"provider_id":"step-plan-main","name":"Main","type":"step_plan","site":"china"},
-            {"provider_id":"feed-zai","name":"ZAI Feed","type":"daily_usage_feed","family_id":"zai","endpoint":"https://example.com"}
+            {"provider_id":"feed-zai","name":"ZAI Feed","type":"daily_usage_feed","family_id":"zai","endpoint":"https://example.com"},
+            {"provider_id":"cost-openai","name":"OpenAI Cost","type":"daily_cost_feed","family_id":"openai","endpoint":"https://example.com"}
           ]
         }
         """#.utf8).write(to: url)
 
         let connections = try ProviderConnectionSummaryStore(url: url).load()
 
-        #expect(connections.map(\.providerID) == ["step-plan-main", "feed-zai"])
+        #expect(connections.map(\.providerID) == ["step-plan-main", "feed-zai", "cost-openai"])
         #expect(connections[0].familyID == "step_plan")
         #expect(connections[0].site == "china")
         #expect(connections[0].isStepPlan)
@@ -119,6 +212,8 @@ struct ActivityAppLogicTests {
         #expect(!connections[1].isStepPlan)
         #expect(connections[1].isManaged)
         #expect(connections[1].credentialLabel == "Replacement API key")
+        #expect(connections[2].familyID == "openai")
+        #expect(connections[2].kind == "daily_cost_feed")
     }
 
     @Test("Stale background loads cannot publish over a newer filter")
@@ -140,11 +235,74 @@ struct ActivityAppLogicTests {
         #expect(DetailsCopy.visibleText.allSatisfy { !$0.contains("—") && !$0.contains("–") })
         #expect(DetailsCopy.sidebar == [
             "Activity", "Capacity", "API Spend", "Local Tools",
-            "Providers", "Data Health",
+            "Providers", "Data Health", "Automation",
         ])
         #expect(!DetailsCopy.visibleText.contains("Longest Task"))
         #expect(!DetailsCopy.visibleText.contains("Unavailable"))
         #expect(DetailsCopy.visibleText.contains("Active Days"))
+    }
+
+    @Test("Automation opens without the ledger and loads it only when leaving")
+    func automationLedgerPolicy() {
+        #expect(!ActivityRouteLoadingPolicy.loadsLedgerOnAppear(.automation))
+        #expect(ActivityRouteLoadingPolicy.loadsLedgerOnAppear(.activity))
+        #expect(ActivityRouteLoadingPolicy.loadsLedgerAfterSelection(
+            from: .automation, to: .capacity
+        ))
+        #expect(!ActivityRouteLoadingPolicy.loadsLedgerAfterSelection(
+            from: .automation, to: .automation
+        ))
+        #expect(!ActivityRouteLoadingPolicy.loadsLedgerAfterSelection(
+            from: .activity, to: .automation
+        ))
+    }
+
+    @Test("Dynamic product labels cover every localized enum state")
+    func localizedDynamicLabels() {
+        #expect(UsagePeriod.allCases.map(\.title) == ["Day", "Week", "Month", "Year"])
+        #expect([
+            ProviderProductCategory.subscription,
+            .api,
+            .localTool,
+        ].map(\.title) == ["Subscription", "Api", "Local Tool"])
+        #expect([
+            ProviderMetricFamily.subscriptionQuota,
+            .tokenActivity,
+            .billing,
+            .operational,
+        ].map(\.title) == ["Subscription Quota", "Token Activity", "Billing", "Operational"])
+        #expect([
+            CredentialSourceType.none,
+            .keychain,
+            .browserSession,
+            .apiKey,
+            .oauth,
+            .cli,
+            .local,
+        ].map(\.title) == [
+            "Provider owned", "Keychain", "Browser Session", "API Key", "OAuth", "CLI", "Local",
+        ])
+        #expect([
+            APISpendQuality.reported,
+            .estimated,
+            .partial,
+        ].map(\.title) == ["Reported", "Estimated", "Observed, partial"])
+        #expect([
+            ProviderMutationFailure.unavailable,
+            .couldNotLaunch,
+            .timedOut,
+            .responseTooLarge,
+            .invalidResponse,
+        ].map(\.message).allSatisfy { !$0.isEmpty })
+        #expect(DateText.reset(nil) == "Reset unavailable")
+        #expect(CapacityText.value(CapacityItem(
+            recordID: "unknown", providerID: "codex", accountRef: "",
+            quotaName: "weekly", unit: "percent", used: nil, limit: nil,
+            remaining: nil, remainingRatio: nil, resetsAt: nil,
+            periodStart: nil, periodEnd: nil, observedAt: "2026-07-18T00:00:00Z",
+            freshnessSeconds: 0, state: "unknown", quality: "unknown",
+            stale: false, revision: 1, sourceID: "current.quota", quotaWindow: "weekly"
+        )) == "Unavailable")
     }
 
     @Test("Annual heatmap opens at the latest real day")
@@ -203,12 +361,37 @@ struct ActivityAppLogicTests {
         #expect(HeatmapPointerTarget.position(x: 35, y: 1, slotCount: 14) == nil)
     }
 
+    @Test("Heatmap inspection prefers hover and falls back to keyboard selection")
+    func heatmapInspectionSelection() {
+        let first = HeatmapDayDetail(
+            activity: ActivityDay(
+                day: day("2026-07-13"), state: .coveredActive,
+                totalTokens: 1, observedTokens: 1, heatLevel: 1
+            ), quality: .exact, lastCollectionAt: "2026-07-13T10:00:00Z"
+        )
+        let second = HeatmapDayDetail(
+            activity: ActivityDay(
+                day: day("2026-07-14"), state: .coveredActive,
+                totalTokens: 2, observedTokens: 2, heatLevel: 2
+            ), quality: .exact, lastCollectionAt: "2026-07-14T10:00:00Z"
+        )
+        #expect(HeatmapInspectionSelection.visible(
+            hovered: first, selected: second.activity.day, in: [first, second]
+        ) == first)
+        #expect(HeatmapInspectionSelection.visible(
+            hovered: nil, selected: second.activity.day, in: [first, second]
+        ) == second)
+        #expect(HeatmapInspectionSelection.visible(
+            hovered: nil, selected: nil, in: [first, second]
+        ) == nil)
+    }
+
     @Test("Heatmap is one grouped accessibility stop and metrics omit task duration")
     func sourceAccessibilityAndMetricContract() throws {
         let source = try String(
             contentsOf: URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                .appendingPathComponent("Sources/OpenUsageActivity/ActivityViews.swift"),
+                .appendingPathComponent("Sources/OpenUsageActivity/ActivityDashboardViews.swift"),
             encoding: .utf8
         )
         let heatmap = try #require(source.range(of: "private struct HeatmapSection"))
@@ -227,7 +410,44 @@ struct ActivityAppLogicTests {
         #expect(metrics.contains("Active Days"))
         #expect(metrics.contains("Observed Peak"))
         #expect(metrics.contains("Observed Active Days"))
+        #expect(metrics.contains("Input Tokens"))
+        #expect(metrics.contains("Output Tokens"))
+        #expect(metrics.contains("Cache Read"))
+        #expect(metrics.contains("Cache Write"))
+        #expect(metrics.contains("Cache reads are included in Input Tokens"))
         #expect(!metrics.contains("Longest Task"))
+    }
+
+    @Test("Token metric presentation keeps complete and partial component facts distinct")
+    func tokenMetricPresentation() throws {
+        let complete = MetricStripPresentation(metrics: ActivityMetrics(
+            totalTokens: 100, observedTokens: 100,
+            observedBreakdown: TokenBreakdown(
+                totalTokens: 100, inputTokens: 70, outputTokens: 30,
+                cacheReadTokens: 20, cacheCreationTokens: 5
+            ),
+            isComplete: true, peak: PeakUsage(day: try LocalDay("2026-07-18"), tokens: 100),
+            activeDays: 1, currentStreak: 1, longestStreak: 1
+        ))
+        #expect(complete.tokenMetrics.map(\.label) == [
+            "Total Tokens", "Input Tokens", "Output Tokens", "Cache Read", "Cache Write",
+        ])
+        #expect(complete.tokenMetrics.map(\.value) == ["100", "70", "30", "20", "5"])
+        #expect(complete.activityMetrics.map(\.label) == [
+            "Peak Day", "Active Days", "Current Streak", "Longest Streak",
+        ])
+
+        let missing = MetricStripPresentation(metrics: ActivityMetrics(
+            totalTokens: nil, observedTokens: 0, observedBreakdown: .zero,
+            isComplete: false, peak: nil, activeDays: 0, currentStreak: 0, longestStreak: 0
+        ))
+        #expect(missing.tokenMetrics.first?.label == "Observed Tokens")
+        #expect(missing.tokenMetrics.first?.state == "Missing")
+        #expect(missing.tokenMetrics.dropFirst().allSatisfy {
+            $0.value == AppLocalization.text("Unavailable")
+        })
+        #expect(missing.activityMetrics.first?.label == "Observed Peak")
+        #expect(missing.activityMetrics.first?.value == AppLocalization.text("Unavailable"))
     }
 
     @Test("Visibility preserves hidden Claude Code and fails open on malformed data")

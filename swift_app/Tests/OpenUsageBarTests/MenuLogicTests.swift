@@ -31,6 +31,12 @@ struct MenuLogicTests {
         #expect(!visible.contains("–"))
     }
 
+    @Test("View all providers opens Provider Center instead of capacity")
+    func allProvidersDestination() {
+        #expect(MenuDestination.allProviders == .providersAndAccounts)
+        #expect(MenuDestination.allProviders.transportValue == "providers")
+    }
+
     @Test("Keyboard commands map to deterministic actions")
     func keyboard() {
         #expect(MenuKeyRouter.action(for: .commandRefresh) == .refresh)
@@ -144,6 +150,68 @@ struct MenuLogicTests {
         #expect(groups[0].secondary.map(\.recordID) == ["secondary"])
     }
 
+    @Test("Capacity ordering prefers usable facts then ratio reset and stable Provider ID")
+    func menuCapacityOrdering() {
+        let rows = MenuCapacityOrdering.sorted([
+            capacity(
+                id: "failed-low", provider: "failed", ratio: 0.01,
+                reset: "2026-07-14T12:10:00Z", state: "temporarily_unavailable"
+            ),
+            capacity(
+                id: "later", provider: "z-provider", ratio: 0.25,
+                reset: "2026-07-14T13:00:00Z"
+            ),
+            capacity(
+                id: "earlier-b", provider: "b-provider", ratio: 0.25,
+                reset: "2026-07-14T12:30:00Z"
+            ),
+            capacity(
+                id: "earlier-a", provider: "a-provider", ratio: 0.25,
+                reset: "2026-07-14T12:30:00Z"
+            ),
+        ])
+
+        #expect(rows.map(\.recordID) == ["earlier-a", "earlier-b", "later", "failed-low"])
+    }
+
+    @Test("Stale unavailable and unknown capacity facts stay visibly distinct")
+    func capacityFactStates() {
+        let stale = ProviderRowPresentation(capacity(id: "stale", stale: true))
+        let unavailable = ProviderRowPresentation(capacity(
+            id: "unavailable", ratio: nil, remaining: nil, state: "temporarily_unavailable"
+        ))
+        let unknown = ProviderRowPresentation(capacity(
+            id: "unknown", ratio: nil, remaining: nil, state: "unknown"
+        ))
+
+        #expect(stale.freshness?.hasPrefix("Stale") == true)
+        #expect(stale.stateSymbol == "clock.badge.exclamationmark")
+        #expect(unavailable.freshness == "Temporarily Unavailable")
+        #expect(unavailable.stateSymbol == "exclamationmark.triangle.fill")
+        #expect(unknown.freshness == "Unknown")
+        #expect(unknown.stateSymbol == "questionmark.circle")
+    }
+
+    @Test("Menu empty states route to the next useful native surface")
+    func menuEmptyStates() {
+        let noSources = MenuEmptyStatePresentation.make(
+            hasSources: false, isRefreshing: false, hasFailure: false
+        )
+        let collecting = MenuEmptyStatePresentation.make(
+            hasSources: true, isRefreshing: true, hasFailure: false
+        )
+        let failed = MenuEmptyStatePresentation.make(
+            hasSources: true, isRefreshing: false, hasFailure: true
+        )
+
+        #expect(noSources.reason == .noSources)
+        #expect(noSources.primaryRoute == .providersAndAccounts)
+        #expect(collecting.reason == .collecting)
+        #expect(collecting.primaryRoute == .activity)
+        #expect(failed.reason == .sourceFailure)
+        #expect(failed.primaryRoute == .dataHealth)
+    }
+
     @Test("Fixed formatters cover token and reset boundaries")
     func formattingBoundaries() {
         #expect(Format.tokens(999) == "999")
@@ -200,7 +268,7 @@ struct MenuLogicTests {
 
     @Test("Today Token distinguishes no data, zero, and observed partial totals")
     func missingToday() {
-        #expect(Format.todayTokens(nil) == "No data")
+        #expect(Format.todayTokens(nil) == "Unavailable")
         #expect(Format.todayTokens(0) == "0")
         #expect(TodayTokenPresentation(tokens: 4_513_614_786, isComplete: false).value == "4.5B")
         #expect(TodayTokenPresentation(tokens: 4_513_614_786, isComplete: false).coverage == "Partial")
@@ -234,7 +302,7 @@ struct MenuLogicTests {
         #expect(!joined.contains("token"))
         #expect(!joined.contains("cookie"))
         #expect(!joined.contains("key"))
-        #expect(RefreshCommand.interactiveTimeout == 90)
+        #expect(RefreshCommand.interactiveTimeout == 120)
         #expect(command.timeout == RefreshCommand.interactiveTimeout)
     }
 

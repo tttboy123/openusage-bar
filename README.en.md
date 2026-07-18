@@ -24,7 +24,7 @@ OpenUsage Bar is a local-first native macOS dashboard for AI subscriptions, API 
 
 <p align="center"><sub>Real SwiftUI interface rendered from an isolated synthetic ledger. No user ledger, Keychain data, or real quota was read.</sub></p>
 
-> Current version: **0.3.0 pre-release**. Apple Silicon and macOS 15 or later are required. Developer ID notarization is not available yet; read the Gatekeeper note before installing a downloaded build, or build from source.
+> Current version: **0.4.0 pre-release**. Apple Silicon and macOS 15 or later are required. Developer ID notarization is not available yet; read the Gatekeeper note before installing a downloaded build, or build from source.
 
 ## What it does
 
@@ -49,16 +49,20 @@ flowchart LR
 Download the macOS arm64 ZIP and matching checksum from GitHub Releases:
 
 ```bash
-shasum -a 256 -c OpenUsage-Bar-v0.3.0-macos-arm64.zip.sha256
-unzip OpenUsage-Bar-v0.3.0-macos-arm64.zip
-cd OpenUsage-Bar-v0.3.0-macos-arm64
+shasum -a 256 -c OpenUsage-Bar-v0.4.0-macos-arm64.zip.sha256
+unzip OpenUsage-Bar-v0.4.0-macos-arm64.zip
+cd OpenUsage-Bar-v0.4.0-macos-arm64
 scripts/install_app.sh
 ```
 
-User-local install:
+The installer prefers `/Applications`, the standard Finder Applications folder.
+When that directory is not writable, it automatically falls back to
+`~/Applications`. After installation, Finder reveals the exact app bundle and
+the terminal prints its full path. Set a directory only when you want a custom
+location:
 
 ```bash
-OPENUSAGE_INSTALL_DIR="$HOME/Applications" scripts/install_app.sh
+OPENUSAGE_INSTALL_DIR="$HOME/My Apps" scripts/install_app.sh
 ```
 
 ## Build from source
@@ -102,7 +106,9 @@ GET /v1/changes?after=0&limit=100
 Signed helper JSON:
 
 ```bash
-HELPER="/Applications/OpenUsage Bar.app/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
+APP="/Applications/OpenUsage Bar.app"
+[[ -d "$APP" ]] || APP="$HOME/Applications/OpenUsage Bar.app"
+HELPER="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
 "$HELPER" status --format json --offline
 "$HELPER" providers --format json --offline
 "$HELPER" usage --from 2026-07-01 --to 2026-07-14 --format jsonl --offline
@@ -113,7 +119,7 @@ HELPER="/Applications/OpenUsage Bar.app/Contents/Helpers/OpenUsage Provider Sett
 
 OpenUsage Bar is an independent repository and release. OpenUsage.sh is an optional CLI data source consumed through validated JSON only; its Go internals, credentials, and release lifecycle are not embedded here.
 
-Version 0.3.0 includes the OpenUsage 0.23.0 provider catalog plus built-in enhancements for MiniMax, StepFun, Codex, Cursor, Kiro, OpenAI Organization, Generic HTTPS Provider, and Custom Daily Token Feed. See [Provider support](docs/provider-support.md).
+Version 0.4.0 includes the OpenUsage 0.23.0 provider catalog plus built-in enhancements for MiniMax, StepFun, Codex, Cursor, Kiro, OpenAI Organization, Generic HTTPS Provider, and Custom Daily Token Feed. See [Provider support](docs/provider-support.md).
 
 ## License
 

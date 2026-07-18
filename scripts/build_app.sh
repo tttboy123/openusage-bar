@@ -13,47 +13,42 @@ RESOURCES="$SWIFT_PACKAGE/Resources"
 ATOMIC_SWAP="$APP/Contents/Resources/atomic-swap"
 SWIFT_MIN_LINE_COVERAGE=80
 PYTHON_MIN_LINE_COVERAGE=80
+# Declarative SwiftUI composition is exercised by native hosting smoke tests.
+# Keep the line gate focused on deterministic product logic; compiler-generated
+# view coverage changes across macOS/Xcode runner images.
+SWIFT_COVERAGE_IGNORE='Tests|/Sources/(OpenUsageBar|OpenUsageActivity)/(main|[^/]*Views)\.swift'
 CODESIGN_IDENTITY=${OPENUSAGE_CODESIGN_IDENTITY:--}
-PYTHON_TOUCHED_MODULES=(
-  openusage_bar.activity_store
-  openusage_bar.aggregator
-  openusage_bar.bounded_process
-  openusage_bar.capabilities
-  openusage_bar.codex_subscription
-  openusage_bar.collector_cli
-  openusage_bar.config
-  openusage_bar.daily_feed
-  openusage_bar.daily_history
-  openusage_bar.generic
-  openusage_bar.kiro
-  openusage_bar.local_api
-  openusage_bar.minimax
-  openusage_bar.model_ids
-  openusage_bar.models
-  openusage_bar.openusage_adapter
-  openusage_bar.openusage_catalog
-  openusage_bar.openai_organization
-  openusage_bar.provider_catalog
-  openusage_bar.provider_commands
-  openusage_bar.query
-  openusage_bar.step_plan
-)
 
 [[ -x "$PYTHON" ]] || { print -u2 "local build environment unavailable"; exit 1; }
 
 cd "$ROOT"
 "$PYTHON" scripts/release_secret_scan.py
 CATALOG_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-provider-catalog.XXXXXX")
+LOCAL_API_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-local-api-schema.XXXXXX")
+ACTIVITY_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-activity-schema.XXXXXX")
 PYTHON_COVERAGE_REPORT=$(mktemp "${TMPDIR:-/tmp}/openusage-python-coverage.XXXXXX")
 PYTHON_COVERAGE_DIR="${TMPDIR:-/tmp}/openusage-build-trace-$$"
-trap 'rm -f "$CATALOG_TMP" "$PYTHON_COVERAGE_REPORT"; rm -rf "$PYTHON_COVERAGE_DIR"' EXIT
+trap 'rm -f "$CATALOG_TMP" "$LOCAL_API_SCHEMA_TMP" "$ACTIVITY_SCHEMA_TMP" "$PYTHON_COVERAGE_REPORT"; rm -rf "$PYTHON_COVERAGE_DIR"' EXIT
 "$PYTHON" scripts/generate_swift_provider_catalog.py --output "$CATALOG_TMP"
 if ! cmp -s "$CATALOG_TMP" "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift"; then
   print -u2 "generated Swift provider catalog is stale"
   diff -u "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift" "$CATALOG_TMP" || true
   exit 1
 fi
+"$PYTHON" scripts/generate_local_api_schema.py --output "$LOCAL_API_SCHEMA_TMP"
+if ! cmp -s "$LOCAL_API_SCHEMA_TMP" "$ROOT/openusage_bar/resources/local-api-v1.schema.json"; then
+  print -u2 "generated local API schema is stale"
+  diff -u "$ROOT/openusage_bar/resources/local-api-v1.schema.json" "$LOCAL_API_SCHEMA_TMP" || true
+  exit 1
+fi
+"$PYTHON" scripts/generate_swift_activity_schema.py --output "$ACTIVITY_SCHEMA_TMP"
+if ! cmp -s "$ACTIVITY_SCHEMA_TMP" "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedActivitySchema.swift"; then
+  print -u2 "generated Swift activity schema is stale"
+  diff -u "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedActivitySchema.swift" "$ACTIVITY_SCHEMA_TMP" || true
+  exit 1
+fi
 PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
+"$PYTHON" -m unittest tests.test_provider_conformance -v
 "$PYTHON" -m unittest discover -s tests -v
 "$PYTHON" -m trace --count --summary --missing \
   --coverdir "$PYTHON_COVERAGE_DIR" \
@@ -62,10 +57,12 @@ PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
 "$PYTHON" scripts/python_coverage_gate.py \
   --report "$PYTHON_COVERAGE_REPORT" \
   --minimum "$PYTHON_MIN_LINE_COVERAGE" \
-  "${PYTHON_TOUCHED_MODULES[@]}"
+  --package-root "$ROOT/openusage_bar"
 "$PYTHON" scripts/privacy_scan.py \
   "$ROOT/openusage_bar/resources/provider-catalog.v1.json" \
-  "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift"
+  "$ROOT/openusage_bar/resources/local-api-v1.schema.json" \
+  "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift" \
+  "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedActivitySchema.swift"
 swift test --package-path "$SWIFT_PACKAGE" --enable-code-coverage -Xswiftc -warnings-as-errors
 SWIFT_PROFILE="$SWIFT_PACKAGE/.build/debug/codecov/default.profdata"
 SWIFT_TEST_BINARY=$(find "$SWIFT_PACKAGE/.build" -type f \
@@ -77,12 +74,12 @@ SWIFT_TEST_BINARY=$(find "$SWIFT_PACKAGE/.build" -type f \
 }
 SWIFT_COVERAGE_REPORT=$(xcrun llvm-cov report "$SWIFT_TEST_BINARY" \
   -instr-profile="$SWIFT_PROFILE" \
-  -ignore-filename-regex='Tests|/Sources/(OpenUsageBar|OpenUsageActivity)/main.swift')
+  -ignore-filename-regex="$SWIFT_COVERAGE_IGNORE")
 SWIFT_LINE_COVERAGE=$(print -r -- "$SWIFT_COVERAGE_REPORT" | awk '/^TOTAL/ {gsub("%", "", $10); print $10}')
 [[ -n "$SWIFT_LINE_COVERAGE" ]] || { print -u2 "Swift coverage total unavailable"; exit 1; }
 if ! awk -v actual="$SWIFT_LINE_COVERAGE" -v minimum="$SWIFT_MIN_LINE_COVERAGE" \
   'BEGIN { exit !(actual + 0 >= minimum + 0) }'; then
-  print -u2 "Swift product line coverage below ${SWIFT_MIN_LINE_COVERAGE}%"
+  print -u2 "Swift product line coverage below ${SWIFT_MIN_LINE_COVERAGE}% (actual=${SWIFT_LINE_COVERAGE}%)"
   exit 1
 fi
 print "swift_product_line_coverage=${SWIFT_LINE_COVERAGE}%"
@@ -123,9 +120,27 @@ if [[ ! -x "$SETTINGS_APP/Contents/MacOS/OpenUsage Provider Settings" ]]; then
   [[ -n "$PY_EXEC" ]] || { print -u2 "settings helper executable unavailable"; exit 1; }
   mv "$PY_EXEC" "$SETTINGS_APP/Contents/MacOS/OpenUsage Provider Settings"
 fi
+/usr/libexec/PlistBuddy -c "Delete :PythonInfoDict:PythonExecutable" \
+  "$SETTINGS_APP/Contents/Info.plist"
+# py2app copies Python development headers even though this app never compiles
+# extensions at runtime. Hosted Python's pyconfig.h can contain its build-home
+# prefix, so remove the unused development-only tree before signing/package audit.
+rm -rf "$SETTINGS_APP/Contents/Resources/include"
+find "$SETTINGS_APP/Contents/Resources/lib" -type d \
+  -name 'config-*darwin*' -prune -exec rm -rf {} +
+# Package-manager metadata is not used by the frozen helper. Some hosted
+# Python distributions record their absolute installation prefix in METADATA.
+find "$SETTINGS_APP/Contents/Resources" -type d \
+  \( -name '*.dist-info' -o -name '*.egg-info' \) -prune -exec rm -rf {} +
+# A frozen production helper does not ship test packages or loose test modules.
+find "$SETTINGS_APP/Contents/Resources" -type d \
+  \( -name test -o -name tests \) -prune -exec rm -rf {} +
+find "$SETTINGS_APP/Contents/Resources" -type f \
+  \( -name 'test_*.py' -o -name '*_test.py' \) -delete
 
 cp "$RESOURCES/com.lune.openusagebar.plist" "$APP/Contents/Resources/LaunchAgents/"
 cp "$RESOURCES/com.lune.openusagebar.collector.plist" "$APP/Contents/Resources/LaunchAgents/"
+find "$APP" -type f -name Makefile -delete
 
 "$PYTHON" scripts/privacy_scan.py \
   "$APP/Contents/Info.plist" \

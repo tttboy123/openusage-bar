@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time as time_module
-from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
@@ -18,6 +17,13 @@ from .network import (
     NetworkError,
     RateLimited,
 )
+from .providers.contracts import (
+    CostImportResult,
+    CostImportSuccess,
+    ImportFailure,
+    UsageImportResult,
+    UsageImportSuccess,
+)
 
 
 USAGE_ENDPOINT = "https://api.openai.com/v1/organization/usage/completions"
@@ -28,47 +34,6 @@ MAX_HISTORY_DAYS = 365
 MAX_PAGES = 64
 MAX_RESULTS_PER_PAGE = 4096
 MAX_LABEL_LENGTH = 4096
-
-
-@dataclass(frozen=True)
-class ImportFailure:
-    error_code: str
-
-    @property
-    def ok(self) -> bool:
-        return False
-
-
-@dataclass(frozen=True)
-class UsageImportSuccess:
-    since: date
-    until: date
-    rows: tuple[DailyUsageRow, ...]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rows", tuple(self.rows))
-
-    @property
-    def ok(self) -> bool:
-        return True
-
-
-@dataclass(frozen=True)
-class CostImportSuccess:
-    since: date
-    until: date
-    rows: tuple[DailyCostRow, ...]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rows", tuple(self.rows))
-
-    @property
-    def ok(self) -> bool:
-        return True
-
-
-UsageImportResult = UsageImportSuccess | ImportFailure
-CostImportResult = CostImportSuccess | ImportFailure
 
 
 class _InvalidResponse(ValueError):
@@ -88,6 +53,7 @@ class OpenAIOrganizationImporter:
         monotonic: Callable[[], float] | None = None,
     ) -> None:
         self.config = config
+        self.account_ref = config.account_ref
         self.keychain = keychain
         self.client = client
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -264,6 +230,7 @@ class OpenAIOrganizationImporter:
             DailyUsageRow(
                 day=day,
                 provider_id=self.config.provider_id,
+                account_ref=self.config.account_ref,
                 model_id=model,
                 input_tokens=values[0],
                 output_tokens=values[1],
@@ -321,6 +288,7 @@ class OpenAIOrganizationImporter:
             DailyCostRow(
                 day=day,
                 provider_id=self.config.provider_id,
+                account_ref=self.config.account_ref,
                 cost_kind="actual",
                 currency=currency,
                 amount=self._decimal_text(value),
@@ -445,4 +413,5 @@ class OpenAIOrganizationCardAdapter:
             family_id="openai",
             credential_source="openai_admin_api",
             source_kind="official_api",
+            account_ref=self.config.account_ref,
         )

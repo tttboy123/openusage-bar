@@ -1,8 +1,16 @@
+import AppKit
 import SwiftUI
 import UsageCore
 
+final class ActivityAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+}
+
 @main
 struct OpenUsageActivityApp: App {
+    @NSApplicationDelegateAdaptor(ActivityAppDelegate.self) private var appDelegate
     @State private var store = ActivityViewStore()
     @State private var coordinator: ActivityRouteCoordinator
     @State private var windowRegistry: ActivityWindowRegistry
@@ -36,6 +44,11 @@ struct OpenUsageActivityApp: App {
         .defaultSize(width: 1040, height: 720)
         .commands {
             CommandGroup(after: .appInfo) {
+                Button(AppLocalization.text(FirstRunAssessment.manualEntryTitleKey)) {
+                    NotificationCenter.default.post(
+                        name: OnboardingRouteMessage.notification, object: nil
+                    )
+                }
                 Button("Refresh Usage") { store.reload() }
                     .keyboardShortcut("r", modifiers: .command)
             }

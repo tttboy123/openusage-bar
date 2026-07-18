@@ -148,9 +148,18 @@ def merge_cards(base: list[ProviderCard], overrides: list[ProviderCard]) -> list
                 raise ValueError(
                     f"provider instance {card.provider_id!r} has conflicting family IDs"
                 )
+            if (
+                previous.account_ref
+                and card.account_ref
+                and previous.account_ref != card.account_ref
+            ):
+                raise ValueError(
+                    f"provider instance {card.provider_id!r} has conflicting account refs"
+                )
             card = replace(
                 card,
                 family_id=card.family_id or previous.family_id,
+                account_ref=card.account_ref or previous.account_ref,
                 credential_source=(
                     card.credential_source or previous.credential_source
                 ),
@@ -212,6 +221,7 @@ class CardCache:
                         family_id=raw.get("family_id"),
                         credential_source=raw.get("credential_source"),
                         source_kind=raw.get("source_kind"),
+                        account_ref=raw.get("account_ref", ""),
                     )
                 )
             return cards
@@ -261,8 +271,7 @@ class Aggregator:
                             f"provider instance {current.provider_id!r} has conflicting family IDs"
                         )
                 if (
-                    current.provider_id in {"kiro_cli", "codex"}
-                    and current.source == "OpenUsage"
+                    current.source == "OpenUsage"
                     and current.remaining_percent is None
                     and previous is not None
                     and previous.remaining_percent is not None
@@ -336,95 +345,96 @@ class Aggregator:
 class LedgerRefresher:
     """Headless bridge from provider cards into the canonical activity ledger."""
 
-    def __init__(self, aggregator, collector) -> None:
+    def __init__(
+        self, aggregator, collector, quota_sources=(), *,
+        eager_usage_provider_ids=(),
+    ) -> None:
         self.aggregator = aggregator
         self.collector = collector
+        self.quota_sources = tuple(quota_sources)
+        self.eager_usage_provider_ids = tuple(eager_usage_provider_ids)
 
     def refresh(self) -> None:
-        self.collector.refresh(self.aggregator.refresh())
+        if self.eager_usage_provider_ids:
+            try:
+                self.collector.refresh_usage(self.eager_usage_provider_ids)
+            except Exception:
+                pass
+        overview = self.aggregator.refresh()
+        results = tuple(
+            (provider_id, source_id, result)
+            for provider_id, source_id, adapter in self.quota_sources
+            if (result := getattr(adapter, "last_quota_result", None)) is not None
+        )
+        self.collector.refresh(overview, quota_results=results)
 
 
 def build_headless_refresher(activity_store):
     """Build the production collector without importing the AppKit UI module."""
-    from .codex_subscription import CodexSubscriptionAdapter
-    from .config import (
-        GenericProviderConfig,
-        DailyUsageFeedConfig,
-        MiniMaxConfig,
-        OpenAIOrganizationConfig,
-        ProviderConfigStore,
-        StepPlanConfig,
-    )
-    from .daily_history import ActivityCollector, OpenUsageDailyImporter
-    from .daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
-    from .generic import GenericHTTPSAdapter
-    from .kiro import KiroQuotaAdapter
-    from .keychain import MacOSKeychain
-    from .minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
-    from .network import BoundedHTTPClient
-    from .openusage_adapter import OpenUsageAdapter
-    from .openai_organization import (
-        OpenAIOrganizationCardAdapter,
-        OpenAIOrganizationImporter,
-    )
-    from .step_plan import StepPlanAdapter, endpoints_for_site
+    from .config import ProviderConfigStore
+    from .daily_history import ActivityCollector
+    from .providers.builtins import default_registry
 
     clock = lambda: datetime.now(timezone.utc)
     keychain = BoundedReadOnlyKeychain()
-    step_plan_keychain = None
     config_store = ProviderConfigStore()
-    generic_client = BoundedHTTPClient()
-    daily_feed_client = BoundedHTTPClient(allowed_redirect_hosts=set())
-    minimax_client = BoundedHTTPClient(
-        allowed_reserved_hosts={"www.minimaxi.com"},
-        allowed_redirect_hosts=set(),
-    )
-    openai_client = BoundedHTTPClient(allowed_redirect_hosts=set())
-    official_importers = {}
-    adapters = [
-        OpenUsageAdapter(clock),
-        KiroQuotaAdapter(clock=clock),
-        CodexSubscriptionAdapter(clock=clock),
-    ]
     try:
         configs = config_store.load()
     except (OSError, ValueError):
         configs = []
-    for config in configs:
-        if isinstance(config, MiniMaxConfig):
-            adapters.append(MiniMaxCodingPlanAdapter(config, keychain, minimax_client, clock))
-            official_importers[config.provider_id] = MiniMaxBillingImporter(
-                config, keychain, minimax_client, clock
+    bindings = default_registry(clock=clock, keychain=keychain).build(configs)
+    adapters = [item[4] for item in sorted(
+        (
+            getattr(adapter, "source_priority", 100),
+            binding.provider_id,
+            getattr(adapter, "source_id", type(adapter).__name__),
+            type(adapter).__qualname__,
+            adapter,
+        )
+        for binding in bindings for adapter in binding.quota_sources
+    )]
+    openusage_importer = next(
+        source
+        for binding in bindings if binding.provider_id == "openusage"
+        for source in binding.usage_sources
+    )
+    official_importers = {}
+    for binding in bindings:
+        if binding.provider_id == "openusage":
+            continue
+        sources = {id(source): source for source in (
+            *binding.usage_sources, *binding.cost_sources,
+        )}
+        if len(sources) > 1:
+            raise ValueError(
+                "legacy collector requires one combined importer per Provider"
             )
-        elif isinstance(config, OpenAIOrganizationConfig):
-            adapters.append(OpenAIOrganizationCardAdapter(config, keychain, clock))
-            official_importers[config.provider_id] = OpenAIOrganizationImporter(
-                config, keychain, openai_client, clock
-            )
-        elif isinstance(config, DailyUsageFeedConfig):
-            adapters.append(DailyUsageFeedCardAdapter(config, keychain, clock))
-            official_importers[config.provider_id] = DailyUsageFeedImporter(
-                config, keychain, daily_feed_client, clock
-            )
-        elif isinstance(config, StepPlanConfig):
-            if step_plan_keychain is None:
-                try:
-                    step_plan_keychain = MacOSKeychain()
-                except (ImportError, OSError, RuntimeError):
-                    step_plan_keychain = keychain
-            endpoints = endpoints_for_site(config.site)
-            client = BoundedHTTPClient(
-                allowed_reserved_hosts={endpoints.api_host, endpoints.platform_host},
-                allowed_redirect_hosts=set(),
-            )
-            adapters.append(StepPlanAdapter(config, step_plan_keychain, client, clock))
-        elif isinstance(config, GenericProviderConfig):
-            adapters.append(GenericHTTPSAdapter(config, keychain, generic_client, clock))
+        if sources:
+            official_importers[binding.provider_id] = next(iter(sources.values()))
     aggregator = Aggregator(adapters, CardCache(), clock)
     collector = ActivityCollector(
         activity_store,
-        OpenUsageDailyImporter(clock=clock),
+        openusage_importer,
         official_importers=official_importers,
         clock=clock,
     )
-    return LedgerRefresher(aggregator, collector)
+    quota_sources = tuple(
+        (
+            binding.provider_id,
+            getattr(adapter, "source_id", type(adapter).__name__),
+            adapter,
+        )
+        for binding in bindings for adapter in binding.quota_sources
+        if hasattr(adapter, "last_quota_result")
+    )
+    eager_usage_provider_ids = tuple(sorted(
+        {"codex"} | {
+            provider_id
+            for provider_id, importer in official_importers.items()
+            if getattr(importer, "eager_local", False) is True
+        }
+    ))
+    return LedgerRefresher(
+        aggregator, collector, quota_sources,
+        eager_usage_provider_ids=eager_usage_provider_ids,
+    )

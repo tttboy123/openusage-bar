@@ -54,6 +54,30 @@ struct AggregationTests {
         #expect(ActivityAggregator.makeViewModel(from: data).days.map(\.heatLevel) == [1, 2, 3, 4, 5])
     }
 
+    @Test("Token totals preserve input output and cache as separate non-additive facts")
+    func tokenBreakdown() {
+        let value = DailyUsage(
+            day: day("2026-07-01"), providerID: "codex", accountRef: "",
+            modelID: "gpt-5.6-sol", inputTokens: 100, outputTokens: 20,
+            cacheReadTokens: 80, cacheCreationTokens: 4, reasoningTokens: 3,
+            totalTokens: 120, costAmount: nil, costCurrency: nil, costBasis: nil,
+            quality: "exact", importedAt: "2026-07-14T09:00:00Z", revision: 1,
+            recordID: "breakdown"
+        )
+        let view = ActivityAggregator.makeViewModel(from: ActivityDataset(
+            records: [value], coverage: [coverage("2026-07-01")],
+            knownScopes: [ProviderScope(providerID: "codex", accountRef: "")], revision: 1
+        ))
+
+        #expect(view.metrics.observedBreakdown.totalTokens == 120)
+        #expect(view.metrics.observedBreakdown.inputTokens == 100)
+        #expect(view.metrics.observedBreakdown.outputTokens == 20)
+        #expect(view.metrics.observedBreakdown.cacheReadTokens == 80)
+        #expect(view.metrics.observedBreakdown.cacheCreationTokens == 4)
+        #expect(view.metrics.hasObservedBreakdown)
+        #expect(view.metrics.totalTokens == 120)
+    }
+
     @Test("Provider and model filters recompute totals and coverage")
     func filtersRecompute() {
         let data = ActivityDataset(
@@ -117,6 +141,7 @@ struct AggregationTests {
         #expect(minimax.days[0].totalTokens == nil)
         #expect(minimax.days[0].observedTokens == 0)
         #expect(!minimax.metrics.isComplete)
+        #expect(!minimax.metrics.hasObservedBreakdown)
     }
 
     @Test("A canonical usage row is covered evidence even if a caller omits coverage metadata")

@@ -11,7 +11,8 @@ struct UsageDetailsTests {
         provider: String = "codex",
         model: String,
         tokens: Int64,
-        quality: String = "exact"
+        quality: String = "exact",
+        sourceID: String = "legacy"
     ) -> DailyUsage {
         DailyUsage(
             day: day(dayValue), providerID: provider, accountRef: "", modelID: model,
@@ -19,7 +20,7 @@ struct UsageDetailsTests {
             cacheCreationTokens: 0, reasoningTokens: nil, totalTokens: tokens,
             costAmount: nil, costCurrency: nil, costBasis: nil, quality: quality,
             importedAt: "2026-07-14T09:00:00Z", revision: 1,
-            recordID: "\(dayValue).\(provider).\(model)"
+            recordID: "\(dayValue).\(provider).\(model)", sourceID: sourceID
         )
     }
 
@@ -55,6 +56,8 @@ struct UsageDetailsTests {
         #expect(model.chartDays.first { $0.day == day("2026-07-02") }?.state == .coveredActive)
         #expect(model.chartDays.first { $0.day == day("2026-07-03") }?.state == .missing)
         #expect(model.chartDays.first { $0.day == day("2026-07-03") }?.totalTokens == nil)
+        #expect(model.chartDays.first { $0.day == day("2026-07-03") }?.hasObservedBreakdown == false)
+        #expect(model.chartDays.first { $0.day == day("2026-07-03") }?.accessibilitySummary.contains("Input 0") == false)
         #expect(model.chartDays.first { $0.day == day("2026-07-04") }?.quality == .estimated)
         #expect(model.seriesPoints.filter { $0.day == day("2026-07-02") }.reduce(0) { $0 + $1.tokens } == 28_000_000)
     }
@@ -271,8 +274,68 @@ struct UsageDetailsTests {
         #expect(payload.totalTokens == 74_200_000)
         #expect(payload.composition.reduce(0) { $0 + $1.tokens } == 74_200_000)
         #expect(payload.quality == .exact)
+        #expect(payload.lastCollectionAt == "2026-07-14T09:00:00Z")
         #expect(payload.accessibilitySummary.contains("74.2M Tokens"))
         #expect(payload.accessibilitySummary.contains("GPT-5.5"))
+        #expect(payload.accessibilitySummary.contains("2026-07-14T09:00:00Z"))
+    }
+
+    @Test("Daily chart carries a complete non-additive Token breakdown")
+    func dailyChartTokenBreakdown() throws {
+        let value = DailyUsage(
+            day: day("2026-07-02"), providerID: "codex", accountRef: "",
+            modelID: "gpt-5.6-sol", inputTokens: 100, outputTokens: 20,
+            cacheReadTokens: 80, cacheCreationTokens: 4, reasoningTokens: 3,
+            totalTokens: 120, costAmount: nil, costCurrency: nil, costBasis: nil,
+            quality: "exact", importedAt: "2026-07-14T09:00:00Z", revision: 1,
+            recordID: "breakdown"
+        )
+        let model = UsageDetailsAggregator.make(
+            from: ActivityDataset(
+                records: [value], coverage: [coverage("2026-07-02")],
+                knownScopes: [ProviderScope(providerID: "codex", accountRef: "")], revision: 1
+            ),
+            metricRange: day("2026-07-02")...day("2026-07-02")
+        )
+        let payload = try #require(model.chartDays.last)
+
+        #expect(payload.observedBreakdown.totalTokens == 120)
+        #expect(payload.observedBreakdown.inputTokens == 100)
+        #expect(payload.observedBreakdown.outputTokens == 20)
+        #expect(payload.observedBreakdown.cacheReadTokens == 80)
+        #expect(payload.observedBreakdown.cacheCreationTokens == 4)
+        #expect(payload.accessibilitySummary.contains("Input 100"))
+        #expect(payload.accessibilitySummary.contains("Output 20"))
+        #expect(payload.accessibilitySummary.contains("Cache Read 80"))
+        #expect(payload.accessibilitySummary.contains("Cache Write 4"))
+    }
+
+    @Test("Chart day exposes selected source quality and collection time")
+    func chartDayProvenance() throws {
+        let dataset = ActivityDataset(
+            records: [record(
+                "2026-07-14", model: "gpt-5.6-sol", tokens: 300,
+                quality: "fallback", sourceID: "openusage.daily"
+            )],
+            coverage: [CoverageDay(
+                day: day("2026-07-14"), providerID: "codex", accountRef: "",
+                isCovered: true, sourceID: "openusage.daily"
+            )],
+            knownScopes: [ProviderScope(providerID: "codex", accountRef: "")],
+            revision: 2
+        )
+
+        let model = UsageDetailsAggregator.make(
+            from: dataset,
+            metricRange: day("2026-07-14")...day("2026-07-14")
+        )
+        let value = try #require(model.chartDays.last)
+
+        #expect(value.sourceIDs == ["openusage.daily"])
+        #expect(value.qualityIDs == ["fallback"])
+        #expect(value.lastCollectionAt == "2026-07-14T09:00:00Z")
+        #expect(value.accessibilitySummary.contains("openusage.daily"))
+        #expect(value.accessibilitySummary.contains("fallback"))
     }
 
     @Test("Period ranges are calendar bounded and never exceed repository limits")
@@ -805,13 +868,16 @@ struct UsageDetailsTests {
     func routeParsing() {
         #expect(UsageDetailsRoute(arguments: ["--route", "health"]) == .dataHealth)
         #expect(UsageDetailsRoute(arguments: ["--route", "capacity"]) == .capacity)
+        #expect(UsageDetailsRoute(arguments: ["--route", "automation"]) == .automation)
         #expect(UsageDetailsRoute(arguments: ["--route", "welcome"]) == .activity)
         #expect(UsageDetailsRoute(arguments: ["--route", "overview"]) == .activity)
         #expect(UsageDetailsRoute(arguments: ["--route", "unknown"]) == .activity)
         #expect(UsageDetailsRoute(arguments: ["--route"]) == .activity)
         #expect(UsageDetailsRoute(routeValue: "health") == .dataHealth)
+        #expect(UsageDetailsRoute(routeValue: "automation") == .automation)
         #expect(UsageDetailsRoute(routeValue: "unknown") == nil)
         #expect(ActivityRouteMessage.decode(["route": "capacity"]) == .capacity)
+        #expect(ActivityRouteMessage.decode(["route": "automation"]) == .automation)
         #expect(ActivityRouteMessage.decode(["route": "health", "token": "secret"]) == nil)
     }
 

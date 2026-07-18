@@ -1,9 +1,118 @@
+import Foundation
 import Testing
 @testable import UsageCore
 @testable import OpenUsageActivity
 
 @Suite("Provider Center presentation")
 struct ProviderCenterPresentationTests {
+    @Test("Managed drafts encode strict v2 create update and remove envelopes")
+    func mutationV2Envelopes() throws {
+        let draft = ManagedConnectionDraft.minimax(
+            providerID: "minimax-work", name: "MiniMax Work",
+            replacementCredential: "private-key"
+        )
+        let create = try mutationObject(draft.request(action: .createConnection))
+        #expect(create["version"] as? Int == 2)
+        #expect(create["action"] as? String == "create_connection")
+        #expect(create["kind"] as? String == "minimax")
+        #expect((create["configuration"] as? [String: Any])?["name"] as? String == "MiniMax Work")
+        #expect((create["credentialMaterial"] as? [String: Any])?["primary"] as? String == "private-key")
+
+        let remove = try mutationObject(draft.request(action: .removeConnection))
+        #expect((remove["configuration"] as? [String: Any])?.isEmpty == true)
+        #expect((remove["credentialMaterial"] as? [String: Any])?.isEmpty == true)
+    }
+
+    @Test("Draft validation keeps credentials transient and rejects incomplete forms")
+    func draftValidation() {
+        let invalid = ManagedConnectionDraft.stepPlan(
+            providerID: "step-work", name: "", site: "china",
+            replacementCredential: "", replacementSession: ""
+        )
+        #expect(invalid.validation(action: .createConnection) == .missingName)
+
+        let missingCredential = ManagedConnectionDraft.minimax(
+            providerID: "minimax-work", name: "MiniMax",
+            replacementCredential: ""
+        )
+        #expect(missingCredential.validation(action: .createConnection) == .missingCredential)
+        #expect(missingCredential.validation(action: .updateConnection) == nil)
+
+        let missingProvider = ManagedConnectionDraft.minimax(
+            providerID: "  ", name: "MiniMax", replacementCredential: "key"
+        )
+        #expect(missingProvider.validation(action: .createConnection) == .missingProviderID)
+
+        let invalidSite = ManagedConnectionDraft.stepPlan(
+            providerID: "step-work", name: "Step Plan", site: "elsewhere",
+            replacementCredential: "key", replacementSession: ""
+        )
+        #expect(invalidSite.validation(action: .createConnection) == .invalidSite)
+
+        let sessionOnly = ManagedConnectionDraft.stepPlan(
+            providerID: "step-work", name: "Step Plan", site: "china",
+            replacementCredential: "", replacementSession: "session"
+        )
+        #expect(sessionOnly.validation(action: .createConnection) == nil)
+    }
+
+    @Test("Every managed Provider draft serializes its public configuration")
+    func allManagedDraftEnvelopes() throws {
+        let step = ManagedConnectionDraft.stepPlan(
+            providerID: "step-work", name: "Step Work", site: "international",
+            replacementCredential: "api-key", replacementSession: "web-session"
+        )
+        let organization = ManagedConnectionDraft.openAIOrganization(
+            providerID: "openai-work", name: "OpenAI Work",
+            replacementCredential: "admin-key"
+        )
+        let generic = ManagedConnectionDraft.generic(.init(
+            providerID: "custom-quota", name: "Custom Quota", familyID: "custom",
+            endpoint: "https://example.test/quota", headerName: "Authorization",
+            authPrefix: "Bearer ", primaryPath: "$.quota",
+            remainingPercentPath: "$.remaining", resetPath: "$.reset",
+            detailPath: "$.detail", replacementCredential: "quota-key"
+        ))
+        let daily = ManagedConnectionDraft.dailyUsageFeed(.init(
+            providerID: "custom-daily", name: "Custom Daily", familyID: "custom",
+            endpoint: "https://example.test/usage", headerName: "X-API-Key",
+            authPrefix: "", itemsPath: "$.items", datePath: "$.date",
+            modelPath: "$.model", inputTokensPath: "$.input",
+            outputTokensPath: "$.output", cacheReadTokensPath: "$.cacheRead",
+            cacheCreationTokensPath: "$.cacheCreate", reasoningTokensPath: "$.reasoning",
+            totalTokensPath: "$.total", sinceParameter: "since",
+            untilParameter: "until", replacementCredential: "usage-key"
+        ))
+
+        let stepObject = try mutationObject(step.request(action: .createConnection))
+        #expect(stepObject["kind"] as? String == "step_plan")
+        #expect((stepObject["configuration"] as? [String: Any])?["site"] as? String == "international")
+        #expect((stepObject["credentialMaterial"] as? [String: Any])?["session"] as? String == "web-session")
+
+        let organizationObject = try mutationObject(organization.request(action: .updateConnection))
+        #expect(organizationObject["kind"] as? String == "openai_organization")
+
+        let genericObject = try mutationObject(generic.request(action: .createConnection))
+        let genericConfiguration = try #require(genericObject["configuration"] as? [String: Any])
+        #expect(genericObject["kind"] as? String == "generic")
+        #expect(genericConfiguration["remainingPercentPath"] as? String == "$.remaining")
+        #expect(genericConfiguration["detailPath"] as? String == "$.detail")
+
+        let dailyObject = try mutationObject(daily.request(action: .createConnection))
+        let dailyConfiguration = try #require(dailyObject["configuration"] as? [String: Any])
+        #expect(dailyObject["kind"] as? String == "daily_usage_feed")
+        #expect(dailyConfiguration["modelPath"] as? String == "$.model")
+        #expect(dailyConfiguration["reasoningTokensPath"] as? String == "$.reasoning")
+        #expect(dailyConfiguration["untilParameter"] as? String == "until")
+    }
+
+    @Test("Auto-discovered connections never receive mutation actions")
+    func readOnlyDiscovery() {
+        #expect(!ProviderCenterPresentation.canMutate(kind: "codex"))
+        #expect(!ProviderCenterPresentation.canMutate(kind: "cursor"))
+        #expect(ProviderCenterPresentation.canMutate(kind: "minimax"))
+        #expect(ProviderCenterPresentation.canMutate(kind: "daily_usage_feed"))
+    }
     @Test("Browse categories separate cloud services from API providers")
     func categories() throws {
         #expect(ProviderBrowseCategory.classify(try descriptor("minimax")) == .subscription)
@@ -47,6 +156,15 @@ struct ProviderCenterPresentationTests {
         #expect(ProviderCenterPresentation.filter(items, category: .all, query: "Mini").map(\.id) == ["minimax"])
         #expect(ProviderCenterPresentation.filter(items, category: .cloud, query: "").map(\.id) == ["alibaba_cloud"])
         #expect(ProviderCenterPresentation.filter(items, category: .all, query: "openclaw").map(\.id) == ["openclaw"])
+    }
+
+    @Test("Selection follows visible order without a hard-coded Provider")
+    func selection() {
+        let visibleIDs = ["codex", "deepseek", "minimax"]
+        #expect(ProviderCenterPresentation.selection(current: nil, visibleIDs: visibleIDs) == "codex")
+        #expect(ProviderCenterPresentation.selection(current: "deepseek", visibleIDs: visibleIDs) == "deepseek")
+        #expect(ProviderCenterPresentation.selection(current: "hidden", visibleIDs: visibleIDs) == "codex")
+        #expect(ProviderCenterPresentation.selection(current: "minimax", visibleIDs: []) == nil)
     }
 
     @Test("Status distinguishes available, connected, and attention")
@@ -120,5 +238,12 @@ struct ProviderCenterPresentationTests {
 
     private func descriptor(_ familyID: String) throws -> ProviderDisplayDescriptor {
         try #require(ProviderCatalog.allDescriptors.first { $0.familyID == familyID })
+    }
+
+    private func mutationObject(_ request: ProviderMutationRequestV2) throws -> [String: Any] {
+        try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
+                as? [String: Any]
+        )
     }
 }

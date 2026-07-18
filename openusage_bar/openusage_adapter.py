@@ -6,6 +6,8 @@ import math
 import os
 import shutil
 import subprocess
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -62,6 +64,43 @@ _CHILD_ENVIRONMENT_KEYS = frozenset(
         "XDG_STATE_HOME",
     }
 )
+
+
+class ProviderRetryBackoff:
+    def __init__(
+        self,
+        clock: Callable[[], float],
+        base_seconds: int = 300,
+        maximum_seconds: int = 21_600,
+    ) -> None:
+        self.clock = clock
+        self.base_seconds = base_seconds
+        self.maximum_seconds = maximum_seconds
+        self._failures: dict[str, int] = {}
+        self._retry_at: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def retry_after(self, provider_id: str) -> int:
+        with self._lock:
+            remaining = self._retry_at.get(provider_id, 0) - self.clock()
+        return max(0, math.ceil(remaining))
+
+    def record_failure(self, provider_id: str) -> int:
+        with self._lock:
+            failures = self._failures.get(provider_id, 0) + 1
+            self._failures[provider_id] = failures
+            delay = self.base_seconds
+            for _ in range(min(failures - 1, 63)):
+                delay = min(self.maximum_seconds, delay * 2)
+                if delay == self.maximum_seconds:
+                    break
+            self._retry_at[provider_id] = self.clock() + delay
+        return delay
+
+    def record_success(self, provider_id: str) -> None:
+        with self._lock:
+            self._failures.pop(provider_id, None)
+            self._retry_at.pop(provider_id, None)
 
 
 def child_subprocess_environment(
@@ -183,11 +222,14 @@ class OpenUsageAdapter:
         runner=None,
         environment: dict[str, str] | None = None,
         path_exists: Callable[[str], bool] | None = None,
+        monotonic: Callable[[], float] | None = None,
     ):
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.runner = runner
         self.environment = dict(environment if environment is not None else os.environ)
         self.path_exists = path_exists or os.path.isdir
+        self.monotonic = monotonic or time.monotonic
+        self.provider_backoff = ProviderRetryBackoff(self.monotonic)
 
     def _subprocess_environment(self) -> dict[str, str]:
         return child_subprocess_environment(self.environment, self.path_exists)
@@ -346,15 +388,34 @@ class OpenUsageAdapter:
         cursor = next(
             (card for card in overview.cards if card.provider_id == "cursor"), None
         )
-        if cursor is None or (
-            cursor.status == ProviderStatus.OK and cursor.remaining_percent is not None
-        ):
+        if cursor is None:
             return overview
 
+        if cursor.status == ProviderStatus.OK and cursor.remaining_percent is not None:
+            self.provider_backoff.record_success("cursor")
+            return overview
+
+        retry_after = self.provider_backoff.retry_after("cursor")
+        if retry_after > 0:
+            logger.info(
+                "Provider enrichment deferred provider=cursor retry_after_seconds=%d",
+                retry_after,
+            )
+            return overview
+
+        started = self.monotonic()
         try:
             direct = self._export("direct")
         except OpenUsageExportError as error:
-            logger.warning("OpenUsage direct Cursor enrichment failed: %s", error)
+            delay = self.provider_backoff.record_failure("cursor")
+            elapsed_ms = max(0, round((self.monotonic() - started) * 1000))
+            logger.warning(
+                "Provider enrichment provider=cursor outcome=failed "
+                "duration_ms=%d retry_after_seconds=%d reason=%s",
+                elapsed_ms,
+                delay,
+                error,
+            )
             return overview
         direct_cursor = next(
             (
@@ -367,7 +428,21 @@ class OpenUsageAdapter:
             None,
         )
         if direct_cursor is None:
+            delay = self.provider_backoff.record_failure("cursor")
+            elapsed_ms = max(0, round((self.monotonic() - started) * 1000))
+            logger.warning(
+                "Provider enrichment provider=cursor outcome=unavailable "
+                "duration_ms=%d retry_after_seconds=%d",
+                elapsed_ms,
+                delay,
+            )
             return overview
+        self.provider_backoff.record_success("cursor")
+        elapsed_ms = max(0, round((self.monotonic() - started) * 1000))
+        logger.info(
+            "Provider enrichment provider=cursor outcome=succeeded duration_ms=%d",
+            elapsed_ms,
+        )
         return Overview(
             [
                 direct_cursor if card.provider_id == "cursor" else card

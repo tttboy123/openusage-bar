@@ -18,7 +18,9 @@ from openusage_bar.kiro import (
     SecurityKiroTokenReader,
     parse_kiro_credentials,
     parse_kiro_quota,
+    parse_kiro_quota_observations,
 )
+from openusage_bar.providers.contracts import QuotaFetchSuccess
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
@@ -168,6 +170,18 @@ class KiroCredentialTests(unittest.TestCase):
 
 
 class KiroQuotaParserTests(unittest.TestCase):
+    def test_credit_limit_is_an_account_billing_cycle_fact(self):
+        result = parse_kiro_quota_observations(quota_payload(), NOW)
+
+        self.assertIsInstance(result, QuotaFetchSuccess)
+        observation = result.observations[0]
+        self.assertEqual(observation.quota_window, "billing_cycle")
+        self.assertEqual(observation.applies_to_kind, "account")
+        self.assertEqual(observation.source_id, "kiro.codewhisperer")
+        self.assertEqual(observation.unit, "credits")
+        self.assertEqual(observation.remaining, "87.5")
+        self.assertEqual(observation.remaining_ratio, 0.875)
+
     def test_parses_regular_credit_quota_and_row_reset(self):
         card = parse_kiro_quota(quota_payload(), NOW)
 

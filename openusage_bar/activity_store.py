@@ -2,596 +2,57 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import sqlite3
 import threading
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable
 
-from .config import ID_PATTERN
-from .provider_catalog import PROVIDER_CATEGORIES, SOURCE_KINDS, catalog
-
-
-SCHEMA_VERSION = 3
-DAILY_ACTIVITY_SOURCE_ID = "openusage.daily"
-_PROVIDER_INSTANCE_SOURCE_KINDS = SOURCE_KINDS | frozenset({"generic_https"})
-
-_PRIVATE_LABEL_EMAIL = re.compile(
-    r"[A-Z0-9._%+-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?", re.IGNORECASE
+from .provider_catalog import catalog
+from .activity_records import (
+    ChangeRecord,
+    ChangeSnapshot,
+    DailyCostRecord,
+    DailyCostRow,
+    DailyCostSnapshot,
+    DailyUsageRecord,
+    DailyUsageRow,
+    DailyUsageSnapshot,
+    ProviderInstance,
+    ProviderInstanceSnapshot,
+    PurgeResult,
+    QuotaHistorySnapshot,
+    QuotaObservation,
+    QuotaSnapshot,
+    QuotaState,
+    QuotaStateSnapshot,
+    ResourceStateSnapshot,
+    SourceStatus,
+    SourceStatusSnapshot,
+    UsageSummary,
+    canonical_timestamp as _timestamp,
+    validate_day as _validate_day,
+    validate_id as _validate_id,
 )
-_PRIVATE_LABEL_PATH = re.compile(
-    r"(?<![A-Z0-9._-])(?:"
-    r"/(?!\s)[^\s()]+|"
-    r"~[/\\](?!\s)[^\s()]+|"
-    r"[A-Z]:[/\\](?!\s)[^\s()]+)",
-    re.IGNORECASE,
+from .activity_schema import (
+    DAILY_ACTIVITY_SOURCE_ID,
+    EXPECTED_AUTOINCREMENT as _EXPECTED_AUTOINCREMENT,
+    EXPECTED_INDEXES as _EXPECTED_INDEXES,
+    EXPECTED_SCHEMA as _EXPECTED_SCHEMA,
+    LEGACY_SOURCE_SCHEMAS as _LEGACY_SOURCE_SCHEMAS,
+    PUBLIC_CHANGE_TYPES,
+    SCHEMA_VERSION,
 )
-_PRIVATE_LABEL_ASSIGNMENT = re.compile(
-    r"(?<![A-Z0-9_])(?:authorization|credential|api[_ -]?key|password|secret|cookie|"
-    r"access[_ -]?token|refresh[_ -]?token|token|username|user|"
-    r"account(?:_email)?|email|attributes?|raw_attrs?|response_body|body)"
-    r"\s*[:=]",
-    re.IGNORECASE,
-)
-_PRIVATE_LABEL_CREDENTIAL = re.compile(
-    r"(?:bearer\s+)[A-Z0-9._~+/=-]+|"
-    r"eyJ[A-Z0-9_-]{8,}\.[A-Z0-9_-]{8,}\.[A-Z0-9_-]{8,}|"
-    r"(?:sk-|ghp_|xox[baprs]-|AIza)[A-Z0-9_-]{16,}",
-    re.IGNORECASE,
-)
-_PRIVATE_LABEL_CREDENTIAL_VALUE = re.compile(
-    r"(?<![A-Z0-9_])(?:authorization|credential|api[_ -]?key|password|secret|"
-    r"cookie|access[_ -]?token|refresh[_ -]?token|token)\s+"
-    r"[A-Z0-9._~+/=-]{20,}(?=\s|$)",
-    re.IGNORECASE,
-)
-_PRIVATE_LABEL_OPAQUE_KEY = re.compile(r"[A-Z0-9_~+/=-]{28,}", re.IGNORECASE)
-_PRIVATE_LABEL_STRUCTURED = re.compile(r"(?:^|\s)[\[{]\s*[\"']")
 
-_EXPECTED_SCHEMA = {
-    "daily_costs": (
-        ("day", "TEXT", 1, None, 1),
-        ("provider_id", "TEXT", 1, None, 2),
-        ("account_ref", "TEXT", 1, "''", 3),
-        ("cost_kind", "TEXT", 1, None, 4),
-        ("currency", "TEXT", 1, None, 5),
-        ("amount", "TEXT", 1, None, 0),
-        ("basis", "TEXT", 1, None, 0),
-        ("quality", "TEXT", 1, None, 0),
-        ("imported_at", "TEXT", 1, None, 0),
-        ("revision", "INTEGER", 1, None, 0),
-        ("payload_hash", "TEXT", 1, None, 0),
-    ),
-    "daily_cost_coverage": (
-        ("day", "TEXT", 1, None, 1),
-        ("provider_id", "TEXT", 1, None, 2),
-        ("account_ref", "TEXT", 1, "''", 3),
-        ("imported_at", "TEXT", 1, None, 0),
-    ),
-    "daily_model_usage": (
-        ("day", "TEXT", 1, None, 1),
-        ("provider_id", "TEXT", 1, None, 2),
-        ("account_ref", "TEXT", 1, "''", 3),
-        ("model_id", "TEXT", 1, None, 4),
-        ("input_tokens", "INTEGER", 1, None, 0),
-        ("output_tokens", "INTEGER", 1, None, 0),
-        ("cache_read_tokens", "INTEGER", 1, None, 0),
-        ("cache_creation_tokens", "INTEGER", 1, None, 0),
-        ("reasoning_tokens", "INTEGER", 0, None, 0),
-        ("total_tokens", "INTEGER", 1, None, 0),
-        ("cost_amount", "TEXT", 0, None, 0),
-        ("cost_currency", "TEXT", 0, None, 0),
-        ("cost_basis", "TEXT", 0, None, 0),
-        ("quality", "TEXT", 1, None, 0),
-        ("imported_at", "TEXT", 1, None, 0),
-        ("revision", "INTEGER", 1, None, 0),
-        ("payload_hash", "TEXT", 1, None, 0),
-        ("source_id", "TEXT", 1, "'legacy'", 0),
-    ),
-    "daily_coverage": (
-        ("day", "TEXT", 1, None, 1),
-        ("provider_id", "TEXT", 1, None, 2),
-        ("account_ref", "TEXT", 1, "''", 3),
-        ("imported_at", "TEXT", 1, None, 0),
-        ("source_id", "TEXT", 1, "'legacy'", 0),
-    ),
-    "quota_state": (
-        ("record_id", "TEXT", 0, None, 1),
-        ("observed_at", "TEXT", 1, None, 0),
-        ("provider_id", "TEXT", 1, None, 0),
-        ("account_ref", "TEXT", 1, "''", 0),
-        ("quota_name", "TEXT", 1, None, 0),
-        ("unit", "TEXT", 1, None, 0),
-        ("used", "TEXT", 0, None, 0),
-        ("quota_limit", "TEXT", 0, None, 0),
-        ("remaining", "TEXT", 0, None, 0),
-        ("remaining_ratio", "REAL", 0, None, 0),
-        ("resets_at", "TEXT", 0, None, 0),
-        ("period_start", "TEXT", 0, None, 0),
-        ("period_end", "TEXT", 0, None, 0),
-        ("state", "TEXT", 1, None, 0),
-        ("quality", "TEXT", 1, None, 0),
-        ("stale", "INTEGER", 1, None, 0),
-        ("revision", "INTEGER", 1, None, 0),
-        ("payload_hash", "TEXT", 1, None, 0),
-    ),
-    "quota_snapshots": (
-        ("snapshot_id", "INTEGER", 0, None, 1),
-        ("record_id", "TEXT", 1, None, 0),
-        ("observed_at", "TEXT", 1, None, 0),
-        ("provider_id", "TEXT", 1, None, 0),
-        ("account_ref", "TEXT", 1, "''", 0),
-        ("quota_name", "TEXT", 1, None, 0),
-        ("payload_json", "TEXT", 1, None, 0),
-        ("payload_hash", "TEXT", 1, None, 0),
-    ),
-    "source_status": (
-        ("provider_id", "TEXT", 1, None, 1),
-        ("source_id", "TEXT", 1, None, 2),
-        ("state", "TEXT", 1, None, 0),
-        ("last_attempt_at", "TEXT", 1, None, 0),
-        ("last_success_at", "TEXT", 0, None, 0),
-        ("stale_at", "TEXT", 0, None, 0),
-        ("error_code", "TEXT", 0, None, 0),
-    ),
-    "provider_instances": (
-        ("provider_id", "TEXT", 0, None, 1),
-        ("family_id", "TEXT", 1, None, 0),
-        ("display_name", "TEXT", 1, None, 0),
-        ("category", "TEXT", 1, None, 0),
-        ("credential_source", "TEXT", 1, None, 0),
-        ("source_kind", "TEXT", 1, None, 0),
-        ("observed_at", "TEXT", 1, None, 0),
-        ("revision", "INTEGER", 1, None, 0),
-        ("payload_hash", "TEXT", 1, None, 0),
-    ),
-    "change_log": (
-        ("change_seq", "INTEGER", 0, None, 1),
-        ("record_type", "TEXT", 1, None, 0),
-        ("record_id", "TEXT", 1, None, 0),
-        ("revision", "INTEGER", 1, None, 0),
-        ("operation", "TEXT", 1, None, 0),
-        ("changed_at", "TEXT", 1, None, 0),
-        ("payload_json", "TEXT", 0, None, 0),
-        ("payload_hash", "TEXT", 1, None, 0),
-    ),
-    "ledger_meta": (
-        ("key", "TEXT", 0, None, 1),
-        ("value", "TEXT", 1, None, 0),
-    ),
-}
-
-_LEGACY_SOURCE_SCHEMAS = {
-    "daily_model_usage": _EXPECTED_SCHEMA["daily_model_usage"][:-1],
-    "daily_coverage": _EXPECTED_SCHEMA["daily_coverage"][:-1],
-}
-
-_EXPECTED_INDEXES = {
-    "daily_cost_provider_account_day": (
-        "daily_costs",
-        0,
-        (("provider_id", 0), ("account_ref", 0), ("day", 0)),
-    ),
-    "quota_snapshot_record_time": (
-        "quota_snapshots",
-        0,
-        (("record_id", 0), ("observed_at", 1)),
-    ),
-    "quota_snapshot_provider_account_time": (
-        "quota_snapshots",
-        0,
-        (
-            ("provider_id", 0),
-            ("account_ref", 0),
-            ("observed_at", 1),
-            ("snapshot_id", 1),
-        ),
-    ),
-    "change_log_record_revision_unique": (
-        "change_log",
-        1,
-        (("record_type", 0), ("record_id", 0), ("revision", 0)),
-    ),
-}
-
-_EXPECTED_AUTOINCREMENT = {
-    "quota_snapshots": "snapshot_id",
-    "change_log": "change_seq",
-}
-
-
-def _validate_id(name: str, value: str) -> None:
-    if not isinstance(value, str) or not ID_PATTERN.fullmatch(value):
-        raise ValueError(f"{name} must use the stable identifier grammar")
-
-
-def _validate_day(value: str) -> None:
-    try:
-        parsed = date.fromisoformat(value)
-    except (TypeError, ValueError) as error:
-        raise ValueError("day must be an ISO local day") from error
-    if parsed.isoformat() != value:
-        raise ValueError("day must be an ISO local day")
-
-
-def _timestamp(value: str | None, field: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError(f"{field} must be an ISO timestamp")
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as error:
-        raise ValueError(f"{field} must be an ISO timestamp") from error
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError(f"{field} must include a timezone")
-    utc = parsed.astimezone(timezone.utc)
-    return utc.isoformat(timespec="microseconds").replace("+00:00", "Z")
-
-
-def _nonnegative_integer(name: str, value: int | None, *, nullable: bool = False) -> None:
-    if value is None and nullable:
-        return
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError(f"{name} must be a nonnegative integer")
-
-
-def _decimal_string(value: str | None, field: str) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
-        raise ValueError(f"{field} must be a finite decimal value")
-    try:
-        decimal = Decimal(str(value))
-    except InvalidOperation as error:
-        raise ValueError(f"{field} must be a finite decimal value") from error
-    if not decimal.is_finite():
-        raise ValueError(f"{field} must be a finite decimal value")
-    text = format(decimal, "f")
-    if "." in text:
-        text = text.rstrip("0").rstrip(".")
-    return "0" if text in {"-0", ""} else text
-
-
-def _json(payload: dict[str, Any]) -> str:
+def _json(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def _hash(payload_json: str) -> str:
     return hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
-
-
-def _validate_safe_display_name(value: str) -> None:
-    if (
-        not isinstance(value, str)
-        or not value.strip()
-        or value != value.strip()
-        or len(value) > 128
-        or any(ord(character) < 32 for character in value)
-    ):
-        raise ValueError("display_name must be a safe provider label")
-    opaque_key = any(
-        any(character.isalpha() for character in match.group())
-        and any(character.isdigit() for character in match.group())
-        for match in _PRIVATE_LABEL_OPAQUE_KEY.finditer(value)
-    )
-    if (
-        _PRIVATE_LABEL_EMAIL.search(value)
-        or _PRIVATE_LABEL_PATH.search(value)
-        or _PRIVATE_LABEL_ASSIGNMENT.search(value)
-        or _PRIVATE_LABEL_CREDENTIAL.search(value)
-        or _PRIVATE_LABEL_CREDENTIAL_VALUE.search(value)
-        or _PRIVATE_LABEL_STRUCTURED.search(value)
-        or opaque_key
-    ):
-        # Deliberately do not interpolate the rejected value into diagnostics.
-        raise ValueError("display_name must be a safe provider label")
-
-
-@dataclass(frozen=True)
-class DailyUsageRow:
-    day: str
-    provider_id: str
-    model_id: str
-    input_tokens: int
-    output_tokens: int
-    cache_read_tokens: int
-    cache_creation_tokens: int
-    reasoning_tokens: int | None
-    total_tokens: int
-    cost_amount: str | None
-    cost_currency: str | None
-    cost_basis: str | None
-    quality: str
-    imported_at: str | None = None
-    account_ref: str = ""
-
-    def __post_init__(self) -> None:
-        _validate_day(self.day)
-        _validate_id("provider_id", self.provider_id)
-        if self.account_ref:
-            _validate_id("account_ref", self.account_ref)
-        _validate_id("model_id", self.model_id)
-        for field in (
-            "input_tokens",
-            "output_tokens",
-            "cache_read_tokens",
-            "cache_creation_tokens",
-            "total_tokens",
-        ):
-            _nonnegative_integer(field, getattr(self, field))
-        _nonnegative_integer("reasoning_tokens", self.reasoning_tokens, nullable=True)
-        object.__setattr__(self, "cost_amount", _decimal_string(self.cost_amount, "cost_amount"))
-        if self.cost_currency is not None:
-            _validate_id("cost_currency", self.cost_currency)
-        if self.cost_basis is not None:
-            _validate_id("cost_basis", self.cost_basis)
-        _validate_id("quality", self.quality)
-        imported_at = self.imported_at or datetime.now(timezone.utc).isoformat()
-        object.__setattr__(self, "imported_at", _timestamp(imported_at, "imported_at"))
-
-
-@dataclass(frozen=True)
-class DailyCostRow:
-    day: str
-    provider_id: str
-    cost_kind: str
-    currency: str
-    amount: str
-    basis: str
-    quality: str
-    imported_at: str | None = None
-    account_ref: str = ""
-
-    def __post_init__(self) -> None:
-        _validate_day(self.day)
-        _validate_id("provider_id", self.provider_id)
-        if self.account_ref:
-            _validate_id("account_ref", self.account_ref)
-        _validate_id("cost_kind", self.cost_kind)
-        if self.cost_kind != "actual":
-            raise ValueError("cost_kind must be actual")
-        _validate_id("currency", self.currency)
-        if self.currency != self.currency.upper() or not 3 <= len(self.currency) <= 8:
-            raise ValueError("currency must be an uppercase currency identifier")
-        _validate_id("basis", self.basis)
-        _validate_id("quality", self.quality)
-        amount = _decimal_string(self.amount, "amount")
-        if amount is None or Decimal(amount) < 0:
-            raise ValueError("amount must be a nonnegative finite decimal value")
-        object.__setattr__(self, "amount", amount)
-        imported_at = self.imported_at or datetime.now(timezone.utc).isoformat()
-        object.__setattr__(self, "imported_at", _timestamp(imported_at, "imported_at"))
-
-
-@dataclass(frozen=True)
-class ProviderInstance:
-    provider_id: str
-    family_id: str
-    display_name: str
-    category: str
-    credential_source: str
-    source_kind: str
-    observed_at: str
-    revision: int = 0
-
-    def __post_init__(self) -> None:
-        _validate_id("provider_id", self.provider_id)
-        _validate_id("family_id", self.family_id)
-        _validate_id("credential_source", self.credential_source)
-        if self.category not in PROVIDER_CATEGORIES:
-            raise ValueError("category must be a canonical provider category")
-        if self.source_kind not in _PROVIDER_INSTANCE_SOURCE_KINDS:
-            raise ValueError("source_kind must be a canonical source kind")
-        _validate_safe_display_name(self.display_name)
-        object.__setattr__(self, "observed_at", _timestamp(self.observed_at, "observed_at"))
-        _nonnegative_integer("revision", self.revision)
-
-
-@dataclass(frozen=True)
-class DailyUsageRecord(DailyUsageRow):
-    revision: int = 1
-    payload_hash: str = ""
-    record_id: str = ""
-    source_id: str = "legacy"
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        _validate_id("source_id", self.source_id)
-
-
-@dataclass(frozen=True)
-class DailyCostRecord(DailyCostRow):
-    revision: int = 1
-    payload_hash: str = ""
-    record_id: str = ""
-
-
-@dataclass(frozen=True)
-class QuotaObservation:
-    record_id: str
-    observed_at: str
-    provider_id: str
-    quota_name: str
-    unit: str
-    used: str | None
-    quota_limit: str | None
-    remaining: str | None
-    remaining_ratio: float | None
-    resets_at: str | None
-    period_start: str | None
-    period_end: str | None
-    state: str
-    quality: str
-    stale: bool
-    account_ref: str = ""
-
-    def __post_init__(self) -> None:
-        _validate_id("record_id", self.record_id)
-        _validate_id("provider_id", self.provider_id)
-        if self.account_ref:
-            _validate_id("account_ref", self.account_ref)
-        if not isinstance(self.quota_name, str) or not self.quota_name.strip():
-            raise ValueError("quota_name must not be empty")
-        _validate_id("unit", self.unit)
-        _validate_id("state", self.state)
-        _validate_id("quality", self.quality)
-        object.__setattr__(self, "observed_at", _timestamp(self.observed_at, "observed_at"))
-        for field in ("resets_at", "period_start", "period_end"):
-            object.__setattr__(self, field, _timestamp(getattr(self, field), field))
-        for field in ("used", "quota_limit", "remaining"):
-            object.__setattr__(self, field, _decimal_string(getattr(self, field), field))
-        ratio = self.remaining_ratio
-        if ratio is not None and (
-            isinstance(ratio, bool)
-            or not isinstance(ratio, (int, float))
-            or not math.isfinite(ratio)
-            or not 0 <= ratio <= 1
-        ):
-            raise ValueError("remaining_ratio must be between zero and one")
-        if ratio is not None:
-            canonical_ratio = float(ratio)
-            object.__setattr__(
-                self, "remaining_ratio", 0.0 if canonical_ratio == 0 else canonical_ratio
-            )
-        if not isinstance(self.stale, bool):
-            raise ValueError("stale must be boolean")
-
-
-@dataclass(frozen=True)
-class QuotaState(QuotaObservation):
-    revision: int = 1
-    payload_hash: str = ""
-
-
-@dataclass(frozen=True)
-class QuotaSnapshot:
-    snapshot_id: int
-    record_id: str
-    observed_at: str
-    provider_id: str
-    account_ref: str
-    quota_name: str
-    payload_json: str
-    payload_hash: str
-
-
-@dataclass(frozen=True)
-class ChangeRecord:
-    change_seq: int
-    record_type: str
-    record_id: str
-    revision: int
-    operation: str
-    changed_at: str
-    payload_json: str | None
-    payload_hash: str
-
-
-@dataclass(frozen=True)
-class DailyUsageSnapshot:
-    rows: tuple[DailyUsageRecord, ...]
-    covered: frozenset[tuple[str, str, str]]
-    coverage_sources: frozenset[tuple[str, str, str, str]]
-    known_scopes: frozenset[tuple[str, str]]
-    cursor: int
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rows", tuple(self.rows))
-        object.__setattr__(self, "covered", frozenset(self.covered))
-        object.__setattr__(self, "coverage_sources", frozenset(self.coverage_sources))
-        object.__setattr__(self, "known_scopes", frozenset(self.known_scopes))
-
-
-@dataclass(frozen=True)
-class DailyCostSnapshot:
-    rows: tuple[DailyCostRecord, ...]
-    covered: frozenset[tuple[str, str, str]]
-    known_scopes: frozenset[tuple[str, str]]
-    cursor: int
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rows", tuple(self.rows))
-        object.__setattr__(self, "covered", frozenset(self.covered))
-        object.__setattr__(self, "known_scopes", frozenset(self.known_scopes))
-
-
-@dataclass(frozen=True)
-class QuotaStateSnapshot:
-    rows: tuple[QuotaState, ...]
-    cursor: int
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rows", tuple(self.rows))
-
-
-@dataclass(frozen=True)
-class ProviderInstanceSnapshot:
-    rows: tuple[ProviderInstance, ...]
-    cursor: int
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rows", tuple(self.rows))
-
-
-@dataclass(frozen=True)
-class QuotaHistorySnapshot:
-    rows: tuple[QuotaSnapshot, ...]
-    cursor: int
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rows", tuple(self.rows))
-
-
-@dataclass(frozen=True)
-class SourceStatusSnapshot:
-    rows: tuple[SourceStatus, ...]
-    cursor: int
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rows", tuple(self.rows))
-
-
-@dataclass(frozen=True)
-class ChangeSnapshot:
-    rows: tuple[ChangeRecord, ...]
-    cursor: int
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rows", tuple(self.rows))
-
-
-@dataclass(frozen=True)
-class PurgeResult:
-    daily_rows: int
-    coverage_rows: int
-    quota_snapshots: int
-    cost_rows: int = 0
-    cost_coverage_rows: int = 0
-
-
-@dataclass(frozen=True)
-class SourceStatus:
-    provider_id: str
-    source_id: str
-    state: str
-    last_attempt_at: str
-    last_success_at: str | None
-    stale_at: str | None
-    error_code: str | None
-
-
-@dataclass(frozen=True)
-class UsageSummary:
-    total_tokens: int
-    model_count: int
-    covered_day_count: int
-    cursor: int
 
 
 class ActivityStore:
@@ -613,11 +74,13 @@ class ActivityStore:
                         f"database uses newer schema version {version}; supported version is {SCHEMA_VERSION}"
                     )
                 self._validate_existing_schema(
-                    require_all=version == SCHEMA_VERSION,
+                    require_all=version in {3, SCHEMA_VERSION},
                     optional_missing=frozenset(),
                     allow_legacy_source_columns=version < SCHEMA_VERSION,
                 )
                 self._migrate_source_provenance()
+                self._migrate_quota_scope()
+                self._migrate_public_revisions(version)
                 try:
                     self._initialize_schema()
                 except sqlite3.IntegrityError as error:
@@ -717,6 +180,106 @@ class ActivityStore:
                         f"ALTER TABLE {table} ADD COLUMN source_id TEXT NOT NULL DEFAULT 'legacy'"
                     )
 
+    def _migrate_public_revisions(self, version: int) -> None:
+        existing = {
+            str(row[0])
+            for row in self._connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        columns = (
+            {
+                str(row[1])
+                for row in self._connection.execute("PRAGMA table_info(source_status)")
+            }
+            if "source_status" in existing
+            else set()
+        )
+        migrated = bool(columns) and (
+            "revision" not in columns or "payload_hash" not in columns
+        )
+        with self._connection:
+            if migrated and "revision" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE source_status ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
+                )
+            if migrated and "payload_hash" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE source_status ADD COLUMN payload_hash TEXT NOT NULL DEFAULT ''"
+                )
+            rows = (
+                self._connection.execute(
+                    "SELECT provider_id,source_id,state,last_attempt_at,last_success_at,stale_at,error_code "
+                    "FROM source_status"
+                ).fetchall()
+                if migrated
+                else []
+            )
+            for row in rows:
+                payload_json, payload_hash = self._source_status_payload(dict(row))
+                self._connection.execute(
+                    "UPDATE source_status SET revision=1,payload_hash=? "
+                    "WHERE provider_id=? AND source_id=?",
+                    (payload_hash, row["provider_id"], row["source_id"]),
+                )
+            if 0 < version < SCHEMA_VERSION and "change_log" in existing:
+                changed_at = datetime.now(timezone.utc).isoformat(
+                    timespec="microseconds"
+                ).replace("+00:00", "Z")
+                payload_json = _json({"from": version, "to": SCHEMA_VERSION})
+                self._append_change(
+                    "ledger_schema",
+                    "schema",
+                    self._next_revision_locked("ledger_schema", "schema"),
+                    "update",
+                    changed_at,
+                    payload_json,
+                    _hash(payload_json),
+                )
+
+    def _migrate_quota_scope(self) -> None:
+        for table in ("quota_state", "quota_snapshots"):
+            exists = self._connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()
+            if exists is None:
+                continue
+            columns = {
+                str(row[1]) for row in self._connection.execute(
+                    f"PRAGMA table_info({table})"
+                )
+            }
+            additions = (
+                ("source_id", "TEXT NOT NULL DEFAULT 'current.quota'"),
+                ("quota_window", "TEXT NOT NULL DEFAULT 'subscription'"),
+                ("applies_to_kind", "TEXT NOT NULL DEFAULT 'account'"),
+                ("applies_to_model_ids", "TEXT NOT NULL DEFAULT '[]'"),
+            )
+            with self._connection:
+                for name, declaration in additions:
+                    if name not in columns:
+                        self._connection.execute(
+                            f"ALTER TABLE {table} ADD COLUMN {name} {declaration}"
+                        )
+                if table == "quota_state":
+                    for row in self._connection.execute(
+                        "SELECT * FROM quota_state"
+                    ).fetchall():
+                        values = dict(row)
+                        values["stale"] = bool(values["stale"])
+                        values["applies_to_model_ids"] = tuple(
+                            json.loads(str(values["applies_to_model_ids"]))
+                        )
+                        observation = QuotaObservation(**{
+                            key: value for key, value in values.items()
+                            if key not in {"revision", "payload_hash"}
+                        })
+                        _, payload_hash = self._quota_semantic_payload(observation)
+                        self._connection.execute(
+                            "UPDATE quota_state SET payload_hash=? WHERE record_id=?",
+                            (payload_hash, observation.record_id),
+                        )
+
     def _validate_required_indexes(self) -> None:
         for index_name, (table, expected_unique, expected_terms) in _EXPECTED_INDEXES.items():
             indexes = {
@@ -769,12 +332,20 @@ class ActivityStore:
             account_ref TEXT NOT NULL DEFAULT '', quota_name TEXT NOT NULL, unit TEXT NOT NULL, used TEXT,
             quota_limit TEXT, remaining TEXT, remaining_ratio REAL, resets_at TEXT,
             period_start TEXT, period_end TEXT, state TEXT NOT NULL, quality TEXT NOT NULL,
-            stale INTEGER NOT NULL, revision INTEGER NOT NULL, payload_hash TEXT NOT NULL);
+            stale INTEGER NOT NULL, revision INTEGER NOT NULL, payload_hash TEXT NOT NULL,
+            source_id TEXT NOT NULL DEFAULT 'current.quota',
+            quota_window TEXT NOT NULL DEFAULT 'subscription',
+            applies_to_kind TEXT NOT NULL DEFAULT 'account',
+            applies_to_model_ids TEXT NOT NULL DEFAULT '[]');
         CREATE TABLE IF NOT EXISTS quota_snapshots(
             snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL,
             observed_at TEXT NOT NULL, provider_id TEXT NOT NULL,
             account_ref TEXT NOT NULL DEFAULT '', quota_name TEXT NOT NULL,
-            payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL);
+            payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL,
+            source_id TEXT NOT NULL DEFAULT 'current.quota',
+            quota_window TEXT NOT NULL DEFAULT 'subscription',
+            applies_to_kind TEXT NOT NULL DEFAULT 'account',
+            applies_to_model_ids TEXT NOT NULL DEFAULT '[]');
         CREATE INDEX IF NOT EXISTS quota_snapshot_record_time
             ON quota_snapshots(record_id, observed_at DESC);
         CREATE INDEX IF NOT EXISTS quota_snapshot_provider_account_time
@@ -783,6 +354,8 @@ class ActivityStore:
             provider_id TEXT NOT NULL, source_id TEXT NOT NULL, state TEXT NOT NULL,
             last_attempt_at TEXT NOT NULL,
             last_success_at TEXT, stale_at TEXT, error_code TEXT,
+            revision INTEGER NOT NULL DEFAULT 1,
+            payload_hash TEXT NOT NULL DEFAULT '',
             PRIMARY KEY(provider_id,source_id));
         CREATE TABLE IF NOT EXISTS provider_instances(
             provider_id TEXT PRIMARY KEY, family_id TEXT NOT NULL,
@@ -911,6 +484,27 @@ class ActivityStore:
         return payload_json, _hash(payload_json)
 
     @staticmethod
+    def _source_status_record_id(provider_id: str, source_id: str) -> str:
+        return f"source:{provider_id}:{source_id}"
+
+    @staticmethod
+    def _source_status_payload(status: dict[str, Any]) -> tuple[str, str]:
+        payload = {
+            key: status.get(key)
+            for key in (
+                "provider_id",
+                "source_id",
+                "state",
+                "last_attempt_at",
+                "last_success_at",
+                "stale_at",
+                "error_code",
+            )
+        }
+        payload_json = _json(payload)
+        return payload_json, _hash(payload_json)
+
+    @staticmethod
     def _validate_provider_family_binding(instance: ProviderInstance) -> None:
         known_ids = frozenset(catalog.family_ids)
         if instance.family_id not in known_ids:
@@ -965,6 +559,8 @@ class ActivityStore:
         payload_json: str | None,
         payload_hash: str,
     ) -> None:
+        if record_type not in PUBLIC_CHANGE_TYPES:
+            raise ValueError("record_type must be a public change type")
         self._connection.execute(
             "INSERT INTO change_log(record_type,record_id,revision,operation,changed_at,payload_json,payload_hash) VALUES(?,?,?,?,?,?,?)",
             (record_type, record_id, revision, operation, changed_at, payload_json, payload_hash),
@@ -1042,18 +638,18 @@ class ActivityStore:
 
     def provider_instances(self) -> tuple[ProviderInstance, ...]:
         with self._lock:
-            rows = self._connection.execute(
-                "SELECT * FROM provider_instances ORDER BY provider_id"
-            ).fetchall()
-            return tuple(self._row_to_provider_instance(row) for row in rows)
+            return self._resource_provider_instances_locked()
+
+    def _resource_provider_instances_locked(self) -> tuple[ProviderInstance, ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM provider_instances ORDER BY provider_id"
+        ).fetchall()
+        return tuple(self._row_to_provider_instance(row) for row in rows)
 
     def snapshot_provider_instances(self) -> ProviderInstanceSnapshot:
         with self._read_snapshot():
-            rows = self._connection.execute(
-                "SELECT * FROM provider_instances ORDER BY provider_id"
-            ).fetchall()
             return ProviderInstanceSnapshot(
-                tuple(self._row_to_provider_instance(row) for row in rows),
+                self._resource_provider_instances_locked(),
                 self._current_change_seq_locked(),
             )
 
@@ -1689,6 +1285,23 @@ class ActivityStore:
         payload_json = _json(asdict(observation))
         return payload_json, _hash(payload_json)
 
+    def _append_quota_snapshot_change_locked(
+        self,
+        snapshot_id: int,
+        observed_at: str,
+        payload_json: str,
+        payload_hash: str,
+    ) -> None:
+        self._append_change(
+            "quota_snapshot",
+            f"quota-snapshot:{snapshot_id}",
+            1,
+            "insert",
+            observed_at,
+            payload_json,
+            payload_hash,
+        )
+
     def record_quota(self, observation: QuotaObservation) -> QuotaState:
         semantic_json, semantic_hash = self._quota_semantic_payload(observation)
         snapshot_json, snapshot_hash = self._quota_snapshot_payload(observation)
@@ -1703,8 +1316,8 @@ class ActivityStore:
                     (observation.record_id, observation.observed_at, snapshot_hash),
                 ).fetchone()
                 if duplicate is None:
-                    self._connection.execute(
-                        "INSERT INTO quota_snapshots(record_id,observed_at,provider_id,account_ref,quota_name,payload_json,payload_hash) VALUES(?,?,?,?,?,?,?)",
+                    inserted = self._connection.execute(
+                        "INSERT INTO quota_snapshots(record_id,observed_at,provider_id,account_ref,quota_name,payload_json,payload_hash,source_id,quota_window,applies_to_kind,applies_to_model_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             observation.record_id,
                             observation.observed_at,
@@ -1713,7 +1326,17 @@ class ActivityStore:
                             observation.quota_name,
                             snapshot_json,
                             snapshot_hash,
+                            observation.source_id,
+                            observation.quota_window,
+                            observation.applies_to_kind,
+                            _json(list(observation.applies_to_model_ids)),
                         ),
+                    )
+                    self._append_quota_snapshot_change_locked(
+                        int(inserted.lastrowid),
+                        observation.observed_at,
+                        snapshot_json,
+                        snapshot_hash,
                     )
                 return self._quota_state_by_id_locked(observation.record_id)
             changed = old is None or old["payload_hash"] != semantic_hash
@@ -1732,16 +1355,28 @@ class ActivityStore:
                     should_snapshot = (current_time - previous_time).total_seconds() >= 3600
 
             values = asdict(observation)
+            values["applies_to_model_ids"] = _json(
+                list(observation.applies_to_model_ids)
+            )
             columns = list(values) + ["revision", "payload_hash"]
             self._connection.execute(
                 f"INSERT OR REPLACE INTO quota_state({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
                 tuple(values.values()) + (revision, semantic_hash),
             )
             if should_snapshot:
-                self._connection.execute(
-                    "INSERT INTO quota_snapshots(record_id,observed_at,provider_id,account_ref,quota_name,payload_json,payload_hash) VALUES(?,?,?,?,?,?,?)",
+                inserted = self._connection.execute(
+                    "INSERT INTO quota_snapshots(record_id,observed_at,provider_id,account_ref,quota_name,payload_json,payload_hash,source_id,quota_window,applies_to_kind,applies_to_model_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     (observation.record_id, observation.observed_at, observation.provider_id,
-                     observation.account_ref, observation.quota_name, snapshot_json, snapshot_hash),
+                     observation.account_ref, observation.quota_name, snapshot_json, snapshot_hash,
+                     observation.source_id, observation.quota_window,
+                     observation.applies_to_kind,
+                     _json(list(observation.applies_to_model_ids))),
+                )
+                self._append_quota_snapshot_change_locked(
+                    int(inserted.lastrowid),
+                    observation.observed_at,
+                    snapshot_json,
+                    snapshot_hash,
                 )
             if changed:
                 self._append_change(
@@ -1754,6 +1389,9 @@ class ActivityStore:
     def _row_to_quota_state(row: sqlite3.Row) -> QuotaState:
         values = dict(row)
         values["stale"] = bool(values["stale"])
+        values["applies_to_model_ids"] = tuple(
+            json.loads(str(values["applies_to_model_ids"]))
+        )
         return QuotaState(**values)
 
     def _quota_state_by_id_locked(self, record_id: str) -> QuotaState:
@@ -1764,16 +1402,19 @@ class ActivityStore:
 
     def quota_states(self) -> list[QuotaState]:
         with self._lock:
-            rows = self._connection.execute("SELECT * FROM quota_state ORDER BY record_id").fetchall()
-            return [self._row_to_quota_state(row) for row in rows]
+            return list(self._resource_quota_states_locked())
+
+    def _resource_quota_states_locked(self) -> tuple[QuotaState, ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM quota_state "
+            "ORDER BY provider_id,account_ref,quota_name,record_id"
+        ).fetchall()
+        return tuple(self._row_to_quota_state(row) for row in rows)
 
     def snapshot_quota_states(self) -> QuotaStateSnapshot:
         with self._read_snapshot():
-            rows = self._connection.execute(
-                "SELECT * FROM quota_state ORDER BY provider_id,account_ref,quota_name,record_id"
-            ).fetchall()
             return QuotaStateSnapshot(
-                tuple(self._row_to_quota_state(row) for row in rows),
+                self._resource_quota_states_locked(),
                 self._current_change_seq_locked(),
             )
 
@@ -1784,7 +1425,15 @@ class ActivityStore:
                 "SELECT * FROM quota_snapshots WHERE record_id=? ORDER BY observed_at,snapshot_id",
                 (record_id,),
             ).fetchall()
-            return [QuotaSnapshot(**dict(row)) for row in rows]
+            return [self._row_to_quota_snapshot(row) for row in rows]
+
+    @staticmethod
+    def _row_to_quota_snapshot(row: sqlite3.Row) -> QuotaSnapshot:
+        values = dict(row)
+        values["applies_to_model_ids"] = tuple(
+            json.loads(str(values["applies_to_model_ids"]))
+        )
+        return QuotaSnapshot(**values)
 
     def snapshot_quota_history(
         self,
@@ -1828,7 +1477,7 @@ class ActivityStore:
                 [*arguments, limit],
             ).fetchall()
             return QuotaHistorySnapshot(
-                tuple(QuotaSnapshot(**dict(row)) for row in rows),
+                tuple(self._row_to_quota_snapshot(row) for row in rows),
                 self._current_change_seq_locked(),
             )
 
@@ -1883,6 +1532,10 @@ class ActivityStore:
             ).isoformat(),
             "stale_at",
         )
+        old = self._connection.execute(
+            "SELECT * FROM source_status WHERE provider_id=? AND source_id=?",
+            (provider_id, source_id),
+        ).fetchone()
         self._connection.execute(
             "INSERT INTO source_status(provider_id,source_id,state,last_attempt_at,last_success_at,stale_at,error_code) "
             "VALUES(?,?,?,?,?,?,NULL) "
@@ -1901,6 +1554,39 @@ class ActivityStore:
                 expected,
                 expected,
             ),
+        )
+        self._publish_source_status_change_locked(provider_id, source_id, old)
+
+    def _publish_source_status_change_locked(
+        self, provider_id: str, source_id: str, old: sqlite3.Row | None
+    ) -> None:
+        current = self._connection.execute(
+            "SELECT * FROM source_status WHERE provider_id=? AND source_id=?",
+            (provider_id, source_id),
+        ).fetchone()
+        if current is None:
+            return
+        payload_json, payload_hash = self._source_status_payload(dict(current))
+        old_hash = None
+        if old is not None:
+            _, old_hash = self._source_status_payload(dict(old))
+        if old_hash == payload_hash:
+            return
+        revision = 1 if old is None else int(old["revision"]) + 1
+        self._connection.execute(
+            "UPDATE source_status SET revision=?,payload_hash=? "
+            "WHERE provider_id=? AND source_id=?",
+            (revision, payload_hash, provider_id, source_id),
+        )
+        record_id = self._source_status_record_id(provider_id, source_id)
+        self._append_change(
+            "source_status",
+            record_id,
+            revision,
+            "insert" if old is None else "update",
+            str(current["last_attempt_at"]),
+            payload_json,
+            payload_hash,
         )
 
     def record_source_failure(
@@ -1947,6 +1633,10 @@ class ActivityStore:
             else None
         )
         with self._write_transaction():
+            old = self._connection.execute(
+                "SELECT * FROM source_status WHERE provider_id=? AND source_id=?",
+                (provider_id, source_id),
+            ).fetchone()
             self._connection.execute(
                 "INSERT INTO source_status(provider_id,source_id,state,last_attempt_at,last_success_at,stale_at,error_code) "
                 "VALUES(?,?,?,?,NULL,?,?) "
@@ -1971,13 +1661,17 @@ class ActivityStore:
                     expected,
                 ),
             )
+            self._publish_source_status_change_locked(provider_id, source_id, old)
 
     def source_statuses(self) -> list[SourceStatus]:
         with self._lock:
-            rows = self._connection.execute(
-                "SELECT * FROM source_status ORDER BY provider_id,source_id"
-            ).fetchall()
-            return [SourceStatus(**dict(row)) for row in rows]
+            return list(self._resource_source_statuses_locked())
+
+    def _resource_source_statuses_locked(self) -> tuple[SourceStatus, ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM source_status ORDER BY provider_id,source_id"
+        ).fetchall()
+        return tuple(SourceStatus(**dict(row)) for row in rows)
 
     def delete_source_status(
         self, provider_id: str, source_id: str, attempted_at: datetime
@@ -1986,20 +1680,60 @@ class ActivityStore:
         _validate_id("source_id", source_id)
         attempted = _timestamp(attempted_at.isoformat(), "attempted_at")
         with self._write_transaction():
+            old = self._connection.execute(
+                "SELECT * FROM source_status "
+                "WHERE provider_id=? AND source_id=? AND last_attempt_at<=?",
+                (provider_id, source_id, attempted),
+            ).fetchone()
             self._connection.execute(
                 "DELETE FROM source_status "
                 "WHERE provider_id=? AND source_id=? AND last_attempt_at<=?",
                 (provider_id, source_id, attempted),
             )
+            if old is not None:
+                record_id = self._source_status_record_id(provider_id, source_id)
+                self._append_change(
+                    "source_status",
+                    record_id,
+                    int(old["revision"]) + 1,
+                    "delete",
+                    attempted,
+                    None,
+                    str(old["payload_hash"]),
+                )
 
     def snapshot_source_statuses(self) -> SourceStatusSnapshot:
         with self._read_snapshot():
-            rows = self._connection.execute(
-                "SELECT * FROM source_status ORDER BY provider_id,source_id"
-            ).fetchall()
             return SourceStatusSnapshot(
-                tuple(SourceStatus(**dict(row)) for row in rows),
+                self._resource_source_statuses_locked(),
                 self._current_change_seq_locked(),
+            )
+
+    def snapshot_resource_state(self, local_day: str) -> ResourceStateSnapshot:
+        _validate_day(local_day)
+        with self._read_snapshot():
+            total, count = self._connection.execute(
+                "SELECT COALESCE(SUM(total_tokens),0),COUNT(*) "
+                "FROM daily_model_usage WHERE day=?",
+                (local_day,),
+            ).fetchone()
+            covered = self._connection.execute(
+                "SELECT COUNT(*) FROM daily_coverage WHERE day=?",
+                (local_day,),
+            ).fetchone()[0]
+            quota_states = self._resource_quota_states_locked()
+            provider_instances = self._resource_provider_instances_locked()
+            source_statuses = self._resource_source_statuses_locked()
+            cursor = self._current_change_seq_locked()
+            return ResourceStateSnapshot(
+                local_day=local_day,
+                cursor=cursor,
+                today_tokens=int(total),
+                model_count=int(count),
+                covered_day_count=int(covered),
+                quota_states=quota_states,
+                provider_instances=provider_instances,
+                source_statuses=source_statuses,
             )
 
     def apply_retention(
@@ -2112,12 +1846,23 @@ class ActivityStore:
             self._connection.execute("DELETE FROM daily_coverage WHERE day<?", (day_cutoff,))
             self._connection.execute("DELETE FROM daily_costs WHERE day<?", (day_cutoff,))
             self._connection.execute("DELETE FROM daily_cost_coverage WHERE day<?", (day_cutoff,))
-            snapshot_count = int(self._connection.execute(
-                "SELECT COUNT(*) FROM quota_snapshots WHERE observed_at<?", (normalized_snapshot_cutoff,)
-            ).fetchone()[0])
+            snapshots = self._connection.execute(
+                "SELECT snapshot_id,payload_hash FROM quota_snapshots WHERE observed_at<?",
+                (normalized_snapshot_cutoff,),
+            ).fetchall()
+            for row in snapshots:
+                self._append_change(
+                    "quota_snapshot",
+                    f"quota-snapshot:{int(row['snapshot_id'])}",
+                    2,
+                    "delete",
+                    changed_at,
+                    None,
+                    str(row["payload_hash"]),
+                )
             self._connection.execute("DELETE FROM quota_snapshots WHERE observed_at<?", (normalized_snapshot_cutoff,))
             return PurgeResult(
-                len(daily), len(coverages), snapshot_count,
+                len(daily), len(coverages), len(snapshots),
                 len(costs), len(cost_coverages),
             )
 

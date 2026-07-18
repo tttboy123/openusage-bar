@@ -64,16 +64,20 @@ struct HeatmapTooltipText: Sendable, Hashable {
     init(_ day: HeatmapDayDetail) {
         title = day.activity.day.rawValue
         value = switch day.activity.state {
-        case .missing: "No collection data"
-        case .partial: "\(TokenText.compact(day.activity.observedTokens)) observed Tokens"
-        case .coveredZero: "0 Tokens"
-        case .coveredActive: "\(TokenText.compact(day.activity.totalTokens ?? 0)) Tokens"
+        case .missing: AppLocalization.text("No collection data")
+        case .partial: AppLocalization.format(
+            "%@ observed Tokens", TokenText.compact(day.activity.observedTokens)
+        )
+        case .coveredZero: AppLocalization.format("%@ Tokens", "0")
+        case .coveredActive: AppLocalization.format(
+            "%@ Tokens", TokenText.compact(day.activity.totalTokens ?? 0)
+        )
         }
         metadata = [
             day.quality.displayName,
-            day.activity.state == .partial ? "Partial" : nil,
-            day.isStale ? "Stale" : nil,
-            day.lastCollectionAt.map { "Collected \($0)" },
+            day.activity.state == .partial ? AppLocalization.text("Partial") : nil,
+            day.isStale ? AppLocalization.text("Stale") : nil,
+            day.lastCollectionAt.map { AppLocalization.format("Collected %@", DateText.display($0)) },
         ].compactMap { $0 }.joined(separator: " · ")
         accessibilityValue = [title, value, metadata].filter { !$0.isEmpty }.joined(separator: ", ")
     }
@@ -82,15 +86,38 @@ struct HeatmapTooltipText: Sendable, Hashable {
 enum DetailsCopy {
     static let sidebar = [
         "Activity", "Capacity", "API Spend", "Local Tools",
-        "Providers", "Data Health",
+        "Providers", "Data Health", "Automation",
     ]
     static let visibleText = sidebar + [
         "Usage Details", "Refresh", "All Providers", "All Models", "Total Tokens",
+        "Input Tokens", "Output Tokens", "Cache Read", "Cache Write",
         "Peak Tokens", "Active Days", "Current Streak", "Longest Streak",
         "Daily Token Activity", "Daily Model Trend", "Subscription Capacity",
         "Manage Credentials", "Retry", "Missing", "Covered zero",
         "Lower", "Higher", "Exact", "Estimated", "Partial", "Partial history", "Stale",
     ]
+}
+
+enum ActivityRouteLoadingPolicy {
+    static func loadsLedgerOnAppear(_ route: UsageDetailsRoute) -> Bool {
+        route != .automation
+    }
+
+    static func loadsLedgerAfterSelection(
+        from current: UsageDetailsRoute, to selected: UsageDetailsRoute
+    ) -> Bool {
+        current == .automation && selected != .automation
+    }
+}
+
+enum HeatmapInspectionSelection {
+    static func visible(
+        hovered: HeatmapDayDetail?, selected: LocalDay?, in days: [HeatmapDayDetail]
+    ) -> HeatmapDayDetail? {
+        hovered ?? selected.flatMap { value in
+            days.first { $0.activity.day == value }
+        }
+    }
 }
 
 enum ProviderBrowseCategory: String, CaseIterable, Sendable, Hashable, Identifiable {
@@ -189,11 +216,12 @@ struct ProviderCenterItem: Identifiable, Sendable, Hashable {
     }
     var helpText: String {
         if let issue = connectionIssues.first ?? secondaryIssues.first { return issue.message }
-        return switch status {
+        let key = switch status {
         case .available: "Available"
         case .connected: "Connected"
         case .attention: "Needs attention"
         }
+        return AppLocalization.text(key)
     }
 }
 
@@ -212,6 +240,11 @@ enum ProviderCenterPresentation {
                     || item.descriptor.displayName.localizedCaseInsensitiveContains(needle)
                     || item.descriptor.familyID.localizedCaseInsensitiveContains(needle))
         }
+    }
+
+    static func selection(current: String?, visibleIDs: [String]) -> String? {
+        guard let current, visibleIDs.contains(current) else { return visibleIDs.first }
+        return current
     }
 }
 
@@ -255,6 +288,7 @@ struct ProviderConnectionSummary: Sendable, Hashable, Identifiable {
     let displayName: String
     let kind: String
     let site: String?
+    let configuration: ProviderConnectionPublicConfiguration
 
     var id: String { providerID }
     var isStepPlan: Bool { kind == "step_plan" && familyID == "step_plan" }
@@ -288,11 +322,46 @@ struct ProviderConnectionSummaryStore {
         let type: String
         let familyID: String?
         let site: String?
+        let endpoint: String?
+        let headerName: String?
+        let authPrefix: String?
+        let primaryPath: String?
+        let remainingPercentPath: String?
+        let resetPath: String?
+        let detailPath: String?
+        let itemsPath: String?
+        let datePath: String?
+        let modelPath: String?
+        let inputTokensPath: String?
+        let outputTokensPath: String?
+        let cacheReadTokensPath: String?
+        let cacheCreationTokensPath: String?
+        let reasoningTokensPath: String?
+        let totalTokensPath: String?
+        let sinceParameter: String?
+        let untilParameter: String?
 
         enum CodingKeys: String, CodingKey {
-            case name, type, site
+            case name, type, site, endpoint
             case providerID = "provider_id"
             case familyID = "family_id"
+            case headerName = "header_name"
+            case authPrefix = "auth_prefix"
+            case primaryPath = "primary_path"
+            case remainingPercentPath = "remaining_percent_path"
+            case resetPath = "reset_path"
+            case detailPath = "detail_path"
+            case itemsPath = "items_path"
+            case datePath = "date_path"
+            case modelPath = "model_path"
+            case inputTokensPath = "input_tokens_path"
+            case outputTokensPath = "output_tokens_path"
+            case cacheReadTokensPath = "cache_read_tokens_path"
+            case cacheCreationTokensPath = "cache_creation_tokens_path"
+            case reasoningTokensPath = "reasoning_tokens_path"
+            case totalTokensPath = "total_tokens_path"
+            case sinceParameter = "since_parameter"
+            case untilParameter = "until_parameter"
         }
     }
 
@@ -310,7 +379,7 @@ struct ProviderConnectionSummaryStore {
             throw ProviderConnectionSummaryError.invalidConfiguration
         }
         let envelope = try JSONDecoder().decode(Envelope.self, from: data)
-        guard envelope.version == 1 else {
+        guard [1, 2].contains(envelope.version) else {
             throw ProviderConnectionSummaryError.invalidConfiguration
         }
         return try envelope.providers.map { row in
@@ -322,7 +391,7 @@ struct ProviderConnectionSummaryStore {
             case "step_plan": "step_plan"
             case "minimax": "minimax"
             case "openai_organization": "openai"
-            case "daily_usage_feed": row.familyID ?? row.providerID
+            case "daily_usage_feed", "daily_cost_feed": row.familyID ?? row.providerID
             default: row.providerID
             }
             guard Self.isStableID(familyID) else {
@@ -336,7 +405,22 @@ struct ProviderConnectionSummaryStore {
                 familyID: familyID,
                 displayName: row.name,
                 kind: row.type,
-                site: row.site
+                site: row.site,
+                configuration: .init(
+                    endpoint: row.endpoint, headerName: row.headerName,
+                    authPrefix: row.authPrefix, primaryPath: row.primaryPath,
+                    remainingPercentPath: row.remainingPercentPath,
+                    resetPath: row.resetPath, detailPath: row.detailPath,
+                    itemsPath: row.itemsPath, datePath: row.datePath,
+                    modelPath: row.modelPath, inputTokensPath: row.inputTokensPath,
+                    outputTokensPath: row.outputTokensPath,
+                    cacheReadTokensPath: row.cacheReadTokensPath,
+                    cacheCreationTokensPath: row.cacheCreationTokensPath,
+                    reasoningTokensPath: row.reasoningTokensPath,
+                    totalTokensPath: row.totalTokensPath,
+                    sinceParameter: row.sinceParameter,
+                    untilParameter: row.untilParameter
+                )
             )
         }
     }
@@ -491,13 +575,15 @@ struct ProviderMutationResponse: Decodable, Sendable, Hashable {
 }
 
 enum ProviderMutationFailure: Error, Sendable, Hashable {
-    case unavailable, couldNotLaunch, invalidResponse
+    case unavailable, couldNotLaunch, timedOut, responseTooLarge, invalidResponse
 
     var message: String {
         switch self {
-        case .unavailable: "Provider editor is unavailable. Reinstall OpenUsage Bar."
-        case .couldNotLaunch: "Provider connection could not be updated."
-        case .invalidResponse: "Provider editor returned an invalid response."
+        case .unavailable: AppLocalization.text("Provider editor is unavailable. Reinstall OpenUsage Bar.")
+        case .couldNotLaunch: AppLocalization.text("Provider connection could not be updated.")
+        case .timedOut: AppLocalization.text("Provider editor timed out.")
+        case .responseTooLarge: AppLocalization.text("Provider editor returned too much data.")
+        case .invalidResponse: AppLocalization.text("Provider editor returned an invalid response.")
         }
     }
 }
@@ -507,36 +593,14 @@ enum ProviderMutationService {
         _ request: ProviderEditRequest,
         command: ProviderMutationCommand
     ) async -> Result<ProviderMutationResponse, ProviderMutationFailure> {
-        await Task.detached(priority: .userInitiated) {
-            do {
-                let requestData = try JSONEncoder().encode(request)
-                let process = Process()
-                let input = Pipe()
-                let output = Pipe()
-                process.executableURL = command.executableURL
-                process.arguments = command.arguments
-                process.standardInput = input
-                process.standardOutput = output
-                process.standardError = FileHandle.nullDevice
-                try process.run()
-                input.fileHandleForWriting.write(requestData)
-                try input.fileHandleForWriting.close()
-                let responseData = output.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                guard process.terminationStatus == 0 else {
-                    return .failure(.couldNotLaunch)
-                }
-                let response = try JSONDecoder().decode(
-                    ProviderMutationResponse.self, from: responseData
-                )
-                guard response.version == 1 else { return .failure(.invalidResponse) }
-                return .success(response)
-            } catch is DecodingError {
-                return .failure(.invalidResponse)
-            } catch {
-                return .failure(.couldNotLaunch)
-            }
-        }.value
+        await ProviderMutationClient().submit(request, command: command)
+    }
+
+    static func submit(
+        _ request: ProviderMutationRequestV2,
+        command: ProviderMutationCommand
+    ) async -> Result<ProviderMutationResponse, ProviderMutationFailure> {
+        await ProviderMutationClient().submit(request, command: command)
     }
 }
 
@@ -982,21 +1046,24 @@ struct QuotaHistoryTooltipText: Sendable, Hashable {
             $0.formatted(date: .abbreviated, time: .shortened)
         }
     ) -> Self {
-        let remaining = percentage(point.remainingRatio) + " remaining"
+        let remaining = AppLocalization.format(
+            "%@ remaining", percentage(point.remainingRatio)
+        )
         let observedValue = formatDate(point.observedAt)
         let resetValue = point.resetsAt.map(formatDate)
-        let status = point.stale ? "Stale" : normalState(point.state)
+        let status = point.stale ? AppLocalization.text("Stale") : normalState(point.state)
         let statusSymbol = status.map {
-            $0 == "Stale" ? "clock.badge.exclamationmark" : "exclamationmark.triangle"
+            $0 == AppLocalization.text("Stale")
+                ? "clock.badge.exclamationmark" : "exclamationmark.triangle"
         }
         let details = [
-            remaining.lowercased(), "observed \(observedValue)",
-            resetValue.map { "resets \($0)" }, status?.lowercased(),
+            remaining.lowercased(), AppLocalization.format("observed %@", observedValue),
+            resetValue.map { AppLocalization.format("resets %@", $0) }, status?.lowercased(),
         ].compactMap { $0 }.joined(separator: ", ")
         return Self(
             title: point.seriesLabel, remaining: remaining,
-            observed: "Observed \(observedValue)",
-            reset: resetValue.map { "Resets \($0)" }, status: status,
+            observed: AppLocalization.format("Observed %@", observedValue),
+            reset: resetValue.map { AppLocalization.format("Resets %@", $0) }, status: status,
             statusSymbol: statusSymbol,
             accessibilityValue: "\(point.seriesLabel), \(details)",
             detailAccessibilityValue: details
@@ -1014,8 +1081,10 @@ struct QuotaHistoryTooltipText: Sendable, Hashable {
         guard normalized != "ok", normalized != "available" else { return nil }
         guard normalized.range(
             of: #"^[a-z0-9_]{1,40}$"#, options: .regularExpression
-        ) != nil else { return "Unavailable" }
-        return normalized.replacingOccurrences(of: "_", with: " ").capitalized
+        ) != nil else { return AppLocalization.text("Unavailable") }
+        return AppLocalization.text(
+            normalized.replacingOccurrences(of: "_", with: " ").capitalized
+        )
     }
 }
 
@@ -1257,7 +1326,8 @@ struct QuotaHistoryTimeDomain: Sendable, Hashable {
 
 enum QuotaHistoryLegendText {
     static func accessibilityValue(percentage: String, stale: Bool) -> String {
-        "\(percentage) remaining" + (stale ? ", stale" : "")
+        AppLocalization.format("%@ remaining", percentage)
+            + (stale ? ", " + AppLocalization.text("stale") : "")
     }
 }
 

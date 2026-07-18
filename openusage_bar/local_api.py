@@ -37,6 +37,12 @@ from .provider_catalog import catalog as default_catalog
 from .query import MAX_LIMIT, SCHEMA_VERSION, QueryService, to_wire
 
 
+LOCAL_API_SCHEMA = json.loads(
+    (Path(__file__).with_name("resources") / "local-api-v1.schema.json")
+    .read_text(encoding="utf-8")
+)
+
+
 MAX_REQUEST_LINE = 8_192
 MAX_BODY_BYTES = 0
 MAX_QUERY_BYTES = 4_096
@@ -252,7 +258,9 @@ class LocalAPIRouter:
     """Pure request router with injected query, clock, registry, and verifier."""
 
     ROUTES = (
-        "/v1/health", "/v1/schema", "/v1/summary", "/v1/capabilities",
+        "/v1/health", "/v1/schema", "/v1/schema.json", "/v1/summary",
+        "/v1/snapshot",
+        "/v1/capabilities",
         "/v1/providers", "/v1/capacity", "/v1/activity/daily",
         "/v1/costs/daily",
         "/v1/quotas/history",
@@ -390,7 +398,9 @@ class LocalAPIRouter:
         allowed = {
             "/v1/health": (),
             "/v1/schema": (),
+            "/v1/schema.json": (),
             "/v1/summary": ("today",),
+            "/v1/snapshot": ("today",),
             "/v1/capabilities": (),
             "/v1/providers": ("providerIds",),
             "/v1/capacity": ("limit",),
@@ -415,8 +425,15 @@ class LocalAPIRouter:
         try:
             if route == "/v1/summary":
                 now = self.clock()
-                selected = _day(params["today"], "today") if "today" in params else now.astimezone(timezone.utc).date()
+                selected = _day(params["today"], "today") if "today" in params else now.astimezone().date()
                 return to_wire(self.query.summary(selected))
+            if route == "/v1/snapshot":
+                now = self.clock()
+                selected = (
+                    _day(params["today"], "today")
+                    if "today" in params else now.astimezone().date()
+                )
+                return to_wire(self.query.resource_snapshot(selected))
             if route == "/v1/capacity":
                 limit = _integer(params["limit"], "limit", minimum=1, maximum=MAX_LIMIT) if "limit" in params else None
                 return to_wire(self.query.capacity(limit))
@@ -483,6 +500,13 @@ class LocalAPIRouter:
                     "generatedAt": status["generatedAt"],
                     "routes": list(self.ROUTES),
                     "errorShape": {"error": {"code": "string", "message": "string"}},
+                }
+            if route == "/v1/schema.json":
+                return {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "dataRevision": status["dataRevision"],
+                    "generatedAt": status["generatedAt"],
+                    "schema": LOCAL_API_SCHEMA,
                 }
             if route == "/v1/capabilities":
                 descriptors = self.provider_registry.descriptors
@@ -780,6 +804,10 @@ class _BoundedThreads:
         for _, timer in active:
             if timer is not threading.current_thread():
                 timer.join()
+        with self._deadline_lock:
+            for request, timer in active:
+                if self._deadline_timers.get(request) is timer:
+                    self._deadline_timers.pop(request, None)
 
     def server_close(self) -> None:
         self._abort_active_requests()

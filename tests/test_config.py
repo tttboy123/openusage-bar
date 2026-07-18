@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from openusage_bar.config import (
+    DailyCostFeedConfig,
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
@@ -37,6 +38,79 @@ def daily_feed_config(**overrides):
 
 
 class ProviderConfigTests(unittest.TestCase):
+    def test_v1_custom_feeds_migrate_without_changing_identity_or_mappings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "providers.json"
+            legacy = {
+                "version": 1,
+                "providers": [
+                    {
+                        "type": "generic", "provider_id": "quota-work",
+                        "name": "Quota Work", "endpoint": "https://api.example.com/quota",
+                        "header_name": "Authorization", "auth_prefix": "Bearer",
+                        "primary_path": "data.remaining",
+                        "remaining_percent_path": "data.percent",
+                        "reset_path": "data.reset", "detail_path": None,
+                    },
+                    {
+                        "type": "daily_usage_feed", "provider_id": "usage-work",
+                        "name": "Usage Work", "family_id": "zai",
+                        "endpoint": "https://api.example.com/usage", "method": "GET",
+                        "header_name": "Authorization", "auth_prefix": "Bearer",
+                        "items_path": "data.items", "date_path": "day",
+                        "model_path": "model", "input_tokens_path": "input",
+                        "output_tokens_path": "output", "total_tokens_path": "total",
+                        "since_parameter": "from", "until_parameter": "to",
+                    },
+                ],
+            }
+            path.write_text(json.dumps(legacy))
+
+            loaded = ProviderConfigStore(path).load()
+            ProviderConfigStore(path).save(loaded)
+            reloaded = ProviderConfigStore(path).load()
+
+            self.assertEqual(reloaded, loaded)
+            self.assertEqual(json.loads(path.read_text())["version"], 2)
+            self.assertEqual(
+                [(item.provider_id, item.endpoint) for item in reloaded],
+                [("quota-work", "https://api.example.com/quota"),
+                 ("usage-work", "https://api.example.com/usage")],
+            )
+
+    def test_generic_quota_declaration_is_explicit_and_consistent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProviderConfigStore(Path(directory) / "providers.json")
+            base = GenericProviderConfig(
+                provider_id="quota-work", name="Quota Work", family_id="zai",
+                endpoint="https://api.example.com/quota",
+                header_name="Authorization", auth_prefix="Bearer",
+                primary_path="data.remaining", remaining_percent_path="data.percent",
+                reset_path="data.reset", quota_window="weekly",
+                quota_name="Weekly Plan", unit="percent",
+            )
+            store.save([base])
+            self.assertEqual(store.load(), [base])
+            for invalid in (
+                GenericProviderConfig(**(base.__dict__ | {"unit": "credits"})),
+                GenericProviderConfig(**(base.__dict__ | {"quota_window": None})),
+            ):
+                with self.assertRaises(ValueError):
+                    store.save([invalid])
+
+    def test_daily_cost_feed_requires_bounded_monetary_mappings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProviderConfigStore(Path(directory) / "providers.json")
+            config = DailyCostFeedConfig(
+                provider_id="cost-work", name="Cost Work", family_id="openai",
+                endpoint="https://api.example.com/costs", method="GET",
+                header_name="Authorization", auth_prefix="Bearer",
+                items_path="data.items", date_path="day",
+                amount_path="amount", currency_path="currency",
+                since_parameter="from", until_parameter="to",
+            )
+            store.save([config])
+            self.assertEqual(store.load(), [config])
     def test_daily_feed_round_trip_is_secret_free(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "providers.json"
@@ -135,23 +209,49 @@ class ProviderConfigTests(unittest.TestCase):
                 ["demo", "minimax-main", "step-plan-main", "openai"],
             )
 
-    def test_openai_organization_config_is_secret_free_and_uses_canonical_id(self):
+    def test_openai_organization_connections_use_independent_stable_ids(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "providers.json"
             store = ProviderConfigStore(path)
-            store.save([OpenAIOrganizationConfig("openai", "OpenAI Org")])
+            configs = [
+                OpenAIOrganizationConfig(
+                    "openai-personal", "OpenAI Personal", account_ref="personal"
+                ),
+                OpenAIOrganizationConfig(
+                    "openai-work", "OpenAI Work", account_ref="work"
+                ),
+            ]
+            store.save(configs)
 
             payload = json.loads(path.read_text())
+            self.assertEqual(store.load(), configs)
             self.assertEqual(
-                payload["providers"],
-                [{"name": "OpenAI Org", "provider_id": "openai", "type": "openai_organization"}],
+                [item["provider_id"] for item in payload["providers"]],
+                ["openai-personal", "openai-work"],
             )
             self.assertEqual(
-                store.load(), [OpenAIOrganizationConfig("openai", "OpenAI Org")]
+                [item["account_ref"] for item in payload["providers"]],
+                ["personal", "work"],
             )
 
-            with self.assertRaisesRegex(ValueError, "canonical provider ID"):
-                store.save([OpenAIOrganizationConfig("openai-work", "OpenAI Org")])
+    def test_account_ref_is_optional_opaque_and_not_a_display_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProviderConfigStore(Path(directory) / "providers.json")
+            store.save([MiniMaxConfig("minimax-main", "MiniMax Main")])
+
+            for account_ref in (
+                "owner@example.com",
+                "work account",
+                "organizations/work",
+                "OpenAI Work",
+            ):
+                with self.subTest(account_ref=account_ref):
+                    with self.assertRaises(ValueError):
+                        store.save([
+                            OpenAIOrganizationConfig(
+                                "openai-work", "OpenAI Work", account_ref=account_ref
+                            )
+                        ])
 
     def test_rejects_duplicate_provider_ids(self):
         with tempfile.TemporaryDirectory() as directory:

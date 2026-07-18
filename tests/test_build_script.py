@@ -15,15 +15,21 @@ class BuildScriptContractTests(unittest.TestCase):
 
         self.assertIn('python3', source)
         self.assertIn('-m venv "$VENV"', source)
-        self.assertIn('pip==26.1.2', source)
-        self.assertIn('--no-deps --requirement "$REQUIREMENTS"', source)
+        self.assertIn('pip==26.1.2', requirements)
+        self.assertIn(
+            '--no-deps --require-hashes --requirement "$REQUIREMENTS"', source
+        )
         self.assertIn('pip check', source)
         self.assertIn('release_secret_scan.py', source)
         self.assertNotIn('curl ', source)
         self.assertNotIn('/Users/', source)
         for line in requirements.splitlines():
             if line.strip():
-                self.assertRegex(line, r"^[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9_.-]*$")
+                self.assertRegex(
+                    line,
+                    r"^[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9_.-]* "
+                    r"--hash=sha256:[0-9a-f]{64}$",
+                )
 
     def test_build_uses_local_native_toolchain_and_verifies_release(self):
         source = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
@@ -46,14 +52,35 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("llvm-cov report", source)
         self.assertIn("SWIFT_MIN_LINE_COVERAGE=80", source)
         self.assertIn("swift_product_line_coverage", source)
+        self.assertIn("SWIFT_COVERAGE_IGNORE", source)
+        self.assertIn("[^/]*Views", source)
+        self.assertIn('ignore-filename-regex="$SWIFT_COVERAGE_IGNORE"', source)
         self.assertIn("scripts/privacy_scan.py", source)
         self.assertIn("scripts/release_secret_scan.py", source)
+        self.assertIn("Delete :PythonInfoDict:PythonExecutable", source)
+        self.assertIn('rm -rf "$SETTINGS_APP/Contents/Resources/include"', source)
+        self.assertIn("-name 'config-*darwin*'", source)
+        self.assertIn('find "$APP" -type f -name Makefile -delete', source)
+        self.assertIn("-name '*.dist-info'", source)
+        self.assertIn("-name '*.egg-info'", source)
+        self.assertIn("-name 'test_*.py'", source)
+        self.assertIn("-name '*_test.py'", source)
         self.assertIn("provider-catalog.v1.json", source)
         self.assertIn("GeneratedProviderCatalog.swift", source)
+        self.assertIn("generate_local_api_schema.py --output", source)
+        self.assertIn("generate_swift_activity_schema.py --output", source)
+        self.assertIn("GeneratedActivitySchema.swift", source)
+        self.assertIn("local-api-v1.schema.json", source)
         self.assertIn("python_coverage_gate.py", source)
         self.assertIn("--module unittest discover -s tests -v", source)
-        self.assertIn("openusage_bar.bounded_process", source)
-        self.assertIn("openusage_bar.openusage_catalog", source)
+        self.assertIn('--package-root "$ROOT/openusage_bar"', source)
+        self.assertNotIn("PYTHON_TOUCHED_MODULES", source)
+        self.assertIn('actual=${SWIFT_LINE_COVERAGE}%', source)
+
+    def test_ci_and_release_pin_the_same_xcode_toolchain_as_local_release_validation(self):
+        for name in ("ci.yml", "release.yml"):
+            workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+            self.assertIn("DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer", workflow)
 
     def test_build_runs_a_failure_propagating_python_suite_before_trace(self):
         source = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
@@ -139,13 +166,15 @@ class BuildScriptContractTests(unittest.TestCase):
 
     def test_install_is_backup_first_atomic_and_has_rollback(self):
         source = (ROOT / "scripts/install_app.sh").read_text(encoding="utf-8")
+        transaction = (ROOT / "scripts/install_app_transaction.sh").read_text(encoding="utf-8")
 
-        self.assertIn("deployed-backups", source)
+        self.assertIn('BACKUP_ROOT="$STATE_DIR/backups/app"', source)
+        self.assertIn("create_complete_app_backup", source)
         self.assertIn("ditto", source)
         self.assertIn(".new-$$", source)
         self.assertIn("rollback", source)
         self.assertIn("codesign --verify --deep --strict", source)
-        self.assertIn("launchctl bootstrap", source)
+        self.assertIn('"$LAUNCHCTL" bootstrap', source)
         self.assertIn('ATOMIC_SWAP="$SOURCE/Contents/Resources/atomic-swap"', source)
         self.assertNotIn('mv "$TARGET" "$PREVIOUS"', source)
         self.assertIn('install_bundle_transaction "$ATOMIC_SWAP" "$TARGET" "$NEW"', source)
@@ -168,28 +197,36 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn('mv "$target" "$failed"', transaction)
         self.assertIn('CFBundleIdentifier', transaction)
         self.assertIn('OpenUsage\\ Bar.app.previous-', transaction)
-        self.assertIn('curl --fail --silent --show-error --unix-socket "$SOCKET"', source)
-        self.assertIn("/v1/health", source)
+        self.assertIn('HEALTH_PROBE=${OPENUSAGE_HEALTH_PROBE:-}', source)
+        self.assertIn('verify_local_api_contract "$SOCKET" "$HEALTH_PROBE"', source)
         self.assertIn("wait_for_health", source)
         self.assertIn("wait_for_socket_release", source)
-        self.assertIn('[[ -S "$SOCKET" ]]', source)
+        self.assertIn('/v1/$route', transaction)
+        self.assertIn('plutil -extract schemaVersion', transaction)
         self.assertIn("/usr/libexec/PlistBuddy", source)
         self.assertNotIn("plutil -replace ProgramArguments.0", source)
         self.assertIn("rollback 1", source)
 
     def test_public_install_and_release_scripts_are_relocatable_and_data_safe(self):
         install = (ROOT / "scripts/install_app.sh").read_text(encoding="utf-8")
+        location = (ROOT / "scripts/install_location.sh").read_text(encoding="utf-8")
         uninstall = (ROOT / "scripts/uninstall_app.sh").read_text(encoding="utf-8")
         package = (ROOT / "scripts/package_release.sh").read_text(encoding="utf-8")
 
-        self.assertIn("OPENUSAGE_INSTALL_DIR", install)
+        self.assertIn("OPENUSAGE_INSTALL_DIR", location)
+        self.assertIn("resolve_openusage_install_dir", install)
+        self.assertIn("reveal_openusage_install", install)
         self.assertIn("ProgramArguments.0", install)
         self.assertIn('cleanup_legacy_previous_bundles "$INSTALL_DIR"', install)
         self.assertIn("local data and Keychain items were preserved", uninstall)
         self.assertIn("--purge-data", uninstall)
         self.assertNotIn("security delete-generic-password", uninstall)
         self.assertIn("scripts/install_app.sh", package)
+        self.assertIn("scripts/install_location.sh", package)
         self.assertIn("scripts/uninstall_app.sh", package)
+        self.assertIn("scripts/rollback_app.sh", package)
+        self.assertIn("scripts/export_diagnostics.py", package)
+        self.assertIn("docs/canary.md", package)
         self.assertIn("THIRD_PARTY_NOTICES.md", package)
         self.assertIn("shasum -a 256", package)
 

@@ -44,9 +44,9 @@ public struct ProviderCapabilityPresentation: Sendable, Hashable {
         if !supported.isEmpty {
             summary = supported.map(\.title).joined(separator: " · ")
         } else if items.allSatisfy({ $0.state == .unknown }) {
-            summary = "Capabilities not yet classified"
+            summary = AppLocalization.text("Capabilities not yet classified")
         } else {
-            summary = "No supported capabilities"
+            summary = AppLocalization.text("No supported capabilities")
         }
         groups = [
             Self.group(.supported, items: items),
@@ -64,23 +64,23 @@ public struct ProviderCapabilityPresentation: Sendable, Hashable {
                 state: profile.quotaWindows.state
             ),
             ProviderCapabilityItem(
-                id: .tokenHistory, title: "Token history", state: profile.tokenHistory
+                id: .tokenHistory, title: AppLocalization.text("Token history"), state: profile.tokenHistory
             ),
             ProviderCapabilityItem(
-                id: .modelBreakdown, title: "Model breakdown", state: profile.modelBreakdown
+                id: .modelBreakdown, title: AppLocalization.text("Model breakdown"), state: profile.modelBreakdown
             ),
             ProviderCapabilityItem(
-                id: .resetDates, title: "Reset dates", state: profile.resetTimestamps
+                id: .resetDates, title: AppLocalization.text("Reset dates"), state: profile.resetTimestamps
             ),
-            ProviderCapabilityItem(id: .billing, title: "Billing", state: profile.billing),
-            ProviderCapabilityItem(id: .credits, title: "Credits", state: profile.credits),
-            ProviderCapabilityItem(id: .balance, title: "Balance", state: profile.balance),
-            ProviderCapabilityItem(id: .cost, title: "Cost", state: profile.cost),
+            ProviderCapabilityItem(id: .billing, title: AppLocalization.text("Billing"), state: profile.billing),
+            ProviderCapabilityItem(id: .credits, title: AppLocalization.text("Credits"), state: profile.credits),
+            ProviderCapabilityItem(id: .balance, title: AppLocalization.text("Balance"), state: profile.balance),
+            ProviderCapabilityItem(id: .cost, title: AppLocalization.text("Cost"), state: profile.cost),
             ProviderCapabilityItem(
-                id: .rateLimits, title: "Rate limits", state: profile.rateLimits
+                id: .rateLimits, title: AppLocalization.text("Rate limits"), state: profile.rateLimits
             ),
             ProviderCapabilityItem(
-                id: .serviceStatus, title: "Service status", state: profile.serviceStatus
+                id: .serviceStatus, title: AppLocalization.text("Service status"), state: profile.serviceStatus
             ),
         ]
     }
@@ -88,33 +88,34 @@ public struct ProviderCapabilityPresentation: Sendable, Hashable {
     private static func group(
         _ state: ProviderCapabilityState, items: [ProviderCapabilityItem]
     ) -> ProviderCapabilityGroup {
-        let title = switch state {
+        let key = switch state {
         case .supported: "Supported"
         case .unsupported: "Unsupported"
         case .unknown: "Unknown"
         }
+        let title = AppLocalization.text(key)
         return ProviderCapabilityGroup(
             state: state, title: title, items: items.filter { $0.state == state }
         )
     }
 
     private static func quotaTitle(_ capability: ProviderQuotaWindowCapability) -> String {
-        guard capability.state == .supported else { return "Quota windows" }
+        guard capability.state == .supported else { return AppLocalization.text("Quota windows") }
         let values = ProviderQuotaWindow.allCases.compactMap { window in
             capability.values.contains(window) ? quotaWindowTitle(window) : nil
         }
-        let raw = values.joined(separator: " + ") + " quota"
-        return raw.prefix(1).uppercased() + raw.dropFirst()
+        let localized = AppLocalization.format("%@ quota", values.joined(separator: " + "))
+        return localized.prefix(1).uppercased() + localized.dropFirst()
     }
 
     private static func quotaWindowTitle(_ window: ProviderQuotaWindow) -> String {
         switch window {
-        case .session: "session"
+        case .session: AppLocalization.text("session")
         case .fiveHour: "5-hour"
-        case .weekly: "weekly"
-        case .monthly: "monthly"
-        case .billingCycle: "billing-cycle"
-        case .modelSpecific: "model-specific"
+        case .weekly: AppLocalization.text("weekly")
+        case .monthly: AppLocalization.text("monthly")
+        case .billingCycle: AppLocalization.text("billing-cycle")
+        case .modelSpecific: AppLocalization.text("model-specific")
         }
     }
 }
@@ -137,33 +138,33 @@ public struct ProviderSourceStrategyPresentation: Sendable, Hashable {
     private static func kindTitle(_ kind: String) -> String {
         switch kind {
         case "openusage": "OpenUsage"
-        case "builtin_api": "Built-in API"
-        case "official_api": "Official API"
+        case "builtin_api": AppLocalization.text("Built-in API")
+        case "official_api": AppLocalization.text("Official API")
         case "cli": "CLI"
-        case "local_log": "Local log"
-        case "local_database": "Local database"
-        case "keychain": "Keychain"
-        case "browser_session": "Browser session"
-        default: "Provider source"
+        case "local_log": AppLocalization.text("Local log")
+        case "local_database": AppLocalization.text("Local database")
+        case "keychain": AppLocalization.text("Keychain")
+        case "browser_session": AppLocalization.text("Browser session")
+        default: AppLocalization.text("Provider source")
         }
     }
 
     private static func stabilityTitle(_ stability: ProviderSourceStability) -> String {
         switch stability {
-        case .stable: "Stable"
-        case .experimental: "Experimental"
-        case .pinned: "Pinned"
-        case .opaque: "Opaque"
+        case .stable: AppLocalization.text("Stable")
+        case .experimental: AppLocalization.text("Experimental")
+        case .pinned: AppLocalization.text("Pinned")
+        case .opaque: AppLocalization.text("Opaque")
         }
     }
 
     private static func provenanceTitle(_ provenance: ProviderSourceProvenance) -> String {
         switch provenance {
-        case .openUsageUpstream: "OpenUsage upstream"
-        case .openUsageBarBuiltIn: "OpenUsage Bar built-in"
-        case .providerOfficial: "Provider official"
-        case .providerLocal: "Provider local"
-        case .userSession: "User session"
+        case .openUsageUpstream: AppLocalization.text("OpenUsage upstream")
+        case .openUsageBarBuiltIn: AppLocalization.text("OpenUsage Bar built-in")
+        case .providerOfficial: AppLocalization.text("Provider official")
+        case .providerLocal: AppLocalization.text("Provider local")
+        case .userSession: AppLocalization.text("User session")
         }
     }
 
@@ -199,13 +200,13 @@ public struct ProviderRuntimeSourcePresentation: Sendable, Hashable {
         }
         if runtimeSourceID == "openusage.daily" {
             return make(
-                roleTitle: "Token history",
+                roleTitle: AppLocalization.text("Token history"),
                 sources: descriptor.sourceCapabilities.filter { $0.sourceKind == "openusage" }
             )
         }
         if runtimeSourceID == "current.quota" {
             return make(
-                roleTitle: "Current quota",
+                roleTitle: AppLocalization.text("Current quota"),
                 sources: descriptor.sourceCapabilities.filter { $0.sourceKind != "openusage" }
             )
         }
@@ -227,6 +228,7 @@ public struct ProviderRuntimeSourcePresentation: Sendable, Hashable {
     }
 
     private static let uncatalogued = Self(
-        roleTitle: "Uncatalogued source", strategies: [], platforms: "Unavailable"
+        roleTitle: AppLocalization.text("Uncatalogued source"), strategies: [],
+        platforms: AppLocalization.text("Unavailable")
     )
 }

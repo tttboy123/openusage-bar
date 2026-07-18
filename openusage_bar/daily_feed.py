@@ -15,7 +15,7 @@ from .keychain import MacOSKeychain
 from .model_ids import InvalidModelID, canonical_model_id
 from .models import Category, ProviderCard, ProviderStatus
 from .network import AuthenticationRequired, BoundedHTTPClient, NetworkError, RateLimited
-from .openai_organization import ImportFailure, UsageImportResult, UsageImportSuccess
+from .providers.contracts import ImportFailure, UsageImportResult, UsageImportSuccess
 from .provider_catalog import catalog
 
 
@@ -54,6 +54,7 @@ class DailyUsageFeedCardAdapter:
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.config = config
+        self.account_ref = config.account_ref
         self.keychain = keychain
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
@@ -79,6 +80,7 @@ class DailyUsageFeedCardAdapter:
             family_id=self.config.family_id,
             credential_source="api_key",
             source_kind="generic_https",
+            account_ref=self.config.account_ref,
         )
 
 
@@ -95,6 +97,7 @@ class DailyUsageFeedImporter:
         monotonic: Callable[[], float] | None = None,
     ) -> None:
         self.config = config
+        self.account_ref = config.account_ref
         self.keychain = keychain
         self.client = client
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -299,6 +302,7 @@ class DailyUsageFeedImporter:
             DailyUsageRow(
                 day=day,
                 provider_id=self.config.provider_id,
+                account_ref=self.config.account_ref,
                 model_id=model,
                 input_tokens=value["input"],
                 output_tokens=value["output"],

@@ -10,6 +10,7 @@ from openusage_bar.daily_history import ActivityCollector, DailyImportResult
 from openusage_bar.generic import GenericHTTPSAdapter, MissingField, extract_path
 from openusage_bar.models import Overview, ProviderStatus
 from openusage_bar.network import NetworkError
+from openusage_bar.providers.contracts import QuotaFetchSuccess
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
@@ -26,6 +27,10 @@ def config(**overrides):
         "remaining_percent_path": "data.percent",
         "reset_path": "data.reset_at",
         "detail_path": "data.plan",
+        "family_id": "demo",
+        "quota_window": "weekly",
+        "quota_name": "Weekly Plan",
+        "unit": "percent",
     }
     values.update(overrides)
     return GenericProviderConfig(**values)
@@ -69,6 +74,7 @@ class GenericProviderTests(unittest.TestCase):
         self.assertEqual(card.remaining_percent, 73)
         self.assertEqual(card.detail, "Pro")
         self.assertEqual(card.resets_at, datetime(2026, 7, 15, tzinfo=timezone.utc))
+        self.assertEqual(card.family_id, "demo")
 
     def test_success_card_publishes_sanitized_generic_identity(self):
         endpoint = "https://api.example.com/private-usage"
@@ -92,6 +98,9 @@ class GenericProviderTests(unittest.TestCase):
             card = adapter.fetch()
 
         ledger = self.assert_collector_publishes_generic_identity(card)
+        self.assertIsInstance(adapter.last_quota_result, QuotaFetchSuccess)
+        quota = adapter.last_quota_result.observations[0]
+        self.assertEqual((quota.quota_window, quota.quota_name), ("weekly", "Weekly Plan"))
         for private in (endpoint, api_key):
             self.assertNotIn(private, repr(card))
             self.assertNotIn(private, ledger)

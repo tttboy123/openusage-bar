@@ -181,11 +181,13 @@ enum HelperLauncher {
 enum RecoveryPresenter {
     static func show() {
         let alert = NSAlert()
-        alert.messageText = "OpenUsage Bar needs attention"
-        alert.informativeText = "The menu-bar item or a helper window is unavailable. Open Data Health, Provider Settings, or macOS Menu Bar settings to repair it."
-        alert.addButton(withTitle: "Open Data Health")
-        alert.addButton(withTitle: "Provider Settings")
-        alert.addButton(withTitle: "macOS Menu Bar Settings")
+        alert.messageText = AppLocalization.text("OpenUsage Bar needs attention")
+        alert.informativeText = AppLocalization.text(
+            "The menu-bar item or a helper window is unavailable. Open Data Health, Provider Settings, or macOS Menu Bar settings to repair it."
+        )
+        alert.addButton(withTitle: AppLocalization.text("Open Data Health"))
+        alert.addButton(withTitle: AppLocalization.text("Provider Settings"))
+        alert.addButton(withTitle: AppLocalization.text("macOS Menu Bar Settings"))
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             Task { if await HelperLauncher.launchActivity(route: "health") != .launched { openSystemSettings() } }

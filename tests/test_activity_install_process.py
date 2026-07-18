@@ -75,8 +75,36 @@ class ActivityInstallProcessTests(unittest.TestCase):
             ["/bin/zsh", "-c", f'source "{HELPER}"\n{body}'],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
         )
+
+    def wait_for_command(self, process: subprocess.Popen, expected: str) -> None:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            observed = subprocess.run(
+                ["/bin/ps", "-ww", "-p", str(process.pid), "-o", "command="],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout.strip()
+            if observed == expected:
+                return
+            time.sleep(0.005)
+        self.fail("fixture process command did not become stable")
+
+    def wait_for_marker(
+        self,
+        marker: Path,
+        process: subprocess.Popen | None = None,
+        *,
+        timeout: float = 5,
+    ) -> None:
+        deadline = time.monotonic() + timeout
+        while not marker.exists() and time.monotonic() < deadline:
+            if process is not None and process.poll() is not None:
+                self.fail("fixture process exited before becoming ready")
+            time.sleep(0.005)
+        self.assertTrue(marker.exists(), "fixture process did not become ready")
 
     def test_stop_matches_only_the_exact_full_activity_command(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -93,6 +121,11 @@ class ActivityInstallProcessTests(unittest.TestCase):
             argument_process = subprocess.Popen([str(target), "--different-command"])
             unrelated_process = subprocess.Popen([str(same_name)])
             try:
+                self.wait_for_command(target_process, str(target))
+                self.wait_for_command(
+                    argument_process, f"{target} --different-command"
+                )
+                self.wait_for_command(unrelated_process, str(same_name))
                 result = self.run_helper(f'stop_exact_activity_processes "{target}" 20 0.01')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 target_process.wait(timeout=2)
@@ -114,6 +147,7 @@ class ActivityInstallProcessTests(unittest.TestCase):
                 "local-tools",
                 "providers",
                 "health",
+                "automation",
             )
             supported = [
                 subprocess.Popen([str(target), "--route", route])
@@ -148,10 +182,7 @@ class ActivityInstallProcessTests(unittest.TestCase):
                 root, "OpenUsage Activity", ignores_term=True, launch_marker=ready,
             )
             process = subprocess.Popen([str(target)])
-            deadline = time.monotonic() + 2
-            while not ready.exists() and time.monotonic() < deadline:
-                time.sleep(0.001)
-            self.assertTrue(ready.exists())
+            self.wait_for_marker(ready, process)
             signals = root / "signals"
             signaler = root / "record-signal"
             signaler.write_text(
@@ -215,14 +246,11 @@ class ActivityInstallProcessTests(unittest.TestCase):
                 root, "OpenUsage Activity", term_marker=marker, launch_marker=ready,
             )
             first = subprocess.Popen([str(target)])
-            deadline = time.monotonic() + 2
-            while not ready.exists() and time.monotonic() < deadline:
-                time.sleep(0.001)
-            self.assertTrue(ready.exists(), "fixture process did not become ready")
+            self.wait_for_marker(ready, first)
             spawned: list[subprocess.Popen[bytes]] = []
 
             def respawn() -> None:
-                deadline = time.monotonic() + 2
+                deadline = time.monotonic() + 5
                 while not marker.exists() and time.monotonic() < deadline:
                     time.sleep(0.001)
                 if marker.exists():
@@ -353,22 +381,21 @@ class ActivityInstallProcessTests(unittest.TestCase):
                 app, "Contents/MacOS/OpenUsage Activity", launch_marker=ready,
             )
             process = subprocess.Popen([str(target)])
-            deadline = time.monotonic() + 2
-            while not ready.exists() and time.monotonic() < deadline:
-                time.sleep(0.001)
-            self.assertTrue(ready.exists())
-            deny = root / "deny-signal"
-            deny.write_text("#!/bin/zsh\nexit 1\n", encoding="utf-8")
-            deny.chmod(0o755)
-            target_state = root / "target-state"
-            target_state.write_text("new", encoding="utf-8")
-            live_plist = root / "live-plist"
-            live_plist.write_text("new", encoding="utf-8")
-            opened = root / "opened"
-            opener = root / "open-fixture"
-            opener.write_text(f'#!/bin/zsh\nprint opened > "{opened}"\n', encoding="utf-8")
-            opener.chmod(0o755)
             try:
+                self.wait_for_marker(ready, process)
+                deny = root / "deny-signal"
+                deny.write_text("#!/bin/zsh\nexit 1\n", encoding="utf-8")
+                deny.chmod(0o755)
+                target_state = root / "target-state"
+                target_state.write_text("new", encoding="utf-8")
+                live_plist = root / "live-plist"
+                live_plist.write_text("new", encoding="utf-8")
+                opened = root / "opened"
+                opener = root / "open-fixture"
+                opener.write_text(
+                    f'#!/bin/zsh\nprint opened > "{opened}"\n', encoding="utf-8"
+                )
+                opener.chmod(0o755)
                 result = self.run_helper(
                     'original_rc=73\n'
                     f'if clear_activity_for_runtime_rollback "{target}" 4 0.01 "{deny}"; then\n'
@@ -398,10 +425,7 @@ class ActivityInstallProcessTests(unittest.TestCase):
                 root, "OpenUsage Activity", launch_marker=ready,
             )
             process = subprocess.Popen([str(target)])
-            deadline = time.monotonic() + 2
-            while not ready.exists() and time.monotonic() < deadline:
-                time.sleep(0.001)
-            self.assertTrue(ready.exists())
+            self.wait_for_marker(ready, process)
             try:
                 result = self.run_helper(
                     'SWAPPED=1\nFIRST_INSTALLED=0\nACTIVITY_STOPPED=0\n'
@@ -442,7 +466,7 @@ class ActivityInstallProcessTests(unittest.TestCase):
                 self.assertEqual(self.run_helper(f'stop_exact_activity_processes "{target}" 10 0.01').returncode, 0)
                 old_between_swap.wait(timeout=2)
                 new_process = subprocess.Popen([str(target)])
-                deadline = time.monotonic() + 2
+                deadline = time.monotonic() + 5
                 while not new_marker.exists() and time.monotonic() < deadline:
                     time.sleep(0.01)
                 self.assertTrue(new_marker.exists())

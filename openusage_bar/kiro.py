@@ -15,6 +15,8 @@ from .bounded_process import BoundedProcessError, run_bounded
 from .keychain import KeychainError
 from .models import Category, Overview, ProviderCard, ProviderStatus
 from .network import AuthenticationRequired, BoundedHTTPClient, NetworkError, RateLimited
+from .activity_store import QuotaObservation
+from .providers.contracts import QuotaFetchFailure, QuotaFetchSuccess
 
 
 logger = logging.getLogger(__name__)
@@ -223,6 +225,43 @@ def parse_kiro_quota(payload: dict[str, Any], now: datetime) -> ProviderCard:
     )
 
 
+def parse_kiro_quota_observations(
+    payload: dict[str, Any], now: datetime
+) -> QuotaFetchSuccess | QuotaFetchFailure:
+    try:
+        card = parse_kiro_quota(payload, now)
+        rows = payload.get("usageBreakdownList")
+        row = next(
+            candidate for candidate in rows
+            if isinstance(candidate, dict) and candidate.get("resourceType") == "CREDIT"
+        )
+        limit = _number(row.get("usageLimitWithPrecision"), row.get("usageLimit"))
+        used = _number(row.get("currentUsageWithPrecision"), row.get("currentUsage"))
+        assert limit is not None and limit > 0
+        used = min(limit, max(0.0, 0.0 if used is None else used))
+        remaining = limit - used
+        observation = QuotaObservation(
+            record_id="kiro_cli.kiro.codewhisperer.billing_cycle.credits",
+            provider_id="kiro_cli", account_ref="",
+            source_id="kiro.codewhisperer", quota_name="Kiro Credits",
+            quota_window="billing_cycle", applies_to_kind="account",
+            applies_to_model_ids=(), unit="credits",
+            used=str(used), quota_limit=str(limit), remaining=str(remaining),
+            remaining_ratio=remaining / limit,
+            resets_at=(
+                None if card.resets_at is None
+                else card.resets_at.astimezone(timezone.utc).isoformat()
+            ),
+            period_start=None, period_end=None,
+            observed_at=now.astimezone(timezone.utc).isoformat(),
+            state="ok" if remaining > 0 else "rate_limited",
+            quality="direct", stale=False,
+        )
+        return QuotaFetchSuccess((observation,))
+    except (KiroParseError, StopIteration, TypeError, ValueError, AssertionError):
+        return QuotaFetchFailure("invalid_response")
+
+
 class KiroQuotaAdapter:
     def __init__(
         self,
@@ -233,11 +272,13 @@ class KiroQuotaAdapter:
         self.client = client
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.token_reader = token_reader or SecurityKiroTokenReader()
+        self.last_quota_result = QuotaFetchFailure("not_collected")
 
     def fetch(self) -> Overview:
         try:
             raw = self.token_reader.read()
             if raw is None:
+                self.last_quota_result = QuotaFetchFailure("quota_unavailable")
                 return Overview([])
             credentials = parse_kiro_credentials(raw)
             endpoint = self._endpoint(credentials)
@@ -246,20 +287,31 @@ class KiroQuotaAdapter:
                 allowed_redirect_hosts={f"q.{credentials.region}.amazonaws.com"},
             )
             payload = client.get_json(endpoint, self._headers(credentials))
-            return Overview([parse_kiro_quota(payload, self.clock())])
+            now = self.clock()
+            self.last_quota_result = parse_kiro_quota_observations(
+                payload, now
+            )
+            return Overview([parse_kiro_quota(payload, now)])
         except KeychainError:
+            self.last_quota_result = QuotaFetchFailure("keychain_unavailable")
             return self._unavailable("keychain read failed")
         except KiroCredentialError:
+            self.last_quota_result = QuotaFetchFailure("auth_rejected")
             return self._unavailable("credential data invalid")
         except AuthenticationRequired:
+            self.last_quota_result = QuotaFetchFailure("auth_rejected")
             return self._unavailable("authentication required")
         except RateLimited:
+            self.last_quota_result = QuotaFetchFailure("rate_limited")
             return self._unavailable("rate limit reached")
         except NetworkError:
+            self.last_quota_result = QuotaFetchFailure("network_error")
             return self._unavailable("network request failed")
         except (KiroParseError, TypeError, ValueError):
+            self.last_quota_result = QuotaFetchFailure("invalid_response")
             return self._unavailable("response data invalid")
         except Exception:
+            self.last_quota_result = QuotaFetchFailure("unexpected_failure")
             return self._unavailable("unexpected failure")
 
     @staticmethod

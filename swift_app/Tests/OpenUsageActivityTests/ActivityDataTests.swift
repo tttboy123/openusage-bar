@@ -431,6 +431,25 @@ struct ActivityDataTests {
     }
 
     @MainActor
+    @Test("Activity token metrics render both compact and expanded layouts")
+    func nativeTokenMetricLayouts() async throws {
+        let fixture = try ActivityLedgerFixture()
+        let store = ActivityViewStore(loader: ActivityDataLoader(
+            databaseURL: fixture.databaseURL, visibilityURL: fixture.visibilityURL
+        ), preferences: ActivityPreferences(defaults: InMemoryActivityPreferencesStore()))
+        store.reload()
+        try await wait(for: store)
+        let data = try #require(store.data)
+
+        let compact = render(ActivityPage(store: store, data: data), size: .init(width: 560, height: 660))
+        let expanded = render(ActivityPage(store: store, data: data), size: .init(width: 1_600, height: 660))
+
+        #expect(compact.descendantCount > 4)
+        #expect(expanded.descendantCount > 4)
+        store.cancel()
+    }
+
+    @MainActor
     @Test("Native Capacity renders reset-aware changing and stale unchanged quota history")
     func nativeQuotaHistoryRendering() async throws {
         let fixture = try ActivityLedgerFixture()
@@ -485,9 +504,11 @@ struct ActivityDataTests {
     }
 
     @MainActor
-    private func render<Content: View>(_ content: Content) -> (size: CGSize, descendantCount: Int) {
+    private func render<Content: View>(
+        _ content: Content, size: CGSize = .init(width: 900, height: 660)
+    ) -> (size: CGSize, descendantCount: Int) {
         let hosting = NSHostingView(rootView: content)
-        hosting.frame = NSRect(x: 0, y: 0, width: 900, height: 660)
+        hosting.frame = NSRect(origin: .zero, size: size)
         let window = NSWindow(
             contentRect: hosting.frame, styleMask: [.borderless],
             backing: .buffered, defer: false

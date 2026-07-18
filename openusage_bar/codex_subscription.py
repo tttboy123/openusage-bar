@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .models import Category, Overview, ProviderCard, ProviderStatus
+from .providers.contracts import QuotaFetchFailure, QuotaFetchSuccess
+from .providers.quota import percent_observation
 
 
 DEFAULT_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
@@ -177,7 +179,6 @@ def parse_rate_limit_card(
         if reached
         else f"{window_label} {_percent_text(remaining)}% remaining"
     )
-
     detail_parts = []
     if plan := _plan_label(rate_limits.get("plan_type")):
         detail_parts.append(plan)
@@ -207,6 +208,43 @@ def parse_rate_limit_card(
     )
 
 
+def parse_rate_limit_observations(
+    rate_limits: dict[str, Any], observed_at: datetime, now: datetime
+) -> QuotaFetchSuccess | QuotaFetchFailure:
+    windows = [
+        window
+        for window in (
+            _parse_window(rate_limits.get("primary"), now),
+            _parse_window(rate_limits.get("secondary"), now),
+        )
+        if window is not None
+    ]
+    if not windows:
+        return QuotaFetchFailure("quota_unavailable")
+
+    def window_id(minutes: int) -> str:
+        if minutes == 300:
+            return "five_hour"
+        if minutes == 10080:
+            return "weekly"
+        if minutes in {40320, 43200, 44640}:
+            return "monthly"
+        return f"minutes_{minutes}"
+
+    observations = tuple(
+        percent_observation(
+            provider_id="codex", source_id="codex.local_rate_limits",
+            quota_name=f"{_window_label(window.window_minutes)} Subscription",
+            quota_window=window_id(window.window_minutes),
+            remaining_percent=window.remaining_percent,
+            resets_at=window.resets_at, observed_at=observed_at,
+            applies_to_kind="subscription",
+        )
+        for window in sorted(windows, key=lambda value: value.window_minutes)
+    )
+    return QuotaFetchSuccess(observations)
+
+
 class CodexSubscriptionAdapter:
     def __init__(
         self,
@@ -217,11 +255,17 @@ class CodexSubscriptionAdapter:
         self.sessions_root = sessions_root
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.max_files = max_files
+        self.last_quota_result = QuotaFetchFailure("not_collected")
 
     def fetch(self) -> Overview:
         event = latest_rate_limit_event(self.sessions_root, self.max_files)
         if event is None:
+            self.last_quota_result = QuotaFetchFailure("quota_unavailable")
             return Overview([])
         rate_limits, observed_at = event
-        card = parse_rate_limit_card(rate_limits, observed_at, self.clock())
+        now = self.clock()
+        self.last_quota_result = parse_rate_limit_observations(
+            rate_limits, observed_at, now
+        )
+        card = parse_rate_limit_card(rate_limits, observed_at, now)
         return Overview([card] if card else [])

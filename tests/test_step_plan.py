@@ -7,6 +7,7 @@ from unittest.mock import Mock
 from openusage_bar.config import StepPlanConfig
 from openusage_bar.keychain import KeychainError
 from openusage_bar.models import Category, ProviderStatus
+from openusage_bar.providers.contracts import QuotaFetchSuccess
 from openusage_bar.step_plan import (
     STEP_PLAN_MODELS_ENDPOINT,
     STEP_PLAN_RATE_LIMIT_ENDPOINT,
@@ -24,6 +25,35 @@ NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
 
 
 class StepPlanAdapterTests(unittest.TestCase):
+    def test_five_hour_and_weekly_windows_are_separate_quota_facts(self):
+        five_reset = NOW + timedelta(hours=5)
+        weekly_reset = NOW + timedelta(days=6)
+        result = StepPlanAdapter.quota_observations(
+            StepPlanConfig("step-main", "Step Plan"),
+            {
+                "status": 1,
+                "five_hour_usage_left_rate": 0.75,
+                "weekly_usage_left_rate": 0.5,
+                "five_hour_usage_reset_time": int(five_reset.timestamp()),
+                "weekly_usage_reset_time": int(weekly_reset.timestamp()),
+            },
+            NOW,
+        )
+
+        self.assertIsInstance(result, QuotaFetchSuccess)
+        self.assertEqual(
+            [item.quota_window for item in result.observations],
+            ["five_hour", "weekly"],
+        )
+        self.assertEqual(
+            [item.remaining_ratio for item in result.observations], [0.75, 0.5]
+        )
+        self.assertTrue(all(
+            item.source_id == "step_plan.quota"
+            and item.applies_to_kind == "subscription"
+            for item in result.observations
+        ))
+
     def test_site_endpoints_never_mix_china_and_international_hosts(self):
         china = endpoints_for_site("china")
         international = endpoints_for_site("international")

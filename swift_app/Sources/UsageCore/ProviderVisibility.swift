@@ -1,4 +1,5 @@
 import CoreFoundation
+import Darwin
 import Foundation
 
 public enum VisibilityStoreError: Error, Sendable, Hashable {
@@ -42,6 +43,59 @@ public struct VisibilityStore: Sendable {
         return try Self.decode(data)
     }
 
+    public func save(hiddenProviderIDs: Set<String>) throws {
+        guard hiddenProviderIDs.allSatisfy(Self.isStableID) else {
+            throw VisibilityStoreError.invalidSchema
+        }
+        let payload: [String: Any] = [
+            "version": 1,
+            "hidden_provider_ids": hiddenProviderIDs.sorted(),
+        ]
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]
+        ), data.count <= Self.maximumBytes else {
+            throw VisibilityStoreError.tooLarge
+        }
+        let directory = url.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: directory.path
+            )
+        } catch { throw VisibilityStoreError.unreadable }
+        let temporary = directory.appendingPathComponent(
+            ".visibility.\(UUID().uuidString).json"
+        )
+        let descriptor = open(
+            temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600
+        )
+        guard descriptor >= 0 else { throw VisibilityStoreError.unreadable }
+        var succeeded = false
+        defer {
+            close(descriptor)
+            if !succeeded { unlink(temporary.path) }
+        }
+        let wrote = data.withUnsafeBytes { bytes -> Bool in
+            guard let base = bytes.baseAddress else { return data.isEmpty }
+            var offset = 0
+            while offset < data.count {
+                let count = Darwin.write(
+                    descriptor, base.advanced(by: offset), data.count - offset
+                )
+                if count > 0 { offset += count }
+                else if count < 0, errno == EINTR { continue }
+                else { return false }
+            }
+            return true
+        }
+        guard wrote, fsync(descriptor) == 0,
+              rename(temporary.path, url.path) == 0
+        else { throw VisibilityStoreError.unreadable }
+        succeeded = true
+    }
+
     public static func decode(_ data: Data) throws -> VisibilitySnapshot {
         guard data.count <= maximumBytes else { throw VisibilityStoreError.tooLarge }
         guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -64,5 +118,12 @@ public struct VisibilityStore: Sendable {
         data.reduce(UInt64(14_695_981_039_346_656_037)) { value, byte in
             (value ^ UInt64(byte)) &* 1_099_511_628_211
         }
+    }
+
+    private static func isStableID(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 128
+            && value.range(
+                of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression
+            ) != nil
     }
 }

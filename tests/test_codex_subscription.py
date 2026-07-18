@@ -8,7 +8,9 @@ from openusage_bar.codex_subscription import (
     CodexSubscriptionAdapter,
     latest_rate_limit_event,
     parse_rate_limit_card,
+    parse_rate_limit_observations,
 )
+from openusage_bar.providers.contracts import QuotaFetchSuccess
 from openusage_bar.models import Category, ProviderStatus
 
 
@@ -37,6 +39,35 @@ def rate_limits(primary: dict, secondary: dict | None = None) -> dict:
 
 
 class CodexSubscriptionTests(unittest.TestCase):
+    def test_all_rate_limit_windows_become_scoped_quota_facts(self):
+        five_reset = NOW + timedelta(hours=3)
+        weekly_reset = NOW + timedelta(days=5)
+
+        result = parse_rate_limit_observations(
+            rate_limits(
+                window(25, 300, five_reset),
+                window(40, 10080, weekly_reset),
+            ),
+            NOW,
+            NOW,
+        )
+
+        self.assertIsInstance(result, QuotaFetchSuccess)
+        self.assertEqual(
+            [observation.quota_window for observation in result.observations],
+            ["five_hour", "weekly"],
+        )
+        self.assertEqual(
+            [observation.remaining_ratio for observation in result.observations],
+            [0.75, 0.6],
+        )
+        self.assertTrue(all(
+            observation.source_id == "codex.local_rate_limits"
+            and observation.applies_to_kind == "subscription"
+            and observation.applies_to_model_ids == ()
+            for observation in result.observations
+        ))
+
     def test_dual_window_maps_to_minimax_style_subscription_card(self):
         reset_5h = NOW + timedelta(hours=2)
         reset_weekly = NOW + timedelta(days=5)

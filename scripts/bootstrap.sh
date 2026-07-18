@@ -11,7 +11,7 @@ PYTHON_BIN=${PYTHON_BIN:-${commands[python3]:-}}
   exit 1
 }
 [[ $(uname -m) == arm64 ]] || {
-  print -u2 "OpenUsage Bar 0.3 supports Apple Silicon only"
+  print -u2 "OpenUsage Bar supports Apple Silicon only"
   exit 1
 }
 [[ -n "$PYTHON_BIN" && -x "$PYTHON_BIN" ]] || {
@@ -35,9 +35,8 @@ command -v swift >/dev/null 2>&1 || {
 if [[ ! -x "$VENV/bin/python" ]]; then
   "$PYTHON_BIN" -m venv "$VENV"
 fi
-"$VENV/bin/python" -m pip install --disable-pip-version-check --upgrade pip==26.1.2
 "$VENV/bin/python" -m pip install \
-  --disable-pip-version-check --no-deps --requirement "$REQUIREMENTS"
+  --disable-pip-version-check --no-deps --require-hashes --requirement "$REQUIREMENTS"
 "$VENV/bin/python" -m pip check
 cd "$ROOT"
 "$VENV/bin/python" scripts/release_secret_scan.py

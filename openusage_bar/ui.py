@@ -8,6 +8,7 @@ from typing import Callable
 
 from .aggregator import Aggregator, CardCache
 from .config import (
+    DailyCostFeedConfig,
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
@@ -16,6 +17,7 @@ from .config import (
     StepPlanConfig,
     validate_provider_config,
 )
+from .cost_feed import DailyCostFeedCardAdapter
 from .daily_feed import DailyUsageFeedCardAdapter
 from .codex_subscription import CodexSubscriptionAdapter
 from .generic import GenericHTTPSAdapter
@@ -56,14 +58,14 @@ ATTENTION_HEIGHT = 36
 
 _UI_TEXT = {
     "en": {
-        "settings.window_title": "OpenUsage Bar Settings",
-        "settings.providers_title": "Providers and visibility",
+        "settings.window_title": "OpenUsage Bar Advanced and Repair",
+        "settings.providers_title": "Advanced and Repair",
         "settings.credentials_help": (
-            "Credentials stay in Keychain. Add accounts here, then edit existing "
-            "connections in Usage Details > Providers."
+            "Manage accounts in Usage Details > Providers. Use this fallback only "
+            "to repair Provider visibility."
         ),
         "settings.add_provider": "Add Provider",
-        "settings.provider_visibility": "Provider Visibility",
+        "settings.provider_visibility": "Repair Visibility",
         "settings.manage_title": "Manage Providers",
         "settings.manage_help": (
             "Choose which providers appear in the menu bar. Hidden providers keep "
@@ -95,13 +97,13 @@ _UI_TEXT = {
         "settings.could_not_save": "Could not save provider",
     },
     "zh-Hans": {
-        "settings.window_title": "OpenUsage Bar 设置",
-        "settings.providers_title": "Provider 与显示设置",
+        "settings.window_title": "OpenUsage Bar 高级与修复",
+        "settings.providers_title": "高级与修复",
         "settings.credentials_help": (
-            "凭证保存在钥匙串中。在此添加账号；已有连接请前往“用量详情 > Provider”修改。"
+            "请在“用量详情 > Provider”管理账号；这里只用于修复 Provider 显示状态。"
         ),
         "settings.add_provider": "添加 Provider",
-        "settings.provider_visibility": "Provider 显示设置",
+        "settings.provider_visibility": "修复显示状态",
         "settings.manage_title": "管理 Provider",
         "settings.manage_help": (
             "选择菜单栏中显示的 Provider。隐藏不会删除数据或凭证。"
@@ -352,6 +354,145 @@ class ProviderController:
     ) -> OperationResult:
         return self._configure_step_plan(config, secret, session_cookie, allow_existing=False)
 
+    def create_connection(
+        self,
+        config,
+        secret: str,
+        session_cookie: str = "",
+    ) -> OperationResult:
+        """Create one validated app-owned connection.
+
+        The mutation boundary constructs one of the allowlisted configuration
+        dataclasses before calling this dispatcher. Discovered client logins can
+        therefore never enter this write path.
+        """
+        if isinstance(config, MiniMaxConfig):
+            return self.add_minimax(config, secret)
+        if isinstance(config, StepPlanConfig):
+            return self.add_step_plan(config, secret, session_cookie)
+        if isinstance(config, OpenAIOrganizationConfig):
+            return self.add_openai(config, secret)
+        if isinstance(config, GenericProviderConfig):
+            return self.add_generic(config, secret)
+        if isinstance(config, DailyUsageFeedConfig):
+            return self.add_daily_feed(config, secret)
+        return OperationResult(False, "Provider connection type is unsupported")
+
+    def update_connection_config(
+        self,
+        config,
+        secret: str,
+        session_cookie: str = "",
+    ) -> OperationResult:
+        """Replace public configuration while retaining or replacing credentials."""
+        try:
+            configs = self.store.load()
+            existing = next(
+                (item for item in configs if item.provider_id == config.provider_id), None
+            )
+            if existing is None:
+                return OperationResult(False, "Provider connection was not found")
+            if type(existing) is not type(config):
+                return OperationResult(False, "Provider connection type cannot be changed")
+            # Account scope is an opaque ledger identity. The native editor does
+            # not expose it, so a public-config edit must preserve the scope.
+            config = replace(config, account_ref=existing.account_ref)
+            if isinstance(existing, GenericProviderConfig):
+                config = replace(
+                    config,
+                    family_id=existing.family_id,
+                    quota_window=existing.quota_window,
+                    quota_name=existing.quota_name,
+                    unit=existing.unit,
+                )
+            if isinstance(existing, StepPlanConfig):
+                return self.update_step_plan(config, secret, session_cookie)
+            if session_cookie.strip():
+                return OperationResult(False, "Web session is not supported for this provider")
+
+            if isinstance(config, GenericProviderConfig):
+                validate_endpoint(config.endpoint, self.resolver)
+                if not HEADER_PATTERN.fullmatch(config.header_name):
+                    raise ValueError("Header name is invalid")
+                if "\r" in config.auth_prefix or "\n" in config.auth_prefix:
+                    raise ValueError("Authentication prefix is invalid")
+                _validate_field_path(config.primary_path, required=True)
+                _validate_field_path(config.remaining_percent_path)
+                _validate_field_path(config.reset_path)
+                _validate_field_path(config.detail_path)
+            elif isinstance(config, DailyUsageFeedConfig):
+                validate_endpoint(config.endpoint, self.resolver)
+            validate_provider_config(config)
+
+            replacement_secret = secret.strip()
+            previous_secret = self.keychain.get(config.provider_id)
+            if not replacement_secret and previous_secret is None:
+                return OperationResult(False, "API key is required")
+            try:
+                if replacement_secret:
+                    self.keychain.set(config.provider_id, replacement_secret)
+                self.store.save([
+                    config if item.provider_id == config.provider_id else item
+                    for item in configs
+                ])
+            except Exception:
+                if replacement_secret:
+                    try:
+                        if previous_secret is None:
+                            self.keychain.delete(config.provider_id)
+                        else:
+                            self.keychain.set(config.provider_id, previous_secret)
+                    except Exception:
+                        pass
+                raise
+            return OperationResult(True, "Provider connection updated")
+        except (UnsafeEndpoint, ValueError, OSError) as error:
+            return OperationResult(False, str(error))
+        except Exception:
+            return OperationResult(False, "Provider connection could not be updated")
+
+    def remove_connection(
+        self, provider_id: str, expected_kind: str | None = None
+    ) -> OperationResult:
+        """Remove an app-owned connection with Keychain and config rollback."""
+        try:
+            configs = self.store.load()
+            existing = next(
+                (item for item in configs if item.provider_id == provider_id), None
+            )
+            if existing is None:
+                return OperationResult(False, "Provider connection was not found")
+            if expected_kind is not None and existing.type != expected_kind:
+                return OperationResult(False, "Provider connection type does not match")
+            accounts = [provider_id]
+            if isinstance(existing, StepPlanConfig):
+                accounts.extend([
+                    provider_id + STEP_PLAN_TOKEN_SUFFIX,
+                    provider_id + STEP_PLAN_WEBID_SUFFIX,
+                ])
+            previous = {account: self.keychain.get(account) for account in accounts}
+            try:
+                for account in accounts:
+                    self.keychain.delete(account)
+                self.store.save([
+                    item for item in configs if item.provider_id != provider_id
+                ])
+            except Exception:
+                for account, old_value in previous.items():
+                    if old_value is not None:
+                        try:
+                            self.keychain.set(account, old_value)
+                        except Exception:
+                            pass
+                try:
+                    self.store.save(configs)
+                except Exception:
+                    pass
+                raise
+            return OperationResult(True, "Provider connection removed")
+        except Exception:
+            return OperationResult(False, "Provider connection could not be removed")
+
     def update_step_plan(
         self,
         config: StepPlanConfig,
@@ -563,6 +704,8 @@ def _build_aggregator(store: ProviderConfigStore, keychain: MacOSKeychain) -> Ag
             adapters.append(StepPlanAdapter(config, keychain, step_plan_client, clock))
         elif isinstance(config, DailyUsageFeedConfig):
             adapters.append(DailyUsageFeedCardAdapter(config, keychain, clock))
+        elif isinstance(config, DailyCostFeedConfig):
+            adapters.append(DailyCostFeedCardAdapter(config, keychain, clock))
         elif isinstance(config, GenericProviderConfig):
             adapters.append(GenericHTTPSAdapter(config, keychain, client, clock))
     return Aggregator(adapters, CardCache(), clock)
@@ -730,15 +873,10 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
                     NSColor.secondaryLabelColor(),
                 )
             )
-            add = NSButton.buttonWithTitle_target_action_(
-                self._text("settings.add_provider"), self, "addProvider:"
-            )
-            add.setFrame_(NSMakeRect(62, 82, 148, 32))
-            content.addSubview_(add)
             self.settings_manage = NSButton.buttonWithTitle_target_action_(
                 self._text("settings.provider_visibility"), self, "manageProviders:"
             )
-            self.settings_manage.setFrame_(NSMakeRect(230, 82, 148, 32))
+            self.settings_manage.setFrame_(NSMakeRect(146, 82, 148, 32))
             self.settings_manage.setEnabled_(False)
             content.addSubview_(self.settings_manage)
             self.settings_window.center()

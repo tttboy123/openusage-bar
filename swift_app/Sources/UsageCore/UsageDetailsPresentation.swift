@@ -83,16 +83,43 @@ public struct DailyChartDay: Identifiable, Sendable, Hashable {
     public let state: ActivityDayState
     public let totalTokens: Int64?
     public let observedTokens: Int64
+    public let observedBreakdown: TokenBreakdown
     public let composition: [ModelComposition]
     public let quality: ActivityQuality
+    public let sourceIDs: [String]
+    public let qualityIDs: [String]
+    public let lastCollectionAt: String?
     public var id: LocalDay { day }
 
+    public var hasObservedBreakdown: Bool {
+        state == .coveredZero || state == .coveredActive || observedBreakdown != .zero
+    }
+
     public var accessibilitySummary: String {
-        let total = totalTokens.map(TokenText.compact) ?? "Unavailable"
+        let total = totalTokens.map(TokenText.compact) ?? AppLocalization.text("Unavailable")
         let models = composition.map {
             "\(DisplayText.model($0.modelID)), \(TokenText.compact($0.tokens))"
         }.joined(separator: ", ")
-        return [day.rawValue, "\(total) Tokens", models, quality.displayName]
+        let collected = lastCollectionAt.map { AppLocalization.format("Collected %@", $0) } ?? ""
+        let sources = sourceIDs.isEmpty
+            ? "" : AppLocalization.format("Source %@", sourceIDs.joined(separator: ", "))
+        let qualities = qualityIDs.isEmpty
+            ? "" : AppLocalization.format("Quality %@", qualityIDs.joined(separator: ", "))
+        let breakdown = hasObservedBreakdown ? [
+            AppLocalization.format("Input %@", TokenText.compact(observedBreakdown.inputTokens)),
+            AppLocalization.format("Output %@", TokenText.compact(observedBreakdown.outputTokens)),
+            AppLocalization.format(
+                "Cache Read %@", TokenText.compact(observedBreakdown.cacheReadTokens)
+            ),
+            AppLocalization.format(
+                "Cache Write %@", TokenText.compact(observedBreakdown.cacheCreationTokens)
+            ),
+        ] : []
+        return [
+            day.rawValue, AppLocalization.format("%@ Tokens", total),
+            breakdown.joined(separator: ", "), models, quality.displayName,
+            sources, qualities, collected,
+        ]
             .filter { !$0.isEmpty }.joined(separator: ", ")
     }
 }
@@ -271,7 +298,8 @@ public struct UsageDetailsModel: Sendable, Hashable {
         Self(
             heatmapDays: [], heatmapDetails: [],
             metrics: ActivityMetrics(
-                totalTokens: nil, observedTokens: 0, isComplete: false,
+                totalTokens: nil, observedTokens: 0, observedBreakdown: .zero,
+                isComplete: false,
                 peak: nil, activeDays: 0, currentStreak: 0, longestStreak: 0
             ),
             seriesPoints: [], chartDays: [], providerIDs: [], modelIDs: [],
@@ -304,8 +332,12 @@ public struct UsageDetailsModel: Sendable, Hashable {
                 state: day.state,
                 totalTokens: day.totalTokens,
                 observedTokens: day.observedTokens,
+                observedBreakdown: day.observedBreakdown,
                 composition: day.composition.filter { visible.contains($0.modelID) },
-                quality: day.quality
+                quality: day.quality,
+                sourceIDs: day.sourceIDs,
+                qualityIDs: day.qualityIDs,
+                lastCollectionAt: day.lastCollectionAt
             )
         }
         return ModelSeriesPresentation(series: series, seriesPoints: points, chartDays: days)
@@ -698,7 +730,11 @@ public enum UsageDetailsAggregator {
             return DailyChartDay(
                 day: activityDay.day, state: activityDay.state,
                 totalTokens: activityDay.totalTokens, observedTokens: activityDay.observedTokens,
-                composition: values, quality: quality
+                observedBreakdown: TokenBreakdown(records: records),
+                composition: values, quality: quality,
+                sourceIDs: Set(records.map(\.sourceID)).sorted(),
+                qualityIDs: Set(records.map(\.quality)).sorted(),
+                lastCollectionAt: records.map(\.importedAt).max()
             )
         }
         let points: [DailyModelPoint] = chartDays.flatMap { day -> [DailyModelPoint] in
@@ -820,6 +856,7 @@ public struct ProviderDisplayDescriptor: Sendable, Hashable {
     public let providerID: String
     public let familyID: String
     public let displayName: String
+    public let aliases: Set<String>
     public let category: ProviderProductCategory
     public let metricFamilies: Set<ProviderMetricFamily>
     public let regions: Set<String>
@@ -828,9 +865,47 @@ public struct ProviderDisplayDescriptor: Sendable, Hashable {
     public let acceptedIdentitySources: Set<ProviderIdentitySource>
     public let capabilityProfile: ProviderCapabilityProfile
     public let sourceCapabilities: [ProviderSourceCapability]
+
+    public init(
+        providerID: String,
+        familyID: String,
+        displayName: String,
+        aliases: Set<String> = [],
+        category: ProviderProductCategory,
+        metricFamilies: Set<ProviderMetricFamily>,
+        regions: Set<String>,
+        supportsAccounts: Bool,
+        credentialSourceTypes: Set<CredentialSourceType>,
+        acceptedIdentitySources: Set<ProviderIdentitySource>,
+        capabilityProfile: ProviderCapabilityProfile,
+        sourceCapabilities: [ProviderSourceCapability]
+    ) {
+        self.providerID = providerID
+        self.familyID = familyID
+        self.displayName = displayName
+        self.aliases = aliases
+        self.category = category
+        self.metricFamilies = metricFamilies
+        self.regions = regions
+        self.supportsAccounts = supportsAccounts
+        self.credentialSourceTypes = credentialSourceTypes
+        self.acceptedIdentitySources = acceptedIdentitySources
+        self.capabilityProfile = capabilityProfile
+        self.sourceCapabilities = sourceCapabilities
+    }
 }
 
 public enum ProviderCatalog {
+    public static func search(_ query: String) -> [ProviderDisplayDescriptor] {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty, normalized.count <= 128 else { return [] }
+        return known.values.filter { descriptor in
+            ([descriptor.familyID, descriptor.displayName] + descriptor.aliases).contains {
+                $0.lowercased().contains(normalized)
+            }
+        }.sorted { $0.familyID < $1.familyID }
+    }
+
     public static var allDescriptors: [ProviderDisplayDescriptor] {
         GeneratedProviderCatalog.families.values.sorted {
             let order = $0.displayName.localizedStandardCompare($1.displayName)
@@ -868,6 +943,7 @@ public enum ProviderCatalog {
             providerID: providerID,
             familyID: familyID,
             displayName: resolvedDisplayName,
+            aliases: family.aliases,
             category: category,
             metricFamilies: family.metricFamilies,
             regions: family.regions,
@@ -883,7 +959,7 @@ public enum ProviderCatalog {
 }
 
 public enum UsageDetailsRoute: String, CaseIterable, Sendable, Hashable, Identifiable {
-    case activity, capacity, apiSpend, localTools, providersAndAccounts, dataHealth
+    case activity, capacity, apiSpend, localTools, providersAndAccounts, dataHealth, automation
     public var id: String { rawValue }
 
     public init(arguments: [String]) {
@@ -902,6 +978,7 @@ public enum UsageDetailsRoute: String, CaseIterable, Sendable, Hashable, Identif
         case "local-tools", "local": self = .localTools
         case "providers", "accounts", "settings": self = .providersAndAccounts
         case "health", "data-health": self = .dataHealth
+        case "automation", "api": self = .automation
         default: return nil
         }
     }
@@ -928,6 +1005,7 @@ public extension UsageDetailsRoute {
         case .localTools: "local-tools"
         case .providersAndAccounts: "providers"
         case .dataHealth: "health"
+        case .automation: "automation"
         default: rawValue
         }
     }
@@ -966,10 +1044,10 @@ public enum DisplayText {
     }
 
     public static func model(_ id: String) -> String {
-        if id == ModelSeriesIdentity.overflowID { return "Additional Models" }
-        if id == "unknown" { return "Unattributed" }
+        if id == ModelSeriesIdentity.overflowID { return AppLocalization.text("Additional Models") }
+        if id == "unknown" { return AppLocalization.text("Unattributed") }
         if let providerID = ModelSeriesIdentity.unattributedProviderID(from: id) {
-            return "\(provider(providerID)) · Unattributed"
+            return AppLocalization.format("%@ · Unattributed", provider(providerID))
         }
         return id.split(separator: "-").map { part in
             let value = String(part)
@@ -981,10 +1059,10 @@ public enum DisplayText {
 public extension ActivityQuality {
     var displayName: String {
         switch self {
-        case .exact: "Exact"
-        case .estimated: "Estimated"
-        case .partial: "Partial"
-        case .missing: "Missing"
+        case .exact: AppLocalization.text("Exact")
+        case .estimated: AppLocalization.text("Estimated")
+        case .partial: AppLocalization.text("Partial")
+        case .missing: AppLocalization.text("Missing")
         }
     }
 }
