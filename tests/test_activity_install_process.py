@@ -1,3 +1,6 @@
+import os
+import plistlib
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -10,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "scripts/activity_install_process.sh"
 INSTALL = ROOT / "scripts/install_app.sh"
+UNINSTALL = ROOT / "scripts/uninstall_app.sh"
 
 
 class ActivityInstallProcessTests(unittest.TestCase):
@@ -106,6 +110,23 @@ class ActivityInstallProcessTests(unittest.TestCase):
             time.sleep(0.005)
         self.assertTrue(marker.exists(), "fixture process did not become ready")
 
+    def build_lsappinfo(
+        self, root: Path, bundle_identifiers: dict[int, str]
+    ) -> Path:
+        executable = root / "lsappinfo"
+        cases = "\n".join(
+            f'  *"-pid {pid}"*) printf \'"CFBundleIdentifier"="{bundle_id}"\\n\';;'
+            for pid, bundle_id in bundle_identifiers.items()
+        )
+        executable.write_text(
+            "#!/bin/sh\ncase \"$*\" in\n"
+            + cases
+            + "\n  *) exit 1;;\nesac\n",
+            encoding="utf-8",
+        )
+        executable.chmod(0o755)
+        return executable
+
     def test_stop_matches_only_the_exact_full_activity_command(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -136,6 +157,193 @@ class ActivityInstallProcessTests(unittest.TestCase):
                     if process.poll() is None:
                         process.kill()
                     process.wait(timeout=2)
+
+    def test_uninstall_stops_exact_activity_before_removing_bundle(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            app = root / "Applications/OpenUsage Bar.app"
+            target = self.build_process(
+                app,
+                "Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity",
+            )
+            with (app / "Contents/Info.plist").open("wb") as handle:
+                plistlib.dump(
+                    {"CFBundleIdentifier": "com.lune.openusagebar"}, handle
+                )
+            process = subprocess.Popen([str(target), "--route", "health"])
+            try:
+                self.wait_for_command(process, f"{target} --route health")
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "HOME": str(root / "home"),
+                        "OPENUSAGE_INSTALL_DIR": str(app.parent),
+                        "OPENUSAGE_SYSTEM_APPLICATIONS_DIR": str(app.parent),
+                        "OPENUSAGE_STATE_DIR": str(root / "home/state"),
+                        "OPENUSAGE_LAUNCHCTL": "/usr/bin/true",
+                    }
+                )
+                result = subprocess.run(
+                    [str(UNINSTALL)],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                process.wait(timeout=2)
+                self.assertFalse(app.exists())
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=2)
+
+    def test_uninstall_with_explicit_install_dir_is_strictly_scoped(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            home = root / "home"
+            scoped_app = root / "scoped/OpenUsage Bar.app"
+            system_app = root / "system/OpenUsage Bar.app"
+            user_app = home / "Applications/OpenUsage Bar.app"
+            for app in (scoped_app, system_app, user_app):
+                (app / "Contents").mkdir(parents=True)
+                with (app / "Contents/Info.plist").open("wb") as handle:
+                    plistlib.dump(
+                        {"CFBundleIdentifier": "com.lune.openusagebar"}, handle
+                    )
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "HOME": str(home),
+                    "OPENUSAGE_INSTALL_DIR": str(scoped_app.parent),
+                    "OPENUSAGE_SYSTEM_APPLICATIONS_DIR": str(system_app.parent),
+                    "OPENUSAGE_STATE_DIR": str(home / "state"),
+                    "OPENUSAGE_LAUNCHCTL": "/usr/bin/true",
+                }
+            )
+            result = subprocess.run(
+                [str(UNINSTALL)],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(scoped_app.exists())
+            self.assertTrue(system_app.exists())
+            self.assertTrue(user_app.exists())
+
+    def test_uninstall_stops_stale_user_activity_when_system_app_is_target(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            home = root / "home"
+            system_app = root / "system-applications/OpenUsage Bar.app"
+            (system_app / "Contents").mkdir(parents=True)
+            with (system_app / "Contents/Info.plist").open("wb") as handle:
+                plistlib.dump(
+                    {"CFBundleIdentifier": "com.lune.openusagebar"}, handle
+                )
+            stale_target = self.build_process(
+                home / "Applications/OpenUsage Bar.app",
+                "Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity",
+            )
+            with (
+                home / "Applications/OpenUsage Bar.app/Contents/Info.plist"
+            ).open("wb") as handle:
+                plistlib.dump(
+                    {"CFBundleIdentifier": "com.lune.openusagebar"}, handle
+                )
+            stale_process = subprocess.Popen(
+                [str(stale_target), "--route", "providers"]
+            )
+            try:
+                self.wait_for_command(
+                    stale_process, f"{stale_target} --route providers"
+                )
+                lsappinfo = self.build_lsappinfo(
+                    root, {stale_process.pid: "com.lune.openusagebar.activity"}
+                )
+                shutil.rmtree(home / "Applications/OpenUsage Bar.app")
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "HOME": str(home),
+                        "OPENUSAGE_SYSTEM_APPLICATIONS_DIR": str(system_app.parent),
+                        "OPENUSAGE_STATE_DIR": str(home / "state"),
+                        "OPENUSAGE_LAUNCHCTL": "/usr/bin/true",
+                        "OPENUSAGE_LSAPPINFO": str(lsappinfo),
+                    }
+                )
+                result = subprocess.run(
+                    [str(UNINSTALL)],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                stale_process.wait(timeout=2)
+                self.assertFalse(system_app.exists())
+                self.assertFalse(
+                    (home / "Applications/OpenUsage Bar.app").exists()
+                )
+            finally:
+                if stale_process.poll() is None:
+                    stale_process.kill()
+                stale_process.wait(timeout=2)
+
+    def test_uninstall_preserves_same_name_alternate_with_wrong_bundle_id(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            home = root / "home"
+            system_app = root / "system-applications/OpenUsage Bar.app"
+            (system_app / "Contents").mkdir(parents=True)
+            with (system_app / "Contents/Info.plist").open("wb") as handle:
+                plistlib.dump(
+                    {"CFBundleIdentifier": "com.lune.openusagebar"}, handle
+                )
+            alternate = home / "Applications/OpenUsage Bar.app"
+            alternate_target = self.build_process(
+                alternate,
+                "Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity",
+            )
+            with (alternate / "Contents/Info.plist").open("wb") as handle:
+                plistlib.dump({"CFBundleIdentifier": "example.not-openusage"}, handle)
+            alternate_process = subprocess.Popen(
+                [str(alternate_target), "--route", "health"]
+            )
+            try:
+                self.wait_for_command(
+                    alternate_process, f"{alternate_target} --route health"
+                )
+                lsappinfo = self.build_lsappinfo(
+                    root, {alternate_process.pid: "example.not-openusage.activity"}
+                )
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "HOME": str(home),
+                        "OPENUSAGE_SYSTEM_APPLICATIONS_DIR": str(system_app.parent),
+                        "OPENUSAGE_STATE_DIR": str(home / "state"),
+                        "OPENUSAGE_LAUNCHCTL": "/usr/bin/true",
+                        "OPENUSAGE_LSAPPINFO": str(lsappinfo),
+                    }
+                )
+                result = subprocess.run(
+                    [str(UNINSTALL)],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(system_app.exists())
+                self.assertTrue(alternate.exists())
+                self.assertIsNone(alternate_process.poll())
+            finally:
+                if alternate_process.poll() is None:
+                    alternate_process.kill()
+                alternate_process.wait(timeout=2)
 
     def test_stop_accepts_only_supported_activity_route_arguments(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -5,6 +5,13 @@ ROOT=${0:A:h:h}
 source "$ROOT/scripts/install_location.sh"
 INSTALL_DIR=$(resolve_openusage_install_dir)
 TARGET="$INSTALL_DIR/OpenUsage Bar.app"
+SYSTEM_TARGET="${OPENUSAGE_SYSTEM_APPLICATIONS_DIR:-/Applications}/OpenUsage Bar.app"
+USER_TARGET="$HOME/Applications/OpenUsage Bar.app"
+APP_TARGETS=("$TARGET")
+if [[ -z ${OPENUSAGE_INSTALL_DIR:-} ]]; then
+  APP_TARGETS+=("$SYSTEM_TARGET" "$USER_TARGET")
+fi
+ACTIVITY_SUFFIX="Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity"
 AGENTS="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
 LABEL_SUFFIX=${OPENUSAGE_LABEL_SUFFIX:-}
@@ -18,6 +25,16 @@ STATE_DIR=${OPENUSAGE_STATE_DIR:-"$HOME/.local/state/openusage-bar"}
 STATE_DIR=${STATE_DIR:A}
 HOME_ROOT=${HOME:A}
 PURGE=0
+
+source "$ROOT/scripts/activity_install_process.sh"
+
+is_openusage_bundle() {
+  local app=$1
+  local info="$app/Contents/Info.plist"
+  [[ -f "$info" ]] || return 1
+  [[ $(plutil -extract CFBundleIdentifier raw "$info" 2>/dev/null) == \
+    com.lune.openusagebar ]]
+}
 
 if [[ ${1:-} == --purge-data ]]; then
   PURGE=1
@@ -34,7 +51,15 @@ for label in "com.lune.openusagebar$LABEL_SUFFIX_PART" "com.lune.openusagebar.co
   "$LAUNCHCTL" bootout "$DOMAIN/$label" >/dev/null 2>&1 || true
   rm -f "$AGENTS/$label.plist"
 done
-rm -rf "$TARGET"
+for app_target in "${(@u)APP_TARGETS}"; do
+  if is_openusage_bundle "$app_target"; then
+    stop_exact_activity_processes "$app_target/$ACTIVITY_SUFFIX"
+    rm -rf "$app_target"
+  else
+    stop_exact_activity_processes "$app_target/$ACTIVITY_SUFFIX" 50 0.1 \
+      /bin/kill com.lune.openusagebar.activity
+  fi
+done
 
 if (( PURGE )); then
   rm -rf \
