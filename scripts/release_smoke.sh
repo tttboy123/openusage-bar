@@ -8,6 +8,7 @@ SOURCE=${OPENUSAGE_SMOKE_APP:-"$ROOT/dist/OpenUsage Bar.app"}
   exit 1
 }
 /usr/bin/codesign --verify --deep --strict "$SOURCE"
+SOURCE_VERSION=$(plutil -extract CFBundleShortVersionString raw "$SOURCE/Contents/Info.plist")
 
 SMOKE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/openusage-release-smoke.XXXXXX")
 cleanup_smoke() {
@@ -138,7 +139,7 @@ plutil -replace CFBundleShortVersionString -string 0.3.0 "$OLD_APP/Contents/Info
 plutil -replace CFBundleVersion -string 3 "$OLD_APP/Contents/Info.plist"
 /usr/bin/codesign --force --deep --sign - "$OLD_APP"
 "$ROOT/scripts/install_app.sh"
-[[ $(plutil -extract CFBundleShortVersionString raw "$OLD_APP/Contents/Info.plist") == 0.4.0 ]]
+[[ $(plutil -extract CFBundleShortVersionString raw "$OLD_APP/Contents/Info.plist") == "$SOURCE_VERSION" ]]
 assert_ledger_unchanged "$EXPECTED_FACTS"
 
 # Explicit rollback validates the stored hash, identity, version, and signature.

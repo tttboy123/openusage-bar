@@ -18,7 +18,7 @@ body:
     id: version
     attributes:
       label: Product version and build
-      placeholder: 0.4.0 (4)
+      placeholder: 0.4.1 (5)
     validations:
       required: true
   - type: input

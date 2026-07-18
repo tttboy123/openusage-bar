@@ -25,7 +25,7 @@ OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Tok
 
 <p align="center"><sub>真实 SwiftUI 界面，使用隔离的合成账本生成。未读取用户账本、Keychain 或真实额度。</sub></p>
 
-> 当前版本：**0.4.0 预发布版**。支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple Developer ID 公证包；下载构建请阅读 Gatekeeper 说明，或直接从源码构建。
+> 当前版本：**0.4.1 预发布版**。支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple Developer ID 公证包；下载构建请阅读 Gatekeeper 说明，或直接从源码构建。
 
 ## 为什么需要它
 
@@ -73,9 +73,9 @@ flowchart LR
 从 GitHub Releases 下载 macOS arm64 ZIP 和对应 `.sha256` 文件，放在同一个目录后先校验：
 
 ```bash
-shasum -a 256 -c OpenUsage-Bar-v0.4.0-macos-arm64.zip.sha256
-unzip OpenUsage-Bar-v0.4.0-macos-arm64.zip
-cd OpenUsage-Bar-v0.4.0-macos-arm64
+shasum -a 256 -c OpenUsage-Bar-v0.4.1-macos-arm64.zip.sha256
+unzip OpenUsage-Bar-v0.4.1-macos-arm64.zip
+cd OpenUsage-Bar-v0.4.1-macos-arm64
 scripts/install_app.sh
 ```
 

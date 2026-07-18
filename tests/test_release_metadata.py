@@ -3,6 +3,7 @@ import re
 import subprocess
 import tempfile
 import unittest
+import os
 from pathlib import Path
 
 
@@ -54,10 +55,13 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
 
     def run_verifier(self, *arguments):
+        environment = os.environ.copy()
+        environment.pop("GITHUB_REF_NAME", None)
+        environment.pop("GITHUB_SHA", None)
         return subprocess.run(
             [str(ROOT / ".build-venv/bin/python"), str(VERIFIER),
              "--root", str(self.repo), *arguments],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, check=False, env=environment,
         )
 
     def test_valid_untagged_release_metadata_passes(self):

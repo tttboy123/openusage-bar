@@ -204,6 +204,8 @@ validate_complete_app_backup "{complete[-1].parent}"
         self.assertIn("launchctl-spy", smoke)
         self.assertIn("OPENUSAGE_REAL_LAUNCH_AGENTS", smoke)
         self.assertIn("PRAGMA integrity_check", smoke)
+        self.assertIn("SOURCE_VERSION=$(plutil", smoke)
+        self.assertIn('== "$SOURCE_VERSION"', smoke)
         self.assertIn("--purge-data", smoke)
         self.assertNotIn("security ", rollback)
         self.assertIn("scripts/release_smoke.sh", workflow)
