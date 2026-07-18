@@ -251,6 +251,54 @@ struct ActivityAppLogicTests {
         ))
     }
 
+    @Test("Dynamic product labels cover every localized enum state")
+    func localizedDynamicLabels() {
+        #expect(UsagePeriod.allCases.map(\.title) == ["Day", "Week", "Month", "Year"])
+        #expect([
+            ProviderProductCategory.subscription,
+            .api,
+            .localTool,
+        ].map(\.title) == ["Subscription", "Api", "Local Tool"])
+        #expect([
+            ProviderMetricFamily.subscriptionQuota,
+            .tokenActivity,
+            .billing,
+            .operational,
+        ].map(\.title) == ["Subscription Quota", "Token Activity", "Billing", "Operational"])
+        #expect([
+            CredentialSourceType.none,
+            .keychain,
+            .browserSession,
+            .apiKey,
+            .oauth,
+            .cli,
+            .local,
+        ].map(\.title) == [
+            "Provider owned", "Keychain", "Browser Session", "API Key", "OAuth", "CLI", "Local",
+        ])
+        #expect([
+            APISpendQuality.reported,
+            .estimated,
+            .partial,
+        ].map(\.title) == ["Reported", "Estimated", "Observed, partial"])
+        #expect([
+            ProviderMutationFailure.unavailable,
+            .couldNotLaunch,
+            .timedOut,
+            .responseTooLarge,
+            .invalidResponse,
+        ].map(\.message).allSatisfy { !$0.isEmpty })
+        #expect(DateText.reset(nil) == "Reset unavailable")
+        #expect(CapacityText.value(CapacityItem(
+            recordID: "unknown", providerID: "codex", accountRef: "",
+            quotaName: "weekly", unit: "percent", used: nil, limit: nil,
+            remaining: nil, remainingRatio: nil, resetsAt: nil,
+            periodStart: nil, periodEnd: nil, observedAt: "2026-07-18T00:00:00Z",
+            freshnessSeconds: 0, state: "unknown", quality: "unknown",
+            stale: false, revision: 1, sourceID: "current.quota", quotaWindow: "weekly"
+        )) == "Unavailable")
+    }
+
     @Test("Annual heatmap opens at the latest real day")
     func heatmapLatestScrollTarget() throws {
         let range = day("2025-07-15")...day("2026-07-14")
@@ -305,6 +353,31 @@ struct ActivityAppLogicTests {
         #expect(HeatmapPointerTarget.position(x: 1, y: 14, slotCount: 14) == nil)
         #expect(HeatmapPointerTarget.position(x: -1, y: 1, slotCount: 14) == nil)
         #expect(HeatmapPointerTarget.position(x: 35, y: 1, slotCount: 14) == nil)
+    }
+
+    @Test("Heatmap inspection prefers hover and falls back to keyboard selection")
+    func heatmapInspectionSelection() {
+        let first = HeatmapDayDetail(
+            activity: ActivityDay(
+                day: day("2026-07-13"), state: .coveredActive,
+                totalTokens: 1, observedTokens: 1, heatLevel: 1
+            ), quality: .exact, lastCollectionAt: "2026-07-13T10:00:00Z"
+        )
+        let second = HeatmapDayDetail(
+            activity: ActivityDay(
+                day: day("2026-07-14"), state: .coveredActive,
+                totalTokens: 2, observedTokens: 2, heatLevel: 2
+            ), quality: .exact, lastCollectionAt: "2026-07-14T10:00:00Z"
+        )
+        #expect(HeatmapInspectionSelection.visible(
+            hovered: first, selected: second.activity.day, in: [first, second]
+        ) == first)
+        #expect(HeatmapInspectionSelection.visible(
+            hovered: nil, selected: second.activity.day, in: [first, second]
+        ) == second)
+        #expect(HeatmapInspectionSelection.visible(
+            hovered: nil, selected: nil, in: [first, second]
+        ) == nil)
     }
 
     @Test("Heatmap is one grouped accessibility stop and metrics omit task duration")

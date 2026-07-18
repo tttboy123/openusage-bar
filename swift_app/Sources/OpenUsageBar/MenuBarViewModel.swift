@@ -60,9 +60,11 @@ final class MenuBarViewModel {
     }
     var updatedAge: String {
         guard let value = summary?.updatedAt, let date = Format.timestamp(value) else {
-            return "Waiting for usage data"
+            return AppLocalization.text("Waiting for usage data")
         }
-        return "Updated \(Format.age(Int64(max(0, Date().timeIntervalSince(date))))) ago"
+        return AppLocalization.format(
+            "Updated %@ ago", Format.age(Int64(max(0, Date().timeIntervalSince(date))))
+        )
     }
 
     func loadLastGoodOnce() {
@@ -118,7 +120,7 @@ final class MenuBarViewModel {
         reloadVisibility()
         guard !isRefreshing else { return }
         guard let command = InstalledPaths.refreshCommand() else {
-            refreshError = "Installed collector is unavailable."
+            refreshError = AppLocalization.text("Installed collector is unavailable.")
             return
         }
         isRefreshing = true
@@ -143,7 +145,7 @@ final class MenuBarViewModel {
         } catch {
             hiddenProviderIDs = []
             visibilityRevision = nil
-            visibilityError = "Provider visibility settings are invalid."
+            visibilityError = AppLocalization.text("Provider visibility settings are invalid.")
         }
         let visibleIDs = Set(groups.map(\.id))
         if let selectedProviderID, !visibleIDs.contains(selectedProviderID) {

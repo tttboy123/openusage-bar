@@ -64,16 +64,20 @@ struct HeatmapTooltipText: Sendable, Hashable {
     init(_ day: HeatmapDayDetail) {
         title = day.activity.day.rawValue
         value = switch day.activity.state {
-        case .missing: "No collection data"
-        case .partial: "\(TokenText.compact(day.activity.observedTokens)) observed Tokens"
-        case .coveredZero: "0 Tokens"
-        case .coveredActive: "\(TokenText.compact(day.activity.totalTokens ?? 0)) Tokens"
+        case .missing: AppLocalization.text("No collection data")
+        case .partial: AppLocalization.format(
+            "%@ observed Tokens", TokenText.compact(day.activity.observedTokens)
+        )
+        case .coveredZero: AppLocalization.format("%@ Tokens", "0")
+        case .coveredActive: AppLocalization.format(
+            "%@ Tokens", TokenText.compact(day.activity.totalTokens ?? 0)
+        )
         }
         metadata = [
             day.quality.displayName,
-            day.activity.state == .partial ? "Partial" : nil,
-            day.isStale ? "Stale" : nil,
-            day.lastCollectionAt.map { "Collected \($0)" },
+            day.activity.state == .partial ? AppLocalization.text("Partial") : nil,
+            day.isStale ? AppLocalization.text("Stale") : nil,
+            day.lastCollectionAt.map { AppLocalization.format("Collected %@", DateText.display($0)) },
         ].compactMap { $0 }.joined(separator: " · ")
         accessibilityValue = [title, value, metadata].filter { !$0.isEmpty }.joined(separator: ", ")
     }
@@ -102,6 +106,16 @@ enum ActivityRouteLoadingPolicy {
         from current: UsageDetailsRoute, to selected: UsageDetailsRoute
     ) -> Bool {
         current == .automation && selected != .automation
+    }
+}
+
+enum HeatmapInspectionSelection {
+    static func visible(
+        hovered: HeatmapDayDetail?, selected: LocalDay?, in days: [HeatmapDayDetail]
+    ) -> HeatmapDayDetail? {
+        hovered ?? selected.flatMap { value in
+            days.first { $0.activity.day == value }
+        }
     }
 }
 
@@ -201,11 +215,12 @@ struct ProviderCenterItem: Identifiable, Sendable, Hashable {
     }
     var helpText: String {
         if let issue = connectionIssues.first ?? secondaryIssues.first { return issue.message }
-        return switch status {
+        let key = switch status {
         case .available: "Available"
         case .connected: "Connected"
         case .attention: "Needs attention"
         }
+        return AppLocalization.text(key)
     }
 }
 
@@ -563,11 +578,11 @@ enum ProviderMutationFailure: Error, Sendable, Hashable {
 
     var message: String {
         switch self {
-        case .unavailable: "Provider editor is unavailable. Reinstall OpenUsage Bar."
-        case .couldNotLaunch: "Provider connection could not be updated."
-        case .timedOut: "Provider editor timed out."
-        case .responseTooLarge: "Provider editor returned too much data."
-        case .invalidResponse: "Provider editor returned an invalid response."
+        case .unavailable: AppLocalization.text("Provider editor is unavailable. Reinstall OpenUsage Bar.")
+        case .couldNotLaunch: AppLocalization.text("Provider connection could not be updated.")
+        case .timedOut: AppLocalization.text("Provider editor timed out.")
+        case .responseTooLarge: AppLocalization.text("Provider editor returned too much data.")
+        case .invalidResponse: AppLocalization.text("Provider editor returned an invalid response.")
         }
     }
 }
@@ -1030,21 +1045,24 @@ struct QuotaHistoryTooltipText: Sendable, Hashable {
             $0.formatted(date: .abbreviated, time: .shortened)
         }
     ) -> Self {
-        let remaining = percentage(point.remainingRatio) + " remaining"
+        let remaining = AppLocalization.format(
+            "%@ remaining", percentage(point.remainingRatio)
+        )
         let observedValue = formatDate(point.observedAt)
         let resetValue = point.resetsAt.map(formatDate)
-        let status = point.stale ? "Stale" : normalState(point.state)
+        let status = point.stale ? AppLocalization.text("Stale") : normalState(point.state)
         let statusSymbol = status.map {
-            $0 == "Stale" ? "clock.badge.exclamationmark" : "exclamationmark.triangle"
+            $0 == AppLocalization.text("Stale")
+                ? "clock.badge.exclamationmark" : "exclamationmark.triangle"
         }
         let details = [
-            remaining.lowercased(), "observed \(observedValue)",
-            resetValue.map { "resets \($0)" }, status?.lowercased(),
+            remaining.lowercased(), AppLocalization.format("observed %@", observedValue),
+            resetValue.map { AppLocalization.format("resets %@", $0) }, status?.lowercased(),
         ].compactMap { $0 }.joined(separator: ", ")
         return Self(
             title: point.seriesLabel, remaining: remaining,
-            observed: "Observed \(observedValue)",
-            reset: resetValue.map { "Resets \($0)" }, status: status,
+            observed: AppLocalization.format("Observed %@", observedValue),
+            reset: resetValue.map { AppLocalization.format("Resets %@", $0) }, status: status,
             statusSymbol: statusSymbol,
             accessibilityValue: "\(point.seriesLabel), \(details)",
             detailAccessibilityValue: details
@@ -1062,8 +1080,10 @@ struct QuotaHistoryTooltipText: Sendable, Hashable {
         guard normalized != "ok", normalized != "available" else { return nil }
         guard normalized.range(
             of: #"^[a-z0-9_]{1,40}$"#, options: .regularExpression
-        ) != nil else { return "Unavailable" }
-        return normalized.replacingOccurrences(of: "_", with: " ").capitalized
+        ) != nil else { return AppLocalization.text("Unavailable") }
+        return AppLocalization.text(
+            normalized.replacingOccurrences(of: "_", with: " ").capitalized
+        )
     }
 }
 
@@ -1305,7 +1325,8 @@ struct QuotaHistoryTimeDomain: Sendable, Hashable {
 
 enum QuotaHistoryLegendText {
     static func accessibilityValue(percentage: String, stale: Bool) -> String {
-        "\(percentage) remaining" + (stale ? ", stale" : "")
+        AppLocalization.format("%@ remaining", percentage)
+            + (stale ? ", " + AppLocalization.text("stale") : "")
     }
 }
 

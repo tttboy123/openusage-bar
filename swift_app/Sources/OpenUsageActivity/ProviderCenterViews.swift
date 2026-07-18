@@ -193,9 +193,11 @@ struct ProvidersPage: View {
                 data.providerDescriptor(for: source.providerID).familyID
             ) && !["ok", "available"].contains(source.effectiveState.lowercased())
         }.count
-        return count == 0
-            ? "Data source and compatibility"
-            : "\(count) diagnostic issue\(count == 1 ? "" : "s")"
+        if count == 0 { return AppLocalization.text("Data source and compatibility") }
+        return AppLocalization.format(
+            count == 1 ? "%lld diagnostic issue" : "%lld diagnostic issues",
+            Int64(count)
+        )
     }
 
     private func synchronizeSelection() {
@@ -390,7 +392,9 @@ private struct ProviderConnectionDetail: View {
                 )
                 HStack {
                     Button(
-                        connections.isEmpty ? "Add Connection" : "Add Account",
+                        AppLocalization.text(
+                            connections.isEmpty ? "Add Connection" : "Add Account"
+                        ),
                         systemImage: "plus"
                     ) {
                         showingAddConnection = true
@@ -421,7 +425,7 @@ private struct ProviderConnectionDetail: View {
                             .foregroundStyle(issue.requiresUserAction ? .red : .orange)
                             .frame(width: 18)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(issue.message).font(.callout.weight(.medium))
+                            Text(AppLocalization.text(issue.message)).font(.callout.weight(.medium))
                             if let lastSuccessAt = issue.lastSuccessAt {
                                 Text(
                                     "\(AppLocalization.text("Last successful update:")) "
@@ -475,10 +479,10 @@ private struct ProviderConnectionDetail: View {
         ) {
             VStack(alignment: .leading, spacing: 10) {
                 if let savedMessage {
-                    Label(savedMessage, systemImage: "checkmark.circle.fill")
+                    Label(AppLocalization.text(savedMessage), systemImage: "checkmark.circle.fill")
                         .font(.callout)
                         .foregroundStyle(.green)
-                        .accessibilityLabel("Success: \(savedMessage)")
+                        .accessibilityLabel(AppLocalization.format("Success: %@", savedMessage))
                 }
                 ForEach(connections) { connection in
                     HStack(spacing: 12) {
@@ -507,7 +511,9 @@ private struct ProviderConnectionDetail: View {
                             Text("Read only")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
-                        Button(hiddenProviderIDs.contains(connection.providerID) ? "Show" : "Hide") {
+                        Button(AppLocalization.text(
+                            hiddenProviderIDs.contains(connection.providerID) ? "Show" : "Hide"
+                        )) {
                             setHidden(
                                 connection.providerID,
                                 hidden: !hiddenProviderIDs.contains(connection.providerID)
@@ -529,13 +535,17 @@ private struct ProviderConnectionDetail: View {
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(instance.displayName).font(.callout.weight(.medium))
-                            Text("Observed source · \(DateText.display(instance.observedAt))")
+                            Text(AppLocalization.format(
+                                "Observed source · %@", DateText.display(instance.observedAt)
+                            ))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Text("Read only")
                             .font(.caption).foregroundStyle(.secondary)
-                        Button(hiddenProviderIDs.contains(instance.providerID) ? "Show" : "Hide") {
+                        Button(AppLocalization.text(
+                            hiddenProviderIDs.contains(instance.providerID) ? "Show" : "Hide"
+                        )) {
                             setHidden(
                                 instance.providerID,
                                 hidden: !hiddenProviderIDs.contains(instance.providerID)
@@ -555,12 +565,12 @@ private struct ProviderConnectionDetail: View {
     private func inlineEditor(for connection: ProviderConnectionSummary) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Edit \(connection.displayName)")
+                Text(AppLocalization.format("Edit %@", connection.displayName))
                     .font(.headline)
                 Spacer()
-                Text(connection.isStepPlan
+                Text(AppLocalization.text(connection.isStepPlan
                     ? "Site remains locked to this connection"
-                    : "Connection type remains unchanged")
+                    : "Connection type remains unchanged"))
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -590,16 +600,16 @@ private struct ProviderConnectionDetail: View {
                         .disabled(isSaving)
                 }
             }
-            Text(connection.isStepPlan
+            Text(AppLocalization.text(connection.isStepPlan
                 ? "Blank credential fields keep the existing values. China and International credentials cannot be moved between sites."
-                : "Blank credential fields keep the existing Keychain value. Provider protocol and endpoint settings remain unchanged.")
+                : "Blank credential fields keep the existing Keychain value. Provider protocol and endpoint settings remain unchanged."))
                 .font(.caption).foregroundStyle(.secondary)
 
             if let editError {
                 Label(editError, systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)
                     .foregroundStyle(.red)
-                    .accessibilityLabel("Error: \(editError)")
+                    .accessibilityLabel(AppLocalization.format("Error: %@", editError))
             }
 
             HStack {
@@ -882,7 +892,10 @@ private struct NativeProviderConnectionSheet: View {
                     TextField("Since parameter", text: $sinceParameter)
                     TextField("Until parameter", text: $untilParameter)
                 }
-                SecureField(kind == "minimax" ? "Coding Plan key" : "API key", text: $credential)
+                SecureField(
+                    AppLocalization.text(kind == "minimax" ? "Coding Plan key" : "API key"),
+                    text: $credential
+                )
                 if kind == "step_plan" {
                     SecureField("Web session (optional)", text: $session)
                 }

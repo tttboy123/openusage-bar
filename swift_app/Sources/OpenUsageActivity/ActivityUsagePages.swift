@@ -67,8 +67,9 @@ struct LocalToolsPage: View {
                         HStack(spacing: 36) {
                             LocalToolMetric(
                                 value: summary.observedTokens > 0
-                                    ? TokenText.compact(summary.observedTokens) : "No activity",
-                                label: "\(store.period.title) Tokens"
+                                    ? TokenText.compact(summary.observedTokens)
+                                    : AppLocalization.text("No activity"),
+                                label: AppLocalization.format("%@ Tokens", store.period.title)
                             )
                             LocalToolMetric(
                                 value: "\(summary.activeDays)", label: "Active Days"
@@ -77,7 +78,8 @@ struct LocalToolsPage: View {
                                 value: "\(summary.knownModelIDs.count)", label: "Known Models"
                             )
                             LocalToolMetric(
-                                value: summary.lastActivityDay?.rawValue ?? "Unavailable",
+                                value: summary.lastActivityDay?.rawValue
+                                    ?? AppLocalization.text("Unavailable"),
                                 label: "Last Activity"
                             )
                         }
@@ -88,8 +90,9 @@ struct LocalToolsPage: View {
                                     .lineLimit(1).truncationMode(.tail)
                             }
                             Spacer()
-                            Text(summary.lastCollectionAt.map { "Collected \(DateText.display($0))" }
-                                ?? "Collection unavailable")
+                            Text(summary.lastCollectionAt.map {
+                                AppLocalization.format("Collected %@", DateText.display($0))
+                            } ?? AppLocalization.text("Collection unavailable"))
                         }
                         .font(.caption).foregroundStyle(.secondary)
                     }
@@ -109,7 +112,7 @@ private struct LocalToolMetric: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(value).font(.headline).monospacedDigit()
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(AppLocalization.text(label)).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

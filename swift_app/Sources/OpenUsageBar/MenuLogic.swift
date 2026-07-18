@@ -10,17 +10,29 @@ public struct StatusLabel: Sendable, Hashable {
 
     public static func compact(remainingRatio: Double?) -> Self {
         let values = remainingRatio.map { [Format.percent($0)] } ?? []
-        return Self(values: values, accessibilityTitle: "OpenUsage Bar", accessibilityValue: values.first.map { "Most urgent capacity, \($0) remaining" } ?? "Capacity unavailable")
+        return Self(
+            values: values, accessibilityTitle: "OpenUsage Bar",
+            accessibilityValue: values.first.map {
+                AppLocalization.format("Most urgent capacity, %@ remaining", $0)
+            } ?? AppLocalization.text("Capacity unavailable")
+        )
     }
 
     public static func activity(tokens: Int64) -> Self {
         let value = Format.tokens(tokens)
-        return Self(values: [value], accessibilityTitle: "OpenUsage Bar", accessibilityValue: "Today Token, \(value)")
+        return Self(
+            values: [value], accessibilityTitle: "OpenUsage Bar",
+            accessibilityValue: AppLocalization.format("Today Token, %@", value)
+        )
     }
 
     public static func custom(values: [String]) -> Self {
         let short = Array(values.filter { !$0.isEmpty }.prefix(2))
-        return Self(values: short, accessibilityTitle: "OpenUsage Bar", accessibilityValue: short.isEmpty ? "Usage unavailable" : short.joined(separator: ", "))
+        return Self(
+            values: short, accessibilityTitle: "OpenUsage Bar",
+            accessibilityValue: short.isEmpty
+                ? AppLocalization.text("Usage unavailable") : short.joined(separator: ", ")
+        )
     }
 }
 
@@ -97,8 +109,8 @@ enum RefreshErrorPolicy {
     static func next(current: String?, result: RefreshResult) -> String? {
         switch result {
         case .succeeded: nil
-        case .failed: "Refresh failed. Showing last-good data."
-        case .timedOut: "Refresh timed out. Showing last-good data."
+        case .failed: AppLocalization.text("Refresh failed. Showing last-good data.")
+        case .timedOut: AppLocalization.text("Refresh timed out. Showing last-good data.")
         }
     }
 }
@@ -116,7 +128,7 @@ struct TodayTokenPresentation: Sendable, Hashable {
 
     init(tokens: Int64?, isComplete: Bool) {
         value = Format.todayTokens(tokens)
-        coverage = tokens != nil && !isComplete ? "Partial" : nil
+        coverage = tokens != nil && !isComplete ? AppLocalization.text("Partial") : nil
         accessibilityValue = [value, coverage].compactMap { $0 }.joined(separator: ", ")
     }
 }
@@ -226,20 +238,22 @@ public struct ProviderRowPresentation: Sendable, Hashable {
         } else if let remaining = row.remaining {
             capacity = remaining + (row.unit == "count" ? "" : " \(row.unit)")
         } else {
-            capacity = "Unavailable"
+            capacity = AppLocalization.text("Unavailable")
         }
         reset = Format.reset(row.resetsAt, now: now)
         if row.stale {
-            freshness = "Stale, \(Format.age(row.freshnessSeconds)) old"
+            freshness = AppLocalization.format(
+                "Stale, %@ old", Format.age(row.freshnessSeconds)
+            )
             stateSymbol = "clock.badge.exclamationmark"
         } else if row.state.lowercased() == "unknown" {
-            freshness = "Unknown"
+            freshness = AppLocalization.text("Unknown")
             stateSymbol = "questionmark.circle"
         } else if row.state != "ok" {
             freshness = Format.state(row.state)
             stateSymbol = "exclamationmark.triangle.fill"
         } else if row.remainingRatio == nil, row.remaining == nil {
-            freshness = "Unavailable"
+            freshness = AppLocalization.text("Unavailable")
             stateSymbol = "xmark.circle"
         } else {
             freshness = nil
@@ -256,13 +270,16 @@ public struct ProviderRowPresentation: Sendable, Hashable {
         isWarning = riskLevel == .warning
         qualityText = Format.quality(row.quality)
         switch riskLevel {
-        case .critical: riskText = "Critical capacity"
-        case .warning: riskText = "Warning capacity"
-        case .normal: riskText = "Capacity normal"
+        case .critical: riskText = AppLocalization.text("Critical capacity")
+        case .warning: riskText = AppLocalization.text("Warning capacity")
+        case .normal: riskText = AppLocalization.text("Capacity normal")
         }
         visibleMetadata = [reset, freshness].compactMap { $0 }.filter { !$0.isEmpty }
         accessibilityLabel = "\(provider), \(window)"
-        accessibilityValue = [window, "\(capacity) remaining", reset, freshness, qualityText, riskText]
+        accessibilityValue = [
+            window, AppLocalization.format("%@ remaining", capacity),
+            reset, freshness, qualityText, riskText,
+        ]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 }
@@ -296,7 +313,7 @@ enum Format {
     }
 
     static func todayTokens(_ tokens: Int64?) -> String {
-        tokens.map(Self.tokens) ?? "Unavailable"
+        tokens.map(Self.tokens) ?? AppLocalization.text("Unavailable")
     }
 
     static func timestamp(_ value: String) -> Date? {
@@ -316,16 +333,25 @@ enum Format {
     }
 
     static func window(_ value: String) -> String {
-        value.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ").capitalized
+        AppLocalization.text(
+            value.replacingOccurrences(of: "_", with: " ")
+                .replacingOccurrences(of: "-", with: " ").capitalized
+        )
     }
 
     static func reset(_ value: String?, now: Date) -> String {
-        guard let value, let date = timestamp(value) else { return "Reset unavailable" }
+        guard let value, let date = timestamp(value) else {
+            return AppLocalization.text("Reset unavailable")
+        }
         let seconds = Int(date.timeIntervalSince(now))
-        guard seconds > 0 else { return "Reset due" }
-        if seconds < 3_600 { return "resets in \(max(1, seconds / 60))m" }
-        if seconds < 86_400 { return "resets in \(max(1, seconds / 3_600))h" }
-        return "resets in \(max(1, seconds / 86_400))d"
+        guard seconds > 0 else { return AppLocalization.text("Reset due") }
+        if seconds < 3_600 {
+            return AppLocalization.format("resets in %lldm", Int64(max(1, seconds / 60)))
+        }
+        if seconds < 86_400 {
+            return AppLocalization.format("resets in %lldh", Int64(max(1, seconds / 3_600)))
+        }
+        return AppLocalization.format("resets in %lldd", Int64(max(1, seconds / 86_400)))
     }
 
     static func age(_ seconds: Int64) -> String {
@@ -336,14 +362,14 @@ enum Format {
     }
 
     static func state(_ value: String) -> String {
-        value.replacingOccurrences(of: "_", with: " ").capitalized
+        AppLocalization.text(value.replacingOccurrences(of: "_", with: " ").capitalized)
     }
 
     static func quality(_ value: String) -> String {
         switch value.lowercased() {
-        case "derived", "estimated": "Estimated"
-        case "cached": "Cached"
-        case "exact", "live": "Exact"
+        case "derived", "estimated": AppLocalization.text("Estimated")
+        case "cached": AppLocalization.text("Cached")
+        case "exact", "live": AppLocalization.text("Exact")
         default: state(value)
         }
     }

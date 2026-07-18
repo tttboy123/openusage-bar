@@ -27,7 +27,9 @@ struct ActivityHeader: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Usage Details").font(.largeTitle.weight(.semibold))
-                    Text(updatedAt.map { "Latest collection \(DateText.display($0))" } ?? "Collection time unavailable")
+                    Text(updatedAt.map {
+                        AppLocalization.format("Latest collection %@", DateText.display($0))
+                    } ?? AppLocalization.text("Collection time unavailable"))
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -45,7 +47,11 @@ struct ActivityHeader: View {
                             .tag(Optional($0))
                     }
                     if let selected = store.providerID, !store.providers.contains(selected) {
-                        Text("\(store.data?.providerDescriptor(for: selected).displayName ?? DisplayText.provider(selected)) (Unavailable)")
+                        Text(AppLocalization.format(
+                            "%@ (Unavailable)",
+                            store.data?.providerDescriptor(for: selected).displayName
+                                ?? DisplayText.provider(selected)
+                        ))
                             .tag(Optional(selected))
                     }
                 }
@@ -54,7 +60,8 @@ struct ActivityHeader: View {
                     Text("All Models").tag(String?.none)
                     ForEach(store.models, id: \.self) { Text(DisplayText.model($0)).tag(Optional($0)) }
                     if let selected = store.modelID, !store.models.contains(selected) {
-                        Text("\(DisplayText.model(selected)) (Unavailable)").tag(Optional(selected))
+                        Text(AppLocalization.format("%@ (Unavailable)", DisplayText.model(selected)))
+                            .tag(Optional(selected))
                     }
                 }
                 .frame(maxWidth: 240)
@@ -75,13 +82,16 @@ private struct MetricStrip: View {
         HStack(spacing: 0) {
             MetricValue(
                 value: metrics.totalTokens.map(TokenText.compact)
-                    ?? (metrics.observedTokens > 0 ? TokenText.compact(metrics.observedTokens) : "Unavailable"),
+                    ?? (metrics.observedTokens > 0
+                        ? TokenText.compact(metrics.observedTokens)
+                        : AppLocalization.text("Unavailable")),
                 label: metrics.isComplete ? "Total Tokens" : "Observed Tokens",
                 state: metrics.isComplete ? nil : (metrics.observedTokens > 0 ? "Partial" : "Missing")
             )
             stripDivider
             MetricValue(
-                value: metrics.peak.map { TokenText.compact($0.tokens) } ?? "Unavailable",
+                value: metrics.peak.map { TokenText.compact($0.tokens) }
+                    ?? AppLocalization.text("Unavailable"),
                 label: metrics.isComplete ? "Peak Day" : "Observed Peak",
                 state: metrics.peak.map { $0.day.rawValue }
             )
@@ -121,9 +131,12 @@ private struct MetricValue: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(value).font(.title2.weight(.medium)).monospacedDigit()
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(AppLocalization.text(label)).font(.caption).foregroundStyle(.secondary)
             if let state {
-                Label(state, systemImage: state == "Partial" ? "circle.lefthalf.filled" : "info.circle")
+                Label(
+                    AppLocalization.text(state),
+                    systemImage: state == "Partial" ? "circle.lefthalf.filled" : "info.circle"
+                )
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -148,8 +161,8 @@ private struct HeatmapSection: View {
                     .fixedSize(horizontal: true, vertical: false)
                 Spacer(minLength: 12)
                 Group {
-                    if let hoveredDay {
-                        HeatmapHoverSummary(day: hoveredDay)
+                    if let inspectedDay {
+                        HeatmapHoverSummary(day: inspectedDay)
                     } else {
                         Color.clear
                     }
@@ -252,7 +265,10 @@ private struct HeatmapSection: View {
         let missing = days.filter { $0.activity.state == .missing }.count
         let partial = days.filter { $0.activity.state == .partial }.count
         let active = days.filter { $0.activity.observedTokens > 0 }.count
-        return "\(days.count) days, \(active) observed active, \(partial) partial, \(missing) missing"
+        return AppLocalization.format(
+            "%lld days, %lld observed active, %lld partial, %lld missing",
+            Int64(days.count), Int64(active), Int64(partial), Int64(missing)
+        )
     }
 
     private var layout: HeatmapCalendarLayout? {
@@ -263,6 +279,12 @@ private struct HeatmapSection: View {
     private var selectedSummary: String? {
         guard let selected = store.heatmapFocusDay else { return nil }
         return days.first { $0.activity.day == selected }?.accessibilitySummary
+    }
+
+    private var inspectedDay: HeatmapDayDetail? {
+        HeatmapInspectionSelection.visible(
+            hovered: hoveredDay, selected: store.heatmapFocusDay, in: days
+        )
     }
 
     private func move(_ direction: MoveCommandDirection, in layout: HeatmapCalendarLayout) {
@@ -499,7 +521,7 @@ private struct ModelChartSection: View {
             alignment: .leading, spacing: 8
         ) {
             ForEach(presentation.series) { series in
-                let action = series.isVisible ? "Hide" : "Show"
+                let action = AppLocalization.text(series.isVisible ? "Hide" : "Show")
                 Button {
                     store.toggleModelSeries(
                         series.modelID, availableSeriesIDs: model.modelSeriesIDs
@@ -517,9 +539,13 @@ private struct ModelChartSection: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("\(action) \(DisplayText.model(series.modelID)) series")
-                .accessibilityLabel("\(action) \(DisplayText.model(series.modelID)) series")
-                .accessibilityValue(series.isVisible ? "Visible" : "Hidden")
+                .help(AppLocalization.format(
+                    "%@ %@ series", action, DisplayText.model(series.modelID)
+                ))
+                .accessibilityLabel(AppLocalization.format(
+                    "%@ %@ series", action, DisplayText.model(series.modelID)
+                ))
+                .accessibilityValue(AppLocalization.text(series.isVisible ? "Visible" : "Hidden"))
             }
         }
         .accessibilityLabel("Model series")
@@ -613,7 +639,10 @@ private struct ChartTooltip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("\(day.day.rawValue) · \(day.totalTokens.map(TokenText.compact) ?? "Unavailable") Tokens")
+            Text(AppLocalization.format(
+                "%@ · %@ Tokens", day.day.rawValue,
+                day.totalTokens.map(TokenText.compact) ?? AppLocalization.text("Unavailable")
+            ))
                 .font(.headline).monospacedDigit()
             ForEach(day.composition, id: \.modelID) { item in
                 HStack {
@@ -624,6 +653,10 @@ private struct ChartTooltip: View {
             }
             Label(day.quality.displayName, systemImage: day.quality.symbol)
                 .font(.caption).foregroundStyle(.secondary)
+            if let collected = day.lastCollectionAt {
+                Text(AppLocalization.format("Collected %@", DateText.display(collected)))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding(10).frame(width: 230)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))

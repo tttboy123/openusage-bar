@@ -271,8 +271,10 @@ struct UsageDetailsTests {
         #expect(payload.totalTokens == 74_200_000)
         #expect(payload.composition.reduce(0) { $0 + $1.tokens } == 74_200_000)
         #expect(payload.quality == .exact)
+        #expect(payload.lastCollectionAt == "2026-07-14T09:00:00Z")
         #expect(payload.accessibilitySummary.contains("74.2M Tokens"))
         #expect(payload.accessibilitySummary.contains("GPT-5.5"))
+        #expect(payload.accessibilitySummary.contains("2026-07-14T09:00:00Z"))
     }
 
     @Test("Period ranges are calendar bounded and never exceed repository limits")

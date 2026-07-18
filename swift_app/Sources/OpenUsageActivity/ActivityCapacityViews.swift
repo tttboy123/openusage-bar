@@ -40,7 +40,9 @@ private struct CapacitySection: View {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(row.providerDescriptor.displayName).font(.headline)
-                            Text(row.quotaName).font(.caption).foregroundStyle(.secondary)
+                            Text(AppLocalization.text(
+                                row.quotaName.replacingOccurrences(of: "_", with: " ").capitalized
+                            )).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         if row.stale { Label("Stale", systemImage: "clock.badge.exclamationmark").foregroundStyle(.orange) }
@@ -64,7 +66,9 @@ private struct CapacitySection: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         if chart.changingSeries.count > 6 {
-                            Button(showingAllHistorySeries ? "Focus 6" : "Show all") {
+                            Button(AppLocalization.text(
+                                showingAllHistorySeries ? "Focus 6" : "Show all"
+                            )) {
                                 historySeriesMode = showingAllHistorySeries ? .focused : .showAll
                                 historyFocus.clear(.filterChange)
                             }
@@ -364,7 +368,10 @@ private struct CapacitySection: View {
                 .buttonStyle(.plain)
                 .opacity(isVisible ? 1 : 0.48)
                 .font(.caption)
-                .accessibilityLabel("\(item.seriesLabel), \(isVisible ? "shown" : "hidden")")
+                .accessibilityLabel(AppLocalization.format(
+                    "%@, %@", item.seriesLabel,
+                    AppLocalization.text(isVisible ? "shown" : "hidden")
+                ))
                 .accessibilityValue(QuotaHistoryLegendText.accessibilityValue(
                     percentage: CapacityText.percentage(item.currentRatio),
                     stale: item.latestPoint.stale

@@ -7,10 +7,16 @@ from openusage_bar.ui import localized_ui_text, normalize_ui_language
 
 ROOT = Path(__file__).resolve().parents[1]
 STRINGS_ENTRY = re.compile(r'^"((?:\\.|[^"\\])*)"\s*=\s*"((?:\\.|[^"\\])*)"\s*;', re.MULTILINE)
-LOCALIZED_CALL = re.compile(r'AppLocalization\.text\(\s*"((?:\\.|[^"\\])*)"')
+LOCALIZED_CALL = re.compile(r'AppLocalization\.(?:text|format)\(\s*"((?:\\.|[^"\\])*)"')
 SWIFTUI_LITERAL = re.compile(
     r'\b(?:Text|Button|Label|Picker|Section|LabeledContent|TextField|SecureField|ContentUnavailableView)'
     r'\(\s*"((?:\\.|[^"\\])*)"'
+)
+CUSTOM_VISIBLE_LITERAL = re.compile(
+    r'\b(?:title|detail|description|text):\s*"((?:\\.|[^"\\])*)"'
+)
+ACCESSIBILITY_LITERAL = re.compile(
+    r'\.(?:help|accessibilityLabel|accessibilityValue|accessibilityHint)\(\s*"((?:\\.|[^"\\])*)"'
 )
 FORMAT_PLACEHOLDER = re.compile(r'%(?!%)(?:\d+\$)?[-+#0 \'\d.*]*[A-Za-z@]')
 
@@ -109,6 +115,14 @@ class UILocalizationTests(unittest.TestCase):
             value for value in SWIFTUI_LITERAL.findall(swift_ui_sources())
             if "\\(" not in value
         }
+        literals.update(
+            value for value in CUSTOM_VISIBLE_LITERAL.findall(swift_ui_sources())
+            if "\\(" not in value
+        )
+        literals.update(
+            value for value in ACCESSIBILITY_LITERAL.findall(swift_ui_sources())
+            if "\\(" not in value
+        )
 
         self.assertEqual(literals - set(english), set())
 

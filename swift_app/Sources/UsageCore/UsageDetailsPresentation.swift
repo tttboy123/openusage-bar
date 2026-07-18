@@ -85,14 +85,19 @@ public struct DailyChartDay: Identifiable, Sendable, Hashable {
     public let observedTokens: Int64
     public let composition: [ModelComposition]
     public let quality: ActivityQuality
+    public let lastCollectionAt: String?
     public var id: LocalDay { day }
 
     public var accessibilitySummary: String {
-        let total = totalTokens.map(TokenText.compact) ?? "Unavailable"
+        let total = totalTokens.map(TokenText.compact) ?? AppLocalization.text("Unavailable")
         let models = composition.map {
             "\(DisplayText.model($0.modelID)), \(TokenText.compact($0.tokens))"
         }.joined(separator: ", ")
-        return [day.rawValue, "\(total) Tokens", models, quality.displayName]
+        let collected = lastCollectionAt.map { AppLocalization.format("Collected %@", $0) } ?? ""
+        return [
+            day.rawValue, AppLocalization.format("%@ Tokens", total),
+            models, quality.displayName, collected,
+        ]
             .filter { !$0.isEmpty }.joined(separator: ", ")
     }
 }
@@ -305,7 +310,8 @@ public struct UsageDetailsModel: Sendable, Hashable {
                 totalTokens: day.totalTokens,
                 observedTokens: day.observedTokens,
                 composition: day.composition.filter { visible.contains($0.modelID) },
-                quality: day.quality
+                quality: day.quality,
+                lastCollectionAt: day.lastCollectionAt
             )
         }
         return ModelSeriesPresentation(series: series, seriesPoints: points, chartDays: days)
@@ -698,7 +704,8 @@ public enum UsageDetailsAggregator {
             return DailyChartDay(
                 day: activityDay.day, state: activityDay.state,
                 totalTokens: activityDay.totalTokens, observedTokens: activityDay.observedTokens,
-                composition: values, quality: quality
+                composition: values, quality: quality,
+                lastCollectionAt: records.map(\.importedAt).max()
             )
         }
         let points: [DailyModelPoint] = chartDays.flatMap { day -> [DailyModelPoint] in
@@ -968,10 +975,10 @@ public enum DisplayText {
     }
 
     public static func model(_ id: String) -> String {
-        if id == ModelSeriesIdentity.overflowID { return "Additional Models" }
-        if id == "unknown" { return "Unattributed" }
+        if id == ModelSeriesIdentity.overflowID { return AppLocalization.text("Additional Models") }
+        if id == "unknown" { return AppLocalization.text("Unattributed") }
         if let providerID = ModelSeriesIdentity.unattributedProviderID(from: id) {
-            return "\(provider(providerID)) · Unattributed"
+            return AppLocalization.format("%@ · Unattributed", provider(providerID))
         }
         return id.split(separator: "-").map { part in
             let value = String(part)
@@ -983,10 +990,10 @@ public enum DisplayText {
 public extension ActivityQuality {
     var displayName: String {
         switch self {
-        case .exact: "Exact"
-        case .estimated: "Estimated"
-        case .partial: "Partial"
-        case .missing: "Missing"
+        case .exact: AppLocalization.text("Exact")
+        case .estimated: AppLocalization.text("Estimated")
+        case .partial: AppLocalization.text("Partial")
+        case .missing: AppLocalization.text("Missing")
         }
     }
 }

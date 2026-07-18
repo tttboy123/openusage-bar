@@ -126,6 +126,9 @@ struct AutomationPage: View {
                 Spacer()
                 Button("Copy", systemImage: "doc.on.doc") { copy(command) }
                     .controlSize(.small)
+                    .accessibilityLabel(
+                        AppLocalization.format("Copy %@", AppLocalization.text(label))
+                    )
             }
             Text(verbatim: command)
                 .font(.system(.caption, design: .monospaced))

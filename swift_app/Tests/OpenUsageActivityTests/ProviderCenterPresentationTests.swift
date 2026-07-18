@@ -37,6 +37,73 @@ struct ProviderCenterPresentationTests {
         )
         #expect(missingCredential.validation(action: .createConnection) == .missingCredential)
         #expect(missingCredential.validation(action: .updateConnection) == nil)
+
+        let missingProvider = ManagedConnectionDraft.minimax(
+            providerID: "  ", name: "MiniMax", replacementCredential: "key"
+        )
+        #expect(missingProvider.validation(action: .createConnection) == .missingProviderID)
+
+        let invalidSite = ManagedConnectionDraft.stepPlan(
+            providerID: "step-work", name: "Step Plan", site: "elsewhere",
+            replacementCredential: "key", replacementSession: ""
+        )
+        #expect(invalidSite.validation(action: .createConnection) == .invalidSite)
+
+        let sessionOnly = ManagedConnectionDraft.stepPlan(
+            providerID: "step-work", name: "Step Plan", site: "china",
+            replacementCredential: "", replacementSession: "session"
+        )
+        #expect(sessionOnly.validation(action: .createConnection) == nil)
+    }
+
+    @Test("Every managed Provider draft serializes its public configuration")
+    func allManagedDraftEnvelopes() throws {
+        let step = ManagedConnectionDraft.stepPlan(
+            providerID: "step-work", name: "Step Work", site: "international",
+            replacementCredential: "api-key", replacementSession: "web-session"
+        )
+        let organization = ManagedConnectionDraft.openAIOrganization(
+            providerID: "openai-work", name: "OpenAI Work",
+            replacementCredential: "admin-key"
+        )
+        let generic = ManagedConnectionDraft.generic(.init(
+            providerID: "custom-quota", name: "Custom Quota", familyID: "custom",
+            endpoint: "https://example.test/quota", headerName: "Authorization",
+            authPrefix: "Bearer ", primaryPath: "$.quota",
+            remainingPercentPath: "$.remaining", resetPath: "$.reset",
+            detailPath: "$.detail", replacementCredential: "quota-key"
+        ))
+        let daily = ManagedConnectionDraft.dailyUsageFeed(.init(
+            providerID: "custom-daily", name: "Custom Daily", familyID: "custom",
+            endpoint: "https://example.test/usage", headerName: "X-API-Key",
+            authPrefix: "", itemsPath: "$.items", datePath: "$.date",
+            modelPath: "$.model", inputTokensPath: "$.input",
+            outputTokensPath: "$.output", cacheReadTokensPath: "$.cacheRead",
+            cacheCreationTokensPath: "$.cacheCreate", reasoningTokensPath: "$.reasoning",
+            totalTokensPath: "$.total", sinceParameter: "since",
+            untilParameter: "until", replacementCredential: "usage-key"
+        ))
+
+        let stepObject = try mutationObject(step.request(action: .createConnection))
+        #expect(stepObject["kind"] as? String == "step_plan")
+        #expect((stepObject["configuration"] as? [String: Any])?["site"] as? String == "international")
+        #expect((stepObject["credentialMaterial"] as? [String: Any])?["session"] as? String == "web-session")
+
+        let organizationObject = try mutationObject(organization.request(action: .updateConnection))
+        #expect(organizationObject["kind"] as? String == "openai_organization")
+
+        let genericObject = try mutationObject(generic.request(action: .createConnection))
+        let genericConfiguration = try #require(genericObject["configuration"] as? [String: Any])
+        #expect(genericObject["kind"] as? String == "generic")
+        #expect(genericConfiguration["remainingPercentPath"] as? String == "$.remaining")
+        #expect(genericConfiguration["detailPath"] as? String == "$.detail")
+
+        let dailyObject = try mutationObject(daily.request(action: .createConnection))
+        let dailyConfiguration = try #require(dailyObject["configuration"] as? [String: Any])
+        #expect(dailyObject["kind"] as? String == "daily_usage_feed")
+        #expect(dailyConfiguration["modelPath"] as? String == "$.model")
+        #expect(dailyConfiguration["reasoningTokensPath"] as? String == "$.reasoning")
+        #expect(dailyConfiguration["untilParameter"] as? String == "until")
     }
 
     @Test("Auto-discovered connections never receive mutation actions")

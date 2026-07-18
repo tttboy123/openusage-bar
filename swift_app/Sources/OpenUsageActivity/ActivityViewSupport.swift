@@ -30,7 +30,7 @@ struct DataHealthPage: View {
                         Spacer()
                         StateLabel(state: catalog.state)
                     }
-                    LabeledContent("Status", value: catalog.title)
+                    LabeledContent("Status", value: AppLocalization.text(catalog.title))
                     LabeledContent("Providers", value: catalog.countSummary)
                     Text("Diagnostic only; readable provider data remains available.")
                         .font(.caption)
@@ -43,19 +43,20 @@ struct DataHealthPage: View {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
                         Text("OpenUsage").font(.headline)
-                        Text(issue.title).foregroundStyle(.secondary)
+                        Text(AppLocalization.text(issue.title)).foregroundStyle(.secondary)
                         Spacer()
                         StateLabel(state: source.effectiveState)
                     }
                     if issue.isIssue {
-                        Text(issue.message).font(.callout)
+                        Text(AppLocalization.text(issue.message)).font(.callout)
                     } else {
                         Text("OpenUsage data collection is available.").font(.callout)
                     }
                     LabeledContent("Last attempt", value: DateText.display(source.lastAttemptAt))
                     LabeledContent(
                         "Last success",
-                        value: source.lastSuccessAt.map(DateText.display) ?? "Unavailable"
+                        value: source.lastSuccessAt.map(DateText.display)
+                            ?? AppLocalization.text("Unavailable")
                     )
                 }
                 Divider()
@@ -82,21 +83,30 @@ struct DataHealthPage: View {
                     VStack(alignment: .leading, spacing: 5) {
                         HStack {
                             Text(descriptor.displayName).font(.headline)
-                            Text(runtimeSource.roleTitle).foregroundStyle(.secondary)
+                            Text(AppLocalization.text(runtimeSource.roleTitle)).foregroundStyle(.secondary)
                             Spacer()
                             StateLabel(state: source.effectiveState)
                         }
                         if runtimeSource.strategies.isEmpty {
-                            LabeledContent("Strategy", value: "Uncatalogued source")
+                            LabeledContent(
+                                "Strategy", value: AppLocalization.text("Uncatalogued source")
+                            )
                         } else {
                             LabeledContent("Strategy") {
-                                Text(runtimeSource.strategies.map(\.summary).joined(separator: "; "))
+                                Text(runtimeSource.strategies.map {
+                                    AppLocalization.text($0.summary)
+                                }.joined(separator: "; "))
                                     .multilineTextAlignment(.trailing)
                             }
-                            LabeledContent("Platforms", value: runtimeSource.platforms)
+                            LabeledContent(
+                                "Platforms", value: AppLocalization.text(runtimeSource.platforms)
+                            )
                         }
                         LabeledContent("Last attempt", value: DateText.display(source.lastAttemptAt))
-                        LabeledContent("Last success", value: source.lastSuccessAt.map(DateText.display) ?? "Unavailable")
+                        LabeledContent(
+                            "Last success", value: source.lastSuccessAt.map(DateText.display)
+                                ?? AppLocalization.text("Unavailable")
+                        )
                         if let stale = source.staleAt { LabeledContent("Stale after", value: DateText.display(stale)) }
                         if let code = source.errorCode { LabeledContent("Error code", value: SourceText.errorCode(code)) }
                     }
@@ -183,19 +193,24 @@ struct OpenUsageCatalogPresentation: Sendable, Hashable {
     var isGlobalFailure: Bool { false }
     var title: String {
         switch outcome {
-        case "ok": "Compatible"
-        case "openusage_unavailable": "OpenUsage unavailable"
-        case "unsupported_openusage_version": "Unsupported OpenUsage version"
-        case "provider_catalog_drift": "Provider catalog changed"
-        case "timeout": "Compatibility check timed out"
-        default: "Compatibility check unavailable"
+        case "ok": AppLocalization.text("Compatible")
+        case "openusage_unavailable": AppLocalization.text("OpenUsage unavailable")
+        case "unsupported_openusage_version": AppLocalization.text("Unsupported OpenUsage version")
+        case "provider_catalog_drift": AppLocalization.text("Provider catalog changed")
+        case "timeout": AppLocalization.text("Compatibility check timed out")
+        default: AppLocalization.text("Compatibility check unavailable")
         }
     }
     var countSummary: String {
         if outcome == "provider_catalog_drift" {
-            return "\(actualCount) detected · \(missingCount) missing · \(extraCount) extra"
+            return AppLocalization.format(
+                "%lld detected · %lld missing · %lld extra",
+                Int64(actualCount), Int64(missingCount), Int64(extraCount)
+            )
         }
-        return "\(actualCount) of \(expectedCount) detected"
+        return AppLocalization.format(
+            "%lld of %lld detected", Int64(actualCount), Int64(expectedCount)
+        )
     }
 }
 
@@ -219,9 +234,13 @@ struct NoMatchView: View {
 
     private var description: String {
         switch match {
-        case .matched: "No matching usage data is available."
-        case let .noMatchingProvider(id): "The selected Provider \(providerName(id)) is unavailable or hidden."
-        case let .noMatchingModel(id): "The selected model \(DisplayText.model(id)) has no visible activity."
+        case .matched: AppLocalization.text("No matching usage data is available.")
+        case let .noMatchingProvider(id): AppLocalization.format(
+            "The selected Provider %@ is unavailable or hidden.", providerName(id)
+        )
+        case let .noMatchingModel(id): AppLocalization.format(
+            "The selected model %@ has no visible activity.", DisplayText.model(id)
+        )
         }
     }
 }
@@ -231,9 +250,14 @@ struct FailureView: View {
     let retry: () -> Void
     var body: some View {
         ContentUnavailableView {
-            Label(error == .databaseUnavailable ? "Usage database unavailable" : "Usage details unavailable", systemImage: "externaldrive.badge.exclamationmark")
+            Label(
+                AppLocalization.text(error == .databaseUnavailable
+                    ? "Usage database unavailable" : "Usage details unavailable"),
+                systemImage: "externaldrive.badge.exclamationmark"
+            )
         } description: {
-            Text(error?.localizedDescription ?? "No matching usage data is available.")
+            Text(error?.localizedDescription
+                ?? AppLocalization.text("No matching usage data is available."))
         } actions: {
             Button("Retry") { retry() }
         }
@@ -282,7 +306,7 @@ struct StatusBanner: View {
     let symbol: String
     let text: String
     var body: some View {
-        Label(text, systemImage: symbol).font(.callout).foregroundStyle(.orange)
+        Label(AppLocalization.text(text), systemImage: symbol).font(.callout).foregroundStyle(.orange)
             .padding(.vertical, 8)
     }
 }
@@ -311,17 +335,21 @@ enum SettingsHelper {
 
     @MainActor private static func showUnavailable() {
             let alert = NSAlert()
-            alert.messageText = "Provider Settings unavailable"
-            alert.informativeText = "Reinstall OpenUsage Bar to restore the settings helper."
+            alert.messageText = AppLocalization.text("Provider Settings unavailable")
+            alert.informativeText = AppLocalization.text(
+                "Reinstall OpenUsage Bar to restore the settings helper."
+            )
             alert.runModal()
     }
 }
 
 private enum AccountText {
     static func pseudonymous(_ value: String) -> String {
-        guard !value.isEmpty else { return "Default" }
+        guard !value.isEmpty else { return AppLocalization.text("Default") }
         let hash = value.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
-        return "Account " + String(format: "%08llx", hash).suffix(8)
+        return AppLocalization.format(
+            "Account %@", String(String(format: "%08llx", hash).suffix(8))
+        )
     }
 }
 
@@ -329,7 +357,7 @@ enum CapacityText {
     static func value(_ row: CapacityItem) -> String {
         if let ratio = row.remainingRatio { return percentage(ratio) }
         if let remaining = row.remaining { return row.unit == "count" ? remaining : "\(remaining) \(row.unit)" }
-        return "Unavailable"
+        return AppLocalization.text("Unavailable")
     }
 
     static func percentage(_ ratio: Double) -> String {
@@ -353,10 +381,13 @@ enum APISpendText {
 
 enum DateText {
     static func display(_ value: String) -> String {
-        guard let date = ActivityTimestamp.date(from: value) else { return "Unavailable" }
+        guard let date = ActivityTimestamp.date(from: value) else { return AppLocalization.text("Unavailable") }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
-    static func reset(_ value: String?) -> String { value.map { "Resets \(display($0))" } ?? "Reset unavailable" }
+    static func reset(_ value: String?) -> String {
+        value.map { AppLocalization.format("Resets %@", display($0)) }
+            ?? AppLocalization.text("Reset unavailable")
+    }
     static func month(_ yearMonth: String) -> String {
         let parts = yearMonth.split(separator: "-")
         guard parts.count == 2, let month = Int(parts[1]), (1...12).contains(month) else { return "" }
@@ -365,7 +396,9 @@ enum DateText {
 }
 
 private enum SourceText {
-    static func state(_ value: String) -> String { value.replacingOccurrences(of: "_", with: " ").capitalized }
+    static func state(_ value: String) -> String {
+        AppLocalization.text(value.replacingOccurrences(of: "_", with: " ").capitalized)
+    }
     static func errorCode(_ value: String) -> String {
         value.range(of: #"^[A-Za-z0-9._-]{1,80}$"#, options: .regularExpression) == nil
             ? "unknown_error" : value
@@ -458,7 +491,7 @@ extension ProviderCapabilityState {
 }
 
 extension UsagePeriod {
-    var title: String { rawValue.capitalized }
+    var title: String { AppLocalization.text(rawValue.capitalized) }
 }
 
 extension ActivityQuality {
@@ -468,18 +501,26 @@ extension ActivityQuality {
 }
 
 extension ProviderProductCategory {
-    var title: String { self == .localTool ? "Local Tool" : rawValue.capitalized }
+    var title: String {
+        AppLocalization.text(self == .localTool ? "Local Tool" : rawValue.capitalized)
+    }
 }
 
 extension ProviderMetricFamily {
     var title: String {
-        switch self { case .subscriptionQuota: "Subscription Quota"; case .tokenActivity: "Token Activity"; case .billing: "Billing"; case .operational: "Operational" }
+        let key = switch self {
+        case .subscriptionQuota: "Subscription Quota"
+        case .tokenActivity: "Token Activity"
+        case .billing: "Billing"
+        case .operational: "Operational"
+        }
+        return AppLocalization.text(key)
     }
 }
 
 extension CredentialSourceType {
     var title: String {
-        switch self {
+        let key = switch self {
         case .none: "Provider owned"
         case .keychain: "Keychain"
         case .browserSession: "Browser Session"
@@ -488,12 +529,18 @@ extension CredentialSourceType {
         case .cli: "CLI"
         case .local: "Local"
         }
+        return AppLocalization.text(key)
     }
 }
 
 extension APISpendQuality {
     var title: String {
-        switch self { case .reported: "Reported"; case .estimated: "Estimated"; case .partial: "Observed, partial" }
+        let key = switch self {
+        case .reported: "Reported"
+        case .estimated: "Estimated"
+        case .partial: "Observed, partial"
+        }
+        return AppLocalization.text(key)
     }
     var symbol: String {
         switch self { case .reported: "checkmark.seal"; case .estimated: "function"; case .partial: "circle.lefthalf.filled" }
