@@ -923,3 +923,25 @@ class ActivityCollector:
             return True
         finally:
             self._lock.release()
+
+    def refresh_usage(self, provider_ids: tuple[str, ...]) -> bool:
+        """Refresh selected local usage sources without waiting for quota I/O."""
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            selected = tuple(dict.fromkeys(
+                provider_id
+                for provider_id in provider_ids
+                if provider_id in self.official_importers
+            ))
+            if not selected:
+                return True
+            current = self.clock()
+            attempted_at = current.astimezone(timezone.utc)
+            today = current.astimezone(self.local_timezone).date()
+            self._refresh_usage_sources(
+                Overview([]), selected, today, attempted_at
+            )
+            return True
+        finally:
+            self._lock.release()

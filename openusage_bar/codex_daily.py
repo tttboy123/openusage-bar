@@ -58,6 +58,7 @@ class CodexLocalDailyImporter:
     usage_source_id = "codex.local_sessions"
     cost_source_id = None
     account_ref = ""
+    eager_local = True
 
     def __init__(
         self,

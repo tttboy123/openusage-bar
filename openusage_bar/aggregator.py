@@ -345,12 +345,21 @@ class Aggregator:
 class LedgerRefresher:
     """Headless bridge from provider cards into the canonical activity ledger."""
 
-    def __init__(self, aggregator, collector, quota_sources=()) -> None:
+    def __init__(
+        self, aggregator, collector, quota_sources=(), *,
+        eager_usage_provider_ids=(),
+    ) -> None:
         self.aggregator = aggregator
         self.collector = collector
         self.quota_sources = tuple(quota_sources)
+        self.eager_usage_provider_ids = tuple(eager_usage_provider_ids)
 
     def refresh(self) -> None:
+        if self.eager_usage_provider_ids:
+            try:
+                self.collector.refresh_usage(self.eager_usage_provider_ids)
+            except Exception:
+                pass
         overview = self.aggregator.refresh()
         results = tuple(
             (provider_id, source_id, result)
@@ -418,4 +427,12 @@ def build_headless_refresher(activity_store):
         for binding in bindings for adapter in binding.quota_sources
         if hasattr(adapter, "last_quota_result")
     )
-    return LedgerRefresher(aggregator, collector, quota_sources)
+    eager_usage_provider_ids = tuple(sorted(
+        provider_id
+        for provider_id, importer in official_importers.items()
+        if getattr(importer, "eager_local", False) is True
+    ))
+    return LedgerRefresher(
+        aggregator, collector, quota_sources,
+        eager_usage_provider_ids=eager_usage_provider_ids,
+    )

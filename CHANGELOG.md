@@ -34,6 +34,8 @@ This project follows [Semantic Versioning](https://semver.org/).
   input instead of adding it to the total a second time.
 - Codex history no longer remains stuck on a partial OpenUsage daily snapshot
   when the upstream aggregation times out on large session archives.
+- Local Codex activity is committed before slower network quota refreshes, so
+  one unavailable Provider cannot delay the daily Token ledger.
 - Provider-level refresh failures no longer suppress independent facts.
 - Keychain lookup expressions no longer trigger false-positive literal-secret
   scans while hard-coded credentials remain blocked.

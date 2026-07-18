@@ -788,6 +788,32 @@ class ActivityCollectorTests(unittest.TestCase):
             (date(2025, 7, 15), date(2026, 7, 14)),
         )
 
+    def test_usage_only_refresh_commits_requested_local_provider_before_quotas(self):
+        store = Mock()
+        store.has_source_success.return_value = False
+        official = Mock()
+        official.usage_source_id = "codex.local_sessions"
+        official.cost_source_id = None
+        official.fetch_usage.return_value = UsageImportSuccess(
+            date(2025, 7, 15), date(2026, 7, 14),
+            (model_row(day="2026-07-14", provider_id="codex"),),
+        )
+        openusage = Mock()
+        collector = ActivityCollector(
+            store, openusage, official_importers={"codex": official},
+            clock=lambda: NOW,
+        )
+
+        self.assertTrue(collector.refresh_usage(("codex",)))
+
+        official.fetch_usage.assert_called_once_with(
+            date(2025, 7, 15), date(2026, 7, 14)
+        )
+        store.commit_usage_import_success.assert_called_once()
+        store.record_quota.assert_not_called()
+        official.fetch_costs.assert_not_called()
+        openusage.fetch.assert_not_called()
+
     def test_quota_usage_and_cost_failures_are_independent(self):
         for failed_family in ("quota", "usage", "cost"):
             with self.subTest(failed_family=failed_family):
