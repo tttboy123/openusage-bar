@@ -4,9 +4,10 @@ import stat
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stderr
 from pathlib import Path
 
-from scripts.release_artifact_audit import ArtifactError, inspect_members, verify_versions
+from scripts.release_artifact_audit import ArtifactError, inspect_members, main, verify_versions
 
 
 ROOT_NAME = "OpenUsage-Bar-v0.4.0-macos-arm64"
@@ -25,6 +26,14 @@ def archive_with(entries):
 
 
 class ReleaseArtifactAuditTests(unittest.TestCase):
+    def test_cli_reports_only_a_safe_rule_identifier(self):
+        error = io.StringIO()
+        with redirect_stderr(error):
+            result = main(["missing.zip"])
+
+        self.assertEqual(result, 1)
+        self.assertEqual(error.getvalue(), "release_artifact_invalid reason=archive\n")
+
     def test_documented_members_are_accepted(self):
         archive = archive_with((
             (f"{ROOT_NAME}/LICENSE", "license"),

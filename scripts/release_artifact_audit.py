@@ -38,6 +38,13 @@ class ArtifactError(ValueError):
     pass
 
 
+SAFE_REASONS = frozenset({
+    "archive", "architecture", "binary", "checksum", "home_path",
+    "oversized", "plist", "private_material", "signature", "symlink",
+    "unexpected_member", "unsafe_path", "version_mismatch",
+})
+
+
 def _member_mode(info: zipfile.ZipInfo) -> int:
     return (info.external_attr >> 16) & 0xFFFF
 
@@ -191,8 +198,14 @@ def main(arguments: list[str]) -> int:
         return 2
     try:
         audit(Path(arguments[0]))
-    except (ArtifactError, OSError, UnicodeError, zipfile.BadZipFile):
-        print("release_artifact_invalid", file=sys.stderr)
+    except ArtifactError as error:
+        reason = str(error)
+        if reason not in SAFE_REASONS:
+            reason = "unknown"
+        print(f"release_artifact_invalid reason={reason}", file=sys.stderr)
+        return 1
+    except (OSError, UnicodeError, zipfile.BadZipFile):
+        print("release_artifact_invalid reason=unknown", file=sys.stderr)
         return 1
     print("release_artifact_ok")
     return 0
