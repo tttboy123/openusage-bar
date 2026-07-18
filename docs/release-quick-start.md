@@ -1,6 +1,6 @@
 # OpenUsage Bar release quick start
 
-OpenUsage Bar 0.3 supports Apple Silicon Macs running macOS 15 or later.
+OpenUsage Bar 0.4 supports Apple Silicon Macs running macOS 15 or later.
 
 ## Install
 
@@ -9,14 +9,14 @@ OpenUsage Bar 0.3 supports Apple Silicon Macs running macOS 15 or later.
 2. Verify the download:
 
    ```bash
-   shasum -a 256 -c OpenUsage-Bar-v0.3.0-macos-arm64.zip.sha256
+   shasum -a 256 -c OpenUsage-Bar-v0.4.0-macos-arm64.zip.sha256
    ```
 
 3. Unzip it, enter the extracted directory, and run the bundled installer:
 
    ```bash
-   unzip OpenUsage-Bar-v0.3.0-macos-arm64.zip
-   cd OpenUsage-Bar-v0.3.0-macos-arm64
+   unzip OpenUsage-Bar-v0.4.0-macos-arm64.zip
+   cd OpenUsage-Bar-v0.4.0-macos-arm64
    scripts/install_app.sh
    ```
 
@@ -31,10 +31,16 @@ OpenUsage Bar 0.3 supports Apple Silicon Macs running macOS 15 or later.
 5. Choose **Settings** to add provider credentials. Credentials are written to
    macOS Keychain; provider configuration stores only non-secret metadata.
 
-The initial GitHub pre-release may be ad-hoc signed. Until a notarized Developer
-ID build is attached, build from source or explicitly allow the downloaded app
+The GitHub convenience build is ad-hoc signed. Build from source or explicitly
+allow the downloaded app
 in **System Settings > Privacy & Security**. Never run a command that disables
 Gatekeeper globally.
+
+Every release must use an immutable `vX.Y.Z` tag whose version and build agree
+with all three app bundles, the Python helper, and the matching CHANGELOG entry.
+CI pins third-party Actions to verified full commit SHAs. Developer ID signing
+and notarization are optional distribution conveniences, not source-release
+requirements.
 
 ## Build from source
 

@@ -4,6 +4,35 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.4.0 - 2026-07-18
+
+### Added
+
+- Native bilingual control center with menu-bar capacity, Usage Details,
+  Provider Center, onboarding, and automation diagnostics.
+- Versioned read-only local API and CLI snapshots for independent resource
+  consumers; Loom remains optional and out of process.
+- Provider runtime registry with isolated quota, Token usage, and monetary cost
+  fact pipelines.
+- Multi-window quota provenance, opaque multi-account isolation, and discovery
+  aliases for GLM, Kimi, Qwen, Claude, and OpenCode families.
+- Version 2 custom quota, daily Token, and daily monetary cost feeds with
+  version 1 migration compatibility.
+- Synthetic Provider Conformance Kit covering failure isolation, last-good
+  preservation, source priority, pagination bounds, privacy, and Unknown-not-zero.
+
+### Changed
+
+- All app and helper bundles now share release version 0.4.0 and build 4.
+- Release metadata is verified against immutable tags, build history, and the
+  CHANGELOG; GitHub Actions are pinned to full official commit SHAs.
+
+### Fixed
+
+- Provider-level refresh failures no longer suppress independent facts.
+- Keychain lookup expressions no longer trigger false-positive literal-secret
+  scans while hard-coded credentials remain blocked.
+
 ## 0.3.0 - 2026-07-18
 
 ### Added
