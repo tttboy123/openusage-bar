@@ -1,10 +1,17 @@
+import contextlib
 import importlib.util
+import io
 import json
 import os
+import plistlib
+import socket
+import sqlite3
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -291,6 +298,266 @@ class RebootRecoveryTests(unittest.TestCase):
             '"bootout"',
         ):
             self.assertNotIn(forbidden, source)
+
+    def test_bundle_socket_and_ledger_probes_return_only_bounded_facts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = root / "OpenUsage Bar.app"
+            info = app / "Contents/Info.plist"
+            info.parent.mkdir(parents=True)
+            info.write_bytes(
+                plistlib.dumps(
+                    {
+                        "CFBundleIdentifier": "com.lune.openusagebar",
+                        "CFBundleShortVersionString": "0.4.3",
+                        "CFBundleVersion": "7",
+                        "PrivateIgnoredField": "not-exported",
+                    }
+                )
+            )
+            self.assertEqual(
+                self.module._bundle_metadata(app),
+                {
+                    "bundleId": "com.lune.openusagebar",
+                    "version": "0.4.3",
+                    "build": "7",
+                },
+            )
+
+            socket_path = root / "openusage.sock"
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                listener.bind(str(socket_path))
+                os.chmod(socket_path, 0o600)
+                self.assertEqual(
+                    self.module._socket_state(socket_path),
+                    {"isSocket": True, "mode": 0o600, "ownerMatches": True},
+                )
+            finally:
+                listener.close()
+
+            ledger = root / "activity.sqlite3"
+            connection = sqlite3.connect(ledger)
+            connection.executescript(
+                "CREATE TABLE change_log(change_seq INTEGER);"
+                "CREATE TABLE source_status("
+                "provider_id TEXT,source_id TEXT,state TEXT,"
+                "last_attempt_at TEXT,last_success_at TEXT);"
+                "INSERT INTO change_log VALUES(9);"
+                "INSERT INTO source_status VALUES("
+                "'one','minimax.coding_plan','ok',"
+                "'2026-07-18T20:27:42Z','2026-07-18T20:27:42Z');"
+                "INSERT INTO source_status VALUES("
+                "'two','minimax.coding_plan','ok',"
+                "'2026-07-18T20:28:42Z','2026-07-18T20:28:42Z');"
+            )
+            connection.commit()
+            connection.close()
+            state = self.module._ledger_state(ledger)
+            self.assertEqual(state["quickCheck"], "ok")
+            self.assertEqual(state["changeSeq"], 9)
+            self.assertEqual(
+                state["sourceStatus"]["minimax.coding_plan"],
+                {
+                    "state": "ok",
+                    "lastAttemptAt": "2026-07-18T20:27:42Z",
+                    "lastSuccessAt": "2026-07-18T20:27:42Z",
+                },
+            )
+
+    def test_launch_agent_probe_checks_label_program_pid_and_start_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            agents = Path(directory)
+            label = "com.lune.openusagebar"
+            program = Path("/Applications/OpenUsage Bar.app/Contents/MacOS/OpenUsage Bar")
+            (agents / f"{label}.plist").write_bytes(
+                plistlib.dumps(
+                    {
+                        "Label": label,
+                        "ProgramArguments": [str(program), "--background"],
+                        "RunAtLoad": True,
+                        "KeepAlive": True,
+                    }
+                )
+            )
+            filtered = (
+                "state = running\n"
+                f"program = {program}\n"
+                "runs = 1\n"
+                "pid = 123\n"
+            )
+            with mock.patch.object(
+                self.module, "_filtered_launchctl", return_value=filtered
+            ), mock.patch.object(
+                self.module, "_process_started_after_boot", return_value=True
+            ):
+                self.assertEqual(
+                    self.module._launch_agent_state(label, program, agents, 100),
+                    {
+                        "running": True,
+                        "runAtLoad": True,
+                        "keepAlive": True,
+                        "programMatches": True,
+                        "startedAfterBoot": True,
+                    },
+                )
+
+            payload = plistlib.loads((agents / f"{label}.plist").read_bytes())
+            payload["Label"] = "com.example.other"
+            (agents / f"{label}.plist").write_bytes(plistlib.dumps(payload))
+            with mock.patch.object(
+                self.module, "_filtered_launchctl", return_value=filtered
+            ), mock.patch.object(
+                self.module, "_process_started_after_boot", return_value=True
+            ):
+                self.assertFalse(
+                    self.module._launch_agent_state(label, program, agents, 100)[
+                        "programMatches"
+                    ]
+                )
+
+    def test_local_api_get_is_bounded_and_parses_one_private_socket_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "api.sock"
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(str(path))
+            server.listen(1)
+
+            def serve():
+                connection, _ = server.accept()
+                try:
+                    request = connection.recv(4096)
+                    self.assertIn(b"GET /v1/health HTTP/1.1", request)
+                    body = b'{"schemaVersion":"1.0"}'
+                    connection.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 23\r\n\r\n" + body
+                    )
+                finally:
+                    connection.close()
+
+            worker = threading.Thread(target=serve)
+            worker.start()
+            try:
+                self.assertEqual(
+                    self.module._api_get(path, "/v1/health"),
+                    {"schemaVersion": "1.0"},
+                )
+            finally:
+                worker.join(timeout=2)
+                server.close()
+            self.assertFalse(worker.is_alive())
+
+    def test_baseline_builder_selects_only_latest_healthy_cycle(self):
+        snapshot = self.recovered()
+        snapshot["ledger"]["sourceStatus"]["older.source"] = {
+            "state": "ok",
+            "lastAttemptAt": "2026-07-18T20:34:42Z",
+            "lastSuccessAt": "2026-07-18T20:34:42Z",
+        }
+        baseline = self.module.baseline_from_snapshot(snapshot)
+        self.assertEqual(
+            set(baseline["ledger"]["sourceAttempts"]),
+            {
+                "codex.local_rate_limits",
+                "kiro.codewhisperer",
+                "minimax.coding_plan",
+                "step_plan.quota",
+            },
+        )
+
+        snapshot["signatureOk"] = False
+        with self.assertRaises(self.module.ProbeUnavailable):
+            self.module.baseline_from_snapshot(snapshot)
+
+    def test_probe_runtime_composes_read_only_helpers(self):
+        app = Path("/Applications/OpenUsage Bar.app")
+        with mock.patch.object(
+            self.module,
+            "_run",
+            return_value="{ sec = 1784406720, usec = 0 } Sat Jul 18 20:32:00 2026",
+        ), mock.patch.object(
+            self.module, "_signature_ok", return_value=True
+        ), mock.patch.object(
+            self.module, "_bundle_metadata", return_value=self.baseline()["app"]
+        ), mock.patch.object(
+            self.module, "_launch_agent_state", return_value={"running": True}
+        ) as launch_probe, mock.patch.object(
+            self.module,
+            "_socket_state",
+            return_value={"isSocket": True, "mode": 0o600, "ownerMatches": True},
+        ), mock.patch.object(
+            self.module,
+            "_api_state",
+            return_value={"healthOk": True, "schemaVersion": "1.0", "dataRevision": 9},
+        ), mock.patch.object(
+            self.module,
+            "_ledger_state",
+            return_value={"quickCheck": "ok", "changeSeq": 9, "sourceStatus": {}},
+        ):
+            snapshot = self.module.probe_runtime(
+                app=app,
+                socket_path=Path("/tmp/api.sock"),
+                ledger=Path("/tmp/activity.sqlite3"),
+                launch_agents_directory=Path("/tmp/LaunchAgents"),
+            )
+        self.assertEqual(snapshot["bootTimeSeconds"], 1784406720)
+        self.assertEqual(launch_probe.call_count, 2)
+
+    def test_main_capture_verify_and_fail_closed_paths_are_sanitized(self):
+        with tempfile.TemporaryDirectory() as directory:
+            baseline_path = Path(directory) / "baseline.json"
+            common = {
+                "baseline": baseline_path,
+                "app": Path("/Applications/OpenUsage Bar.app"),
+                "socket": Path("/tmp/api.sock"),
+                "ledger": Path("/tmp/activity.sqlite3"),
+                "timeout": 0.0,
+            }
+            capture_args = SimpleNamespace(mode="capture", **common)
+            with mock.patch.object(
+                self.module, "_arguments", return_value=capture_args
+            ), mock.patch.object(
+                self.module, "probe_runtime", return_value=self.recovered()
+            ), mock.patch.object(
+                self.module, "baseline_from_snapshot", return_value=self.baseline()
+            ), mock.patch.object(self.module, "write_baseline") as writer, contextlib.redirect_stdout(
+                io.StringIO()
+            ):
+                self.assertEqual(self.module.main(), 0)
+            writer.assert_called_once()
+
+            verify_args = SimpleNamespace(mode="verify", **common)
+            new_boot = (
+                "{ sec = 1784406720, usec = 0 } Sat Jul 18 20:32:00 2026"
+            )
+            output = io.StringIO()
+            with mock.patch.object(
+                self.module, "_arguments", return_value=verify_args
+            ), mock.patch.object(
+                self.module, "load_baseline", return_value=self.baseline()
+            ), mock.patch.object(
+                self.module, "_run", return_value=new_boot
+            ), mock.patch.object(
+                self.module, "probe_runtime", return_value=self.recovered()
+            ), contextlib.redirect_stdout(output):
+                self.assertEqual(self.module.main(), 0)
+            self.assertIn("visualMenuCheck=pending", output.getvalue())
+
+            old_boot = (
+                "{ sec = 1783987056, usec = 0 } Tue Jul 14 07:57:36 2026"
+            )
+            output = io.StringIO()
+            with mock.patch.object(
+                self.module, "_arguments", return_value=verify_args
+            ), mock.patch.object(
+                self.module, "load_baseline", return_value=self.baseline()
+            ), mock.patch.object(
+                self.module, "_run", return_value=old_boot
+            ), contextlib.redirect_stdout(output):
+                self.assertEqual(self.module.main(), 1)
+            self.assertEqual(
+                output.getvalue(), "reboot_recovery_failed reason=boot_unchanged\n"
+            )
 
 
 if __name__ == "__main__":
