@@ -31,13 +31,12 @@ from .openusage_catalog import (
     CatalogDiagnostic,
     OpenUsageCatalogDiscovery,
 )
-from .openai_organization import (
-    COST_SOURCE_ID,
-    USAGE_SOURCE_ID,
+from .providers.contracts import (
     CostImportSuccess,
     ImportFailure,
     UsageImportSuccess,
 )
+from .openai_organization import COST_SOURCE_ID, USAGE_SOURCE_ID
 
 
 DAILY_TIMEOUT_SECONDS = 30
@@ -670,6 +669,153 @@ class ActivityCollector:
             except Exception:
                 pass
 
+    @staticmethod
+    def _provider_ids(
+        overview: Overview, official_importers: Mapping[str, Any]
+    ) -> tuple[str, ...]:
+        return tuple(sorted(
+            {
+                card.provider_id
+                for card in overview.cards
+                if card.provider_id != "openusage"
+            }
+            | set(official_importers)
+        ))
+
+    def _publish_provider_instances(
+        self, overview: Overview, attempted_at: datetime
+    ) -> None:
+        for card in sorted(overview.cards, key=lambda item: item.provider_id):
+            try:
+                instance = self._provider_instance(card, attempted_at)
+                if instance is not None:
+                    self.store.upsert_provider_instance(instance)
+            except Exception:
+                pass
+
+    def _refresh_quota_sources(
+        self, overview: Overview, attempted_at: datetime
+    ) -> None:
+        # Current capacity publishes before slower history sources and remains an
+        # independent failure domain.
+        try:
+            self._persist_current_quotas(overview, attempted_at)
+        except Exception:
+            pass
+
+    def _refresh_usage_sources(
+        self,
+        overview: Overview,
+        provider_ids: tuple[str, ...],
+        today: date,
+        attempted_at: datetime,
+    ) -> None:
+        for provider_id in provider_ids:
+            official = self.official_importers.get(provider_id)
+            use_openusage_fallback = official is None
+            if official is not None:
+                usage_source_id = self._source_id(
+                    official, "usage_source_id", USAGE_SOURCE_ID
+                )
+                assert usage_source_id is not None
+                try:
+                    had_official_usage = self.store.has_source_success(
+                        provider_id, usage_source_id
+                    )
+                except Exception:
+                    had_official_usage = True
+                usage_since = today - timedelta(
+                    days=6 if had_official_usage else 364
+                )
+                try:
+                    official_usage = official.fetch_usage(usage_since, today)
+                except Exception:
+                    official_usage = ImportFailure("import_failed")
+                if isinstance(official_usage, UsageImportSuccess):
+                    if not self._success_bounds_match(
+                        official_usage, usage_since, today
+                    ) or not self._rows_match_scope(
+                        official_usage.rows,
+                        provider_id,
+                        official_usage.since,
+                        official_usage.until,
+                    ):
+                        self._safe_source_failure(
+                            provider_id, "invalid_import_rows", attempted_at,
+                            usage_source_id,
+                        )
+                    else:
+                        try:
+                            self.store.commit_usage_import_success(
+                                provider_id, usage_source_id,
+                                official_usage.since, official_usage.until,
+                                official_usage.rows, attempted_at,
+                            )
+                        except Exception:
+                            self._safe_source_failure(
+                                provider_id, "persistence_failed", attempted_at,
+                                usage_source_id,
+                            )
+                    use_openusage_fallback = False
+                else:
+                    error_code = (
+                        official_usage.error_code
+                        if isinstance(official_usage, ImportFailure)
+                        else "invalid_import_result"
+                    )
+                    self._safe_source_failure(
+                        provider_id, error_code, attempted_at, usage_source_id
+                    )
+                    # The shared token table has no source provenance. Seed a cold
+                    # start only; never overwrite last-good official rows.
+                    use_openusage_fallback = not had_official_usage
+
+            if not use_openusage_fallback:
+                continue
+            try:
+                since = today - timedelta(
+                    days=0 if self.store.has_daily_history(provider_id) else 364
+                )
+                result = self.importer.fetch(provider_id, since, today)
+            except Exception:
+                self._safe_source_failure(provider_id, "import_failed", attempted_at)
+                continue
+            if not result.ok:
+                self._safe_source_failure(
+                    provider_id, result.error_code or "import_failed", attempted_at
+                )
+                continue
+            if not self._rows_match_scope(result.rows, provider_id, since, today):
+                self._safe_source_failure(
+                    provider_id, "invalid_import_rows", attempted_at
+                )
+                continue
+            try:
+                self.store.replace_provider_days(provider_id, since, today, result.rows)
+                self.store.record_source_success(
+                    provider_id, DAILY_SOURCE_ID, attempted_at
+                )
+            except Exception:
+                self._safe_source_failure(
+                    provider_id, "persistence_failed", attempted_at
+                )
+
+    def _refresh_cost_sources(
+        self, provider_ids: tuple[str, ...], today: date, attempted_at: datetime
+    ) -> None:
+        for provider_id in provider_ids:
+            official = self.official_importers.get(provider_id)
+            if official is None:
+                continue
+            cost_source_id = self._source_id(
+                official, "cost_source_id", COST_SOURCE_ID
+            )
+            if cost_source_id is None:
+                continue
+            self._refresh_official_costs(
+                provider_id, official, cost_source_id, today, attempted_at
+            )
+
     def refresh(self, overview: Overview) -> bool:
         if not self._lock.acquire(blocking=False):
             return False
@@ -677,138 +823,13 @@ class ActivityCollector:
             current = self.clock()
             attempted_at = current.astimezone(timezone.utc)
             today = current.astimezone(self.local_timezone).date()
-            # Identity is published before any usage/quota/source facts. Failure is
-            # isolated and upsert semantics preserve the last good binding.
-            for card in sorted(overview.cards, key=lambda item: item.provider_id):
-                try:
-                    instance = self._provider_instance(card, attempted_at)
-                    if instance is not None:
-                        self.store.upsert_provider_instance(instance)
-                except Exception:
-                    pass
-            # Current capacity must not wait behind slow historical imports. The
-            # read-only menu monitor observes these revisions while refresh continues.
-            self._persist_current_quotas(overview, attempted_at)
-            provider_ids = sorted(
-                {
-                    card.provider_id
-                    for card in overview.cards
-                    if card.provider_id != "openusage"
-                }
-                | set(self.official_importers)
+            provider_ids = self._provider_ids(overview, self.official_importers)
+            self._publish_provider_instances(overview, attempted_at)
+            self._refresh_quota_sources(overview, attempted_at)
+            self._refresh_usage_sources(
+                overview, provider_ids, today, attempted_at
             )
-            for provider_id in provider_ids:
-                official = self.official_importers.get(provider_id)
-                use_openusage_fallback = official is None
-                if official is not None:
-                    usage_source_id = self._source_id(
-                        official, "usage_source_id", USAGE_SOURCE_ID
-                    )
-                    assert usage_source_id is not None
-                    try:
-                        had_official_usage = self.store.has_source_success(
-                            provider_id, usage_source_id
-                        )
-                    except Exception:
-                        had_official_usage = True
-                    usage_since = today - timedelta(
-                        days=6 if had_official_usage else 364
-                    )
-                    try:
-                        official_usage = official.fetch_usage(usage_since, today)
-                    except Exception:
-                        official_usage = ImportFailure("import_failed")
-                    if isinstance(official_usage, UsageImportSuccess):
-                        if not self._success_bounds_match(
-                            official_usage, usage_since, today
-                        ) or not self._rows_match_scope(
-                            official_usage.rows,
-                            provider_id,
-                            official_usage.since,
-                            official_usage.until,
-                        ):
-                            self._safe_source_failure(
-                                provider_id,
-                                "invalid_import_rows",
-                                attempted_at,
-                                usage_source_id,
-                            )
-                        else:
-                            try:
-                                self.store.commit_usage_import_success(
-                                    provider_id,
-                                    usage_source_id,
-                                    official_usage.since,
-                                    official_usage.until,
-                                    official_usage.rows,
-                                    attempted_at,
-                                )
-                            except Exception:
-                                self._safe_source_failure(
-                                    provider_id,
-                                    "persistence_failed",
-                                    attempted_at,
-                                    usage_source_id,
-                                )
-                        use_openusage_fallback = False
-                    else:
-                        error_code = (
-                            official_usage.error_code
-                            if isinstance(official_usage, ImportFailure)
-                            else "invalid_import_result"
-                        )
-                        self._safe_source_failure(
-                            provider_id, error_code, attempted_at, usage_source_id
-                        )
-                        # The shared token table has no source provenance. A fallback
-                        # may seed a cold start, but must never overwrite last-good
-                        # official rows after the first official success.
-                        use_openusage_fallback = not had_official_usage
-
-                    cost_source_id = self._source_id(
-                        official, "cost_source_id", COST_SOURCE_ID
-                    )
-                    if cost_source_id is not None:
-                        self._refresh_official_costs(
-                            provider_id,
-                            official,
-                            cost_source_id,
-                            today,
-                            attempted_at,
-                        )
-
-                if not use_openusage_fallback:
-                    continue
-                try:
-                    since = today - timedelta(
-                        days=0 if self.store.has_daily_history(provider_id) else 364
-                    )
-                    result = self.importer.fetch(provider_id, since, today)
-                except Exception:
-                    self._safe_source_failure(provider_id, "import_failed", attempted_at)
-                    continue
-                if not result.ok:
-                    self._safe_source_failure(
-                        provider_id, result.error_code or "import_failed", attempted_at
-                    )
-                    continue
-                if not self._rows_match_scope(result.rows, provider_id, since, today):
-                    self._safe_source_failure(
-                        provider_id, "invalid_import_rows", attempted_at
-                    )
-                    continue
-                try:
-                    self.store.replace_provider_days(
-                        provider_id, since, today, result.rows
-                    )
-                    self.store.record_source_success(
-                        provider_id, DAILY_SOURCE_ID, attempted_at
-                    )
-                except Exception:
-                    self._safe_source_failure(
-                        provider_id, "persistence_failed", attempted_at
-                    )
-
+            self._refresh_cost_sources(provider_ids, today, attempted_at)
             try:
                 self.store.apply_retention(730, attempted_at)
             except Exception:

@@ -778,6 +778,65 @@ class ActivityCollectorTests(unittest.TestCase):
             (date(2025, 7, 15), date(2026, 7, 14)),
         )
 
+    def test_quota_usage_and_cost_failures_are_independent(self):
+        for failed_family in ("quota", "usage", "cost"):
+            with self.subTest(failed_family=failed_family):
+                store = Mock()
+                store.has_source_success.return_value = True
+                store.has_cost_history.return_value = True
+                if failed_family == "quota":
+                    store.record_quota.side_effect = RuntimeError("database unavailable")
+
+                official = Mock()
+                official.usage_source_id = "openai.organization.usage"
+                official.cost_source_id = "openai.organization.costs"
+                official.fetch_usage.return_value = (
+                    ImportFailure("timed_out")
+                    if failed_family == "usage"
+                    else UsageImportSuccess(
+                        date(2026, 7, 8), date(2026, 7, 14),
+                        (model_row(day="2026-07-14", provider_id="openai"),),
+                    )
+                )
+                official.fetch_costs.return_value = (
+                    ImportFailure("timed_out")
+                    if failed_family == "cost"
+                    else CostImportSuccess(
+                        date(2026, 7, 8), date(2026, 7, 14), (cost_row(),)
+                    )
+                )
+
+                ActivityCollector(
+                    store, Mock(), official_importers={"openai": official},
+                    clock=lambda: NOW,
+                ).refresh(Overview([card(
+                    "openai", family_id="minimax", remaining_percent=61
+                )]))
+
+                if failed_family == "quota":
+                    store.record_source_status.assert_any_call(
+                        "openai", "current.quota", "temporarily_unavailable",
+                        NOW, "quota_persistence_failed",
+                    )
+                else:
+                    store.record_quota.assert_called_once()
+
+                if failed_family == "usage":
+                    store.commit_usage_import_success.assert_not_called()
+                    store.record_source_failure.assert_any_call(
+                        "openai", "openai.organization.usage", "timed_out", NOW
+                    )
+                else:
+                    store.commit_usage_import_success.assert_called_once()
+
+                if failed_family == "cost":
+                    store.commit_cost_import_success.assert_not_called()
+                    store.record_source_failure.assert_any_call(
+                        "openai", "openai.organization.costs", "timed_out", NOW
+                    )
+                else:
+                    store.commit_cost_import_success.assert_called_once()
+
     def test_provider_specific_usage_source_and_coverage_are_preserved(self):
         store = Mock()
         store.has_source_success.return_value = False

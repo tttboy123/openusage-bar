@@ -11,7 +11,7 @@ from .keychain import MacOSKeychain
 from .model_ids import InvalidModelID, canonical_model_id
 from .models import Category, ProviderCard, ProviderStatus
 from .network import AuthenticationRequired, BoundedHTTPClient, NetworkError, RateLimited
-from .openai_organization import ImportFailure, UsageImportResult, UsageImportSuccess
+from .providers.contracts import ImportFailure, UsageImportResult, UsageImportSuccess
 
 
 MINIMAX_ENDPOINT = "https://www.minimaxi.com/v1/token_plan/remains"
