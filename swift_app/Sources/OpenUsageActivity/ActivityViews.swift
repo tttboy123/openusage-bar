@@ -8,6 +8,9 @@ struct ActivityRootView: View {
     @Bindable var coordinator: ActivityRouteCoordinator
     let windowRegistry: ActivityWindowRegistry
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("OpenUsageActivity.onboardingSkipped") private var onboardingSkipped = false
+    @State private var showOnboardingManually = false
+    @State private var dismissedOnboardingForSession = false
 
     init(store: ActivityViewStore, initialRoute: UsageDetailsRoute) {
         self.store = store
@@ -43,6 +46,19 @@ struct ActivityRootView: View {
                     }
                 }
         }
+        .overlay {
+            if onboardingPhase != .hidden {
+                OnboardingView(
+                    phase: onboardingPhase,
+                    primaryAction: performOnboardingAction,
+                    skip: {
+                        onboardingSkipped = true
+                        showOnboardingManually = false
+                        dismissedOnboardingForSession = true
+                    }
+                )
+            }
+        }
         .onAppear {
             coordinator.installWindowOpener { openWindow(id: "usage-details") }
             store.reload()
@@ -50,8 +66,54 @@ struct ActivityRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             if store.data != nil { store.revalidateSelection() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: OnboardingRouteMessage.notification)) { _ in
+            showOnboardingManually = true
+        }
         .onDisappear { store.cancel() }
         .background(ActivityWindowRegistrationView(registry: windowRegistry).frame(width: 0, height: 0))
+    }
+
+    private var onboardingPhase: FirstRunPhase {
+        if showOnboardingManually {
+            return store.displayData?.hasTrustworthyFact == true ? .ready : assessment(userSkipped: false)
+        }
+        if dismissedOnboardingForSession { return .hidden }
+        return assessment(userSkipped: onboardingSkipped)
+    }
+
+    private func assessment(userSkipped: Bool) -> FirstRunPhase {
+        if let data = store.displayData {
+            return FirstRunAssessment.evaluate(
+                wasExplicitlyOpened: true,
+                userSkipped: userSkipped,
+                providerFamilyIDs: data.detectedLocalFamilyIDs,
+                configuredFamilyIDs: data.configuredFamilyIDs,
+                hasTrustworthyFact: data.hasTrustworthyFact,
+                isRefreshing: store.isLoading
+            )
+        }
+        guard !store.isLoading, store.error == .databaseUnavailable else { return .hidden }
+        return FirstRunAssessment.evaluate(
+            wasExplicitlyOpened: true, userSkipped: userSkipped,
+            providerFamilyIDs: [], configuredFamilyIDs: [],
+            hasTrustworthyFact: false, isRefreshing: false
+        )
+    }
+
+    private func performOnboardingAction() {
+        switch onboardingPhase {
+        case .discoverableProviders, .needsConnection:
+            coordinator.select(.providersAndAccounts)
+            showOnboardingManually = false
+            dismissedOnboardingForSession = true
+        case .collecting:
+            store.reload()
+        case .ready:
+            coordinator.select(.activity)
+            showOnboardingManually = false
+        case .hidden:
+            break
+        }
     }
 
     private var routeBinding: Binding<UsageDetailsRoute?> {

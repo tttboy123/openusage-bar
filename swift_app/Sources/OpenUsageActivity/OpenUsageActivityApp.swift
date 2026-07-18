@@ -44,6 +44,11 @@ struct OpenUsageActivityApp: App {
         .defaultSize(width: 1040, height: 720)
         .commands {
             CommandGroup(after: .appInfo) {
+                Button(FirstRunAssessment.manualEntryTitleKey) {
+                    NotificationCenter.default.post(
+                        name: OnboardingRouteMessage.notification, object: nil
+                    )
+                }
                 Button("Refresh Usage") { store.reload() }
                     .keyboardShortcut("r", modifiers: .command)
             }
