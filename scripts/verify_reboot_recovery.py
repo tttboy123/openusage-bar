@@ -28,7 +28,7 @@ from typing import Any
 from urllib.parse import quote
 
 
-BASELINE_SCHEMA_VERSION = 1
+BASELINE_SCHEMA_VERSION = 2
 API_SCHEMA_VERSION = "1.0"
 APP_BUNDLE_ID = "com.lune.openusagebar"
 STATUS_LABEL = "com.lune.openusagebar"
@@ -49,6 +49,7 @@ ISO_TIMESTAMP_PATTERN = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z$"
 )
 SOURCE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+SIGNATURE_HASH_PATTERN = re.compile(r"^[0-9a-f]{40,64}$")
 
 
 @dataclass(frozen=True)
@@ -121,11 +122,30 @@ def validate_baseline(payload: object) -> dict[str, Any]:
     _timestamp(baseline["capturedAt"], "capture time")
     _integer(baseline["bootTimeSeconds"], "boot time", positive=True)
 
-    app = _exact_keys(baseline["app"], {"bundleId", "version", "build"}, "app")
+    app = _exact_keys(
+        baseline["app"],
+        {
+            "bundleId",
+            "version",
+            "build",
+            "signatureHash",
+            "statusProgramHash",
+            "collectorProgramHash",
+        },
+        "app",
+    )
     if _string(app["bundleId"], "bundle id") != APP_BUNDLE_ID:
         raise ValueError("invalid bundle id")
     _string(app["version"], "app version")
     _string(app["build"], "app build")
+    for field, label in (
+        ("signatureHash", "signature hash"),
+        ("statusProgramHash", "status program hash"),
+        ("collectorProgramHash", "collector program hash"),
+    ):
+        signature_hash = _string(app[field], label)
+        if not SIGNATURE_HASH_PATTERN.fullmatch(signature_hash):
+            raise ValueError(f"invalid {label}")
 
     api = _exact_keys(baseline["api"], {"schemaVersion", "dataRevision"}, "api")
     if _string(api["schemaVersion"], "API schema") != API_SCHEMA_VERSION:
@@ -367,6 +387,26 @@ def _signature_ok(app: Path) -> bool:
     return True
 
 
+def _signature_hash(app: Path) -> str:
+    filter_script = r'''
+set -o pipefail
+/usr/bin/codesign -dv --verbose=4 "$1" 2>&1 | /usr/bin/awk '
+  /^CDHash=[0-9a-f]+$/ { print; matches += 1 }
+  END { if (matches != 1) exit 1 }
+'
+'''
+    payload = _run(
+        ["/bin/zsh", "-c", filter_script, "reboot-recovery", str(app)], timeout=5
+    ).strip()
+    prefix = "CDHash="
+    if not payload.startswith(prefix):
+        raise ProbeUnavailable("signature hash unavailable")
+    signature_hash = payload[len(prefix) :]
+    if not SIGNATURE_HASH_PATTERN.fullmatch(signature_hash):
+        raise ProbeUnavailable("signature hash unavailable")
+    return signature_hash
+
+
 def _filtered_launchctl(label: str) -> str:
     domain = f"gui/{os.getuid()}/{label}"
     filter_script = r'''
@@ -562,10 +602,14 @@ def probe_runtime(
         or socket_state.get("ownerMatches") is not True
     ):
         raise ProbeUnavailable("socket invalid")
+    app_state = dict(_bundle_metadata(app))
+    app_state["signatureHash"] = _signature_hash(app)
+    app_state["statusProgramHash"] = _signature_hash(status_program)
+    app_state["collectorProgramHash"] = _signature_hash(collector_program)
     return {
         "bootTimeSeconds": boot_time,
         "signatureOk": _signature_ok(app),
-        "app": _bundle_metadata(app),
+        "app": app_state,
         "launchAgents": {
             STATUS_LABEL: _launch_agent_state(
                 STATUS_LABEL, status_program, launch_agents_directory, boot_time

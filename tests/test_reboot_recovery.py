@@ -37,13 +37,16 @@ class RebootRecoveryTests(unittest.TestCase):
 
     def baseline(self):
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "capturedAt": "2026-07-18T20:31:29Z",
             "bootTimeSeconds": 1783987056,
             "app": {
                 "bundleId": "com.lune.openusagebar",
                 "version": "0.4.3",
                 "build": "7",
+                "signatureHash": "1a638387f6844d020e24e6f0db6d3edeca34c389",
+                "statusProgramHash": "2b638387f6844d020e24e6f0db6d3edeca34c389",
+                "collectorProgramHash": "3c638387f6844d020e24e6f0db6d3edeca34c389",
             },
             "api": {"schemaVersion": "1.0", "dataRevision": 5826},
             "ledger": {
@@ -65,6 +68,9 @@ class RebootRecoveryTests(unittest.TestCase):
                 "bundleId": "com.lune.openusagebar",
                 "version": "0.4.3",
                 "build": "7",
+                "signatureHash": "1a638387f6844d020e24e6f0db6d3edeca34c389",
+                "statusProgramHash": "2b638387f6844d020e24e6f0db6d3edeca34c389",
+                "collectorProgramHash": "3c638387f6844d020e24e6f0db6d3edeca34c389",
             },
             "launchAgents": {
                 "com.lune.openusagebar": {
@@ -227,6 +233,15 @@ class RebootRecoveryTests(unittest.TestCase):
         current["app"]["build"] = "8"
         self.assert_failure(current, "app_metadata_changed")
         current = self.recovered()
+        current["app"]["signatureHash"] = "f" * 40
+        self.assert_failure(current, "app_metadata_changed")
+        current = self.recovered()
+        current["app"]["statusProgramHash"] = "d" * 40
+        self.assert_failure(current, "app_metadata_changed")
+        current = self.recovered()
+        current["app"]["collectorProgramHash"] = "e" * 40
+        self.assert_failure(current, "app_metadata_changed")
+        current = self.recovered()
         current["api"]["schemaVersion"] = "2.0"
         self.assert_failure(current, "api_schema_changed")
 
@@ -260,6 +275,19 @@ class RebootRecoveryTests(unittest.TestCase):
 
         malformed = self.baseline()
         malformed["bootTimeSeconds"] = "100"
+        with self.assertRaises(ValueError):
+            self.module.validate_baseline(malformed)
+
+        malformed = self.baseline()
+        malformed["app"]["signatureHash"] = "not-a-code-hash"
+        with self.assertRaises(ValueError):
+            self.module.validate_baseline(malformed)
+        malformed = self.baseline()
+        malformed["app"]["statusProgramHash"] = "not-a-code-hash"
+        with self.assertRaises(ValueError):
+            self.module.validate_baseline(malformed)
+        malformed = self.baseline()
+        malformed["app"]["collectorProgramHash"] = "not-a-code-hash"
         with self.assertRaises(ValueError):
             self.module.validate_baseline(malformed)
 
@@ -505,6 +533,14 @@ class RebootRecoveryTests(unittest.TestCase):
         ), mock.patch.object(
             self.module, "_bundle_metadata", return_value=self.baseline()["app"]
         ), mock.patch.object(
+            self.module,
+            "_signature_hash",
+            side_effect=(
+                self.baseline()["app"]["signatureHash"],
+                self.baseline()["app"]["statusProgramHash"],
+                self.baseline()["app"]["collectorProgramHash"],
+            ),
+        ) as signature_probe, mock.patch.object(
             self.module, "_launch_agent_state", return_value={"running": True}
         ) as launch_probe, mock.patch.object(
             self.module,
@@ -526,6 +562,24 @@ class RebootRecoveryTests(unittest.TestCase):
                 launch_agents_directory=Path("/tmp/LaunchAgents"),
             )
         self.assertEqual(snapshot["bootTimeSeconds"], 1784406720)
+        self.assertEqual(
+            snapshot["app"]["signatureHash"],
+            self.baseline()["app"]["signatureHash"],
+        )
+        self.assertEqual(
+            snapshot["app"]["collectorProgramHash"],
+            self.baseline()["app"]["collectorProgramHash"],
+        )
+        status_program = app / "Contents/MacOS/OpenUsage Bar"
+        collector_program = (
+            app
+            / "Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS"
+            / "OpenUsage Provider Settings"
+        )
+        signature_probe.assert_has_calls(
+            [mock.call(app), mock.call(status_program), mock.call(collector_program)]
+        )
+        self.assertEqual(signature_probe.call_count, 3)
         self.assertEqual(launch_probe.call_count, 2)
 
     def test_probe_runtime_rejects_untrusted_socket_before_connecting(self):
@@ -585,6 +639,19 @@ class RebootRecoveryTests(unittest.TestCase):
             self.assertTrue(self.module._process_started_after_boot(123, 1784406720))
         with mock.patch.object(self.module, "_run", return_value="malformed"):
             self.assertFalse(self.module._process_started_after_boot(123, 1784406720))
+
+        signature_hash = self.baseline()["app"]["signatureHash"]
+        with mock.patch.object(
+            self.module, "_run", return_value=f"CDHash={signature_hash}\n"
+        ) as signature_probe:
+            self.assertEqual(
+                self.module._signature_hash(Path("/Applications/Test.app")),
+                signature_hash,
+            )
+        self.assertIn("/bin/zsh", signature_probe.call_args.args[0])
+        with mock.patch.object(self.module, "_run", return_value="CDHash=invalid\n"):
+            with self.assertRaises(self.module.ProbeUnavailable):
+                self.module._signature_hash(Path("/Applications/Test.app"))
 
     def test_cli_arguments_require_absolute_paths_and_bounded_timeout(self):
         absolute = self.module._absolute_path("/tmp/reboot-baseline.json")
