@@ -60,13 +60,13 @@ def default_registry(
     registry.register_global(lambda: ProviderBinding(
         provider_id="kiro_cli", family_id="kiro_cli",
         quota_sources=(_quota_source(
-            KiroQuotaAdapter(clock=clock), "kiro.quota", 20
+            KiroQuotaAdapter(clock=clock), "kiro.codewhisperer", 20
         ),),
     ))
     registry.register_global(lambda: ProviderBinding(
         provider_id="codex", family_id="codex",
         quota_sources=(_quota_source(
-            CodexSubscriptionAdapter(clock=clock), "codex.quota", 20
+            CodexSubscriptionAdapter(clock=clock), "codex.local_rate_limits", 20
         ),),
     ))
 
@@ -76,7 +76,7 @@ def default_registry(
             provider_id=config.provider_id, family_id="minimax",
             quota_sources=(_quota_source(MiniMaxCodingPlanAdapter(
                 config, keychain, minimax_client, clock
-            ), "minimax.quota", 20),),
+            ), "minimax.coding_plan", 20),),
             usage_sources=(importer,),
         )
 

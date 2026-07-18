@@ -88,6 +88,8 @@ class QuotaFetchSuccess:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "observations", tuple(self.observations))
+        if not self.observations:
+            raise ValueError("Quota success requires at least one observation")
 
     @property
     def ok(self) -> bool:

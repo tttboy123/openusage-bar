@@ -34,6 +34,8 @@ from .openusage_catalog import (
 from .providers.contracts import (
     CostImportSuccess,
     ImportFailure,
+    QuotaFetchFailure,
+    QuotaFetchSuccess,
     UsageImportSuccess,
 )
 from .openai_organization import COST_SOURCE_ID, USAGE_SOURCE_ID
@@ -599,9 +601,12 @@ class ActivityCollector:
         return MetricFamily.SUBSCRIPTION_QUOTA in descriptor.metric_families
 
     def _persist_current_quotas(
-        self, overview: Overview, attempted_at: datetime
+        self, overview: Overview, attempted_at: datetime,
+        explicit_provider_ids: frozenset[str] = frozenset(),
     ) -> None:
         for card in overview.cards:
+            if card.provider_id in explicit_provider_ids:
+                continue
             if not self._tracks_current_quota(card):
                 try:
                     self.store.delete_source_status(
@@ -694,12 +699,45 @@ class ActivityCollector:
                 pass
 
     def _refresh_quota_sources(
-        self, overview: Overview, attempted_at: datetime
+        self,
+        overview: Overview,
+        attempted_at: datetime,
+        quota_results: tuple[tuple[str, str, object], ...],
     ) -> None:
         # Current capacity publishes before slower history sources and remains an
         # independent failure domain.
+        explicit_provider_ids: set[str] = set()
+        for provider_id, source_id, result in quota_results:
+            explicit_provider_ids.add(provider_id)
+            if isinstance(result, QuotaFetchSuccess):
+                try:
+                    if any(
+                        observation.provider_id != provider_id
+                        or observation.source_id != source_id
+                        for observation in result.observations
+                    ):
+                        raise ValueError("quota result scope mismatch")
+                    for observation in result.observations:
+                        self.store.record_quota(observation)
+                    self.store.record_source_success(
+                        provider_id, source_id, attempted_at
+                    )
+                except Exception:
+                    self._safe_source_failure(
+                        provider_id, "persistence_failed", attempted_at, source_id
+                    )
+            elif isinstance(result, QuotaFetchFailure):
+                self._safe_source_failure(
+                    provider_id, result.error_code, attempted_at, source_id
+                )
+            else:
+                self._safe_source_failure(
+                    provider_id, "invalid_import_result", attempted_at, source_id
+                )
         try:
-            self._persist_current_quotas(overview, attempted_at)
+            self._persist_current_quotas(
+                overview, attempted_at, frozenset(explicit_provider_ids)
+            )
         except Exception:
             pass
 
@@ -816,7 +854,12 @@ class ActivityCollector:
                 provider_id, official, cost_source_id, today, attempted_at
             )
 
-    def refresh(self, overview: Overview) -> bool:
+    def refresh(
+        self,
+        overview: Overview,
+        *,
+        quota_results: tuple[tuple[str, str, object], ...] = (),
+    ) -> bool:
         if not self._lock.acquire(blocking=False):
             return False
         try:
@@ -825,7 +868,7 @@ class ActivityCollector:
             today = current.astimezone(self.local_timezone).date()
             provider_ids = self._provider_ids(overview, self.official_importers)
             self._publish_provider_instances(overview, attempted_at)
-            self._refresh_quota_sources(overview, attempted_at)
+            self._refresh_quota_sources(overview, attempted_at, quota_results)
             self._refresh_usage_sources(
                 overview, provider_ids, today, attempted_at
             )

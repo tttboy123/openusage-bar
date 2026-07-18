@@ -261,8 +261,7 @@ class Aggregator:
                             f"provider instance {current.provider_id!r} has conflicting family IDs"
                         )
                 if (
-                    current.provider_id in {"kiro_cli", "codex"}
-                    and current.source == "OpenUsage"
+                    current.source == "OpenUsage"
                     and current.remaining_percent is None
                     and previous is not None
                     and previous.remaining_percent is not None
@@ -336,12 +335,19 @@ class Aggregator:
 class LedgerRefresher:
     """Headless bridge from provider cards into the canonical activity ledger."""
 
-    def __init__(self, aggregator, collector) -> None:
+    def __init__(self, aggregator, collector, quota_sources=()) -> None:
         self.aggregator = aggregator
         self.collector = collector
+        self.quota_sources = tuple(quota_sources)
 
     def refresh(self) -> None:
-        self.collector.refresh(self.aggregator.refresh())
+        overview = self.aggregator.refresh()
+        results = tuple(
+            (provider_id, source_id, result)
+            for provider_id, source_id, adapter in self.quota_sources
+            if (result := getattr(adapter, "last_quota_result", None)) is not None
+        )
+        self.collector.refresh(overview, quota_results=results)
 
 
 def build_headless_refresher(activity_store):
@@ -393,4 +399,13 @@ def build_headless_refresher(activity_store):
         official_importers=official_importers,
         clock=clock,
     )
-    return LedgerRefresher(aggregator, collector)
+    quota_sources = tuple(
+        (
+            binding.provider_id,
+            getattr(adapter, "source_id", type(adapter).__name__),
+            adapter,
+        )
+        for binding in bindings for adapter in binding.quota_sources
+        if hasattr(adapter, "last_quota_result")
+    )
+    return LedgerRefresher(aggregator, collector, quota_sources)

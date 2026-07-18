@@ -29,6 +29,8 @@ from openusage_bar.openai_organization import (
     ImportFailure,
     UsageImportSuccess,
 )
+from openusage_bar.providers.contracts import QuotaFetchSuccess
+from openusage_bar.providers.quota import percent_observation
 
 
 NOW = datetime(2026, 7, 14, 2, 0, tzinfo=timezone.utc)
@@ -836,6 +838,44 @@ class ActivityCollectorTests(unittest.TestCase):
                     )
                 else:
                     store.commit_cost_import_success.assert_called_once()
+
+    def test_explicit_multi_window_quota_replaces_legacy_card_projection(self):
+        store = Mock()
+        store.has_daily_history.return_value = True
+        importer = Mock()
+        importer.fetch.return_value = DailyImportResult(True, ())
+        observations = tuple(
+            percent_observation(
+                provider_id="codex", source_id="codex.local_rate_limits",
+                quota_name=name, quota_window=window,
+                remaining_percent=remaining, resets_at=reset,
+                observed_at=NOW,
+            )
+            for name, window, remaining, reset in (
+                ("5h Subscription", "five_hour", 75, NOW + timedelta(hours=5)),
+                ("Weekly Subscription", "weekly", 60, NOW + timedelta(days=5)),
+            )
+        )
+
+        ActivityCollector(store, importer, clock=lambda: NOW).refresh(
+            Overview([card("codex", remaining_percent=75)]),
+            quota_results=((
+                "codex", "codex.local_rate_limits",
+                QuotaFetchSuccess(observations),
+            ),),
+        )
+
+        self.assertEqual(
+            [call.args[0].quota_window for call in store.record_quota.call_args_list],
+            ["five_hour", "weekly"],
+        )
+        store.record_source_success.assert_any_call(
+            "codex", "codex.local_rate_limits", NOW
+        )
+        self.assertFalse(any(
+            call.args[:2] == ("codex", "current.quota")
+            for call in store.record_source_success.call_args_list
+        ))
 
     def test_provider_specific_usage_source_and_coverage_are_preserved(self):
         store = Mock()

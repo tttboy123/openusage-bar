@@ -9,9 +9,11 @@ from openusage_bar.minimax import (
     MiniMaxBillingImporter,
     MiniMaxCodingPlanAdapter,
     MiniMaxParseError,
+    parse_minimax_quota_observations,
 )
 from openusage_bar.models import ProviderStatus
 from openusage_bar.openai_organization import ImportFailure, UsageImportSuccess
+from openusage_bar.providers.contracts import QuotaFetchSuccess
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
@@ -185,6 +187,43 @@ class MiniMaxBillingImporterTests(unittest.TestCase):
 
 
 class MiniMaxAdapterTests(unittest.TestCase):
+    def test_emits_subscription_and_model_specific_quota_windows(self):
+        payload = {
+            "model_remains": [
+                {
+                    "model_name": "general",
+                    "current_interval_remaining_percent": 93,
+                    "current_weekly_remaining_percent": 97,
+                    "end_time": int((NOW + timedelta(hours=2)).timestamp() * 1000),
+                },
+                {
+                    "model_name": "MiniMax-M2.5",
+                    "current_interval_total_count": 500,
+                    "current_interval_usage_count": 320,
+                },
+            ],
+            "base_resp": {"status_code": 0},
+        }
+
+        result = parse_minimax_quota_observations(
+            MiniMaxConfig("minimax-main", "MiniMax"), payload, NOW
+        )
+
+        self.assertIsInstance(result, QuotaFetchSuccess)
+        self.assertEqual(len(result.observations), 3)
+        subscription = [
+            item for item in result.observations
+            if item.applies_to_kind == "subscription"
+        ]
+        model = [
+            item for item in result.observations if item.applies_to_kind == "model"
+        ]
+        self.assertEqual(
+            {item.quota_window for item in subscription}, {"five_hour", "weekly"}
+        )
+        self.assertEqual(model[0].applies_to_model_ids, ("MiniMax-M2.5",))
+        self.assertEqual(model[0].remaining_ratio, 0.64)
+
     def test_fetch_uses_official_token_plan_endpoint(self):
         keychain = Mock()
         keychain.get.return_value = "subscription-key"

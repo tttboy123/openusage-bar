@@ -13,6 +13,8 @@ from .config import StepPlanConfig
 from .keychain import KeychainError, MacOSKeychain
 from .models import Category, ProviderCard, ProviderStatus
 from .network import AuthenticationRequired, BoundedHTTPClient, NetworkError, RateLimited
+from .providers.contracts import QuotaFetchFailure, QuotaFetchSuccess
+from .providers.quota import percent_observation
 
 
 STEP_PLAN_MODELS_ENDPOINT = "https://api.stepfun.com/step_plan/v1/models"
@@ -182,6 +184,7 @@ class StepPlanAdapter:
         self.client = client
         self.clock = clock
         self.endpoints = endpoints_for_site(config.site)
+        self.last_quota_result = QuotaFetchFailure("not_collected")
 
     @staticmethod
     def _site_label(config: StepPlanConfig) -> str:
@@ -358,6 +361,58 @@ class StepPlanAdapter:
             source_kind="browser_session",
         )
 
+    @staticmethod
+    def quota_observations(
+        config: StepPlanConfig, payload: dict[str, Any], now: datetime
+    ) -> QuotaFetchSuccess | QuotaFetchFailure:
+        if payload.get("status") != 1:
+            return QuotaFetchFailure("invalid_response")
+        credit_limit = payload.get("plan_credit_rate_limit")
+        if isinstance(credit_limit, dict):
+            rates = [
+                rate for rate in (
+                    _optional_rate(credit_limit.get("subscription_credit_left_rate")),
+                    _optional_rate(credit_limit.get("topup_credit_left_rate")),
+                ) if rate is not None
+            ]
+            if rates:
+                try:
+                    reset = _optional_timestamp(
+                        credit_limit, "subscription_credit_reset_time"
+                    )
+                except StepPlanParseError:
+                    reset = None
+                return QuotaFetchSuccess((percent_observation(
+                    provider_id=config.provider_id, source_id="step_plan.quota",
+                    quota_name="Credit Plan", quota_window="billing_cycle",
+                    remaining_percent=max(rates) * 100, resets_at=reset,
+                    observed_at=now, applies_to_kind="subscription",
+                ),))
+        try:
+            values = (
+                (
+                    "5h Subscription", "five_hour",
+                    _fraction(payload, "five_hour_usage_left_rate") * 100,
+                    _optional_timestamp(payload, "five_hour_usage_reset_time"),
+                ),
+                (
+                    "Weekly Subscription", "weekly",
+                    _fraction(payload, "weekly_usage_left_rate") * 100,
+                    _optional_timestamp(payload, "weekly_usage_reset_time"),
+                ),
+            )
+        except StepPlanParseError:
+            return QuotaFetchFailure("invalid_response")
+        return QuotaFetchSuccess(tuple(
+            percent_observation(
+                provider_id=config.provider_id, source_id="step_plan.quota",
+                quota_name=name, quota_window=window,
+                remaining_percent=remaining, resets_at=reset,
+                observed_at=now, applies_to_kind="subscription",
+            )
+            for name, window, remaining, reset in values
+        ))
+
     def fetch(self) -> ProviderCard:
         now = self.clock()
         try:
@@ -373,15 +428,19 @@ class StepPlanAdapter:
                     raise StepPlanParseError("StepFun web session is incomplete")
                 return self._fetch_session(StepPlanSession(token=token, webid=webid), now)
             if not api_key:
+                self.last_quota_result = QuotaFetchFailure("auth_required")
                 return self._error_card(ProviderStatus.AUTH, "Credential required", now)
             payload = self.client.get_json(
                 self.endpoints.models,
                 {"Authorization": f"Bearer {api_key}"},
             )
+            self.last_quota_result = QuotaFetchFailure("quota_unavailable")
             return self.parse(self.config, payload, now)
         except AuthenticationRequired:
+            self.last_quota_result = QuotaFetchFailure("auth_rejected")
             return self._error_card(ProviderStatus.AUTH, "Credential rejected", now)
         except RateLimited:
+            self.last_quota_result = QuotaFetchFailure("rate_limited")
             return self._error_card(ProviderStatus.RATE_LIMITED, "Rate limited", now)
         except (
             KeychainError,
@@ -390,6 +449,7 @@ class StepPlanAdapter:
             TypeError,
             ValueError,
         ):
+            self.last_quota_result = QuotaFetchFailure("invalid_response")
             return self._error_card(
                 ProviderStatus.ERROR, "Step Plan refresh failed", now
             )
@@ -422,6 +482,9 @@ class StepPlanAdapter:
             )
         except NetworkError:
             pass
+        self.last_quota_result = self.quota_observations(
+            self.config, quota_payload, now
+        )
         return self.parse_quota(self.config, quota_payload, status_payload, now)
 
     def _refresh_session(self, session: StepPlanSession) -> StepPlanSession:

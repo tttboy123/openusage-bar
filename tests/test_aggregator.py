@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from openusage_bar.aggregator import (
-    Aggregator, BoundedReadOnlyKeychain, CardCache, merge_cards,
+    Aggregator, BoundedReadOnlyKeychain, CardCache, LedgerRefresher, merge_cards,
 )
 from openusage_bar.daily_history import ActivityCollector, DailyImportResult
 from openusage_bar.models import Category, Overview, ProviderCard, ProviderStatus
@@ -144,6 +144,26 @@ class BoundedReadOnlyKeychainTests(unittest.TestCase):
 
 
 class HeadlessRefresherFactoryTests(unittest.TestCase):
+    def test_ledger_refresher_forwards_explicit_quota_results(self):
+        overview = Overview([])
+        aggregator = Mock()
+        aggregator.refresh.return_value = overview
+        collector = Mock()
+        adapter = Mock()
+        adapter.last_quota_result = object()
+
+        LedgerRefresher(
+            aggregator, collector,
+            (("codex", "codex.local_rate_limits", adapter),),
+        ).refresh()
+
+        collector.refresh.assert_called_once_with(
+            overview,
+            quota_results=((
+                "codex", "codex.local_rate_limits", adapter.last_quota_result,
+            ),),
+        )
+
     def test_daily_feed_uses_shared_read_only_keychain_and_no_redirect_client(self):
         from openusage_bar.aggregator import build_headless_refresher
         from openusage_bar.config import DailyUsageFeedConfig
