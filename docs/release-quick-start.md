@@ -110,5 +110,22 @@ scripts/export_diagnostics.py --output /tmp/openusage-diagnostics.json
 scripts/privacy_scan.py /tmp/openusage-diagnostics.json
 ```
 
-Review the file before attaching it. The full 30-day process and the 1.0
-release gate are documented in [canary.md](canary.md).
+This keeps the byte-compatible aggregate diagnostics v1 as the default. For a
+bounded, source-aware daily reconciliation, explicitly request v2:
+
+```bash
+scripts/export_diagnostics.py \
+  --schema-version 2 \
+  --from 2026-07-17 \
+  --to 2026-07-18 \
+  --timezone Asia/Singapore \
+  --output /tmp/openusage-diagnostics-v2.json
+scripts/privacy_scan.py /tmp/openusage-diagnostics-v2.json
+```
+
+Review either file before attaching it. V2 preserves source totals, marks
+non-comparable or incomplete rows, separates complete `tokenTotals` from
+partial `observedTokenTotals`, replaces account references with per-export
+pseudonyms, and only reports duplicate candidates backed by duplicate effective
+rows. It cannot observe source-selection history. The full 30-day process and
+the 1.0 release gate are documented in [canary.md](canary.md).

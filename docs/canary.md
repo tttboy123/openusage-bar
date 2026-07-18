@@ -51,11 +51,36 @@ scripts/export_diagnostics.py --output /tmp/openusage-diagnostics.json
 scripts/privacy_scan.py /tmp/openusage-diagnostics.json
 ```
 
-The exporter reads only `/v1/snapshot` and `/v1/capabilities`. It writes a
-mode-`0600` aggregate containing product/build, macOS/architecture, schema and
-data revision, aggregate fact/source counts, sanitized error-code counts, and
-the public capability catalog. It does not read Provider configuration or
-Keychain. Review the JSON yourself before attaching it.
+The default schema remains diagnostics v1. It reads only `/v1/snapshot` and
+`/v1/capabilities`, then writes a mode-`0600` aggregate containing
+product/build, macOS/architecture, schema and data revision, aggregate
+fact/source counts, sanitized error-code counts, and the public capability
+catalog.
+
+For an explicit daily reconciliation, choose diagnostics v2 and a bounded
+local-calendar range:
+
+```bash
+scripts/export_diagnostics.py \
+  --schema-version 2 \
+  --from 2026-07-17 \
+  --to 2026-07-18 \
+  --timezone Asia/Singapore \
+  --output /tmp/openusage-diagnostics-v2.json
+scripts/privacy_scan.py /tmp/openusage-diagnostics-v2.json
+```
+
+V2 also reads `/v1/activity/daily` and `/v1/sources/status`. It preserves each
+source-reported total and, only when the declared counting convention is
+arithmetically comparable, reports an expected total and delta. Duplicate
+issues are emitted only when duplicate effective rows are actually present;
+source-selection history before those effective rows is explicitly not
+observable. Complete aggregate totals are emitted only for fully covered or
+explicitly covered-zero ranges; partial exports keep their available subtotal
+under `observedTokenTotals`. Account references are replaced with
+per-export pseudonyms. It does not read Provider configuration, Keychain,
+prompts, responses, or raw Provider payloads. Review the JSON yourself before
+attaching it.
 
 ## Incident definitions
 

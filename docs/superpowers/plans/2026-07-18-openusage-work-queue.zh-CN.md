@@ -146,9 +146,9 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 
 **验收：**
 
-- [ ] 任意一天都能追溯总量组成、来源、覆盖状态与采集时间。
-- [ ] 诊断结果能够区分“统计口径不同”和“实际丢失/重复数据”。
-- [ ] `scripts/privacy_scan.py` 对诊断文件返回零泄漏。
+- [x] 任意一天都能追溯总量组成、来源、覆盖状态与采集时间。
+- [x] 诊断结果能够区分“统计口径不同”和“实际丢失/重复数据”。
+- [x] `scripts/privacy_scan.py` 对诊断文件返回零泄漏。
 
 **验证：** 新增专用对账测试、`tests/test_export_diagnostics.py`、Swift Usage Details 测试和隐私扫描。
 
