@@ -55,6 +55,7 @@ class OpenAIOrganizationImporterTests(unittest.TestCase):
         self.assertEqual((first.input_tokens, first.output_tokens), (100, 40))
         self.assertEqual(first.cache_read_tokens, 25)
         self.assertEqual(first.total_tokens, 140)
+        self.assertEqual(first.token_counting_convention, "input_includes_cache")
         self.assertIsNone(first.cost_amount)
         canonical = next(row.model_id for row in result.rows if row.day == "2026-07-01" and row.model_id != "gpt-5.5")
         self.assertRegex(canonical, r"^gpt-unsafe-name-[0-9a-f]{12}$")

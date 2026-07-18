@@ -34,6 +34,25 @@ The remaining fields are the same fields emitted by the existing collector CLI:
 | `GET /v1/sources/status` | none | `sources`, canonical provider/source order |
 | `GET /v1/changes` | optional `after` (default 0), `limit` (default 100) | `records`, `nextCursor`, `hasMore`; an ahead cursor is invalid |
 
+Daily activity rows preserve the `totalTokens` value reported by the selected
+source. Consumers must not recompute or replace it from the component counters.
+Each row declares `tokenCountingConvention` so a reader can interpret the
+components without counting cache Tokens twice:
+
+| Convention | Meaning |
+|---|---|
+| `input_includes_cache` | Cache reads and cache creation are classifications inside `inputTokens`, and reasoning is a classification inside `outputTokens`; the source total is `inputTokens + outputTokens`. |
+| `components_disjoint` | Input, output, cache read, cache creation, and a known reasoning value are disjoint components of the source total. |
+| `provider_reported` | The source reports a trusted total, but the available component counters may not add up to it. |
+| `unknown` | The source did not declare a provable relationship between Total and the component counters. |
+
+`reasoningTokens` remains nullable because some sources do not expose it.
+`sourceId`, `quality`, `importedAt`, and the matching coverage row describe the
+provenance and completeness of each fact. A covered day with no rows is a known
+zero. `covered=false` is missing coverage, not a numeric zero; a selection that
+mixes covered and missing scopes is partial and must not be presented as a
+complete total.
+
 Unknown or repeated query parameters, malformed percent escapes, controls,
 noncanonical dates, unstable identifiers, oversized ranges, and out-of-range
 limits/cursors are rejected. Provider and model lists contain at most 50 stable

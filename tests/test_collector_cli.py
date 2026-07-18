@@ -291,6 +291,7 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(lines[0]["type"], "usage")
         self.assertEqual(lines[0]["providerId"], "codex")
+        self.assertEqual(lines[0]["tokenCountingConvention"], "unknown")
         self.assertTrue(any(line.get("type") == "coverage" for line in lines))
         self.assertEqual(lines[-1]["type"], "checkpoint")
         self.assertIn("dataRevision", lines[-1])

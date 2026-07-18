@@ -120,7 +120,7 @@ def provider_instance(
 
 
 class ActivityStoreSchemaTests(unittest.TestCase):
-    def test_schema_v5_is_idempotent_and_has_required_tables(self):
+    def test_schema_v5_adds_a_backward_compatible_token_convention_sidecar(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "activity.sqlite3"
             with ActivityStore(path) as store:
@@ -133,6 +133,7 @@ class ActivityStoreSchemaTests(unittest.TestCase):
                         "daily_costs",
                         "daily_coverage",
                         "daily_model_usage",
+                        "daily_token_conventions",
                         "ledger_meta",
                         "provider_instances",
                         "quota_snapshots",
@@ -148,13 +149,31 @@ class ActivityStoreSchemaTests(unittest.TestCase):
                             "PRAGMA table_info(daily_model_usage)"
                         )
                     }
+                    sidecar_columns = tuple(
+                        row[1]
+                        for row in inspector.execute(
+                            "PRAGMA table_info(daily_token_conventions)"
+                        )
+                    )
                 finally:
                     inspector.close()
                 self.assertTrue(columns["day"])
                 self.assertTrue(columns["provider_id"])
                 self.assertTrue(columns["model_id"])
                 self.assertTrue(columns["source_id"])
+                self.assertNotIn("token_counting_convention", columns)
                 self.assertFalse(columns["reasoning_tokens"])
+                self.assertEqual(
+                    sidecar_columns,
+                    (
+                        "day",
+                        "provider_id",
+                        "account_ref",
+                        "model_id",
+                        "token_counting_convention",
+                        "daily_payload_hash",
+                    ),
+                )
                 index_inspector = sqlite3.connect(path)
                 try:
                     indexes = list(
@@ -399,6 +418,64 @@ class ActivityStoreSchemaTests(unittest.TestCase):
                     quota(observed_at="2026-07-14T02:15:00Z")
                 )
                 self.assertEqual(unchanged.revision, original.revision)
+
+    def test_v042_main_schema_and_reader_ignore_token_convention_sidecar(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "activity.sqlite3"
+            with ActivityStore(path) as store:
+                store.replace_daily_usage("codex", "2026-07-02", [usage()])
+
+            connection = sqlite3.connect(path)
+            try:
+                self.assertEqual(
+                    connection.execute("PRAGMA user_version").fetchone()[0],
+                    5,
+                )
+                main_columns = tuple(
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(daily_model_usage)"
+                    )
+                )
+                self.assertEqual(
+                    main_columns,
+                    (
+                        "day", "provider_id", "account_ref", "model_id",
+                        "input_tokens", "output_tokens", "cache_read_tokens",
+                        "cache_creation_tokens", "reasoning_tokens",
+                        "total_tokens", "cost_amount", "cost_currency",
+                        "cost_basis", "quality", "imported_at", "revision",
+                        "payload_hash", "source_id",
+                    ),
+                )
+                legacy_row = connection.execute(
+                    "SELECT day,provider_id,model_id,total_tokens "
+                    "FROM daily_model_usage"
+                ).fetchone()
+                self.assertEqual(
+                    legacy_row,
+                    ("2026-07-02", "codex", "gpt-5.5", 74_200_000),
+                )
+                self.assertIn(
+                    "daily_token_conventions",
+                    {
+                        row[0]
+                        for row in connection.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                        )
+                    },
+                )
+            finally:
+                connection.close()
+
+            with ActivityStore(path) as reopened:
+                self.assertEqual(reopened.schema_version, 5)
+                self.assertEqual(
+                    reopened.snapshot_daily_usage(
+                        "2026-07-02", "2026-07-02"
+                    ).rows[0].total_tokens,
+                    74_200_000,
+                )
 
     def test_rejects_database_from_newer_schema_version(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -811,6 +888,123 @@ class DailyUsageTests(unittest.TestCase):
         self.assertTrue(row.imported_at.endswith("Z"))
         parsed = datetime.fromisoformat(row.imported_at.replace("Z", "+00:00"))
         self.assertIsNotNone(parsed.utcoffset())
+
+    def test_token_counting_convention_validates_declared_arithmetic(self):
+        inclusive = DailyUsageRow(
+            **(
+                usage().__dict__
+                | {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "cache_read_tokens": 80,
+                    "cache_creation_tokens": 0,
+                    "reasoning_tokens": 5,
+                    "total_tokens": 120,
+                    "token_counting_convention": "input_includes_cache",
+                }
+            )
+        )
+        disjoint = DailyUsageRow(
+            **(
+                usage().__dict__
+                | {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "cache_read_tokens": 80,
+                    "cache_creation_tokens": 4,
+                    "reasoning_tokens": 5,
+                    "total_tokens": 209,
+                    "token_counting_convention": "components_disjoint",
+                }
+            )
+        )
+
+        self.assertEqual(inclusive.token_counting_convention, "input_includes_cache")
+        self.assertEqual(disjoint.token_counting_convention, "components_disjoint")
+        for convention, total in (
+            ("input_includes_cache", 121),
+            ("components_disjoint", 208),
+        ):
+            with self.subTest(convention=convention), self.assertRaisesRegex(
+                ValueError, "total_tokens"
+            ):
+                DailyUsageRow(
+                    **(
+                        usage().__dict__
+                        | {
+                            "input_tokens": 100,
+                            "output_tokens": 20,
+                            "cache_read_tokens": 80,
+                            "cache_creation_tokens": 4,
+                            "reasoning_tokens": 5,
+                            "total_tokens": total,
+                            "token_counting_convention": convention,
+                        }
+                    )
+                )
+
+    def test_counting_sidecar_is_hash_bound_and_stale_metadata_fails_closed(self):
+        row = DailyUsageRow(
+            **(
+                usage().__dict__
+                | {"token_counting_convention": "components_disjoint"}
+            )
+        )
+        self.store.replace_daily_usage("codex", row.day, [row])
+
+        stored = self.store.snapshot_daily_usage(row.day, row.day).rows[0]
+        binding = self.store._connection.execute(
+            "SELECT token_counting_convention,daily_payload_hash "
+            "FROM daily_token_conventions"
+        ).fetchone()
+        self.assertEqual(stored.token_counting_convention, "components_disjoint")
+        self.assertEqual(tuple(binding), ("components_disjoint", stored.payload_hash))
+
+        with self.store._connection:
+            self.store._connection.execute(
+                "DELETE FROM daily_token_conventions"
+            )
+        missing_binding = self.store.snapshot_daily_usage(row.day, row.day)
+        self.assertEqual(
+            missing_binding.rows[0].token_counting_convention,
+            "unknown",
+        )
+        self.store.replace_daily_usage("codex", row.day, [row])
+        restored_binding = self.store.snapshot_daily_usage(row.day, row.day)
+        self.assertEqual(
+            restored_binding.rows[0].token_counting_convention,
+            "components_disjoint",
+        )
+        self.assertEqual(restored_binding.rows[0].revision, stored.revision + 1)
+        self.assertGreater(restored_binding.cursor, missing_binding.cursor)
+
+        with self.store._connection:
+            self.store._connection.execute(
+                "UPDATE daily_model_usage SET payload_hash='v042-rewrite' "
+                "WHERE day=? AND provider_id=? AND account_ref='' AND model_id=?",
+                (row.day, row.provider_id, row.model_id),
+            )
+        stale = self.store.snapshot_daily_usage(row.day, row.day).rows[0]
+        self.assertEqual(stale.token_counting_convention, "unknown")
+        self.assertEqual(stale.total_tokens, row.total_tokens)
+
+        self.store.replace_daily_usage("codex", row.day, [row])
+        repaired = self.store.snapshot_daily_usage(row.day, row.day).rows[0]
+        self.assertEqual(repaired.token_counting_convention, "components_disjoint")
+        self.assertEqual(
+            self.store._connection.execute(
+                "SELECT daily_payload_hash FROM daily_token_conventions"
+            ).fetchone()[0],
+            repaired.payload_hash,
+        )
+
+        self.store.replace_daily_usage("codex", row.day, [])
+        self.assertEqual(
+            self.store._connection.execute(
+                "SELECT COUNT(*) FROM daily_token_conventions"
+            ).fetchone()[0],
+            0,
+        )
 
     def test_atomic_replacement_and_covered_zero_day(self):
         first = usage(model_id="gpt-5.5")

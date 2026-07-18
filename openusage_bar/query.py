@@ -112,6 +112,7 @@ class ActivityRow:
     cache_creation_tokens: int
     reasoning_tokens: int | None
     total_tokens: int
+    token_counting_convention: str
     cost_amount: str | None
     cost_currency: str | None
     cost_basis: str | None
@@ -451,6 +452,7 @@ class QueryService:
             model_id=row.model_id, input_tokens=row.input_tokens, output_tokens=row.output_tokens,
             cache_read_tokens=row.cache_read_tokens, cache_creation_tokens=row.cache_creation_tokens,
             reasoning_tokens=row.reasoning_tokens, total_tokens=row.total_tokens,
+            token_counting_convention=row.token_counting_convention,
             cost_amount=row.cost_amount, cost_currency=row.cost_currency, cost_basis=row.cost_basis,
             quality=row.quality, imported_at=row.imported_at or "", revision=row.revision,
             record_id=row.record_id, source_id=row.source_id,

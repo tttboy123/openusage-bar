@@ -82,6 +82,15 @@ public struct ProviderInstanceRecord: Sendable, Hashable, Identifiable {
     }
 }
 
+/// Declares how a source defines its reported Token total relative to the
+/// component counters. The raw values are part of the version-one local API.
+public enum TokenCountingConvention: String, Sendable, Hashable, Codable {
+    case inputIncludesCache = "input_includes_cache"
+    case componentsDisjoint = "components_disjoint"
+    case providerReported = "provider_reported"
+    case unknown
+}
+
 public struct DailyUsage: Sendable, Hashable {
     public let day: LocalDay
     public let providerID: String
@@ -101,6 +110,7 @@ public struct DailyUsage: Sendable, Hashable {
     public let revision: Int64
     public let recordID: String
     public let sourceID: String
+    public let tokenCountingConvention: TokenCountingConvention
 
     public init(
         day: LocalDay, providerID: String, accountRef: String, modelID: String,
@@ -108,7 +118,8 @@ public struct DailyUsage: Sendable, Hashable {
         cacheCreationTokens: Int64, reasoningTokens: Int64?, totalTokens: Int64,
         costAmount: String?, costCurrency: String?, costBasis: String?, quality: String,
         importedAt: String, revision: Int64, recordID: String,
-        sourceID: String = "legacy"
+        sourceID: String = "legacy",
+        tokenCountingConvention: TokenCountingConvention = .unknown
     ) {
         self.day = day
         self.providerID = providerID
@@ -128,6 +139,7 @@ public struct DailyUsage: Sendable, Hashable {
         self.revision = revision
         self.recordID = recordID
         self.sourceID = sourceID
+        self.tokenCountingConvention = tokenCountingConvention
     }
 }
 

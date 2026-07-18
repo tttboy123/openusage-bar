@@ -131,6 +131,60 @@ def render_schema() -> dict[str, object]:
         },
         ["localDay", "summary", "quotaWindows", "providers", "sources", "catalogRevision"],
     )
+    activity_row = closed(
+        {
+            "day": {"type": "string", "format": "date"},
+            "providerId": {"type": "string"},
+            "accountRef": nullable("string"),
+            "modelId": {"type": "string"},
+            "inputTokens": {"type": "integer", "minimum": 0},
+            "outputTokens": {"type": "integer", "minimum": 0},
+            "cacheReadTokens": {"type": "integer", "minimum": 0},
+            "cacheCreationTokens": {"type": "integer", "minimum": 0},
+            "reasoningTokens": nullable("integer"),
+            "totalTokens": {"type": "integer", "minimum": 0},
+            "tokenCountingConvention": {
+                "enum": [
+                    "input_includes_cache",
+                    "components_disjoint",
+                    "provider_reported",
+                    "unknown",
+                ]
+            },
+            "costAmount": nullable("string"),
+            "costCurrency": nullable("string"),
+            "costBasis": nullable("string"),
+            "quality": {"type": "string"},
+            "importedAt": {"type": "string", "format": "date-time"},
+            "revision": {"type": "integer", "minimum": 1},
+            "recordId": {"type": "string"},
+            "sourceId": {"type": "string"},
+        },
+        [
+            "day", "providerId", "accountRef", "modelId", "inputTokens",
+            "outputTokens", "cacheReadTokens", "cacheCreationTokens",
+            "reasoningTokens", "totalTokens", "tokenCountingConvention",
+            "costAmount", "costCurrency", "costBasis", "quality",
+            "importedAt", "revision", "recordId", "sourceId",
+        ],
+    )
+    activity_coverage = closed(
+        {
+            "day": {"type": "string", "format": "date"},
+            "providerId": {"type": "string"},
+            "accountRef": nullable("string"),
+            "covered": {"type": "boolean"},
+            "sourceId": nullable("string"),
+        },
+        ["day", "providerId", "accountRef", "covered", "sourceId"],
+    )
+    activity = envelope(
+        {
+            "rows": {"type": "array", "items": activity_row},
+            "coverage": {"type": "array", "items": activity_coverage},
+        },
+        ["rows", "coverage"],
+    )
     change = closed(
         {
             "changeSeq": {"type": "integer", "minimum": 1},
@@ -161,7 +215,7 @@ def render_schema() -> dict[str, object]:
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://openusage.bar/schemas/local-api-v1.schema.json",
         "title": "OpenUsage Bar Local API v1",
-        "oneOf": [snapshot, changes, error],
+        "oneOf": [snapshot, activity, changes, error],
     }
 
 

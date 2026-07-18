@@ -97,6 +97,7 @@ class CodexLocalDailyImporterTests(unittest.TestCase):
         self.assertEqual(row.cache_read_tokens, 80)
         self.assertEqual(row.output_tokens, 20)
         self.assertEqual(row.total_tokens, 120)
+        self.assertEqual(row.token_counting_convention, "input_includes_cache")
 
     def test_append_refresh_adds_only_new_events_and_truncation_rebuilds(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -187,6 +188,10 @@ class CodexLocalDailyImporterTests(unittest.TestCase):
 
         self.assertEqual(result.rows[0].total_tokens, 17_981)
         self.assertEqual(result.rows[0].input_tokens, 0)
+        self.assertEqual(
+            result.rows[0].token_counting_convention,
+            "provider_reported",
+        )
 
     def test_tokens_before_first_model_move_to_that_model_only_with_evidence(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -206,23 +206,49 @@ class OpenUsageDailyImporter:
             reasoning_tokens = (first.reasoning_tokens or 0) + (
                 second.reasoning_tokens or 0
             )
+        input_tokens = first.input_tokens + second.input_tokens
+        output_tokens = first.output_tokens + second.output_tokens
+        cache_read_tokens = first.cache_read_tokens + second.cache_read_tokens
+        cache_creation_tokens = (
+            first.cache_creation_tokens + second.cache_creation_tokens
+        )
+        total_tokens = first.total_tokens + second.total_tokens
+        token_counting_convention = (
+            first.token_counting_convention
+            if first.token_counting_convention
+            == second.token_counting_convention
+            else "provider_reported"
+        )
+        if token_counting_convention == "input_includes_cache":
+            expected_total = input_tokens + output_tokens
+        elif token_counting_convention == "components_disjoint":
+            expected_total = (
+                input_tokens
+                + output_tokens
+                + cache_read_tokens
+                + cache_creation_tokens
+                + (reasoning_tokens or 0)
+            )
+        else:
+            expected_total = total_tokens
+        if total_tokens != expected_total:
+            token_counting_convention = "provider_reported"
         return DailyUsageRow(
             day=first.day,
             provider_id=first.provider_id,
             model_id=first.model_id,
-            input_tokens=first.input_tokens + second.input_tokens,
-            output_tokens=first.output_tokens + second.output_tokens,
-            cache_read_tokens=first.cache_read_tokens + second.cache_read_tokens,
-            cache_creation_tokens=(
-                first.cache_creation_tokens + second.cache_creation_tokens
-            ),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             reasoning_tokens=reasoning_tokens,
-            total_tokens=first.total_tokens + second.total_tokens,
+            total_tokens=total_tokens,
             cost_amount=cost_amount,
             cost_currency="USD" if cost_amount is not None else None,
             cost_basis="price_table_estimated" if cost_amount is not None else None,
             quality=first.quality if first.quality == second.quality else "derived",
             imported_at=first.imported_at,
+            token_counting_convention=token_counting_convention,
         )
 
     def _parse(
@@ -321,6 +347,7 @@ class OpenUsageDailyImporter:
                         cost_basis=None if cost is None else "price_table_estimated",
                         quality=quality,
                         imported_at=imported_at,
+                        token_counting_convention="components_disjoint",
                     )
                 if identity in parsed:
                     if model_id != "unknown":

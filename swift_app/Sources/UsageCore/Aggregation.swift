@@ -12,27 +12,79 @@ public struct PeakUsage: Sendable, Hashable {
 
 /// Raw Token counters reported by a usage source. Cache counters are kept
 /// separate because cache reads can already be included in input Tokens.
+public enum AggregatedTokenCountingConvention: CaseIterable, Sendable, Hashable {
+    case inputIncludesCache
+    case componentsDisjoint
+    case providerReported
+    case unknown
+    case mixed
+
+    init(records: [DailyUsage]) {
+        let conventions = Set(records.map(\.tokenCountingConvention))
+        guard !conventions.isEmpty, !conventions.contains(.unknown) else {
+            self = .unknown
+            return
+        }
+        guard conventions.count == 1, let convention = conventions.first else {
+            self = .mixed
+            return
+        }
+        self = switch convention {
+        case .inputIncludesCache: .inputIncludesCache
+        case .componentsDisjoint: .componentsDisjoint
+        case .providerReported: .providerReported
+        case .unknown: .unknown
+        }
+    }
+
+    public var localizationKey: String {
+        switch self {
+        case .inputIncludesCache:
+            "Cache Read is a subset of Input Tokens; Total uses the source's inclusive-input convention."
+        case .componentsDisjoint:
+            "The source reports disjoint Token components; Total remains the source-defined total."
+        case .providerReported:
+            "The provider reports Total; component counters may not add up to it."
+        case .unknown:
+            "The source did not declare how Total relates to component counters."
+        case .mixed:
+            "This selection combines multiple Token counting conventions; compare components independently."
+        }
+    }
+
+    public var accessibilityDescription: String {
+        AppLocalization.text(localizationKey)
+    }
+}
+
 public struct TokenBreakdown: Sendable, Hashable {
     public let totalTokens: Int64
     public let inputTokens: Int64
     public let outputTokens: Int64
     public let cacheReadTokens: Int64
     public let cacheCreationTokens: Int64
+    public let reasoningTokens: Int64?
+    public let countingConvention: AggregatedTokenCountingConvention
 
     public init(
         totalTokens: Int64, inputTokens: Int64, outputTokens: Int64,
-        cacheReadTokens: Int64, cacheCreationTokens: Int64
+        cacheReadTokens: Int64, cacheCreationTokens: Int64,
+        reasoningTokens: Int64? = nil,
+        countingConvention: AggregatedTokenCountingConvention = .unknown
     ) {
         self.totalTokens = totalTokens
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.cacheReadTokens = cacheReadTokens
         self.cacheCreationTokens = cacheCreationTokens
+        self.reasoningTokens = reasoningTokens
+        self.countingConvention = countingConvention
     }
 
     public static let zero = TokenBreakdown(
         totalTokens: 0, inputTokens: 0, outputTokens: 0,
-        cacheReadTokens: 0, cacheCreationTokens: 0
+        cacheReadTokens: 0, cacheCreationTokens: 0,
+        reasoningTokens: nil, countingConvention: .unknown
     )
 
     init(records: [DailyUsage]) {
@@ -48,9 +100,15 @@ public struct TokenBreakdown: Sendable, Hashable {
             cacheReadTokens += record.cacheReadTokens
             cacheCreationTokens += record.cacheCreationTokens
         }
+        let reasoningTokens: Int64? = records.isEmpty
+            || records.contains(where: { $0.reasoningTokens == nil })
+            ? nil
+            : records.compactMap(\.reasoningTokens).reduce(0, +)
         self.init(
             totalTokens: totalTokens, inputTokens: inputTokens, outputTokens: outputTokens,
-            cacheReadTokens: cacheReadTokens, cacheCreationTokens: cacheCreationTokens
+            cacheReadTokens: cacheReadTokens, cacheCreationTokens: cacheCreationTokens,
+            reasoningTokens: reasoningTokens,
+            countingConvention: AggregatedTokenCountingConvention(records: records)
         )
     }
 }

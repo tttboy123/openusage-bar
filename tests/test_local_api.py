@@ -241,6 +241,17 @@ class UnixLocalAPITests(unittest.TestCase):
         self.assertEqual((status, code, stderr.getvalue()), (200, 0, ""))
         self.assertEqual(json.loads(body), json.loads(stdout.getvalue()))
 
+    def test_activity_route_exposes_token_counting_convention(self):
+        status, _, body = self.request(
+            "/v1/activity/daily?from=2026-07-14&to=2026-07-14"
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            json.loads(body)["rows"][0]["tokenCountingConvention"],
+            "unknown",
+        )
+
     def test_costs_route_filters_provider_and_currency_and_rejects_bad_parameters(self):
         status, _, body = self.request(
             "/v1/costs/daily?from=2026-07-14&to=2026-07-14&providerIds=openai&currencies=USD"

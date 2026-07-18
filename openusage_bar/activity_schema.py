@@ -61,6 +61,14 @@ EXPECTED_SCHEMA = {
         ("payload_hash", "TEXT", 1, None, 0),
         ("source_id", "TEXT", 1, "'legacy'", 0),
     ),
+    "daily_token_conventions": (
+        ("day", "TEXT", 1, None, 1),
+        ("provider_id", "TEXT", 1, None, 2),
+        ("account_ref", "TEXT", 1, "''", 3),
+        ("model_id", "TEXT", 1, None, 4),
+        ("token_counting_convention", "TEXT", 1, None, 0),
+        ("daily_payload_hash", "TEXT", 1, None, 0),
+    ),
     "daily_coverage": (
         ("day", "TEXT", 1, None, 1),
         ("provider_id", "TEXT", 1, None, 2),

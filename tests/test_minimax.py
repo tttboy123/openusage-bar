@@ -97,6 +97,7 @@ class MiniMaxBillingImporterTests(unittest.TestCase):
         self.assertEqual(first.model_id, "MiniMax-M2.5")
         self.assertEqual((first.input_tokens, first.output_tokens, first.total_tokens), (110, 45, 155))
         self.assertEqual(first.quality, "direct")
+        self.assertEqual(first.token_counting_convention, "input_includes_cache")
         self.assertNotIn("must-not-be-stored", repr(result).lower())
         second = next(row for row in result.rows if row.day == "2026-07-16" and row.model_id != "MiniMax-M2.5")
         self.assertRegex(second.model_id, r"^minimax-m3-coding-[0-9a-f]{12}$")

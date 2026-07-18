@@ -357,6 +357,64 @@ struct RepositoryTests {
         }
     }
 
+    @Test("Version five reads only hash-bound optional token counting sidecar facts")
+    func tokenCountingConvention() throws {
+        let current = try SQLiteFixture(
+            userVersion: 5,
+            extraSQL: """
+            CREATE TABLE daily_token_conventions(
+              day TEXT NOT NULL, provider_id TEXT NOT NULL,
+              account_ref TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL,
+              token_counting_convention TEXT NOT NULL, daily_payload_hash TEXT NOT NULL,
+              PRIMARY KEY(day,provider_id,account_ref,model_id));
+            INSERT INTO daily_token_conventions
+              SELECT day,provider_id,account_ref,model_id,
+                     'components_disjoint',payload_hash
+              FROM daily_model_usage;
+            """
+        )
+        let currentRepository = try UsageRepository(databaseURL: current.databaseURL, now: { now })
+        defer { currentRepository.close() }
+        let currentRow = try #require(try currentRepository.activity(
+            from: LocalDay("2026-07-02"), to: LocalDay("2026-07-02")
+        ).records.first)
+
+        #expect(currentRow.totalTokens == 74_200_000)
+        #expect(currentRow.tokenCountingConvention == .componentsDisjoint)
+
+        let mismatched = try SQLiteFixture(
+            userVersion: 5,
+            extraSQL: """
+            CREATE TABLE daily_token_conventions(
+              day TEXT NOT NULL, provider_id TEXT NOT NULL,
+              account_ref TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL,
+              token_counting_convention TEXT NOT NULL, daily_payload_hash TEXT NOT NULL,
+              PRIMARY KEY(day,provider_id,account_ref,model_id));
+            INSERT INTO daily_token_conventions
+              SELECT day,provider_id,account_ref,model_id,
+                     'input_includes_cache','stale-daily-hash'
+              FROM daily_model_usage;
+            """
+        )
+        let mismatchedRepository = try UsageRepository(
+            databaseURL: mismatched.databaseURL, now: { now }
+        )
+        defer { mismatchedRepository.close() }
+        let mismatchedRow = try #require(try mismatchedRepository.activity(
+            from: LocalDay("2026-07-02"), to: LocalDay("2026-07-02")
+        ).records.first)
+        #expect(mismatchedRow.tokenCountingConvention == .unknown)
+
+        let legacy = try SQLiteFixture(userVersion: 5)
+        let legacyRepository = try UsageRepository(databaseURL: legacy.databaseURL, now: { now })
+        defer { legacyRepository.close() }
+        let legacyRow = try #require(try legacyRepository.activity(
+            from: LocalDay("2026-07-02"), to: LocalDay("2026-07-02")
+        ).records.first)
+
+        #expect(legacyRow.tokenCountingConvention == .unknown)
+    }
+
     @Test("Source health applies stale-at strictly and keeps stored facts")
     func sourceHealthSemantics() throws {
         let fixture = try SQLiteFixture()

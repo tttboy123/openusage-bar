@@ -24,6 +24,27 @@ struct LocalAPIClientTests {
         #expect(snapshotServer.request.contains("GET /v1/snapshot?today=2026-07-18 HTTP/1.1"))
     }
 
+    @Test("Daily activity preserves counting conventions and old JSON defaults unknown")
+    func dailyActivityCountingConvention() async throws {
+        let current = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":10,"generatedAt":"2026-07-18T01:02:00Z","rows":[{"day":"2026-07-18","providerId":"codex","accountRef":null,"modelId":"gpt-5.6-sol","inputTokens":100,"outputTokens":20,"cacheReadTokens":80,"cacheCreationTokens":4,"reasoningTokens":3,"totalTokens":120,"costAmount":null,"costCurrency":null,"costBasis":null,"quality":"direct","importedAt":"2026-07-18T00:30:00Z","revision":1,"recordId":"daily:codex","sourceId":"codex.local_sessions","tokenCountingConvention":"input_includes_cache"}],"coverage":[]}"#)
+        let currentActivity = try await LocalAPIClient(socketURL: current.url).dailyActivity(
+            from: "2026-07-18", to: "2026-07-18"
+        )
+        let currentRow = try #require(currentActivity.records.first)
+        #expect(currentRow.totalTokens == 120)
+        #expect(currentRow.tokenCountingConvention == .inputIncludesCache)
+        #expect(current.request.contains(
+            "GET /v1/activity/daily?from=2026-07-18&to=2026-07-18 HTTP/1.1"
+        ))
+
+        let legacy = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":9,"generatedAt":"2026-07-18T01:02:00Z","rows":[{"day":"2026-07-18","providerId":"legacy","accountRef":null,"modelId":"unknown","inputTokens":1,"outputTokens":1,"cacheReadTokens":0,"cacheCreationTokens":0,"reasoningTokens":null,"totalTokens":99,"costAmount":null,"costCurrency":null,"costBasis":null,"quality":"legacy","importedAt":"2026-07-18T00:30:00Z","revision":1,"recordId":"daily:legacy","sourceId":"legacy"}],"coverage":[]}"#)
+        let legacyActivity = try await LocalAPIClient(socketURL: legacy.url).dailyActivity(
+            from: "2026-07-18", to: "2026-07-18"
+        )
+        #expect(legacyActivity.records.first?.tokenCountingConvention == .unknown)
+        #expect(legacyActivity.records.first?.totalTokens == 99)
+    }
+
     @Test("Unavailable sockets and total timeout are typed")
     func unavailableAndTimeout() async throws {
         let missing = FileManager.default.temporaryDirectory

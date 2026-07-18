@@ -32,6 +32,7 @@ from .activity_records import (
     ResourceStateSnapshot,
     SourceStatus,
     SourceStatusSnapshot,
+    TOKEN_COUNTING_CONVENTIONS,
     UsageSummary,
     canonical_timestamp as _timestamp,
     validate_day as _validate_day,
@@ -55,6 +56,18 @@ def _hash(payload_json: str) -> str:
     return hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
 
 
+_DAILY_USAGE_SELECT = (
+    "SELECT usage.*,"
+    "convention.token_counting_convention AS bound_token_counting_convention,"
+    "convention.daily_payload_hash AS bound_daily_payload_hash "
+    "FROM daily_model_usage AS usage LEFT JOIN daily_token_conventions AS convention "
+    "ON convention.day=usage.day "
+    "AND convention.provider_id=usage.provider_id "
+    "AND convention.account_ref=usage.account_ref "
+    "AND convention.model_id=usage.model_id "
+)
+
+
 class ActivityStore:
     def __init__(self, path: str | Path) -> None:
         self.path = str(path)
@@ -75,7 +88,7 @@ class ActivityStore:
                     )
                 self._validate_existing_schema(
                     require_all=version in {3, SCHEMA_VERSION},
-                    optional_missing=frozenset(),
+                    optional_missing=frozenset({"daily_token_conventions"}),
                     allow_legacy_source_columns=version < SCHEMA_VERSION,
                 )
                 self._migrate_source_provenance()
@@ -121,7 +134,9 @@ class ActivityStore:
             )
             legacy = _LEGACY_SOURCE_SCHEMAS.get(table)
             if actual != _EXPECTED_SCHEMA[table] and not (
-                allow_legacy_source_columns and legacy is not None and actual == legacy
+                allow_legacy_source_columns
+                and legacy is not None
+                and actual == legacy
             ):
                 raise RuntimeError(
                     f"incompatible schema for {table}: table signature does not match"
@@ -322,6 +337,12 @@ class ActivityStore:
             cost_currency TEXT, cost_basis TEXT, quality TEXT NOT NULL, imported_at TEXT NOT NULL,
             revision INTEGER NOT NULL, payload_hash TEXT NOT NULL,
             source_id TEXT NOT NULL DEFAULT 'legacy',
+            PRIMARY KEY(day,provider_id,account_ref,model_id));
+        CREATE TABLE IF NOT EXISTS daily_token_conventions(
+            day TEXT NOT NULL, provider_id TEXT NOT NULL,
+            account_ref TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL,
+            token_counting_convention TEXT NOT NULL,
+            daily_payload_hash TEXT NOT NULL,
             PRIMARY KEY(day,provider_id,account_ref,model_id));
         CREATE TABLE IF NOT EXISTS daily_coverage(
             day TEXT NOT NULL, provider_id TEXT NOT NULL, account_ref TEXT NOT NULL DEFAULT '',
@@ -938,6 +959,11 @@ class ActivityStore:
                 "DELETE FROM daily_model_usage WHERE day=? AND provider_id=? AND account_ref=? AND model_id=?",
                 (day, provider_id, account_ref, model_id),
             )
+            self._connection.execute(
+                "DELETE FROM daily_token_conventions "
+                "WHERE day=? AND provider_id=? AND account_ref=? AND model_id=?",
+                (day, provider_id, account_ref, model_id),
+            )
             self._append_change(
                 "daily_usage",
                 record_id,
@@ -957,7 +983,11 @@ class ActivityStore:
             item = incoming[model_id]
             payload_json, payload_hash = self._daily_payload(item, source_id)
             old = existing.get(model_id)
-            if old is not None and old["payload_hash"] == payload_hash:
+            if (
+                old is not None
+                and old["payload_hash"] == payload_hash
+                and self._daily_token_convention_matches(item, payload_hash)
+            ):
                 continue
             record_id = self._daily_record_id(day, provider_id, account_ref, model_id)
             revision = self._next_revision_locked("daily_usage", record_id)
@@ -985,6 +1015,7 @@ class ActivityStore:
                 f"INSERT OR REPLACE INTO daily_model_usage({columns}) VALUES({','.join('?' for _ in values)})",
                 values,
             )
+            self._upsert_daily_token_convention(item, payload_hash)
             self._append_change(
                 "daily_usage",
                 record_id,
@@ -1022,6 +1053,41 @@ class ActivityStore:
                 payload_json,
                 _hash(payload_json),
             )
+
+    def _upsert_daily_token_convention(
+        self, item: DailyUsageRow, payload_hash: str
+    ) -> None:
+        self._connection.execute(
+            "INSERT OR REPLACE INTO daily_token_conventions("
+            "day,provider_id,account_ref,model_id,"
+            "token_counting_convention,daily_payload_hash"
+            ") VALUES(?,?,?,?,?,?)",
+            (
+                item.day,
+                item.provider_id,
+                item.account_ref,
+                item.model_id,
+                item.token_counting_convention,
+                payload_hash,
+            ),
+        )
+
+    def _daily_token_convention_matches(
+        self, item: DailyUsageRow, payload_hash: str
+    ) -> bool:
+        return self._connection.execute(
+            "SELECT 1 FROM daily_token_conventions "
+            "WHERE day=? AND provider_id=? AND account_ref=? AND model_id=? "
+            "AND token_counting_convention=? AND daily_payload_hash=?",
+            (
+                item.day,
+                item.provider_id,
+                item.account_ref,
+                item.model_id,
+                item.token_counting_convention,
+                payload_hash,
+            ),
+        ).fetchone() is not None
 
     def has_daily_history(self, provider_id: str, account_ref: str = "") -> bool:
         _validate_id("provider_id", provider_id)
@@ -1198,6 +1264,14 @@ class ActivityStore:
     @staticmethod
     def _row_to_daily(row: sqlite3.Row, *, stored: bool) -> DailyUsageRow | DailyUsageRecord:
         values = dict(row)
+        convention = values.pop("bound_token_counting_convention", None)
+        convention_hash = values.pop("bound_daily_payload_hash", None)
+        values["token_counting_convention"] = (
+            str(convention)
+            if convention in TOKEN_COUNTING_CONVENTIONS
+            and convention_hash == values["payload_hash"]
+            else "unknown"
+        )
         if stored:
             values["record_id"] = ActivityStore._daily_record_id(
                 values["day"], values["provider_id"], values["account_ref"], values["model_id"]
@@ -1213,7 +1287,9 @@ class ActivityStore:
         _validate_day(end_day)
         with self._lock:
             rows = self._connection.execute(
-                "SELECT * FROM daily_model_usage WHERE day BETWEEN ? AND ? ORDER BY day,provider_id,account_ref,model_id",
+                _DAILY_USAGE_SELECT
+                + "WHERE usage.day BETWEEN ? AND ? "
+                "ORDER BY usage.day,usage.provider_id,usage.account_ref,usage.model_id",
                 (start_day, end_day),
             ).fetchall()
             return [self._row_to_daily(row, stored=False) for row in rows]  # type: ignore[misc]
@@ -1236,7 +1312,9 @@ class ActivityStore:
             self._connection.execute("BEGIN DEFERRED")
             try:
                 rows = self._connection.execute(
-                    "SELECT * FROM daily_model_usage WHERE day BETWEEN ? AND ? ORDER BY day,provider_id,account_ref,model_id",
+                    _DAILY_USAGE_SELECT
+                    + "WHERE usage.day BETWEEN ? AND ? "
+                    "ORDER BY usage.day,usage.provider_id,usage.account_ref,usage.model_id",
                     (start_day, end_day),
                 ).fetchall()
                 coverage = self._connection.execute(
@@ -1843,6 +1921,7 @@ class ActivityStore:
                     "delete", changed_at, None, _hash("null"),
                 )
             self._connection.execute("DELETE FROM daily_model_usage WHERE day<?", (day_cutoff,))
+            self._connection.execute("DELETE FROM daily_token_conventions WHERE day<?", (day_cutoff,))
             self._connection.execute("DELETE FROM daily_coverage WHERE day<?", (day_cutoff,))
             self._connection.execute("DELETE FROM daily_costs WHERE day<?", (day_cutoff,))
             self._connection.execute("DELETE FROM daily_cost_coverage WHERE day<?", (day_cutoff,))

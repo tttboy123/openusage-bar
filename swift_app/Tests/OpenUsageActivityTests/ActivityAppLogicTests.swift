@@ -413,8 +413,9 @@ struct ActivityAppLogicTests {
         #expect(metrics.contains("Input Tokens"))
         #expect(metrics.contains("Output Tokens"))
         #expect(metrics.contains("Cache Read"))
-        #expect(metrics.contains("Cache Write"))
-        #expect(metrics.contains("Cache reads are included in Input Tokens"))
+        #expect(metrics.contains("Cache Creation"))
+        #expect(metrics.contains("Reasoning"))
+        #expect(metrics.contains("countingConventionDescription"))
         #expect(!metrics.contains("Longest Task"))
     }
 
@@ -424,15 +425,20 @@ struct ActivityAppLogicTests {
             totalTokens: 100, observedTokens: 100,
             observedBreakdown: TokenBreakdown(
                 totalTokens: 100, inputTokens: 70, outputTokens: 30,
-                cacheReadTokens: 20, cacheCreationTokens: 5
+                cacheReadTokens: 20, cacheCreationTokens: 5,
+                reasoningTokens: 8, countingConvention: .inputIncludesCache
             ),
             isComplete: true, peak: PeakUsage(day: try LocalDay("2026-07-18"), tokens: 100),
             activeDays: 1, currentStreak: 1, longestStreak: 1
         ))
         #expect(complete.tokenMetrics.map(\.label) == [
-            "Total Tokens", "Input Tokens", "Output Tokens", "Cache Read", "Cache Write",
+            "Total Tokens", "Input Tokens", "Output Tokens", "Cache Read", "Cache Creation",
+            "Reasoning",
         ])
-        #expect(complete.tokenMetrics.map(\.value) == ["100", "70", "30", "20", "5"])
+        #expect(complete.tokenMetrics.map(\.value) == [
+            "100", "70", "30", "20", "5", "8",
+        ])
+        #expect(complete.countingConventionDescription.contains("inclusive-input"))
         #expect(complete.activityMetrics.map(\.label) == [
             "Peak Day", "Active Days", "Current Streak", "Longest Streak",
         ])

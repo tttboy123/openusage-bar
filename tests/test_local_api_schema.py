@@ -48,6 +48,25 @@ class LocalAPISchemaTests(unittest.TestCase):
         self.assertEqual(json.loads(SCHEMA.read_text()), render_schema())
         self.assertEqual(render_schema()["$schema"], "https://json-schema.org/draft/2020-12/schema")
 
+    def test_activity_schema_declares_token_counting_convention(self):
+        activity = next(
+            branch
+            for branch in render_schema()["oneOf"]
+            if "rows" in branch.get("properties", {})
+        )
+        row = activity["properties"]["rows"]["items"]
+
+        self.assertEqual(
+            row["properties"]["tokenCountingConvention"]["enum"],
+            [
+                "input_includes_cache",
+                "components_disjoint",
+                "provider_reported",
+                "unknown",
+            ],
+        )
+        self.assertIn("tokenCountingConvention", row["required"])
+
     def test_snapshot_contract_rejects_missing_revision_private_fields_and_unknown_values(self):
         store = ActivityStore(":memory:")
         try:

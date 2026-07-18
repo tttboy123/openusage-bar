@@ -189,6 +189,27 @@ class QueryServiceTests(unittest.TestCase):
         self.assertTrue(any("openai-work" in row.record_id for row in changes.records))
         self.assertTrue(any("openai-personal" in row.record_id for row in changes.records))
 
+    def test_activity_exposes_token_counting_convention_on_wire(self):
+        row = DailyUsageRow(
+            **(
+                usage().__dict__
+                | {"token_counting_convention": "components_disjoint"}
+            )
+        )
+        self.store.replace_daily_usage("codex", row.day, [row])
+
+        result = self.query.activity(date(2026, 7, 14), date(2026, 7, 14))
+        wire = to_wire(result)
+
+        self.assertEqual(
+            result.rows[0].token_counting_convention,
+            "components_disjoint",
+        )
+        self.assertEqual(
+            wire["rows"][0]["tokenCountingConvention"],
+            "components_disjoint",
+        )
+
     def test_capacity_selects_most_urgent_window_per_account_and_sorts_zero_before_null(self):
         self.store.record_quota(quota("minimax.weekly", "minimax", 0.7, quota_name="Weekly"))
         self.store.record_quota(quota("minimax.five_hour", "minimax", 0.18))

@@ -35,9 +35,10 @@ def main() -> int:
         store.replace_daily_usage("codex", DAY.isoformat(), [DailyUsageRow(
             day=DAY.isoformat(), provider_id="codex", model_id="gpt-5.6-sol",
             input_tokens=30, output_tokens=10, cache_read_tokens=2,
-            cache_creation_tokens=0, reasoning_tokens=None, total_tokens=42,
+            cache_creation_tokens=4, reasoning_tokens=3, total_tokens=49,
             cost_amount=None, cost_currency=None, cost_basis=None,
             quality="direct", imported_at="2026-07-18T00:30:00Z",
+            token_counting_convention="components_disjoint",
         )])
         store.record_quota(QuotaObservation(
             record_id="minimax.five_hour", observed_at="2026-07-18T00:00:00Z",
@@ -54,7 +55,9 @@ def main() -> int:
             observed_at="2026-07-18T00:00:00Z",
         ))
         store.record_source_success("minimax", "current.quota", NOW)
-        payload = to_wire(QueryService(store, clock=lambda: NOW).resource_snapshot(DAY))
+        query = QueryService(store, clock=lambda: NOW)
+        payload = to_wire(query.resource_snapshot(DAY))
+        payload["activity"] = to_wire(query.activity(DAY, DAY))
     finally:
         store.close()
     args.expected.write_text(

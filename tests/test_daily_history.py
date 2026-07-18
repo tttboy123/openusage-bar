@@ -440,6 +440,7 @@ class OpenUsageDailyImporterTests(unittest.TestCase):
         self.assertIsNone(row.cost_currency)
         self.assertIsNone(row.cost_basis)
         self.assertEqual(row.quality, "derived")
+        self.assertEqual(row.token_counting_convention, "components_disjoint")
 
     def test_captured_openusage_023_fixture_canonicalizes_and_merges_unknown(self):
         payload = json.loads(
@@ -473,6 +474,18 @@ class OpenUsageDailyImporterTests(unittest.TestCase):
         self.assertIsNone(unknown.cost_amount)
         self.assertIsNone(unknown.cost_currency)
         self.assertIsNone(unknown.cost_basis)
+        self.assertEqual(
+            unknown.token_counting_convention,
+            "provider_reported",
+        )
+        self.assertEqual(
+            {
+                row.token_counting_convention
+                for model_id, row in rows.items()
+                if model_id != "unknown"
+            },
+            {"components_disjoint"},
+        )
         self.assertEqual(sum(row.total_tokens for row in rows.values()), 525)
 
     def test_unknown_merge_sums_nullable_values_only_when_both_are_known(self):

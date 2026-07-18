@@ -243,6 +243,7 @@ class OpenAIOrganizationImporter:
                 cost_basis=None,
                 quality="direct",
                 imported_at=imported_at,
+                token_counting_convention="input_includes_cache",
             )
             for (day, model), values in sorted(totals.items())
         ]

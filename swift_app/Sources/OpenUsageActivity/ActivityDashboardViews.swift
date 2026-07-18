@@ -84,7 +84,7 @@ private struct MetricStrip: View {
                 tokenMetricsRow
                 tokenMetricsGrid
             }
-            Label("Cache reads are included in Input Tokens", systemImage: "info.circle")
+            Label(presentation.countingConventionDescription, systemImage: "info.circle")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
             ViewThatFits(in: .horizontal) {
@@ -162,13 +162,25 @@ struct MetricStripPresentation {
             MetricDatum(value: componentValue(breakdown.inputTokens), label: "Input Tokens"),
             MetricDatum(value: componentValue(breakdown.outputTokens), label: "Output Tokens"),
             MetricDatum(value: componentValue(breakdown.cacheReadTokens), label: "Cache Read"),
-            MetricDatum(value: componentValue(breakdown.cacheCreationTokens), label: "Cache Write"),
+            MetricDatum(value: componentValue(breakdown.cacheCreationTokens), label: "Cache Creation"),
+            MetricDatum(value: componentValue(breakdown.reasoningTokens), label: "Reasoning"),
         ]
     }
 
     func componentValue(_ value: Int64) -> String {
         metrics.hasObservedBreakdown
             ? TokenText.compact(value) : AppLocalization.text("Unavailable")
+    }
+
+    func componentValue(_ value: Int64?) -> String {
+        guard metrics.hasObservedBreakdown, let value else {
+            return AppLocalization.text("Unavailable")
+        }
+        return TokenText.compact(value)
+    }
+
+    var countingConventionDescription: String {
+        metrics.observedBreakdown.countingConvention.accessibilityDescription
     }
 
     var activityMetrics: [MetricDatum] {
@@ -736,8 +748,11 @@ private struct ChartTooltip: View {
             TokenDetailRow(label: "Input Tokens", value: componentValue(day.observedBreakdown.inputTokens))
             TokenDetailRow(label: "Output Tokens", value: componentValue(day.observedBreakdown.outputTokens))
             TokenDetailRow(label: "Cache Read", value: componentValue(day.observedBreakdown.cacheReadTokens))
-            TokenDetailRow(label: "Cache Write", value: componentValue(day.observedBreakdown.cacheCreationTokens))
-            Text("Cache reads are included in Input Tokens")
+            TokenDetailRow(label: "Cache Creation", value: componentValue(day.observedBreakdown.cacheCreationTokens))
+            if let reasoningTokens = day.observedBreakdown.reasoningTokens {
+                TokenDetailRow(label: "Reasoning", value: componentValue(reasoningTokens))
+            }
+            Text(day.observedBreakdown.countingConvention.accessibilityDescription)
                 .font(.caption2).foregroundStyle(.secondary)
             if !day.composition.isEmpty {
                 Divider()
