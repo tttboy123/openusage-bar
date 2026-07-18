@@ -127,6 +127,12 @@
 "No capacity data" = "No capacity data";
 "Last-good data unavailable" = "Last-good data unavailable";
 "Connect a supported provider in Settings." = "Connect a supported provider in Settings.";
+"Collecting usage data" = "Collecting usage data";
+"Refresh is in progress. Existing facts remain available." = "Refresh is in progress. Existing facts remain available.";
+"View Activity" = "View Activity";
+"Open Data Health to inspect the source failure." = "Open Data Health to inspect the source failure.";
+"Open Data Health" = "Open Data Health";
+"Review Providers" = "Review Providers";
 "Retry" = "Retry";
 "Clear Filters" = "Clear Filters";
 "All model series hidden" = "All model series hidden";

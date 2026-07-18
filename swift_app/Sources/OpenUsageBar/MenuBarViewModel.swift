@@ -42,6 +42,15 @@ final class MenuBarViewModel {
         summary?.hasHealthIssues == true || loadError != nil || refreshError != nil || visibilityError != nil
     }
     var displayError: String? { loadError ?? refreshError ?? visibilityError }
+    var emptyStatePresentation: MenuEmptyStatePresentation {
+        MenuEmptyStatePresentation.make(
+            hasSources: summary.map {
+                $0.todayTokens != nil || !$0.capacity.isEmpty || $0.updatedAt != nil
+            } ?? false,
+            isRefreshing: isRefreshing,
+            hasFailure: displayError != nil
+        )
+    }
     var isMonitoring: Bool { freshnessTimer?.isValid == true }
     var todayPresentation: TodayTokenPresentation {
         TodayTokenPresentation(

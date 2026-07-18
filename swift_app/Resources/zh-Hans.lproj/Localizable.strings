@@ -127,6 +127,12 @@
 "No capacity data" = "暂无额度数据";
 "Last-good data unavailable" = "最近一次有效数据不可用";
 "Connect a supported provider in Settings." = "请在设置中连接受支持的 Provider。";
+"Collecting usage data" = "正在采集用量数据";
+"Refresh is in progress. Existing facts remain available." = "刷新正在进行，已有事实仍可查看。";
+"View Activity" = "查看活动";
+"Open Data Health to inspect the source failure." = "打开数据健康检查以查看数据源故障。";
+"Open Data Health" = "打开数据健康";
+"Review Providers" = "查看 Provider";
 "Retry" = "重试";
 "Clear Filters" = "清除筛选";
 "All model series hidden" = "已隐藏所有模型序列";

@@ -121,6 +121,85 @@ struct TodayTokenPresentation: Sendable, Hashable {
     }
 }
 
+struct MenuEmptyStatePresentation: Sendable, Hashable {
+    enum Reason: Sendable, Hashable {
+        case noSources
+        case collecting
+        case sourceFailure
+    }
+
+    let reason: Reason
+    let titleKey: String
+    let detailKey: String
+    let actionKey: String
+    let primaryRoute: UsageDetailsRoute
+
+    static func make(
+        hasSources: Bool, isRefreshing: Bool, hasFailure: Bool
+    ) -> Self {
+        if hasFailure {
+            return Self(
+                reason: .sourceFailure,
+                titleKey: "Last-good data unavailable",
+                detailKey: "Open Data Health to inspect the source failure.",
+                actionKey: "Open Data Health",
+                primaryRoute: .dataHealth
+            )
+        }
+        if isRefreshing || hasSources {
+            return Self(
+                reason: .collecting,
+                titleKey: "Collecting usage data",
+                detailKey: "Refresh is in progress. Existing facts remain available.",
+                actionKey: "View Activity",
+                primaryRoute: .activity
+            )
+        }
+        return Self(
+            reason: .noSources,
+            titleKey: "No capacity data",
+            detailKey: "Connect a supported provider in Settings.",
+            actionKey: "Review Providers",
+            primaryRoute: .providersAndAccounts
+        )
+    }
+}
+
+enum MenuCapacityOrdering {
+    static func sorted(_ rows: [CapacityItem]) -> [CapacityItem] {
+        rows.sorted(by: isBefore)
+    }
+
+    static func isBefore(_ lhs: CapacityItem, _ rhs: CapacityItem) -> Bool {
+        let leftState = usabilityRank(lhs)
+        let rightState = usabilityRank(rhs)
+        if leftState != rightState { return leftState < rightState }
+        switch (lhs.remainingRatio, rhs.remainingRatio) {
+        case let (left?, right?) where left != right: return left < right
+        case (_?, nil): return true
+        case (nil, _?): return false
+        default: break
+        }
+        switch (lhs.resetsAt.flatMap(Format.timestamp), rhs.resetsAt.flatMap(Format.timestamp)) {
+        case let (left?, right?) where left != right: return left < right
+        case (_?, nil): return true
+        case (nil, _?): return false
+        default: break
+        }
+        if lhs.providerID != rhs.providerID { return lhs.providerID < rhs.providerID }
+        if lhs.accountRef != rhs.accountRef { return lhs.accountRef < rhs.accountRef }
+        if lhs.quotaName != rhs.quotaName { return lhs.quotaName < rhs.quotaName }
+        return lhs.recordID < rhs.recordID
+    }
+
+    private static func usabilityRank(_ row: CapacityItem) -> Int {
+        let hasValue = row.remainingRatio != nil || row.remaining != nil
+        if hasValue, row.state.lowercased() == "ok", !row.stale { return 0 }
+        if hasValue { return 1 }
+        return row.state.lowercased() == "unknown" ? 3 : 2
+    }
+}
+
 public struct ProviderRowPresentation: Sendable, Hashable {
     public let providerDescriptor: ProviderDisplayDescriptor
     public let provider: String
@@ -153,9 +232,15 @@ public struct ProviderRowPresentation: Sendable, Hashable {
         if row.stale {
             freshness = "Stale, \(Format.age(row.freshnessSeconds)) old"
             stateSymbol = "clock.badge.exclamationmark"
+        } else if row.state.lowercased() == "unknown" {
+            freshness = "Unknown"
+            stateSymbol = "questionmark.circle"
         } else if row.state != "ok" {
             freshness = Format.state(row.state)
             stateSymbol = "exclamationmark.triangle.fill"
+        } else if row.remainingRatio == nil, row.remaining == nil {
+            freshness = "Unavailable"
+            stateSymbol = "xmark.circle"
         } else {
             freshness = nil
             stateSymbol = row.remainingRatio.map { $0 <= 0.2 ? "exclamationmark.triangle.fill" : nil } ?? nil
@@ -189,10 +274,10 @@ public struct ProviderCapacityGroup: Sendable, Hashable, Identifiable {
     public var secondary: ArraySlice<CapacityItem> { rows.dropFirst() }
 
     public static func make(from rows: [CapacityItem]) -> [Self] {
-        let sorted = CapacityViewModel.sorted(rows)
+        let sorted = MenuCapacityOrdering.sorted(rows)
         let grouped = Dictionary(grouping: sorted) { "\($0.providerID)|\($0.accountRef)" }
-        return grouped.map { Self(id: $0.key, rows: CapacityViewModel.sorted($0.value)) }.sorted {
-            CapacityViewModel.sorted([$0.primary, $1.primary]).first == $0.primary
+        return grouped.map { Self(id: $0.key, rows: MenuCapacityOrdering.sorted($0.value)) }.sorted {
+            MenuCapacityOrdering.isBefore($0.primary, $1.primary)
         }
     }
 }
@@ -211,7 +296,7 @@ enum Format {
     }
 
     static func todayTokens(_ tokens: Int64?) -> String {
-        tokens.map(Self.tokens) ?? "No data"
+        tokens.map(Self.tokens) ?? "Unavailable"
     }
 
     static func timestamp(_ value: String) -> Date? {
