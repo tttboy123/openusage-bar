@@ -492,87 +492,7 @@ public final class UsageRepository {
     private func validateSchema(_ database: OpaquePointer) throws {
         let version = try scalarInt64(database, sql: "PRAGMA user_version")
         guard (1...4).contains(version) else { throw RepositoryError.incompatibleSchema }
-        var expected: [String: [SchemaColumn]] = [
-            "daily_model_usage": [
-                .required("day", "TEXT", primaryKey: 1), .required("provider_id", "TEXT", primaryKey: 2),
-                .required("account_ref", "TEXT", defaultValue: "''", primaryKey: 3),
-                .required("model_id", "TEXT", primaryKey: 4), .required("input_tokens", "INTEGER"),
-                .required("output_tokens", "INTEGER"), .required("cache_read_tokens", "INTEGER"),
-                .required("cache_creation_tokens", "INTEGER"), .optional("reasoning_tokens", "INTEGER"),
-                .required("total_tokens", "INTEGER"), .optional("cost_amount", "TEXT"),
-                .optional("cost_currency", "TEXT"), .optional("cost_basis", "TEXT"),
-                .required("quality", "TEXT"), .required("imported_at", "TEXT"),
-                .required("revision", "INTEGER"), .required("payload_hash", "TEXT")
-            ],
-            "daily_coverage": [
-                .required("day", "TEXT", primaryKey: 1), .required("provider_id", "TEXT", primaryKey: 2),
-                .required("account_ref", "TEXT", defaultValue: "''", primaryKey: 3),
-                .required("imported_at", "TEXT")
-            ],
-            "quota_state": [
-                .optional("record_id", "TEXT", primaryKey: 1), .required("observed_at", "TEXT"),
-                .required("provider_id", "TEXT"), .required("account_ref", "TEXT", defaultValue: "''"),
-                .required("quota_name", "TEXT"), .required("unit", "TEXT"), .optional("used", "TEXT"),
-                .optional("quota_limit", "TEXT"), .optional("remaining", "TEXT"),
-                .optional("remaining_ratio", "REAL"), .optional("resets_at", "TEXT"),
-                .optional("period_start", "TEXT"), .optional("period_end", "TEXT"),
-                .required("state", "TEXT"), .required("quality", "TEXT"), .required("stale", "INTEGER"),
-                .required("revision", "INTEGER"), .required("payload_hash", "TEXT")
-            ],
-            "quota_snapshots": [
-                .optional("snapshot_id", "INTEGER", primaryKey: 1), .required("record_id", "TEXT"),
-                .required("observed_at", "TEXT"), .required("provider_id", "TEXT"),
-                .required("account_ref", "TEXT", defaultValue: "''"), .required("quota_name", "TEXT"),
-                .required("payload_json", "TEXT"), .required("payload_hash", "TEXT")
-            ],
-            "source_status": [
-                .required("provider_id", "TEXT", primaryKey: 1), .required("source_id", "TEXT", primaryKey: 2),
-                .required("state", "TEXT"), .required("last_attempt_at", "TEXT"),
-                .optional("last_success_at", "TEXT"), .optional("stale_at", "TEXT"),
-                .optional("error_code", "TEXT")
-            ],
-            "change_log": [
-                .optional("change_seq", "INTEGER", primaryKey: 1), .required("record_type", "TEXT"),
-                .required("record_id", "TEXT"), .required("revision", "INTEGER"),
-                .required("operation", "TEXT"), .required("changed_at", "TEXT"),
-                .optional("payload_json", "TEXT"), .required("payload_hash", "TEXT")
-            ],
-            "ledger_meta": [.optional("key", "TEXT", primaryKey: 1), .required("value", "TEXT")],
-        ]
-        if version >= 3 {
-            expected["daily_model_usage"]?.append(
-                .required("source_id", "TEXT", defaultValue: "'legacy'")
-            )
-            expected["daily_coverage"]?.append(
-                .required("source_id", "TEXT", defaultValue: "'legacy'")
-            )
-        }
-        if version >= 4 {
-            expected["source_status"]?.append(
-                .required("revision", "INTEGER", defaultValue: "1")
-            )
-            expected["source_status"]?.append(
-                .required("payload_hash", "TEXT", defaultValue: "''")
-            )
-        }
-        if version >= 2 {
-            expected["daily_costs"] = [
-                .required("day", "TEXT", primaryKey: 1),
-                .required("provider_id", "TEXT", primaryKey: 2),
-                .required("account_ref", "TEXT", defaultValue: "''", primaryKey: 3),
-                .required("cost_kind", "TEXT", primaryKey: 4),
-                .required("currency", "TEXT", primaryKey: 5),
-                .required("amount", "TEXT"), .required("basis", "TEXT"),
-                .required("quality", "TEXT"), .required("imported_at", "TEXT"),
-                .required("revision", "INTEGER"), .required("payload_hash", "TEXT"),
-            ]
-            expected["daily_cost_coverage"] = [
-                .required("day", "TEXT", primaryKey: 1),
-                .required("provider_id", "TEXT", primaryKey: 2),
-                .required("account_ref", "TEXT", defaultValue: "''", primaryKey: 3),
-                .required("imported_at", "TEXT"),
-            ]
-        }
+        let expected = GeneratedActivitySchema.expectedTables(version: version)
         for (table, signature) in expected {
             let actual = try queryColumnSignature(database, table: table)
             guard actual == signature else {
@@ -586,43 +506,7 @@ public final class UsageRepository {
     private func validateIndexes(
         _ database: OpaquePointer, includeCosts: Bool
     ) throws {
-        var expected = [
-            ExpectedIndex(
-                name: "quota_snapshot_record_time", table: "quota_snapshots",
-                unique: false, partial: false,
-                terms: [IndexTerm(name: "record_id", descending: false), IndexTerm(name: "observed_at", descending: true)]
-            ),
-            ExpectedIndex(
-                name: "quota_snapshot_provider_account_time", table: "quota_snapshots",
-                unique: false, partial: false,
-                terms: [
-                    IndexTerm(name: "provider_id", descending: false),
-                    IndexTerm(name: "account_ref", descending: false),
-                    IndexTerm(name: "observed_at", descending: true),
-                    IndexTerm(name: "snapshot_id", descending: true),
-                ]
-            ),
-            ExpectedIndex(
-                name: "change_log_record_revision_unique", table: "change_log",
-                unique: true, partial: false,
-                terms: [
-                    IndexTerm(name: "record_type", descending: false),
-                    IndexTerm(name: "record_id", descending: false),
-                    IndexTerm(name: "revision", descending: false),
-                ]
-            ),
-        ]
-        if includeCosts {
-            expected.append(ExpectedIndex(
-                name: "daily_cost_provider_account_day", table: "daily_costs",
-                unique: false, partial: false,
-                terms: [
-                    IndexTerm(name: "provider_id", descending: false),
-                    IndexTerm(name: "account_ref", descending: false),
-                    IndexTerm(name: "day", descending: false),
-                ]
-            ))
-        }
+        let expected = GeneratedActivitySchema.expectedIndexes(includeCosts: includeCosts)
         for contract in expected {
             let properties: (unique: Bool, partial: Bool) = try withStatement(
                 database,
@@ -660,7 +544,7 @@ public final class UsageRepository {
     }
 
     private func validateAutoincrement(_ database: OpaquePointer) throws {
-        let contracts = ["quota_snapshots": "snapshot_id", "change_log": "change_seq"]
+        let contracts = GeneratedActivitySchema.autoincrementColumns
         for (table, column) in contracts {
             let definition = try withStatement(
                 database,
@@ -1281,7 +1165,7 @@ private struct CoverageKey: Hashable {
     let scope: ProviderScope
 }
 
-private struct SchemaColumn: Equatable {
+struct SchemaColumn: Equatable {
     let name: String
     let type: String
     let required: Bool
@@ -1301,12 +1185,12 @@ private struct SchemaColumn: Equatable {
     }
 }
 
-private struct IndexTerm: Equatable {
+struct IndexTerm: Equatable {
     let name: String
     let descending: Bool
 }
 
-private struct ExpectedIndex {
+struct ExpectedIndex {
     let name: String
     let table: String
     let unique: Bool

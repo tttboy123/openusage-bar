@@ -22,11 +22,11 @@
 - Test: `tests/test_build_script.py`
 - Test: `tests/test_activity_store.py`
 
-- [ ] **Step 1: Add build-gate tests for the new modules**
+- [x] **Step 1: Add build-gate tests for the new modules**
 
 Add assertions to `tests/test_build_script.py` that the coverage gate contains `openusage_bar.activity_records` and `openusage_bar.activity_schema`.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -36,7 +36,7 @@ Run:
 
 Expected: FAIL because the modules are not covered by the build gate.
 
-- [ ] **Step 3: Move declarations by responsibility**
+- [x] **Step 3: Move declarations by responsibility**
 
 Move dataclasses, constants, and value validation from `activity_store.py` into `activity_records.py`. Move schema version, table/index signatures, and DDL into `activity_schema.py`. Keep `ActivityStore` public imports backward compatible:
 
@@ -53,7 +53,7 @@ from .activity_schema import LEDGER_SCHEMA_VERSION, create_schema, migrate_schem
 
 Use commit `9e57595` only as a move map; do not merge its unrelated branch history.
 
-- [ ] **Step 4: Run behavior-preservation tests**
+- [x] **Step 4: Run behavior-preservation tests**
 
 Run:
 
@@ -63,7 +63,7 @@ Run:
 
 Expected: PASS with no schema or payload changes.
 
-- [ ] **Step 5: Commit the pure refactor**
+- [x] **Step 5: Commit the pure refactor**
 
 ```bash
 git add openusage_bar/activity_records.py openusage_bar/activity_schema.py \
@@ -82,7 +82,7 @@ git commit -m "refactor: split ledger records and schema"
 - Test: `tests/test_activity_store.py`
 - Test: `swift_app/Tests/UsageCoreTests/RepositoryTests.swift`
 
-- [ ] **Step 1: Write failing cursor tests**
+- [x] **Step 1: Write failing cursor tests**
 
 Add tests with this behavior to `tests/test_activity_store.py`:
 
@@ -123,7 +123,7 @@ def test_known_zero_coverage_round_trips_through_change_feed(self):
 
 Also cover success, failure, delete, retention deletion, stale writes, duplicate no-op writes, and the `/v1/changes` serialization of both coverage record types. Coverage is a public fact because it distinguishes observed zero from unknown.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```bash
 .build-venv/bin/python -m unittest tests.test_activity_store -v
@@ -131,7 +131,7 @@ Also cover success, failure, delete, retention deletion, stale writes, duplicate
 
 Expected: source status and history-only quota changes do not appear in the change feed.
 
-- [ ] **Step 3: Introduce ledger schema v4**
+- [x] **Step 3: Introduce ledger schema v4**
 
 Add `revision` and `payload_hash` to `source_status`. Add change types `source_status` and `quota_snapshot`. Implement an idempotent v3-to-v4 migration that preserves every existing row and initializes revisions without decreasing the existing global cursor.
 
@@ -153,11 +153,11 @@ PUBLIC_CHANGE_TYPES = frozenset({
 
 Every inserted, updated, or deleted public row appends exactly one sanitized change record. Duplicate writes with the same semantic hash append none. The v3-to-v4 migration appends one `ledger_schema` change after the transaction has preserved and validated existing rows; incremental consumers that see this type must obtain a fresh `/v1/snapshot` instead of expecting one change record per pre-v4 row.
 
-- [ ] **Step 4: Update Swift schema acceptance**
+- [x] **Step 4: Update Swift schema acceptance**
 
 Teach `UsageRepository` to accept ledger v4 and verify the new columns. Retain read support for v3 during the migration release only; writing remains Python-owned.
 
-- [ ] **Step 5: Verify migration and cursor monotonicity**
+- [x] **Step 5: Verify migration and cursor monotonicity**
 
 ```bash
 .build-venv/bin/python -m unittest tests.test_activity_store -v
@@ -166,7 +166,7 @@ swift test --package-path swift_app --filter RepositoryTests
 
 Expected: PASS; v3 fixtures open and migrate without row loss, and all public changes are cursor-visible.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add openusage_bar/activity_records.py openusage_bar/activity_schema.py \
@@ -185,7 +185,7 @@ git commit -m "feat: revision every public ledger fact"
 - Test: `tests/test_activity_store.py`
 - Test: `tests/test_query.py`
 
-- [ ] **Step 1: Define the store snapshot contract in a failing test**
+- [x] **Step 1: Define the store snapshot contract in a failing test**
 
 The snapshot must contain one cursor and all facts needed by native surfaces and generic resource consumers:
 
@@ -204,7 +204,7 @@ class ResourceStateSnapshot:
 
 Add `ResourceSnapshotTests(unittest.TestCase)` to `tests/test_activity_store.py`. Its concurrent writer test pauses between internal SELECT statements and proves the returned rows and cursor all come from one read transaction.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 .build-venv/bin/python -m unittest \
@@ -213,11 +213,11 @@ Add `ResourceSnapshotTests(unittest.TestCase)` to `tests/test_activity_store.py`
 
 Expected: FAIL because `snapshot_resource_state` does not exist.
 
-- [ ] **Step 3: Implement `ActivityStore.snapshot_resource_state(day)`**
+- [x] **Step 3: Implement `ActivityStore.snapshot_resource_state(day)`**
 
 Validate the canonical local day, enter one `_read_snapshot()` transaction, read summary, quota states, provider instances, source statuses, and the cursor, then return `ResourceStateSnapshot`. Do not call existing public snapshot methods from inside the transaction; extract private `_locked` SELECT helpers to avoid nested transactions.
 
-- [ ] **Step 4: Define the public QueryService result**
+- [x] **Step 4: Define the public QueryService result**
 
 Add these wire dataclasses to `query.py`:
 
@@ -240,7 +240,7 @@ class ResourceSnapshotResult(ResultEnvelope):
 
 Implement `QueryService.resource_snapshot(today: date)` by converting exactly one `ResourceStateSnapshot`. Return every quota window; do not choose a route or synthesize missing numbers.
 
-- [ ] **Step 5: Verify the focused contract**
+- [x] **Step 5: Verify the focused contract**
 
 ```bash
 .build-venv/bin/python -m unittest tests.test_activity_store tests.test_query -v
@@ -248,7 +248,7 @@ Implement `QueryService.resource_snapshot(today: date)` by converting exactly on
 
 Expected: PASS; all nested facts share the envelope's `dataRevision`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add openusage_bar/activity_records.py openusage_bar/activity_store.py \
@@ -265,7 +265,7 @@ git commit -m "feat: add coherent resource snapshot"
 - Test: `tests/test_collector_cli.py`
 - Modify: `docs/api/local-api-v1.md`
 
-- [ ] **Step 1: Write failing API and CLI parity tests**
+- [x] **Step 1: Write failing API and CLI parity tests**
 
 Add `GET /v1/snapshot?today=2026-07-18` and:
 
@@ -275,7 +275,7 @@ openusage-bar snapshot --today 2026-07-18 --format json --offline
 
 Under a fixed clock and ledger fixture, decode both JSON responses, remove no fields, and assert exact equality.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 .build-venv/bin/python -m unittest tests.test_local_api tests.test_collector_cli -v
@@ -283,15 +283,15 @@ Under a fixed clock and ledger fixture, decode both JSON responses, remove no fi
 
 Expected: both entry points reject the unknown snapshot command/route.
 
-- [ ] **Step 3: Add the shared route and command**
+- [x] **Step 3: Add the shared route and command**
 
 Register only `today` as an optional canonical date parameter. When omitted, resolve the same machine-local calendar day in API and CLI. Both paths must call `QueryService.resource_snapshot` and `to_wire`; neither may construct its own JSON.
 
-- [ ] **Step 4: Formalize incremental changes**
+- [x] **Step 4: Formalize incremental changes**
 
 Add `has_more: bool` to `ChangePage` and serialize it as `hasMore`. Define `hasMore` as `nextCursor < dataRevision`. Keep `payloadJson` and all current v1 fields intact. Document that clients must ignore unknown `recordType` values and persist `nextCursor` only after processing the complete page.
 
-- [ ] **Step 5: Run parity and compatibility tests**
+- [x] **Step 5: Run parity and compatibility tests**
 
 ```bash
 .build-venv/bin/python -m unittest \
@@ -300,7 +300,7 @@ Add `has_more: bool` to `ChangePage` and serialize it as `hasMore`. Define `hasM
 
 Expected: PASS, including all pre-existing v1 routes.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add openusage_bar/local_api.py openusage_bar/collector_cli.py \
@@ -321,23 +321,23 @@ git commit -m "feat: publish local resource snapshot"
 - Modify: `scripts/build_app.sh`
 - Modify: `openusage_bar/local_api.py`
 
-- [ ] **Step 1: Add failing schema checks**
+- [x] **Step 1: Add failing schema checks**
 
 Tests must reject missing `schemaVersion`, non-integer `dataRevision`, `unknown` facts with numeric values, secret-like fields, and changes without a cursor. They must accept the committed snapshot and change fixtures.
 
-- [ ] **Step 2: Generate and serve the schema**
+- [x] **Step 2: Generate and serve the schema**
 
 Generate a deterministic Draft 2020-12 JSON Schema for the v1 envelope, snapshot, changes, and error response. Add `GET /v1/schema.json`; preserve the existing descriptive `/v1/schema` route. The new route keeps the normal API envelope and returns the Draft 2020-12 document under a `schema` field, so `schemaVersion`, `dataRevision`, and `generatedAt` remain present on every successful v1 response.
 
-- [ ] **Step 3: Generate Swift ledger signatures**
+- [x] **Step 3: Generate Swift ledger signatures**
 
 Produce `GeneratedActivitySchema.swift` from `activity_schema.py` and replace the duplicated hand-written table/index signatures in `UsageRepository`. Fail the build when regenerated output differs from the committed file.
 
-- [ ] **Step 4: Add a cross-language golden fixture**
+- [x] **Step 4: Add a cross-language golden fixture**
 
 Use Python to create a deterministic synthetic SQLite ledger and expected snapshot JSON under a temporary directory. Swift opens that ledger through `UsageRepository`; the test compares provider identity, Token totals, quota windows, source health, and revision against the expected JSON.
 
-- [ ] **Step 5: Run the full gate**
+- [x] **Step 5: Run the full gate**
 
 ```bash
 .build-venv/bin/python -m unittest discover -s tests -v
@@ -347,7 +347,7 @@ scripts/build_app.sh
 
 Expected: all tests pass, generated files are current, both coverage gates remain at least 80%, and privacy scans report zero findings.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add openusage_bar/resources/local-api-v1.schema.json \

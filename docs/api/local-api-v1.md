@@ -21,6 +21,7 @@ The remaining fields are the same fields emitted by the existing collector CLI:
 |---|---|---|
 | `GET /v1/health` | none | `sources`, plus `health` |
 | `GET /v1/schema` | none | `routes`, `errorShape` |
+| `GET /v1/schema.json` | none | committed Draft 2020-12 contract under `schema` |
 | `GET /schema` | none | Compatibility alias of `/v1/schema` |
 | `GET /v1/summary` | optional `today=YYYY-MM-DD` | `todayTokens`, `modelCount`, `coveredDayCount` |
 | `GET /v1/snapshot` | optional `today=YYYY-MM-DD` | one-revision resource view: `localDay`, `summary`, every `quotaWindow`, `providers`, `sources`, `catalogRevision` |

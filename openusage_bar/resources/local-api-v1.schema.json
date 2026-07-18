@@ -1,0 +1,419 @@
+{
+  "$id": "https://openusage.bar/schemas/local-api-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "catalogRevision": {
+          "type": "string"
+        },
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "localDay": {
+          "format": "date",
+          "type": "string"
+        },
+        "providers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "credentialSource": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "familyId": {
+                "type": "string"
+              },
+              "observedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "sourceKind": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "providerId",
+              "familyId",
+              "displayName",
+              "category",
+              "credentialSource",
+              "sourceKind",
+              "observedAt",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "quotaWindows": {
+          "items": {
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "state": {
+                      "const": "unknown"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "quotaLimit": {
+                      "type": "null"
+                    },
+                    "remaining": {
+                      "type": "null"
+                    },
+                    "remainingRatio": {
+                      "type": "null"
+                    },
+                    "used": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "accountRef": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "constraints": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "estimatedCostPerMillionTokens": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "freshnessSeconds": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "observedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "periodEnd": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "periodStart": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "quality": {
+                "type": "string"
+              },
+              "quotaLimit": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "quotaName": {
+                "type": "string"
+              },
+              "recordId": {
+                "type": "string"
+              },
+              "remaining": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "remainingRatio": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "resetsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "stale": {
+                "type": "boolean"
+              },
+              "state": {
+                "type": "string"
+              },
+              "unit": {
+                "type": "string"
+              },
+              "used": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "recordId",
+              "providerId",
+              "accountRef",
+              "quotaName",
+              "unit",
+              "used",
+              "quotaLimit",
+              "remaining",
+              "remainingRatio",
+              "resetsAt",
+              "periodStart",
+              "periodEnd",
+              "observedAt",
+              "freshnessSeconds",
+              "state",
+              "quality",
+              "stale",
+              "revision",
+              "estimatedCostPerMillionTokens",
+              "constraints"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "sources": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "errorCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lastAttemptAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "lastSuccessAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "staleAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "providerId",
+              "sourceId",
+              "state",
+              "lastAttemptAt",
+              "lastSuccessAt",
+              "staleAt",
+              "errorCode"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "additionalProperties": false,
+          "properties": {
+            "coveredDayCount": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "modelCount": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "todayTokens": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "todayTokens",
+            "modelCount",
+            "coveredDayCount"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "localDay",
+        "summary",
+        "quotaWindows",
+        "providers",
+        "sources",
+        "catalogRevision"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "hasMore": {
+          "type": "boolean"
+        },
+        "nextCursor": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "records": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "changeSeq": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "changedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "payloadHash": {
+                "type": "string"
+              },
+              "payloadJson": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "recordId": {
+                "type": "string"
+              },
+              "recordType": {
+                "type": "string"
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "changeSeq",
+              "recordType",
+              "recordId",
+              "revision",
+              "operation",
+              "changedAt",
+              "payloadJson",
+              "payloadHash"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "records",
+        "nextCursor",
+        "hasMore"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "OpenUsage Bar Local API v1"
+}

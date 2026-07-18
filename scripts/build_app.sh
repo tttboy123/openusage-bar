@@ -46,13 +46,27 @@ PYTHON_TOUCHED_MODULES=(
 cd "$ROOT"
 "$PYTHON" scripts/release_secret_scan.py
 CATALOG_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-provider-catalog.XXXXXX")
+LOCAL_API_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-local-api-schema.XXXXXX")
+ACTIVITY_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-activity-schema.XXXXXX")
 PYTHON_COVERAGE_REPORT=$(mktemp "${TMPDIR:-/tmp}/openusage-python-coverage.XXXXXX")
 PYTHON_COVERAGE_DIR="${TMPDIR:-/tmp}/openusage-build-trace-$$"
-trap 'rm -f "$CATALOG_TMP" "$PYTHON_COVERAGE_REPORT"; rm -rf "$PYTHON_COVERAGE_DIR"' EXIT
+trap 'rm -f "$CATALOG_TMP" "$LOCAL_API_SCHEMA_TMP" "$ACTIVITY_SCHEMA_TMP" "$PYTHON_COVERAGE_REPORT"; rm -rf "$PYTHON_COVERAGE_DIR"' EXIT
 "$PYTHON" scripts/generate_swift_provider_catalog.py --output "$CATALOG_TMP"
 if ! cmp -s "$CATALOG_TMP" "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift"; then
   print -u2 "generated Swift provider catalog is stale"
   diff -u "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift" "$CATALOG_TMP" || true
+  exit 1
+fi
+"$PYTHON" scripts/generate_local_api_schema.py --output "$LOCAL_API_SCHEMA_TMP"
+if ! cmp -s "$LOCAL_API_SCHEMA_TMP" "$ROOT/openusage_bar/resources/local-api-v1.schema.json"; then
+  print -u2 "generated local API schema is stale"
+  diff -u "$ROOT/openusage_bar/resources/local-api-v1.schema.json" "$LOCAL_API_SCHEMA_TMP" || true
+  exit 1
+fi
+"$PYTHON" scripts/generate_swift_activity_schema.py --output "$ACTIVITY_SCHEMA_TMP"
+if ! cmp -s "$ACTIVITY_SCHEMA_TMP" "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedActivitySchema.swift"; then
+  print -u2 "generated Swift activity schema is stale"
+  diff -u "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedActivitySchema.swift" "$ACTIVITY_SCHEMA_TMP" || true
   exit 1
 fi
 PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
@@ -67,7 +81,9 @@ PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
   "${PYTHON_TOUCHED_MODULES[@]}"
 "$PYTHON" scripts/privacy_scan.py \
   "$ROOT/openusage_bar/resources/provider-catalog.v1.json" \
-  "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift"
+  "$ROOT/openusage_bar/resources/local-api-v1.schema.json" \
+  "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift" \
+  "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedActivitySchema.swift"
 swift test --package-path "$SWIFT_PACKAGE" --enable-code-coverage -Xswiftc -warnings-as-errors
 SWIFT_PROFILE="$SWIFT_PACKAGE/.build/debug/codecov/default.profdata"
 SWIFT_TEST_BINARY=$(find "$SWIFT_PACKAGE/.build" -type f \

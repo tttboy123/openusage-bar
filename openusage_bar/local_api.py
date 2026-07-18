@@ -37,6 +37,12 @@ from .provider_catalog import catalog as default_catalog
 from .query import MAX_LIMIT, SCHEMA_VERSION, QueryService, to_wire
 
 
+LOCAL_API_SCHEMA = json.loads(
+    (Path(__file__).with_name("resources") / "local-api-v1.schema.json")
+    .read_text(encoding="utf-8")
+)
+
+
 MAX_REQUEST_LINE = 8_192
 MAX_BODY_BYTES = 0
 MAX_QUERY_BYTES = 4_096
@@ -252,7 +258,8 @@ class LocalAPIRouter:
     """Pure request router with injected query, clock, registry, and verifier."""
 
     ROUTES = (
-        "/v1/health", "/v1/schema", "/v1/summary", "/v1/snapshot",
+        "/v1/health", "/v1/schema", "/v1/schema.json", "/v1/summary",
+        "/v1/snapshot",
         "/v1/capabilities",
         "/v1/providers", "/v1/capacity", "/v1/activity/daily",
         "/v1/costs/daily",
@@ -391,6 +398,7 @@ class LocalAPIRouter:
         allowed = {
             "/v1/health": (),
             "/v1/schema": (),
+            "/v1/schema.json": (),
             "/v1/summary": ("today",),
             "/v1/snapshot": ("today",),
             "/v1/capabilities": (),
@@ -492,6 +500,13 @@ class LocalAPIRouter:
                     "generatedAt": status["generatedAt"],
                     "routes": list(self.ROUTES),
                     "errorShape": {"error": {"code": "string", "message": "string"}},
+                }
+            if route == "/v1/schema.json":
+                return {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "dataRevision": status["dataRevision"],
+                    "generatedAt": status["generatedAt"],
+                    "schema": LOCAL_API_SCHEMA,
                 }
             if route == "/v1/capabilities":
                 descriptors = self.provider_registry.descriptors

@@ -196,6 +196,7 @@ class UnixLocalAPITests(unittest.TestCase):
             "/v1/providers": "providers",
             "/v1/health": "health",
             "/v1/schema": "routes",
+            "/v1/schema.json": "schema",
             "/schema": "routes",
         }
         for target, field in expectations.items():
@@ -209,6 +210,18 @@ class UnixLocalAPITests(unittest.TestCase):
                 self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
                 self.assertEqual(headers["x-content-type-options"], "nosniff")
                 self.assertNotIn("access-control-allow-origin", headers)
+
+    def test_machine_schema_route_serves_the_committed_draft(self):
+        status, _, body = self.request("/v1/schema.json")
+        payload = json.loads(body)
+        committed = json.loads(
+            (Path(__file__).parents[1] / "openusage_bar/resources/local-api-v1.schema.json")
+            .read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["schema"], committed)
+        self.assertEqual(payload["schema"]["$schema"], "https://json-schema.org/draft/2020-12/schema")
 
     def test_snapshot_api_and_cli_are_exactly_identical(self):
         status, _, body = self.request("/v1/snapshot?today=2026-07-14")
