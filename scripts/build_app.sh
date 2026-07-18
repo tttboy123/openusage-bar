@@ -130,6 +130,11 @@ rm -rf "$SETTINGS_APP/Contents/Resources/include"
 # Python distributions record their absolute installation prefix in METADATA.
 find "$SETTINGS_APP/Contents/Resources" -type d \
   \( -name '*.dist-info' -o -name '*.egg-info' \) -prune -exec rm -rf {} +
+# A frozen production helper does not ship test packages or loose test modules.
+find "$SETTINGS_APP/Contents/Resources" -type d \
+  \( -name test -o -name tests \) -prune -exec rm -rf {} +
+find "$SETTINGS_APP/Contents/Resources" -type f \
+  \( -name 'test_*.py' -o -name '*_test.py' \) -delete
 
 cp "$RESOURCES/com.lune.openusagebar.plist" "$APP/Contents/Resources/LaunchAgents/"
 cp "$RESOURCES/com.lune.openusagebar.collector.plist" "$APP/Contents/Resources/LaunchAgents/"

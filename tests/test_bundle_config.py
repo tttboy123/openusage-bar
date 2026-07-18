@@ -24,6 +24,7 @@ class BundleConfigTests(unittest.TestCase):
         self.assertIn("version=APP_VERSION", source)
         self.assertIn('app=["openusage_settings.py"]', source)
         self.assertIn('"packages": ["openusage_bar"]', source)
+        self.assertIn('"excludes": ["test", "tests", "unittest"]', source)
         self.assertIn('"resources/*.json"', source)
         self.assertEqual(
             list(Path("openusage_bar/resources").glob("provider-catalog.*.json")),
