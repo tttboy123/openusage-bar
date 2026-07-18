@@ -117,7 +117,9 @@ is logically `openusage-bar providers --format json`. The app does not install
 a global executable; the real signed command path is:
 
 ```bash
-HELPER="/Applications/OpenUsage Bar.app/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
+APP="/Applications/OpenUsage Bar.app"
+[[ -d "$APP" ]] || APP="$HOME/Applications/OpenUsage Bar.app"
+HELPER="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
 "$HELPER" providers --format json --offline
 ```
 

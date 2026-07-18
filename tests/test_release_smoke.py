@@ -185,6 +185,7 @@ validate_complete_app_backup "{complete[-1].parent}"
 
     def test_installer_exposes_isolated_smoke_controls_and_failure_points(self) -> None:
         install = (ROOT / "scripts/install_app.sh").read_text(encoding="utf-8")
+        location = (ROOT / "scripts/install_location.sh").read_text(encoding="utf-8")
         transaction = (ROOT / "scripts/install_app_transaction.sh").read_text(encoding="utf-8")
         smoke = (ROOT / "scripts/release_smoke.sh").read_text(encoding="utf-8")
         rollback = (ROOT / "scripts/rollback_app.sh").read_text(encoding="utf-8")
@@ -195,7 +196,7 @@ validate_complete_app_backup "{complete[-1].parent}"
             "OPENUSAGE_LABEL_SUFFIX", "OPENUSAGE_LAUNCHCTL",
             "OPENUSAGE_HEALTH_PROBE", "OPENUSAGE_TEST_FAIL_STAGE",
         ):
-            self.assertIn(name, install)
+            self.assertIn(name, install + location)
         self.assertIn("helper-copy", install)
         self.assertIn("launch-agent", install)
         self.assertIn("verify_local_api.py", transaction)

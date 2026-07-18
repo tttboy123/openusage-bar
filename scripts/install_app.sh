@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT=${0:A:h:h}
 SOURCE=${OPENUSAGE_SOURCE_APP:-"$ROOT/dist/OpenUsage Bar.app"}
-INSTALL_DIR=${OPENUSAGE_INSTALL_DIR:-/Applications}
+source "$ROOT/scripts/install_location.sh"
+INSTALL_DIR=$(resolve_openusage_install_dir)
 TARGET="$INSTALL_DIR/OpenUsage Bar.app"
 ACTIVITY_APP="$TARGET/Contents/Helpers/OpenUsage Activity.app"
 ACTIVITY_EXECUTABLE="$TARGET/Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity"
@@ -252,3 +253,5 @@ prune_complete_app_backups "$BACKUP_ROOT" 2 || \
   print -u2 "installed successfully; backup pruning was skipped"
 print "installed $TARGET"
 print "rollback backups retained at $BACKUP_ROOT"
+reveal_openusage_install "$TARGET" || \
+  print -u2 "installed successfully; Finder could not reveal $TARGET"

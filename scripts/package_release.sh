@@ -22,6 +22,7 @@ mkdir -p "$STAGE/dist" "$STAGE/scripts"
 /usr/bin/ditto "$APP" "$STAGE/dist/OpenUsage Bar.app"
 cp \
   "$ROOT/scripts/install_app.sh" \
+  "$ROOT/scripts/install_location.sh" \
   "$ROOT/scripts/install_app_transaction.sh" \
   "$ROOT/scripts/activity_install_process.sh" \
   "$ROOT/scripts/export_diagnostics.py" \

@@ -25,6 +25,7 @@ export OPENUSAGE_INSTALL_DIR="$SMOKE_ROOT/Applications"
 export OPENUSAGE_STATE_DIR="$HOME/.local/state/openusage-bar"
 export OPENUSAGE_LABEL_SUFFIX="smoke-$$"
 export OPENUSAGE_SOURCE_APP="$SOURCE"
+export OPENUSAGE_REVEAL_IN_FINDER=0
 mkdir -p "$HOME/Library/LaunchAgents" "$OPENUSAGE_INSTALL_DIR" "$OPENUSAGE_STATE_DIR"
 
 SPY_BIN="$SMOKE_ROOT/bin"

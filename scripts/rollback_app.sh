@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT=${0:A:h:h}
-INSTALL_DIR=${OPENUSAGE_INSTALL_DIR:-/Applications}
+source "$ROOT/scripts/install_location.sh"
+INSTALL_DIR=$(resolve_openusage_install_dir)
 TARGET="$INSTALL_DIR/OpenUsage Bar.app"
 STATE_DIR=${OPENUSAGE_STATE_DIR:-"$HOME/.local/state/openusage-bar"}
 STATE_DIR=${STATE_DIR:A}

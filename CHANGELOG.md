@@ -49,6 +49,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Installation now prefers the standard Finder `/Applications` directory,
+  falls back to `~/Applications` when necessary, preserves that location for
+  updates, rollback, and uninstall, and reveals the installed app in Finder.
 - Codex daily activity now reads local session deltas incrementally, assigns
   events to the local calendar day, and treats cached input as a subset of
   input instead of adding it to the total a second time.

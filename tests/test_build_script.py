@@ -193,16 +193,20 @@ class BuildScriptContractTests(unittest.TestCase):
 
     def test_public_install_and_release_scripts_are_relocatable_and_data_safe(self):
         install = (ROOT / "scripts/install_app.sh").read_text(encoding="utf-8")
+        location = (ROOT / "scripts/install_location.sh").read_text(encoding="utf-8")
         uninstall = (ROOT / "scripts/uninstall_app.sh").read_text(encoding="utf-8")
         package = (ROOT / "scripts/package_release.sh").read_text(encoding="utf-8")
 
-        self.assertIn("OPENUSAGE_INSTALL_DIR", install)
+        self.assertIn("OPENUSAGE_INSTALL_DIR", location)
+        self.assertIn("resolve_openusage_install_dir", install)
+        self.assertIn("reveal_openusage_install", install)
         self.assertIn("ProgramArguments.0", install)
         self.assertIn('cleanup_legacy_previous_bundles "$INSTALL_DIR"', install)
         self.assertIn("local data and Keychain items were preserved", uninstall)
         self.assertIn("--purge-data", uninstall)
         self.assertNotIn("security delete-generic-password", uninstall)
         self.assertIn("scripts/install_app.sh", package)
+        self.assertIn("scripts/install_location.sh", package)
         self.assertIn("scripts/uninstall_app.sh", package)
         self.assertIn("scripts/rollback_app.sh", package)
         self.assertIn("scripts/export_diagnostics.py", package)

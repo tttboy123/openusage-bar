@@ -1,7 +1,9 @@
 #!/bin/zsh
 set -euo pipefail
 
-INSTALL_DIR=${OPENUSAGE_INSTALL_DIR:-/Applications}
+ROOT=${0:A:h:h}
+source "$ROOT/scripts/install_location.sh"
+INSTALL_DIR=$(resolve_openusage_install_dir)
 TARGET="$INSTALL_DIR/OpenUsage Bar.app"
 AGENTS="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
