@@ -127,7 +127,8 @@ fi
 # prefix, so remove the unused development-only tree before signing/package audit.
 rm -rf "$SETTINGS_APP/Contents/Resources/include"
 find "$SETTINGS_APP/Contents/Resources/lib" -type d \
-  -name 'config-*-darwin' -prune -exec rm -rf {} +
+  -name 'config-*darwin*' -prune -exec rm -rf {} +
+find "$SETTINGS_APP/Contents/Resources" -type f -name Makefile -delete
 # Package-manager metadata is not used by the frozen helper. Some hosted
 # Python distributions record their absolute installation prefix in METADATA.
 find "$SETTINGS_APP/Contents/Resources" -type d \
