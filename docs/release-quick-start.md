@@ -52,6 +52,21 @@ scripts/build_app.sh
 scripts/install_app.sh
 ```
 
+## Roll back
+
+Before every upgrade, the installer writes a complete signed-app backup under
+`~/.local/state/openusage-bar/backups/app`. Only the two newest complete,
+hash-verified backups are retained. To restore the newest one:
+
+```bash
+scripts/rollback_app.sh
+```
+
+Rollback verifies the backup's bundle identity, version, signature, and full
+content hash before the atomic swap. It preserves the ledger, provider
+configuration, and Keychain entries. If the three Local API v1 contract routes
+do not recover within 20 seconds, the rollback itself is reversed.
+
 ## Uninstall
 
 ```bash

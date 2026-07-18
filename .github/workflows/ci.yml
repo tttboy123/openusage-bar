@@ -39,6 +39,8 @@ jobs:
         run: scripts/package_release.sh
       - name: Audit packaged artifact
         run: .build-venv/bin/python scripts/release_artifact_audit.py dist/OpenUsage-Bar-*.zip
+      - name: Prove isolated install, upgrade, rollback, and uninstall
+        run: scripts/release_smoke.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: openusage-bar-macos-arm64

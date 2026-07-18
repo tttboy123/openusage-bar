@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import math
 import socket
-import sys
 import time
 from pathlib import Path
 
@@ -29,17 +30,36 @@ def get(socket_path: Path, route: str) -> dict[str, object]:
     return json.loads(body)
 
 
+def _arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Verify the OpenUsage local API v1 contract.")
+    parser.add_argument("--timeout", type=float, default=20.0)
+    parser.add_argument("socket", type=Path)
+    arguments = parser.parse_args()
+    if not math.isfinite(arguments.timeout) or not 0.1 <= arguments.timeout <= 20:
+        parser.error("timeout must be between 0.1 and 20 seconds")
+    if not arguments.socket.is_absolute() or "\x00" in str(arguments.socket):
+        parser.error("socket path must be absolute")
+    return arguments
+
+
 def main() -> int:
-    if len(sys.argv) != 2:
-        return 2
-    path = Path(sys.argv[1])
-    deadline = time.monotonic() + 20
+    arguments = _arguments()
+    path = arguments.socket
+    deadline = time.monotonic() + arguments.timeout
     while time.monotonic() < deadline:
         try:
             for route in ("/v1/health", "/v1/schema", "/v1/summary"):
                 payload = get(path, route)
                 if payload.get("schemaVersion") != "1.0":
                     raise RuntimeError("unexpected local API schema")
+                if route == "/v1/health" and payload.get("health") != {
+                    "ok": True, "status": "ok"
+                }:
+                    raise RuntimeError("local API health contract unavailable")
+                if route == "/v1/schema" and not isinstance(payload.get("routes"), list):
+                    raise RuntimeError("local API route contract unavailable")
+                if route == "/v1/summary" and "todayTokens" not in payload:
+                    raise RuntimeError("local API summary contract unavailable")
             return 0
         except (OSError, ValueError, RuntimeError):
             time.sleep(0.2)
