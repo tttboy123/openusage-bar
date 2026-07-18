@@ -229,11 +229,26 @@ struct ActivityAppLogicTests {
         #expect(DetailsCopy.visibleText.allSatisfy { !$0.contains("—") && !$0.contains("–") })
         #expect(DetailsCopy.sidebar == [
             "Activity", "Capacity", "API Spend", "Local Tools",
-            "Providers", "Data Health",
+            "Providers", "Data Health", "Automation",
         ])
         #expect(!DetailsCopy.visibleText.contains("Longest Task"))
         #expect(!DetailsCopy.visibleText.contains("Unavailable"))
         #expect(DetailsCopy.visibleText.contains("Active Days"))
+    }
+
+    @Test("Automation opens without the ledger and loads it only when leaving")
+    func automationLedgerPolicy() {
+        #expect(!ActivityRouteLoadingPolicy.loadsLedgerOnAppear(.automation))
+        #expect(ActivityRouteLoadingPolicy.loadsLedgerOnAppear(.activity))
+        #expect(ActivityRouteLoadingPolicy.loadsLedgerAfterSelection(
+            from: .automation, to: .capacity
+        ))
+        #expect(!ActivityRouteLoadingPolicy.loadsLedgerAfterSelection(
+            from: .automation, to: .automation
+        ))
+        #expect(!ActivityRouteLoadingPolicy.loadsLedgerAfterSelection(
+            from: .activity, to: .automation
+        ))
     }
 
     @Test("Annual heatmap opens at the latest real day")

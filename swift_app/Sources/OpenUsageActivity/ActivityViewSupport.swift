@@ -385,6 +385,7 @@ extension UsageDetailsRoute {
         case .localTools: AppLocalization.text("Local Tools")
         case .providersAndAccounts: AppLocalization.text("Providers")
         case .dataHealth: AppLocalization.text("Data Health")
+        case .automation: AppLocalization.text("Automation")
         }
     }
     var symbol: String {
@@ -393,6 +394,7 @@ extension UsageDetailsRoute {
         case .apiSpend: "dollarsign.circle"
         case .localTools: "terminal"; case .providersAndAccounts: "bolt.horizontal.circle"
         case .dataHealth: "waveform.path.ecg"
+        case .automation: "terminal.fill"
         }
     }
 }

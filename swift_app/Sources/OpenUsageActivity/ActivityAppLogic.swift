@@ -82,7 +82,7 @@ struct HeatmapTooltipText: Sendable, Hashable {
 enum DetailsCopy {
     static let sidebar = [
         "Activity", "Capacity", "API Spend", "Local Tools",
-        "Providers", "Data Health",
+        "Providers", "Data Health", "Automation",
     ]
     static let visibleText = sidebar + [
         "Usage Details", "Refresh", "All Providers", "All Models", "Total Tokens",
@@ -91,6 +91,18 @@ enum DetailsCopy {
         "Manage Credentials", "Retry", "Missing", "Covered zero",
         "Lower", "Higher", "Exact", "Estimated", "Partial", "Partial history", "Stale",
     ]
+}
+
+enum ActivityRouteLoadingPolicy {
+    static func loadsLedgerOnAppear(_ route: UsageDetailsRoute) -> Bool {
+        route != .automation
+    }
+
+    static func loadsLedgerAfterSelection(
+        from current: UsageDetailsRoute, to selected: UsageDetailsRoute
+    ) -> Bool {
+        current == .automation && selected != .automation
+    }
 }
 
 enum ProviderBrowseCategory: String, CaseIterable, Sendable, Hashable, Identifiable {

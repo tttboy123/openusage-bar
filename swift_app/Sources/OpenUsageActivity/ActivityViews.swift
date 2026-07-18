@@ -41,13 +41,15 @@ struct ActivityRootView: View {
                 .navigationTitle(coordinator.route.title)
                 .toolbar {
                     ToolbarItem {
-                        Button("Refresh", systemImage: "arrow.clockwise") { store.reload() }
-                            .disabled(store.isLoading)
+                        if coordinator.route != .automation {
+                            Button("Refresh", systemImage: "arrow.clockwise") { store.reload() }
+                                .disabled(store.isLoading)
+                        }
                     }
                 }
         }
         .overlay {
-            if onboardingPhase != .hidden {
+            if coordinator.route != .automation, onboardingPhase != .hidden {
                 OnboardingView(
                     phase: onboardingPhase,
                     primaryAction: performOnboardingAction,
@@ -61,7 +63,7 @@ struct ActivityRootView: View {
         }
         .onAppear {
             coordinator.installWindowOpener { openWindow(id: "usage-details") }
-            store.reload()
+            if ActivityRouteLoadingPolicy.loadsLedgerOnAppear(coordinator.route) { store.reload() }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             if store.data != nil { store.revalidateSelection() }
@@ -119,12 +121,22 @@ struct ActivityRootView: View {
     private var routeBinding: Binding<UsageDetailsRoute?> {
         Binding(
             get: { coordinator.route },
-            set: { if let route = $0 { coordinator.select(route) } }
+            set: {
+                guard let route = $0 else { return }
+                let needsInitialLedgerLoad = ActivityRouteLoadingPolicy.loadsLedgerAfterSelection(
+                    from: coordinator.route, to: route
+                )
+                coordinator.select(route)
+                if needsInitialLedgerLoad { store.reload() }
+            }
         )
     }
 
     @ViewBuilder private var content: some View {
-        if let data = store.displayData {
+        if coordinator.route == .automation {
+            AutomationPage()
+                .background(.background)
+        } else if let data = store.displayData {
             if coordinator.route == .providersAndAccounts {
                 ProvidersPage(
                     data: data,
@@ -153,6 +165,7 @@ struct ActivityRootView: View {
                             case .localTools: LocalToolsPage(store: store, data: data)
                             case .providersAndAccounts: EmptyView()
                             case .dataHealth: DataHealthPage(data: data, retry: store.reload)
+                            case .automation: EmptyView()
                             }
                         }
                     }

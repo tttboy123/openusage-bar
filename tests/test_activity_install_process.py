@@ -133,6 +133,7 @@ class ActivityInstallProcessTests(unittest.TestCase):
                 "local-tools",
                 "providers",
                 "health",
+                "automation",
             )
             supported = [
                 subprocess.Popen([str(target), "--route", route])

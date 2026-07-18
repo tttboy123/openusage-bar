@@ -883,7 +883,7 @@ public enum ProviderCatalog {
 }
 
 public enum UsageDetailsRoute: String, CaseIterable, Sendable, Hashable, Identifiable {
-    case activity, capacity, apiSpend, localTools, providersAndAccounts, dataHealth
+    case activity, capacity, apiSpend, localTools, providersAndAccounts, dataHealth, automation
     public var id: String { rawValue }
 
     public init(arguments: [String]) {
@@ -902,6 +902,7 @@ public enum UsageDetailsRoute: String, CaseIterable, Sendable, Hashable, Identif
         case "local-tools", "local": self = .localTools
         case "providers", "accounts", "settings": self = .providersAndAccounts
         case "health", "data-health": self = .dataHealth
+        case "automation", "api": self = .automation
         default: return nil
         }
     }
@@ -928,6 +929,7 @@ public extension UsageDetailsRoute {
         case .localTools: "local-tools"
         case .providersAndAccounts: "providers"
         case .dataHealth: "health"
+        case .automation: "automation"
         default: rawValue
         }
     }

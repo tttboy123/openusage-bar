@@ -805,13 +805,16 @@ struct UsageDetailsTests {
     func routeParsing() {
         #expect(UsageDetailsRoute(arguments: ["--route", "health"]) == .dataHealth)
         #expect(UsageDetailsRoute(arguments: ["--route", "capacity"]) == .capacity)
+        #expect(UsageDetailsRoute(arguments: ["--route", "automation"]) == .automation)
         #expect(UsageDetailsRoute(arguments: ["--route", "welcome"]) == .activity)
         #expect(UsageDetailsRoute(arguments: ["--route", "overview"]) == .activity)
         #expect(UsageDetailsRoute(arguments: ["--route", "unknown"]) == .activity)
         #expect(UsageDetailsRoute(arguments: ["--route"]) == .activity)
         #expect(UsageDetailsRoute(routeValue: "health") == .dataHealth)
+        #expect(UsageDetailsRoute(routeValue: "automation") == .automation)
         #expect(UsageDetailsRoute(routeValue: "unknown") == nil)
         #expect(ActivityRouteMessage.decode(["route": "capacity"]) == .capacity)
+        #expect(ActivityRouteMessage.decode(["route": "automation"]) == .automation)
         #expect(ActivityRouteMessage.decode(["route": "health", "token": "secret"]) == nil)
     }
 
