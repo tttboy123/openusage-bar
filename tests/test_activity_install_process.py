@@ -92,6 +92,20 @@ class ActivityInstallProcessTests(unittest.TestCase):
             time.sleep(0.005)
         self.fail("fixture process command did not become stable")
 
+    def wait_for_marker(
+        self,
+        marker: Path,
+        process: subprocess.Popen | None = None,
+        *,
+        timeout: float = 5,
+    ) -> None:
+        deadline = time.monotonic() + timeout
+        while not marker.exists() and time.monotonic() < deadline:
+            if process is not None and process.poll() is not None:
+                self.fail("fixture process exited before becoming ready")
+            time.sleep(0.005)
+        self.assertTrue(marker.exists(), "fixture process did not become ready")
+
     def test_stop_matches_only_the_exact_full_activity_command(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -168,10 +182,7 @@ class ActivityInstallProcessTests(unittest.TestCase):
                 root, "OpenUsage Activity", ignores_term=True, launch_marker=ready,
             )
             process = subprocess.Popen([str(target)])
-            deadline = time.monotonic() + 2
-            while not ready.exists() and time.monotonic() < deadline:
-                time.sleep(0.001)
-            self.assertTrue(ready.exists())
+            self.wait_for_marker(ready, process)
             signals = root / "signals"
             signaler = root / "record-signal"
             signaler.write_text(
@@ -235,14 +246,11 @@ class ActivityInstallProcessTests(unittest.TestCase):
                 root, "OpenUsage Activity", term_marker=marker, launch_marker=ready,
             )
             first = subprocess.Popen([str(target)])
-            deadline = time.monotonic() + 2
-            while not ready.exists() and time.monotonic() < deadline:
-                time.sleep(0.001)
-            self.assertTrue(ready.exists(), "fixture process did not become ready")
+            self.wait_for_marker(ready, first)
             spawned: list[subprocess.Popen[bytes]] = []
 
             def respawn() -> None:
-                deadline = time.monotonic() + 2
+                deadline = time.monotonic() + 5
                 while not marker.exists() and time.monotonic() < deadline:
                     time.sleep(0.001)
                 if marker.exists():
@@ -374,10 +382,7 @@ class ActivityInstallProcessTests(unittest.TestCase):
             )
             process = subprocess.Popen([str(target)])
             try:
-                deadline = time.monotonic() + 5
-                while not ready.exists() and time.monotonic() < deadline:
-                    time.sleep(0.001)
-                self.assertTrue(ready.exists())
+                self.wait_for_marker(ready, process)
                 deny = root / "deny-signal"
                 deny.write_text("#!/bin/zsh\nexit 1\n", encoding="utf-8")
                 deny.chmod(0o755)
@@ -420,10 +425,7 @@ class ActivityInstallProcessTests(unittest.TestCase):
                 root, "OpenUsage Activity", launch_marker=ready,
             )
             process = subprocess.Popen([str(target)])
-            deadline = time.monotonic() + 2
-            while not ready.exists() and time.monotonic() < deadline:
-                time.sleep(0.001)
-            self.assertTrue(ready.exists())
+            self.wait_for_marker(ready, process)
             try:
                 result = self.run_helper(
                     'SWAPPED=1\nFIRST_INSTALLED=0\nACTIVITY_STOPPED=0\n'
