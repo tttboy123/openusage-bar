@@ -105,6 +105,7 @@ def parse_minimax_quota_observations(
                 resets_at=interval_reset(row), observed_at=now,
                 applies_to_kind=applies_to_kind,
                 applies_to_model_ids=model_ids,
+                account_ref=config.account_ref,
             ))
 
         weekly_percent = percentage(row.get("current_weekly_remaining_percent"))
@@ -118,6 +119,7 @@ def parse_minimax_quota_observations(
                 ),
                 observed_at=now, applies_to_kind=applies_to_kind,
                 applies_to_model_ids=model_ids,
+                account_ref=config.account_ref,
             ))
     if not observations:
         return QuotaFetchFailure("quota_unavailable")
@@ -154,6 +156,7 @@ class MiniMaxBillingImporter:
         local_timezone=timezone(timedelta(hours=8)),
     ) -> None:
         self.config = config
+        self.account_ref = config.account_ref
         self.keychain = keychain
         self.client = client
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -322,6 +325,7 @@ class MiniMaxBillingImporter:
             DailyUsageRow(
                 day=day,
                 provider_id=self.config.provider_id,
+                account_ref=self.config.account_ref,
                 model_id=model,
                 input_tokens=values[0],
                 output_tokens=values[1],
@@ -464,6 +468,7 @@ class MiniMaxCodingPlanAdapter:
             family_id="minimax",
             credential_source="minimax_builtin_api",
             source_kind="builtin_api",
+            account_ref=config.account_ref,
         )
 
     def fetch(self) -> ProviderCard:
@@ -516,4 +521,5 @@ class MiniMaxCodingPlanAdapter:
             family_id="minimax",
             credential_source="minimax_builtin_api",
             source_kind="builtin_api",
+            account_ref=self.config.account_ref,
         )

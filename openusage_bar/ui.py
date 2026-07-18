@@ -392,6 +392,9 @@ class ProviderController:
                 return OperationResult(False, "Provider connection was not found")
             if type(existing) is not type(config):
                 return OperationResult(False, "Provider connection type cannot be changed")
+            # Account scope is an opaque ledger identity. The native editor does
+            # not expose it, so a public-config edit must preserve the scope.
+            config = replace(config, account_ref=existing.account_ref)
             if isinstance(existing, StepPlanConfig):
                 return self.update_step_plan(config, secret, session_cookie)
             if session_cookie.strip():

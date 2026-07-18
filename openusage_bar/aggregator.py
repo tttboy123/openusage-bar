@@ -148,9 +148,18 @@ def merge_cards(base: list[ProviderCard], overrides: list[ProviderCard]) -> list
                 raise ValueError(
                     f"provider instance {card.provider_id!r} has conflicting family IDs"
                 )
+            if (
+                previous.account_ref
+                and card.account_ref
+                and previous.account_ref != card.account_ref
+            ):
+                raise ValueError(
+                    f"provider instance {card.provider_id!r} has conflicting account refs"
+                )
             card = replace(
                 card,
                 family_id=card.family_id or previous.family_id,
+                account_ref=card.account_ref or previous.account_ref,
                 credential_source=(
                     card.credential_source or previous.credential_source
                 ),
@@ -212,6 +221,7 @@ class CardCache:
                         family_id=raw.get("family_id"),
                         credential_source=raw.get("credential_source"),
                         source_kind=raw.get("source_kind"),
+                        account_ref=raw.get("account_ref", ""),
                     )
                 )
             return cards

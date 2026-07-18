@@ -127,6 +127,68 @@ class QueryServiceTests(unittest.TestCase):
             {"schemaVersion", "dataRevision", "generatedAt", "todayTokens", "modelCount", "coveredDayCount"},
         )
 
+    def test_two_account_connections_remain_isolated_across_public_facts(self):
+        for provider_id, account_ref, tokens, amount, ratio in (
+            ("openai-personal", "personal", 120, "1.20", 0.8),
+            ("openai-work", "work", 340, "3.40", 0.4),
+        ):
+            self.store.replace_daily_usage(
+                provider_id, "2026-07-14",
+                [usage(
+                    provider_id=provider_id, account_ref=account_ref,
+                    total_tokens=tokens,
+                )],
+                account_ref=account_ref,
+            )
+            self.store.replace_daily_costs(
+                provider_id, "2026-07-14",
+                [cost(
+                    provider_id=provider_id, account_ref=account_ref,
+                    amount=amount,
+                )],
+                account_ref=account_ref,
+            )
+            self.store.record_quota(quota(
+                f"{provider_id}.weekly", provider_id, ratio,
+                account_ref=account_ref,
+            ))
+            self.store.record_source_failure(
+                provider_id, "openai.organization.usage", "rate_limited", NOW
+            )
+
+        activity = self.query.activity(
+            date(2026, 7, 14), date(2026, 7, 14),
+            provider_ids=("openai-work",),
+        )
+        costs = self.query.costs(
+            date(2026, 7, 14), date(2026, 7, 14),
+            provider_ids=("openai-work",),
+        )
+        quotas = self.query.quota_history(
+            provider_id="openai-work", account_ref="work"
+        )
+        health = self.query.source_status()
+        changes = self.query.changes(0, limit=1000)
+
+        self.assertEqual(
+            [(row.provider_id, row.account_ref, row.total_tokens) for row in activity.rows],
+            [("openai-work", "work", 340)],
+        )
+        self.assertEqual(
+            [(row.provider_id, row.account_ref, row.amount) for row in costs.rows],
+            [("openai-work", "work", "3.4")],
+        )
+        self.assertEqual(
+            [(row.provider_id, row.account_ref) for row in quotas.snapshots],
+            [("openai-work", "work")],
+        )
+        self.assertEqual(
+            {row.provider_id for row in health.sources},
+            {"openai-personal", "openai-work"},
+        )
+        self.assertTrue(any("openai-work" in row.record_id for row in changes.records))
+        self.assertTrue(any("openai-personal" in row.record_id for row in changes.records))
+
     def test_capacity_selects_most_urgent_window_per_account_and_sorts_zero_before_null(self):
         self.store.record_quota(quota("minimax.weekly", "minimax", 0.7, quota_name="Weekly"))
         self.store.record_quota(quota("minimax.five_hour", "minimax", 0.18))

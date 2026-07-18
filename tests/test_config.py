@@ -135,23 +135,49 @@ class ProviderConfigTests(unittest.TestCase):
                 ["demo", "minimax-main", "step-plan-main", "openai"],
             )
 
-    def test_openai_organization_config_is_secret_free_and_uses_canonical_id(self):
+    def test_openai_organization_connections_use_independent_stable_ids(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "providers.json"
             store = ProviderConfigStore(path)
-            store.save([OpenAIOrganizationConfig("openai", "OpenAI Org")])
+            configs = [
+                OpenAIOrganizationConfig(
+                    "openai-personal", "OpenAI Personal", account_ref="personal"
+                ),
+                OpenAIOrganizationConfig(
+                    "openai-work", "OpenAI Work", account_ref="work"
+                ),
+            ]
+            store.save(configs)
 
             payload = json.loads(path.read_text())
+            self.assertEqual(store.load(), configs)
             self.assertEqual(
-                payload["providers"],
-                [{"name": "OpenAI Org", "provider_id": "openai", "type": "openai_organization"}],
+                [item["provider_id"] for item in payload["providers"]],
+                ["openai-personal", "openai-work"],
             )
             self.assertEqual(
-                store.load(), [OpenAIOrganizationConfig("openai", "OpenAI Org")]
+                [item["account_ref"] for item in payload["providers"]],
+                ["personal", "work"],
             )
 
-            with self.assertRaisesRegex(ValueError, "canonical provider ID"):
-                store.save([OpenAIOrganizationConfig("openai-work", "OpenAI Org")])
+    def test_account_ref_is_optional_opaque_and_not_a_display_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProviderConfigStore(Path(directory) / "providers.json")
+            store.save([MiniMaxConfig("minimax-main", "MiniMax Main")])
+
+            for account_ref in (
+                "owner@example.com",
+                "work account",
+                "organizations/work",
+                "OpenAI Work",
+            ):
+                with self.subTest(account_ref=account_ref):
+                    with self.assertRaises(ValueError):
+                        store.save([
+                            OpenAIOrganizationConfig(
+                                "openai-work", "OpenAI Work", account_ref=account_ref
+                            )
+                        ])
 
     def test_rejects_duplicate_provider_ids(self):
         with tempfile.TemporaryDirectory() as directory:

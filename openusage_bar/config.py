@@ -20,6 +20,7 @@ class MiniMaxConfig:
     provider_id: str
     name: str
     type: str = "minimax"
+    account_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class StepPlanConfig:
     name: str
     type: str = "step_plan"
     site: str = "china"
+    account_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,7 @@ class OpenAIOrganizationConfig:
     provider_id: str
     name: str
     type: str = "openai_organization"
+    account_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,6 +72,7 @@ class DailyUsageFeedConfig:
     until_parameter: str | None = None
     request_body: dict[str, Any] | None = None
     type: str = "daily_usage_feed"
+    account_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -83,6 +87,7 @@ class GenericProviderConfig:
     reset_path: str | None = None
     detail_path: str | None = None
     type: str = "generic"
+    account_ref: str = ""
 
 
 ProviderConfig = (
@@ -115,16 +120,18 @@ def _validate_config(config: ProviderConfig) -> None:
         raise ValueError("Provider ID may contain only letters, numbers, dot, underscore and dash")
     if not config.name.strip():
         raise ValueError("Provider name must not be empty")
+    if not isinstance(config.account_ref, str):
+        raise ValueError("Account ref must use the stable identifier grammar")
+    if config.account_ref:
+        if ID_PATTERN.fullmatch(config.account_ref) is None:
+            raise ValueError("Account ref must use the stable identifier grammar")
+        if config.account_ref.casefold() == config.name.strip().casefold():
+            raise ValueError("Account ref must not copy the provider display name")
     if isinstance(config, StepPlanConfig) and config.site not in {
         "china",
         "international",
     }:
         raise ValueError("StepFun site must be china or international")
-    if (
-        isinstance(config, OpenAIOrganizationConfig)
-        and config.provider_id != "openai"
-    ):
-        raise ValueError("OpenAI Organization must use the canonical provider ID 'openai'")
     if isinstance(config, DailyUsageFeedConfig):
         if not ID_PATTERN.fullmatch(config.family_id):
             raise ValueError("Daily feed family ID is invalid")

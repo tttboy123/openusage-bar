@@ -28,12 +28,14 @@ class LegacyCardAdapter(Protocol):
 
 class UsageAdapter(Protocol):
     usage_source_id: str
+    account_ref: str
 
     def fetch_usage(self, since: date, until: date) -> "UsageImportResult": ...
 
 
 class CostAdapter(Protocol):
     cost_source_id: str
+    account_ref: str
 
     def fetch_costs(self, since: date, until: date) -> "CostImportResult": ...
 

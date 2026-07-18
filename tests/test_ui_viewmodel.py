@@ -135,6 +135,25 @@ class UIModelTests(unittest.TestCase):
         self.assertEqual(saved.endpoint, existing.endpoint)
         self.assertEqual(saved.primary_path, existing.primary_path)
 
+    def test_public_config_edit_preserves_opaque_account_scope(self):
+        existing = OpenAIOrganizationConfig(
+            "openai-work", "OpenAI Work", account_ref="work"
+        )
+        edited = OpenAIOrganizationConfig("openai-work", "Work Organization")
+        store = Mock()
+        store.load.return_value = [existing]
+        keychain = Mock()
+        keychain.get.return_value = "saved-key"
+
+        result = ProviderController(store, keychain).update_connection_config(
+            edited, ""
+        )
+
+        self.assertTrue(result.ok)
+        saved = store.save.call_args.args[0][0]
+        self.assertEqual(saved.name, "Work Organization")
+        self.assertEqual(saved.account_ref, "work")
+
     def test_update_managed_connection_requires_an_existing_or_replacement_key(self):
         existing = daily_feed()
         store = Mock()

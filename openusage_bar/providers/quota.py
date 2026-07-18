@@ -17,6 +17,7 @@ def percent_observation(
     observed_at: datetime,
     applies_to_kind: str = "subscription",
     applies_to_model_ids: tuple[str, ...] = (),
+    account_ref: str = "",
 ) -> QuotaObservation:
     remaining = min(100.0, max(0.0, float(remaining_percent)))
     reset = None if resets_at is None else resets_at.astimezone(timezone.utc).isoformat()
@@ -25,9 +26,12 @@ def percent_observation(
         or "quota"
     )
     return QuotaObservation(
-        record_id=f"{provider_id}.{source_id}.{quota_window}.{quota_key}",
+        record_id=(
+            f"{provider_id}.{account_ref + '.' if account_ref else ''}"
+            f"{source_id}.{quota_window}.{quota_key}"
+        ),
         provider_id=provider_id,
-        account_ref="",
+        account_ref=account_ref,
         source_id=source_id,
         quota_name=quota_name,
         quota_window=quota_window,

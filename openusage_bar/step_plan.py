@@ -222,6 +222,7 @@ class StepPlanAdapter:
             family_id="step_plan",
             credential_source="step_plan_official_api",
             source_kind="official_api",
+            account_ref=config.account_ref,
         )
 
     @staticmethod
@@ -272,6 +273,7 @@ class StepPlanAdapter:
             family_id="step_plan",
             credential_source="step_plan_browser_session",
             source_kind="browser_session",
+            account_ref=config.account_ref,
         )
 
     @staticmethod
@@ -359,6 +361,7 @@ class StepPlanAdapter:
             family_id="step_plan",
             credential_source="step_plan_browser_session",
             source_kind="browser_session",
+            account_ref=config.account_ref,
         )
 
     @staticmethod
@@ -387,6 +390,7 @@ class StepPlanAdapter:
                     quota_name="Credit Plan", quota_window="billing_cycle",
                     remaining_percent=max(rates) * 100, resets_at=reset,
                     observed_at=now, applies_to_kind="subscription",
+                    account_ref=config.account_ref,
                 ),))
         try:
             values = (
@@ -409,6 +413,7 @@ class StepPlanAdapter:
                 quota_name=name, quota_window=window,
                 remaining_percent=remaining, resets_at=reset,
                 observed_at=now, applies_to_kind="subscription",
+                account_ref=config.account_ref,
             )
             for name, window, remaining, reset in values
         ))
@@ -538,4 +543,5 @@ class StepPlanAdapter:
             family_id="step_plan",
             credential_source="step_plan_official_api",
             source_kind="official_api",
+            account_ref=self.config.account_ref,
         )

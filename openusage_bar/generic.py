@@ -71,6 +71,7 @@ class GenericHTTPSAdapter:
             family_id=config.provider_id,
             credential_source="api_key",
             source_kind="generic_https",
+            account_ref=config.account_ref,
         )
 
     def fetch(self) -> ProviderCard:
@@ -107,4 +108,5 @@ class GenericHTTPSAdapter:
             family_id=self.config.provider_id,
             credential_source="api_key",
             source_kind="generic_https",
+            account_ref=self.config.account_ref,
         )

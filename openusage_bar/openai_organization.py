@@ -53,6 +53,7 @@ class OpenAIOrganizationImporter:
         monotonic: Callable[[], float] | None = None,
     ) -> None:
         self.config = config
+        self.account_ref = config.account_ref
         self.keychain = keychain
         self.client = client
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -229,6 +230,7 @@ class OpenAIOrganizationImporter:
             DailyUsageRow(
                 day=day,
                 provider_id=self.config.provider_id,
+                account_ref=self.config.account_ref,
                 model_id=model,
                 input_tokens=values[0],
                 output_tokens=values[1],
@@ -286,6 +288,7 @@ class OpenAIOrganizationImporter:
             DailyCostRow(
                 day=day,
                 provider_id=self.config.provider_id,
+                account_ref=self.config.account_ref,
                 cost_kind="actual",
                 currency=currency,
                 amount=self._decimal_text(value),
@@ -410,4 +413,5 @@ class OpenAIOrganizationCardAdapter:
             family_id="openai",
             credential_source="openai_admin_api",
             source_kind="official_api",
+            account_ref=self.config.account_ref,
         )

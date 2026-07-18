@@ -46,10 +46,12 @@ def model_row(
     provider_id: str = "codex",
     model_id: str = "gpt-5.5",
     total_tokens: int = 11_735_817,
+    account_ref: str = "",
 ) -> DailyUsageRow:
     return DailyUsageRow(
         day=day,
         provider_id=provider_id,
+        account_ref=account_ref,
         model_id=model_id,
         input_tokens=5_000_000,
         output_tokens=1_500_000,
@@ -65,10 +67,14 @@ def model_row(
     )
 
 
-def cost_row(*, day: str = "2026-07-14", provider_id: str = "openai") -> DailyCostRow:
+def cost_row(
+    *, day: str = "2026-07-14", provider_id: str = "openai",
+    account_ref: str = "",
+) -> DailyCostRow:
     return DailyCostRow(
         day=day,
         provider_id=provider_id,
+        account_ref=account_ref,
         cost_kind="actual",
         currency="USD",
         amount="1.25",
@@ -128,6 +134,7 @@ def card(
     family_id: str | None = None,
     credential_source: str = "openusage",
     source_kind: str = "openusage",
+    account_ref: str = "",
 ) -> ProviderCard:
     return ProviderCard(
         provider_id=provider_id,
@@ -145,6 +152,7 @@ def card(
         family_id=family_id or provider_id,
         credential_source=credential_source,
         source_kind=source_kind,
+        account_ref=account_ref,
     )
 
 
@@ -881,12 +889,16 @@ class ActivityCollectorTests(unittest.TestCase):
         store = Mock()
         store.has_source_success.return_value = False
         official = Mock()
+        official.account_ref = "primary"
         official.usage_source_id = "minimax.billing"
         official.cost_source_id = None
         official.fetch_usage.return_value = UsageImportSuccess(
             date(2025, 7, 15),
             date(2026, 7, 13),
-            (model_row(day="2026-07-13", provider_id="minimax-main"),),
+            (model_row(
+                day="2026-07-13", provider_id="minimax-main",
+                account_ref="primary",
+            ),),
         )
         openusage = Mock()
 
@@ -907,9 +919,61 @@ class ActivityCollectorTests(unittest.TestCase):
             date(2026, 7, 13),
             official.fetch_usage.return_value.rows,
             NOW,
+            account_ref="primary",
         )
         openusage.fetch.assert_not_called()
         official.fetch_costs.assert_not_called()
+
+    def test_official_importer_rejects_rows_from_another_account_scope(self):
+        store = Mock()
+        store.has_source_success.return_value = False
+        official = Mock()
+        official.account_ref = "work"
+        official.usage_source_id = "provider.billing"
+        official.cost_source_id = None
+        official.fetch_usage.return_value = UsageImportSuccess(
+            date(2025, 7, 15), date(2026, 7, 13),
+            (model_row(
+                day="2026-07-13", provider_id="provider-work",
+                account_ref="personal",
+            ),),
+        )
+
+        ActivityCollector(
+            store, Mock(), official_importers={"provider-work": official},
+            clock=lambda: NOW,
+        ).refresh(Overview([]))
+
+        store.commit_usage_import_success.assert_not_called()
+        store.record_source_failure.assert_any_call(
+            "provider-work", "provider.billing", "invalid_import_rows", NOW
+        )
+
+    def test_official_costs_commit_to_declared_account_scope(self):
+        store = Mock()
+        store.has_source_success.return_value = True
+        store.has_cost_history.return_value = False
+        official = Mock()
+        official.account_ref = "work"
+        official.usage_source_id = "provider.usage"
+        official.cost_source_id = "provider.costs"
+        official.fetch_usage.return_value = ImportFailure("rate_limited")
+        official.fetch_costs.return_value = CostImportSuccess(
+            date(2025, 7, 15), date(2026, 7, 14),
+            (cost_row(provider_id="provider-work", account_ref="work"),),
+        )
+
+        ActivityCollector(
+            store, Mock(), official_importers={"provider-work": official},
+            clock=lambda: NOW,
+        ).refresh(Overview([]))
+
+        store.commit_cost_import_success.assert_called_once_with(
+            "provider-work", "provider.costs",
+            date(2025, 7, 15), date(2026, 7, 14),
+            official.fetch_costs.return_value.rows, NOW,
+            account_ref="work",
+        )
 
     def test_official_success_rejects_coverage_outside_requested_window(self):
         store = Mock()
@@ -1046,6 +1110,22 @@ class ActivityCollectorTests(unittest.TestCase):
         self.assertEqual(observation.remaining, "18")
         self.assertEqual(observation.observed_at, "2026-07-14T02:00:00.000000Z")
         self.assertNotIn(":", observation.record_id)
+
+    def test_current_quota_projection_preserves_configured_account_scope(self):
+        store = Mock()
+        store.has_daily_history.return_value = True
+        importer = Mock()
+        importer.fetch.return_value = DailyImportResult(True, ())
+
+        ActivityCollector(store, importer, clock=lambda: NOW).refresh(
+            Overview([card(
+                "generic-work", remaining_percent=64, account_ref="work"
+            )])
+        )
+
+        observation = store.record_quota.call_args.args[0]
+        self.assertEqual(observation.account_ref, "work")
+        self.assertEqual(observation.record_id, "generic-work.work.subscription")
 
     def test_stale_numeric_quota_uses_last_good_time_and_keeps_unhealthy_source(self):
         store = Mock()

@@ -437,12 +437,13 @@ class ActivityCollector:
 
     @staticmethod
     def _rows_match_scope(
-        rows: Iterable[DailyUsageRow], provider_id: str, since: date, until: date
+        rows: Iterable[DailyUsageRow], provider_id: str, since: date, until: date,
+        account_ref: str = "",
     ) -> bool:
         try:
             return all(
                 row.provider_id == provider_id
-                and row.account_ref == ""
+                and row.account_ref == account_ref
                 and since <= date.fromisoformat(row.day) <= until
                 for row in rows
             )
@@ -460,6 +461,21 @@ class ActivityCollector:
         if isinstance(candidate, str) and candidate and len(candidate) <= 128:
             return candidate
         return fallback
+
+    @staticmethod
+    def _account_ref(importer: Any) -> str:
+        missing = object()
+        candidate = vars(importer).get("account_ref", missing)
+        if candidate is missing:
+            candidate = getattr(type(importer), "account_ref", missing)
+        if candidate is missing:
+            return ""
+        if (
+            isinstance(candidate, str)
+            and (not candidate or ID_PATTERN.fullmatch(candidate) is not None)
+        ):
+            return candidate
+        raise ValueError("importer account scope is invalid")
 
     @staticmethod
     def _success_bounds_match(
@@ -498,7 +514,14 @@ class ActivityCollector:
         attempted_at: datetime,
     ) -> None:
         try:
-            has_cost_history = self.store.has_cost_history(provider_id)
+            account_ref = self._account_ref(importer)
+        except ValueError:
+            self._safe_source_failure(
+                provider_id, "invalid_import_scope", attempted_at, source_id
+            )
+            return
+        try:
+            has_cost_history = self.store.has_cost_history(provider_id, account_ref)
         except Exception:
             has_cost_history = True
         cost_since = today - timedelta(days=6 if has_cost_history else 364)
@@ -515,6 +538,7 @@ class ActivityCollector:
                     today,
                     official_cost.rows,
                     attempted_at,
+                    account_ref=account_ref,
                 )
             except Exception:
                 self._safe_source_failure(
@@ -571,9 +595,13 @@ class ActivityCollector:
             raise ValueError("quota observation time must include a timezone")
         reset = card.resets_at
         return QuotaObservation(
-            record_id=f"{card.provider_id}.subscription",
+            record_id=(
+                f"{card.provider_id}."
+                f"{card.account_ref + '.' if card.account_ref else ''}subscription"
+            ),
             observed_at=observed_at.astimezone(timezone.utc).isoformat(),
             provider_id=card.provider_id,
+            account_ref=card.account_ref,
             quota_name="Subscription",
             unit="percent",
             used=str(100 - float(remaining)),
@@ -752,6 +780,13 @@ class ActivityCollector:
             official = self.official_importers.get(provider_id)
             use_openusage_fallback = official is None
             if official is not None:
+                try:
+                    account_ref = self._account_ref(official)
+                except ValueError:
+                    self._safe_source_failure(
+                        provider_id, "invalid_import_scope", attempted_at
+                    )
+                    continue
                 usage_source_id = self._source_id(
                     official, "usage_source_id", USAGE_SOURCE_ID
                 )
@@ -777,6 +812,7 @@ class ActivityCollector:
                         provider_id,
                         official_usage.since,
                         official_usage.until,
+                        account_ref,
                     ):
                         self._safe_source_failure(
                             provider_id, "invalid_import_rows", attempted_at,
@@ -788,6 +824,7 @@ class ActivityCollector:
                                 provider_id, usage_source_id,
                                 official_usage.since, official_usage.until,
                                 official_usage.rows, attempted_at,
+                                account_ref=account_ref,
                             )
                         except Exception:
                             self._safe_source_failure(

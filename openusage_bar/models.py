@@ -60,6 +60,7 @@ class ProviderCard:
     # Catalog source facts used only to publish the sanitized instance ledger.
     credential_source: str | None = None
     source_kind: str | None = None
+    account_ref: str = ""
 
 
 @dataclass(frozen=True)
