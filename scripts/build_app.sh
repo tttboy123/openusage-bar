@@ -128,7 +128,6 @@ fi
 rm -rf "$SETTINGS_APP/Contents/Resources/include"
 find "$SETTINGS_APP/Contents/Resources/lib" -type d \
   -name 'config-*darwin*' -prune -exec rm -rf {} +
-find "$SETTINGS_APP/Contents/Resources" -type f -name Makefile -delete
 # Package-manager metadata is not used by the frozen helper. Some hosted
 # Python distributions record their absolute installation prefix in METADATA.
 find "$SETTINGS_APP/Contents/Resources" -type d \
@@ -141,6 +140,7 @@ find "$SETTINGS_APP/Contents/Resources" -type f \
 
 cp "$RESOURCES/com.lune.openusagebar.plist" "$APP/Contents/Resources/LaunchAgents/"
 cp "$RESOURCES/com.lune.openusagebar.collector.plist" "$APP/Contents/Resources/LaunchAgents/"
+find "$APP" -type f -name Makefile -delete
 
 "$PYTHON" scripts/privacy_scan.py \
   "$APP/Contents/Info.plist" \

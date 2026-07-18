@@ -60,7 +60,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("Delete :PythonInfoDict:PythonExecutable", source)
         self.assertIn('rm -rf "$SETTINGS_APP/Contents/Resources/include"', source)
         self.assertIn("-name 'config-*darwin*'", source)
-        self.assertIn("-type f -name Makefile -delete", source)
+        self.assertIn('find "$APP" -type f -name Makefile -delete', source)
         self.assertIn("-name '*.dist-info'", source)
         self.assertIn("-name '*.egg-info'", source)
         self.assertIn("-name 'test_*.py'", source)
