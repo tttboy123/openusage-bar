@@ -39,6 +39,7 @@ mkdir -p "$SPY_BIN" "$SPY_STATE"
 
 if [[ ${OPENUSAGE_REAL_LAUNCH_AGENTS:-0} == 1 ]]; then
   export OPENUSAGE_LAUNCHCTL=/bin/launchctl
+  export OPENUSAGE_LAUNCHCTL_SPY_ACTIVE=0
 else
   cat > "$SPY_BIN/launchctl-spy" <<'SPY'
 #!/bin/zsh
@@ -51,6 +52,13 @@ case "$command" in
     domain=$1
     plist=$2
     label=$(plutil -extract Label raw "$plist")
+    if [[ ${OPENUSAGE_SPY_TRANSIENT_BOOTSTRAP_LABEL:-} == "$label" ]]; then
+      marker="$OPENUSAGE_SPY_STATE/$label.transient-bootstrap-consumed"
+      if [[ ! -e "$marker" ]]; then
+        : > "$marker"
+        exit 5
+      fi
+    fi
     : > "$OPENUSAGE_SPY_STATE/$label"
     ;;
   bootout)
@@ -68,6 +76,7 @@ SPY
   export OPENUSAGE_SPY_STATE="$SPY_STATE"
   export OPENUSAGE_SPY_LOG="$SPY_LOG"
   export OPENUSAGE_LAUNCHCTL="$SPY_BIN/launchctl-spy"
+  export OPENUSAGE_LAUNCHCTL_SPY_ACTIVE=1
 fi
 
 cat > "$SPY_BIN/health-spy" <<'HEALTH'
@@ -78,6 +87,25 @@ set -euo pipefail
 HEALTH
 chmod 755 "$SPY_BIN/health-spy"
 export OPENUSAGE_HEALTH_PROBE="$SPY_BIN/health-spy"
+
+if [[ $OPENUSAGE_LAUNCHCTL_SPY_ACTIVE == 1 ]]; then
+  cat > "$SPY_BIN/curl" <<'CURL'
+#!/bin/zsh
+set -euo pipefail
+if [[ ${OPENUSAGE_SPY_SOCKET_STUCK:-0} == 1 ]]; then
+  exit 0
+fi
+if [[ ${OPENUSAGE_SPY_TRANSIENT_SOCKET_BUSY:-0} == 1 ]]; then
+  marker="$OPENUSAGE_SPY_STATE/socket-busy-consumed"
+  if [[ ! -e "$marker" ]]; then
+    : > "$marker"
+    exit 0
+  fi
+fi
+exit 22
+CURL
+  chmod 755 "$SPY_BIN/curl"
+fi
 
 # A PATH spy proves rollback does not write or delete Keychain credentials.
 cat > "$SPY_BIN/security" <<'KEYCHAIN'
@@ -150,12 +178,42 @@ for metadata in "$OPENUSAGE_STATE_DIR"/backups/app/*/metadata.plist(N); do
   fi
 done
 [[ -n "$ROLLBACK_BACKUP" ]]
+if [[ $OPENUSAGE_LAUNCHCTL_SPY_ACTIVE == 1 ]]; then
+  export OPENUSAGE_SPY_TRANSIENT_BOOTSTRAP_LABEL="$COLLECTOR_LABEL"
+  export OPENUSAGE_SPY_TRANSIENT_SOCKET_BUSY=1
+fi
 "$ROOT/scripts/rollback_app.sh" "$ROLLBACK_BACKUP"
+if [[ $OPENUSAGE_LAUNCHCTL_SPY_ACTIVE == 1 ]]; then
+  unset OPENUSAGE_SPY_TRANSIENT_BOOTSTRAP_LABEL
+  unset OPENUSAGE_SPY_TRANSIENT_SOCKET_BUSY
+  [[ -e "$OPENUSAGE_SPY_STATE/$COLLECTOR_LABEL.transient-bootstrap-consumed" ]]
+  [[ -e "$OPENUSAGE_SPY_STATE/socket-busy-consumed" ]]
+fi
 [[ $(plutil -extract CFBundleShortVersionString raw "$OLD_APP/Contents/Info.plist") == 0.3.0 ]]
 assert_ledger_unchanged "$EXPECTED_FACTS"
 
 # Restore current, then inject failures on both sides of the atomic swap.
 "$ROOT/scripts/install_app.sh"
+if [[ $OPENUSAGE_LAUNCHCTL_SPY_ACTIVE == 1 ]]; then
+  SOCKET_FAILURE_BACKUP=""
+  for metadata in "$OPENUSAGE_STATE_DIR"/backups/app/*/metadata.plist(N); do
+    if [[ $(plutil -extract version raw "$metadata") == 0.3.0 ]]; then
+      SOCKET_FAILURE_BACKUP=$metadata:h
+    fi
+  done
+  [[ -n "$SOCKET_FAILURE_BACKUP" ]]
+  before=$(plutil -extract CFBundleVersion raw "$OLD_APP/Contents/Info.plist")
+  if OPENUSAGE_SPY_SOCKET_STUCK=1 "$ROOT/scripts/rollback_app.sh" "$SOCKET_FAILURE_BACKUP"; then
+    print -u2 "socket-release failure unexpectedly succeeded"
+    exit 1
+  fi
+  [[ $(plutil -extract CFBundleVersion raw "$OLD_APP/Contents/Info.plist") == "$before" ]]
+  "$OPENUSAGE_LAUNCHCTL" print "gui/$(id -u)/$COLLECTOR_LABEL"
+  "$OPENUSAGE_LAUNCHCTL" print "gui/$(id -u)/$STATUS_LABEL"
+  assert_ledger_unchanged "$EXPECTED_FACTS"
+  complete_after_preparation_failure=("$OPENUSAGE_STATE_DIR"/backups/app/*/metadata.plist(N))
+  (( ${#complete_after_preparation_failure} <= 2 ))
+fi
 for stage in helper-copy launch-agent; do
   before=$(plutil -extract CFBundleVersion raw "$OLD_APP/Contents/Info.plist")
   if OPENUSAGE_TEST_FAIL_STAGE=$stage "$ROOT/scripts/install_app.sh"; then
@@ -188,4 +246,4 @@ assert_ledger_unchanged "$EXPECTED_FACTS"
 "$ROOT/scripts/uninstall_app.sh" --purge-data
 [[ ! -e "$OPENUSAGE_STATE_DIR" ]]
 [[ ! -s "$KEYCHAIN_LOG" ]]
-print "release_smoke_ok clean_install=1 upgrade=1 rollback=1 failures=3 preserve=1 purge=1"
+print "release_smoke_ok clean_install=1 upgrade=1 rollback=1 failures=4 preserve=1 purge=1"
