@@ -126,6 +126,8 @@ fi
 # extensions at runtime. Hosted Python's pyconfig.h can contain its build-home
 # prefix, so remove the unused development-only tree before signing/package audit.
 rm -rf "$SETTINGS_APP/Contents/Resources/include"
+find "$SETTINGS_APP/Contents/Resources/lib" -type d \
+  -name 'config-*-darwin' -prune -exec rm -rf {} +
 # Package-manager metadata is not used by the frozen helper. Some hosted
 # Python distributions record their absolute installation prefix in METADATA.
 find "$SETTINGS_APP/Contents/Resources" -type d \

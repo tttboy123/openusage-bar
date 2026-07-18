@@ -59,6 +59,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("scripts/release_secret_scan.py", source)
         self.assertIn("Delete :PythonInfoDict:PythonExecutable", source)
         self.assertIn('rm -rf "$SETTINGS_APP/Contents/Resources/include"', source)
+        self.assertIn("-name 'config-*-darwin'", source)
         self.assertIn("-name '*.dist-info'", source)
         self.assertIn("-name '*.egg-info'", source)
         self.assertIn("-name 'test_*.py'", source)
