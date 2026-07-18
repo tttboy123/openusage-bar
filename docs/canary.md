@@ -42,8 +42,9 @@ Record pass/fail and UTC date for each event:
    ```
 
    The baseline is a short-lived canary artifact; capture it for the current
-   reboot attempt, then verify within six hours of the new boot. A successful
-   verifier intentionally reports `visualMenuCheck=pending`. Separately confirm
+   reboot attempt, start the new boot within six hours of capture, and run the
+   verifier within six hours of that boot. A successful verifier intentionally
+   reports `visualMenuCheck=pending`. Separately confirm
    that the menu-bar item is visibly present and opens its popover; process or
    launchd state is not visual evidence.
 4. Upgrade from the previous published pre-release. Confirm the SQLite

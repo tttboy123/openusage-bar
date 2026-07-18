@@ -33,7 +33,9 @@ API_SCHEMA_VERSION = "1.0"
 APP_BUNDLE_ID = "com.lune.openusagebar"
 STATUS_LABEL = "com.lune.openusagebar"
 COLLECTOR_LABEL = "com.lune.openusagebar.collector"
-MAX_REBOOT_DELAY_SECONDS = 6 * 60 * 60
+MAX_REBOOT_START_DELAY_SECONDS = 6 * 60 * 60
+MAX_REBOOT_VERIFY_DELAY_SECONDS = 6 * 60 * 60
+SOURCE_CYCLE_WINDOW_SECONDS = 5 * 60
 MAX_BASELINE_BYTES = 64 * 1024
 MAX_API_BYTES = 1024 * 1024
 MAX_COMMAND_BYTES = 64 * 1024
@@ -198,7 +200,12 @@ def _mapping(value: object, name: str) -> dict[str, Any]:
     return value
 
 
-def evaluate_recovery(baseline_payload: object, current_payload: object) -> RecoveryResult:
+def evaluate_recovery(
+    baseline_payload: object,
+    current_payload: object,
+    *,
+    evaluated_at: datetime | None = None,
+) -> RecoveryResult:
     baseline = validate_baseline(baseline_payload)
     current = _mapping(current_payload, "runtime snapshot")
 
@@ -212,8 +219,20 @@ def evaluate_recovery(baseline_payload: object, current_payload: object) -> Reco
     captured_at = _timestamp(baseline["capturedAt"], "capture time")
     if current_boot_at <= captured_at:
         return RecoveryResult(False, "reboot_before_baseline")
-    if (current_boot_at - captured_at).total_seconds() > MAX_REBOOT_DELAY_SECONDS:
+    if (
+        current_boot_at - captured_at
+    ).total_seconds() > MAX_REBOOT_START_DELAY_SECONDS:
         return RecoveryResult(False, "baseline_too_old")
+    verification_time = evaluated_at or datetime.now(timezone.utc)
+    if not isinstance(verification_time, datetime) or verification_time.tzinfo is None:
+        return RecoveryResult(False, "verification_time_invalid")
+    verification_time = verification_time.astimezone(timezone.utc)
+    if verification_time < current_boot_at:
+        return RecoveryResult(False, "verification_before_boot")
+    if (
+        verification_time - current_boot_at
+    ).total_seconds() > MAX_REBOOT_VERIFY_DELAY_SECONDS:
+        return RecoveryResult(False, "verification_too_late")
     if current.get("signatureOk") is not True:
         return RecoveryResult(False, "signature_invalid")
     if current.get("app") != baseline["app"]:
@@ -536,6 +555,13 @@ def probe_runtime(
         / "OpenUsage Provider Settings"
     )
     boot_time = parse_boot_time(_run(["/usr/sbin/sysctl", "-n", "kern.boottime"]))
+    socket_state = _socket_state(socket_path)
+    if (
+        socket_state.get("isSocket") is not True
+        or socket_state.get("mode") != 0o600
+        or socket_state.get("ownerMatches") is not True
+    ):
+        raise ProbeUnavailable("socket invalid")
     return {
         "bootTimeSeconds": boot_time,
         "signatureOk": _signature_ok(app),
@@ -548,7 +574,7 @@ def probe_runtime(
                 COLLECTOR_LABEL, collector_program, launch_agents_directory, boot_time
             ),
         },
-        "socket": _socket_state(socket_path),
+        "socket": socket_state,
         "api": _api_state(socket_path),
         "ledger": _ledger_state(ledger),
     }
@@ -577,7 +603,11 @@ def baseline_from_snapshot(snapshot: dict[str, object]) -> dict[str, object]:
     ):
         raise ProbeUnavailable("launch agent invalid")
     socket_state = _mapping(snapshot.get("socket"), "socket")
-    if socket_state.get("isSocket") is not True or socket_state.get("mode") != 0o600:
+    if (
+        socket_state.get("isSocket") is not True
+        or socket_state.get("mode") != 0o600
+        or socket_state.get("ownerMatches") is not True
+    ):
         raise ProbeUnavailable("socket invalid")
     if api.get("healthOk") is not True:
         raise ProbeUnavailable("local API unhealthy")
@@ -586,22 +616,31 @@ def baseline_from_snapshot(snapshot: dict[str, object]) -> dict[str, object]:
     source_status = ledger.get("sourceStatus")
     if not isinstance(source_status, dict):
         raise ProbeUnavailable("source status unavailable")
-    healthy_attempts = {
-        source_id: status_payload.get("lastAttemptAt")
-        for source_id, status_payload in source_status.items()
-        if isinstance(source_id, str)
-        and isinstance(status_payload, dict)
-        and status_payload.get("state") == "ok"
-        and status_payload.get("lastAttemptAt") == status_payload.get("lastSuccessAt")
-        and isinstance(status_payload.get("lastAttemptAt"), str)
-    }
+    healthy_attempts: dict[str, tuple[str, datetime]] = {}
+    for source_id, status_payload in source_status.items():
+        if (
+            not isinstance(source_id, str)
+            or not isinstance(status_payload, dict)
+            or status_payload.get("state") != "ok"
+            or status_payload.get("lastAttemptAt")
+            != status_payload.get("lastSuccessAt")
+            or not isinstance(status_payload.get("lastAttemptAt"), str)
+        ):
+            continue
+        attempt = status_payload["lastAttemptAt"]
+        try:
+            parsed_attempt = _timestamp(attempt, "source attempt time")
+        except ValueError as error:
+            raise ProbeUnavailable("source status unavailable") from error
+        healthy_attempts[source_id] = (attempt, parsed_attempt)
     if not healthy_attempts:
         raise ProbeUnavailable("source status unavailable")
-    newest_attempt = max(healthy_attempts.values())
+    newest_attempt = max(parsed for _, parsed in healthy_attempts.values())
     cycle_attempts = {
-        source_id: attempt
-        for source_id, attempt in healthy_attempts.items()
-        if attempt == newest_attempt
+        source_id: raw_attempt
+        for source_id, (raw_attempt, parsed_attempt) in healthy_attempts.items()
+        if (newest_attempt - parsed_attempt).total_seconds()
+        <= SOURCE_CYCLE_WINDOW_SECONDS
     }
     baseline = {
         "schemaVersion": BASELINE_SCHEMA_VERSION,

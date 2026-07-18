@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -116,12 +117,19 @@ class RebootRecoveryTests(unittest.TestCase):
         }
 
     def assert_failure(self, current, reason):
-        result = self.module.evaluate_recovery(self.baseline(), current)
+        result = self.module.evaluate_recovery(
+            self.baseline(), current, evaluated_at=self.verification_time()
+        )
         self.assertFalse(result.ok)
         self.assertEqual(result.reason, reason)
 
+    def verification_time(self):
+        return datetime(2026, 7, 18, 20, 36, tzinfo=timezone.utc)
+
     def test_accepts_real_reboot_and_advanced_scheduled_collection(self):
-        result = self.module.evaluate_recovery(self.baseline(), self.recovered())
+        result = self.module.evaluate_recovery(
+            self.baseline(), self.recovered(), evaluated_at=self.verification_time()
+        )
         self.assertTrue(result.ok)
         self.assertEqual(result.reason, "ok")
 
@@ -145,9 +153,20 @@ class RebootRecoveryTests(unittest.TestCase):
     def test_rejects_stale_baseline_from_an_older_canary(self):
         baseline = self.baseline()
         baseline["capturedAt"] = "2026-07-18T13:00:00Z"
-        result = self.module.evaluate_recovery(baseline, self.recovered())
+        result = self.module.evaluate_recovery(
+            baseline, self.recovered(), evaluated_at=self.verification_time()
+        )
         self.assertFalse(result.ok)
         self.assertEqual(result.reason, "baseline_too_old")
+
+    def test_rejects_verification_reused_long_after_the_new_boot(self):
+        result = self.module.evaluate_recovery(
+            self.baseline(),
+            self.recovered(),
+            evaluated_at=datetime(2026, 7, 19, 20, 36, tzinfo=timezone.utc),
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "verification_too_late")
 
     def test_rejects_api_or_ledger_revision_regression(self):
         current = self.recovered()
@@ -451,8 +470,13 @@ class RebootRecoveryTests(unittest.TestCase):
         snapshot = self.recovered()
         snapshot["ledger"]["sourceStatus"]["older.source"] = {
             "state": "ok",
-            "lastAttemptAt": "2026-07-18T20:34:42Z",
-            "lastSuccessAt": "2026-07-18T20:34:42Z",
+            "lastAttemptAt": "2026-07-18T20:20:42Z",
+            "lastSuccessAt": "2026-07-18T20:20:42Z",
+        }
+        snapshot["ledger"]["sourceStatus"]["same.cycle.skew"] = {
+            "state": "ok",
+            "lastAttemptAt": "2026-07-18T20:35:12Z",
+            "lastSuccessAt": "2026-07-18T20:35:12Z",
         }
         baseline = self.module.baseline_from_snapshot(snapshot)
         self.assertEqual(
@@ -461,6 +485,7 @@ class RebootRecoveryTests(unittest.TestCase):
                 "codex.local_rate_limits",
                 "kiro.codewhisperer",
                 "minimax.coding_plan",
+                "same.cycle.skew",
                 "step_plan.quota",
             },
         )
@@ -503,6 +528,135 @@ class RebootRecoveryTests(unittest.TestCase):
         self.assertEqual(snapshot["bootTimeSeconds"], 1784406720)
         self.assertEqual(launch_probe.call_count, 2)
 
+    def test_probe_runtime_rejects_untrusted_socket_before_connecting(self):
+        app = Path("/Applications/OpenUsage Bar.app")
+        with mock.patch.object(
+            self.module,
+            "_run",
+            return_value="{ sec = 1784406720, usec = 0 } Sat Jul 18 20:32:00 2026",
+        ), mock.patch.object(
+            self.module, "_signature_ok", return_value=True
+        ), mock.patch.object(
+            self.module, "_bundle_metadata", return_value=self.baseline()["app"]
+        ), mock.patch.object(
+            self.module, "_launch_agent_state", return_value={"running": True}
+        ), mock.patch.object(
+            self.module,
+            "_socket_state",
+            return_value={"isSocket": True, "mode": 0o666, "ownerMatches": False},
+        ), mock.patch.object(
+            self.module, "_api_state"
+        ) as api_state, self.assertRaises(self.module.ProbeUnavailable):
+            self.module.probe_runtime(
+                app=app,
+                socket_path=Path("/tmp/api.sock"),
+                ledger=Path("/tmp/activity.sqlite3"),
+                launch_agents_directory=Path("/tmp/LaunchAgents"),
+            )
+        api_state.assert_not_called()
+
+    def test_command_and_process_helpers_fail_closed(self):
+        completed = SimpleNamespace(returncode=0, stdout=b"filtered\n")
+        with mock.patch.object(
+            self.module.subprocess, "run", return_value=completed
+        ) as runner:
+            self.assertEqual(self.module._run(["/usr/bin/true"]), "filtered\n")
+        self.assertEqual(runner.call_args.kwargs["stdin"], self.module.subprocess.DEVNULL)
+        self.assertEqual(
+            runner.call_args.kwargs["env"]["PATH"], "/usr/bin:/bin:/usr/sbin:/sbin"
+        )
+
+        failed = SimpleNamespace(returncode=1, stdout=b"")
+        with mock.patch.object(self.module.subprocess, "run", return_value=failed):
+            with self.assertRaises(self.module.ProbeUnavailable):
+                self.module._run(["/usr/bin/false"])
+
+        with mock.patch.object(self.module, "_run", return_value="valid"):
+            self.assertTrue(self.module._signature_ok(Path("/Applications/Test.app")))
+        with mock.patch.object(
+            self.module, "_run", side_effect=self.module.ProbeUnavailable("failed")
+        ):
+            self.assertFalse(self.module._signature_ok(Path("/Applications/Test.app")))
+
+        started = "Sat Jul 18 20:32:00 2026"
+        with mock.patch.object(self.module, "_run", return_value=started), mock.patch.object(
+            self.module.time, "mktime", return_value=1784406720
+        ):
+            self.assertTrue(self.module._process_started_after_boot(123, 1784406720))
+        with mock.patch.object(self.module, "_run", return_value="malformed"):
+            self.assertFalse(self.module._process_started_after_boot(123, 1784406720))
+
+    def test_cli_arguments_require_absolute_paths_and_bounded_timeout(self):
+        absolute = self.module._absolute_path("/tmp/reboot-baseline.json")
+        self.assertEqual(absolute, Path("/tmp/reboot-baseline.json"))
+        with self.assertRaises(self.module.argparse.ArgumentTypeError):
+            self.module._absolute_path("relative.json")
+
+        argv = [str(SCRIPT), "verify", "--timeout", "60"]
+        with mock.patch.object(sys, "argv", argv):
+            self.assertEqual(self.module._arguments().timeout, 60)
+        for timeout in ("-1", "601", "nan"):
+            with self.subTest(timeout=timeout), mock.patch.object(
+                sys, "argv", [str(SCRIPT), "verify", "--timeout", timeout]
+            ), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.module._arguments()
+
+    def test_main_probe_failures_are_sanitized(self):
+        common = {
+            "baseline": Path("/tmp/reboot-baseline.json"),
+            "app": Path("/Applications/OpenUsage Bar.app"),
+            "socket": Path("/tmp/api.sock"),
+            "ledger": Path("/tmp/activity.sqlite3"),
+            "timeout": 0.0,
+        }
+        output = io.StringIO()
+        with mock.patch.object(
+            self.module,
+            "_arguments",
+            return_value=SimpleNamespace(mode="capture", **common),
+        ), mock.patch.object(
+            self.module,
+            "probe_runtime",
+            side_effect=self.module.ProbeUnavailable("private detail"),
+        ), contextlib.redirect_stdout(output):
+            self.assertEqual(self.module.main(), 1)
+        self.assertEqual(output.getvalue(), "reboot_baseline_failed\n")
+
+        output = io.StringIO()
+        with mock.patch.object(
+            self.module,
+            "_arguments",
+            return_value=SimpleNamespace(mode="verify", **common),
+        ), mock.patch.object(
+            self.module, "load_baseline", side_effect=ValueError("private detail")
+        ), contextlib.redirect_stdout(output):
+            self.assertEqual(self.module.main(), 1)
+        self.assertEqual(
+            output.getvalue(),
+            "reboot_recovery_failed reason=baseline_or_boot_unavailable\n",
+        )
+
+        output = io.StringIO()
+        new_boot = "{ sec = 1784406720, usec = 0 } Sat Jul 18 20:32:00 2026"
+        with mock.patch.object(
+            self.module,
+            "_arguments",
+            return_value=SimpleNamespace(mode="verify", **common),
+        ), mock.patch.object(
+            self.module, "load_baseline", return_value=self.baseline()
+        ), mock.patch.object(
+            self.module, "_run", return_value=new_boot
+        ), mock.patch.object(
+            self.module,
+            "probe_runtime",
+            side_effect=self.module.ProbeUnavailable("private detail"),
+        ), contextlib.redirect_stdout(output):
+            self.assertEqual(self.module.main(), 1)
+        self.assertEqual(
+            output.getvalue(),
+            "reboot_recovery_failed reason=runtime_unavailable\n",
+        )
+
     def test_main_capture_verify_and_fail_closed_paths_are_sanitized(self):
         with tempfile.TemporaryDirectory() as directory:
             baseline_path = Path(directory) / "baseline.json"
@@ -520,9 +674,9 @@ class RebootRecoveryTests(unittest.TestCase):
                 self.module, "probe_runtime", return_value=self.recovered()
             ), mock.patch.object(
                 self.module, "baseline_from_snapshot", return_value=self.baseline()
-            ), mock.patch.object(self.module, "write_baseline") as writer, contextlib.redirect_stdout(
-                io.StringIO()
-            ):
+            ), mock.patch.object(
+                self.module, "write_baseline"
+            ) as writer, contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(self.module.main(), 0)
             writer.assert_called_once()
 
