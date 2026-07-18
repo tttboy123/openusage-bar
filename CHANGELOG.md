@@ -4,6 +4,34 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.4.3 - 2026-07-19
+
+### Added
+
+- An explicit Token-counting convention shared by Python, SQLite, CLI, Local
+  API, and Swift, with rollback-compatible sidecar storage for existing
+  schema-v5 ledgers.
+- Opt-in diagnostics v2 for bounded daily reconciliation, including source
+  totals, component counters, coverage, quality, freshness, and conservative
+  duplicate-row evidence.
+
+### Changed
+
+- Usage Details presents Total, Input, Output, Cache Read, Cache Creation, and
+  Reasoning independently and explains whether cache is inclusive, disjoint,
+  provider-reported, mixed, or unknown.
+- Reconciliation exports keep observed subtotals separate from complete totals
+  and use per-export account pseudonyms.
+
+### Fixed
+
+- Old app versions can still read and roll back a ledger after the new Token
+  convention metadata has been written.
+- Provider mutation helpers no longer inherit unrelated parent-process secret
+  environment variables.
+- Partial or missing coverage is no longer representable as a trustworthy
+  complete aggregate total in diagnostics.
+
 ## 0.4.2 - 2026-07-18
 
 ### Added
