@@ -166,16 +166,16 @@ GET /v1/sources/status
 GET /v1/changes?after=0&limit=100
 ```
 
-也可以直接调用签名 helper 输出 JSON：
+也可以通过签名的采集器启动器输出 JSON；它会先重建最小非秘密环境：
 
 ```bash
 APP="/Applications/OpenUsage Bar.app"
 [[ -d "$APP" ]] || APP="$HOME/Applications/OpenUsage Bar.app"
-HELPER="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
-"$HELPER" status --format json --offline
-"$HELPER" providers --format json --offline
-"$HELPER" usage --from 2026-07-01 --to 2026-07-14 --format jsonl --offline
-"$HELPER" doctor --format json --offline
+COLLECTOR="$APP/Contents/MacOS/OpenUsage Collector"
+"$COLLECTOR" status --format json --offline
+"$COLLECTOR" providers --format json --offline
+"$COLLECTOR" usage --from 2026-07-01 --to 2026-07-14 --format jsonl --offline
+"$COLLECTOR" doctor --format json --offline
 ```
 
 `--offline` 适合调度器低延迟读取。显式 `--fresh` 和菜单栏 Refresh 共用 90 秒交互尝试上限；超时不会把未知额度写成 0，而是继续提供 last-good ledger 并报告刷新不可用。

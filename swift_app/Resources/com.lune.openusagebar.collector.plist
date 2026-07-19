@@ -3,7 +3,7 @@
 <plist version="1.0"><dict>
   <key>Label</key><string>com.lune.openusagebar.collector</string>
   <key>ProgramArguments</key><array>
-    <string>__APP__/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings</string>
+    <string>__APP__/Contents/MacOS/OpenUsage Collector</string>
     <string>daemon</string><string>--interval</string><string>300</string>
     <string>--api-socket</string><string>__HOME__/.local/state/openusage-bar/openusage.sock</string>
   </array>

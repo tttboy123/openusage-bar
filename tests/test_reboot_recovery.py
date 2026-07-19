@@ -37,7 +37,7 @@ class RebootRecoveryTests(unittest.TestCase):
 
     def baseline(self):
         return {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "capturedAt": "2026-07-18T20:31:29Z",
             "bootTimeSeconds": 1783987056,
             "app": {
@@ -46,7 +46,9 @@ class RebootRecoveryTests(unittest.TestCase):
                 "build": "7",
                 "signatureHash": "1a638387f6844d020e24e6f0db6d3edeca34c389",
                 "statusProgramHash": "2b638387f6844d020e24e6f0db6d3edeca34c389",
+                "statusRuntimeHash": "2c638387f6844d020e24e6f0db6d3edeca34c389",
                 "collectorProgramHash": "3c638387f6844d020e24e6f0db6d3edeca34c389",
+                "collectorRuntimeHash": "3d638387f6844d020e24e6f0db6d3edeca34c389",
             },
             "api": {"schemaVersion": "1.0", "dataRevision": 5826},
             "ledger": {
@@ -70,7 +72,9 @@ class RebootRecoveryTests(unittest.TestCase):
                 "build": "7",
                 "signatureHash": "1a638387f6844d020e24e6f0db6d3edeca34c389",
                 "statusProgramHash": "2b638387f6844d020e24e6f0db6d3edeca34c389",
+                "statusRuntimeHash": "2c638387f6844d020e24e6f0db6d3edeca34c389",
                 "collectorProgramHash": "3c638387f6844d020e24e6f0db6d3edeca34c389",
+                "collectorRuntimeHash": "3d638387f6844d020e24e6f0db6d3edeca34c389",
             },
             "launchAgents": {
                 "com.lune.openusagebar": {
@@ -288,6 +292,16 @@ class RebootRecoveryTests(unittest.TestCase):
             self.module.validate_baseline(malformed)
         malformed = self.baseline()
         malformed["app"]["collectorProgramHash"] = "not-a-code-hash"
+        with self.assertRaises(ValueError):
+            self.module.validate_baseline(malformed)
+
+        malformed = self.baseline()
+        malformed["app"]["statusRuntimeHash"] = "not-a-code-hash"
+        with self.assertRaises(ValueError):
+            self.module.validate_baseline(malformed)
+
+        malformed = self.baseline()
+        malformed["app"]["collectorRuntimeHash"] = "not-a-code-hash"
         with self.assertRaises(ValueError):
             self.module.validate_baseline(malformed)
 
@@ -560,7 +574,9 @@ class RebootRecoveryTests(unittest.TestCase):
             side_effect=(
                 self.baseline()["app"]["signatureHash"],
                 self.baseline()["app"]["statusProgramHash"],
+                self.baseline()["app"]["statusRuntimeHash"],
                 self.baseline()["app"]["collectorProgramHash"],
+                self.baseline()["app"]["collectorRuntimeHash"],
             ),
         ) as signature_probe, mock.patch.object(
             self.module, "_launch_agent_state", return_value={"running": True}
@@ -592,16 +608,32 @@ class RebootRecoveryTests(unittest.TestCase):
             snapshot["app"]["collectorProgramHash"],
             self.baseline()["app"]["collectorProgramHash"],
         )
+        self.assertEqual(
+            snapshot["app"]["statusRuntimeHash"],
+            self.baseline()["app"]["statusRuntimeHash"],
+        )
+        self.assertEqual(
+            snapshot["app"]["collectorRuntimeHash"],
+            self.baseline()["app"]["collectorRuntimeHash"],
+        )
         status_program = app / "Contents/MacOS/OpenUsage Bar"
-        collector_program = (
+        status_runtime = app / "Contents/MacOS/OpenUsage Bar.runtime"
+        collector_program = app / "Contents/MacOS/OpenUsage Collector"
+        collector_runtime = (
             app
             / "Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS"
             / "OpenUsage Provider Settings"
         )
         signature_probe.assert_has_calls(
-            [mock.call(app), mock.call(status_program), mock.call(collector_program)]
+            [
+                mock.call(app),
+                mock.call(status_program),
+                mock.call(status_runtime),
+                mock.call(collector_program),
+                mock.call(collector_runtime),
+            ]
         )
-        self.assertEqual(signature_probe.call_count, 3)
+        self.assertEqual(signature_probe.call_count, 5)
         self.assertEqual(launch_probe.call_count, 2)
 
     def test_probe_runtime_rejects_untrusted_socket_before_connecting(self):
@@ -782,6 +814,10 @@ class RebootRecoveryTests(unittest.TestCase):
                 self.module, "_run", return_value=new_boot
             ), mock.patch.object(
                 self.module, "probe_runtime", return_value=self.recovered()
+            ), mock.patch.object(
+                self.module,
+                "evaluate_recovery",
+                return_value=self.module.RecoveryResult(True, "ok"),
             ), contextlib.redirect_stdout(output):
                 self.assertEqual(self.module.main(), 0)
             self.assertIn("visualMenuCheck=pending", output.getvalue())

@@ -25,6 +25,9 @@ bug bounty program.
 - The read API binds to a user-private Unix socket, not TCP.
 - Provider subprocesses are shell-free, bounded, and receive an allowlisted
   environment.
+- The resident menu-bar host and collector cross a signed native `execve`
+  boundary that rebuilds a minimal environment; the installer never mutates
+  the user's global launchd environment.
 - The SQLite ledger and exported JSON exclude credentials, prompts, responses,
   and direct account identity.
 - Releases must pass the repository and Git-history secret scanner.

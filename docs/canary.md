@@ -44,8 +44,9 @@ Record pass/fail and UTC date for each event:
    The baseline is a short-lived canary artifact; capture it for the current
    reboot attempt, start the new boot within six hours of capture, and run the
    verifier within six hours of that boot. The baseline pins the app bundle,
-   menu-bar executable, and collector executable by code-signature hash, so a
-   same-version replacement cannot satisfy the reboot check. A successful
+   both native launchers, and both long-lived runtime executables by
+   code-signature hash, so a same-version replacement cannot satisfy the
+   reboot check. A successful
    verifier intentionally reports `visualMenuCheck=pending`. Separately confirm
    that the menu-bar item is visibly present and opens its popover; process or
    launchd state is not visual evidence.

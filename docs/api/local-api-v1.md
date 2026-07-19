@@ -139,13 +139,15 @@ local paths, tokens, and raw provider data are never serialized.
 `providerId`, `familyId`, `displayName`, `category`, `credentialSource`,
 `sourceKind`, `observedAt`, and `revision`. The equivalent offline CLI command
 is logically `openusage-bar providers --format json`. The app does not install
-a global executable; the real signed command path is:
+a global executable. Prefer the private local API; for an offline CLI snapshot,
+use the signed collector launcher so it rebuilds the same minimal non-secret
+environment as the resident service:
 
 ```bash
 APP="/Applications/OpenUsage Bar.app"
 [[ -d "$APP" ]] || APP="$HOME/Applications/OpenUsage Bar.app"
-HELPER="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
-"$HELPER" providers --format json --offline
+COLLECTOR="$APP/Contents/MacOS/OpenUsage Collector"
+"$COLLECTOR" providers --format json --offline
 ```
 
 From a source checkout, use `.build-venv/bin/python openusage_settings.py

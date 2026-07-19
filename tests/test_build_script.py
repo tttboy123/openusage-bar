@@ -159,10 +159,18 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertEqual(status["ProgramArguments"][0], "__APP__/Contents/MacOS/OpenUsage Bar")
         self.assertEqual(status["ProgramArguments"][-1], "--background")
         self.assertEqual(collector["Label"], "com.lune.openusagebar.collector")
-        self.assertTrue(collector["ProgramArguments"][0].startswith("__APP__/"))
+        self.assertEqual(
+            collector["ProgramArguments"][0],
+            "__APP__/Contents/MacOS/OpenUsage Collector",
+        )
         self.assertIn("daemon", collector["ProgramArguments"])
         self.assertIn("--api-socket", collector["ProgramArguments"])
         self.assertNotEqual(status["ProgramArguments"][0], collector["ProgramArguments"][0])
+
+        build = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
+        self.assertIn("scripts/clean_env_launcher.c", build)
+        self.assertIn('OpenUsage Bar.runtime', build)
+        self.assertIn('OpenUsage Collector', build)
 
     def test_app_embeds_a_service_management_collector(self):
         resources = ROOT / "swift_app/Resources"
@@ -172,11 +180,11 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertEqual(collector["Label"], "com.lune.openusagebar.collector")
         self.assertEqual(
             collector["BundleProgram"],
-            "Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings",
+            "Contents/MacOS/OpenUsage Collector",
         )
         self.assertEqual(
             collector["ProgramArguments"],
-            ["OpenUsage Provider Settings", "daemon", "--interval", "300"],
+            ["OpenUsage Collector", "daemon", "--interval", "300"],
         )
         self.assertNotIn("StandardOutPath", collector)
         self.assertNotIn("StandardErrorPath", collector)
@@ -266,6 +274,13 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn('hdiutil attach -readonly -nobrowse', audit)
         self.assertIn('Applications', audit)
         self.assertIn('codesign --verify --deep --strict', audit)
+        self.assertIn('Contents/MacOS/OpenUsage Bar.runtime', audit)
+        self.assertIn('Contents/MacOS/OpenUsage Collector', audit)
+        self.assertIn('OpenUsage Provider Settings.app/Contents/MacOS', audit)
+        self.assertIn('STATUS_LAUNCHER=', audit)
+        self.assertIn('"$STATUS_LAUNCHER" "$STATUS_RUNTIME"', audit)
+        self.assertIn('codesign --display', audit)
+        self.assertIn('otool -L', audit)
         self.assertIn('dmg-install-readme.txt', package)
         self.assertIn('Installation Guide.txt', audit)
         self.assertIn(

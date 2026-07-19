@@ -150,7 +150,7 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] 任意一天都能追溯总量组成、来源、覆盖状态与采集时间。
 - [x] 诊断结果能够区分“统计口径不同”和“实际丢失/重复数据”。
 - [x] `scripts/privacy_scan.py` 对诊断文件返回零泄漏。
-- [ ] 实机发现的“`coveredDayCount=0`、`modelCount=0` 但 `todayTokens=0`”回归已完成 RED → GREEN：Python 751 项、Swift 251 项、Swift 产品行覆盖率 87.30%、候选 App 隐私与签名门禁均通过。查询层、顶层与快照 JSON Schema、安装/重启探针、诊断导出和 Swift 客户端使用同一条 Unknown/已覆盖零约束；冻结 helper 对空账本返回 `todayTokens=null`；隔离 release smoke 的干净安装、升级、回滚、4 个注入失败、保留与清除数据卸载均通过。仍需安全部署并确认运行中 API 与菜单栏不再显示伪零。
+- [x] 实机发现的“`coveredDayCount=0`、`modelCount=0` 但 `todayTokens=0`”回归已完成 RED → GREEN 并部署到 `0.4.4 (8)`：Python 754 项、Swift 251 项、覆盖率门禁、候选 App 隐私与签名门禁均通过。查询层、顶层与快照 JSON Schema、安装/重启探针、诊断导出和 Swift 客户端使用同一条 Unknown/已覆盖零约束；冻结 helper 对空账本返回 `todayTokens=null`；隔离 release smoke 的干净安装、升级、回滚、4 个注入失败、保留与清除数据卸载均通过。运行中 API 已从伪 `0` 修正为 `null`，菜单栏在无覆盖时不再把它呈现为可信零值。
 
 **验证：** 新增专用对账测试、`tests/test_export_diagnostics.py`、Swift Usage Details 测试和隐私扫描。
 
@@ -180,10 +180,13 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] 安装/卸载隔离 smoke 现在把显式 `OPENUSAGE_INSTALL_DIR` 视为严格作用域，不再扫描或清理真实 `/Applications` 与 `~/Applications`；19 项 Activity 生命周期回归和完整 release smoke 均已通过。
 - [x] 两个无人点击的五分钟采集周期已通过。以 `minimax-1783978290 / minimax.coding_plan` 为固定哨兵：T0=`2026-07-18T20:14:46.677591Z`、`dataRevision=5784`；T1=`2026-07-18T20:21:34.749783Z`、`dataRevision=5801`；T2=`2026-07-18T20:27:42.947299Z`、观察时 `dataRevision=5818`，最终 API 复核继续推进到 `5826`。T2 时 MiniMax、Step Plan、Codex、Kiro 四个直连来源的 `lastAttemptAt` 与 `lastSuccessAt` 相同且均为 `ok`，全程未点击 Refresh。候选 helper 的本地签名变化曾触发一次 macOS Keychain ACL 授权，当前 Keychain 读取已恢复。
 - [x] 新增 `scripts/verify_reboot_recovery.py`：重启前以 `0600` 保存无凭证 baseline，并分别锁定 App bundle、菜单栏 LaunchAgent 可执行文件和 collector LaunchAgent 可执行文件的 CDHash；重启后只有在 `kern.boottime` 确实推进、baseline 对应当前 canary、新 boot 距 capture 以及验证距新 boot 均不超过 6 小时、两个 LaunchAgent 进程晚于新 boot 启动、三个签名指纹与应用版本均不变、socket 在连接前已确认为当前用户所有且为 `0600`、Local API 三条核心路由通过、SQLite cursor 不倒退、同一轮 5 分钟窗口内的自然采集来源在新 boot 后全部成功推进时才返回通过。它不调用 Keychain、Refresh 或 launchd mutation，并明确保留 `visualMenuCheck=pending`。
-- [x] 重启前最终门禁已在本机通过：验证器 26 项测试、脚本行覆盖率 87%、Python 743 项、Swift 250 项、Swift 产品行覆盖率 87.26%，秘密扫描为 0、依赖审计无已知漏洞、release smoke 的干净安装/升级/回滚/4 个注入失败回滚/保留与清除数据卸载均通过。当前 `/Applications/OpenUsage Bar.app` 为此前已获 Keychain ACL 授权且签名有效的 `0.4.3 (7)`；`2026-07-18T22:12:05.412172Z` 创建的 schema v2 私密 baseline 为 `0600`、`dataRevision=6081`、覆盖 5 个同轮来源，并锁定三枚 40 位 CDHash，隐私扫描为 0；重启前即时验证按预期返回 `boot_unchanged`。
+- [x] `0.4.3 (7)` 阶段的重启前门禁已在本机通过：验证器 26 项测试、脚本行覆盖率 87%、Python 743 项、Swift 250 项、Swift 产品行覆盖率 87.26%，秘密扫描为 0、依赖审计无已知漏洞、release smoke 的干净安装/升级/回滚/4 个注入失败回滚/保留与清除数据卸载均通过。当时 `2026-07-18T22:12:05.412172Z` 创建的是 schema v2 私密 baseline：权限 `0600`、`dataRevision=6081`、覆盖 5 个同轮来源并锁定 3 枚 40 位 CDHash；该历史基线现已由下方 `0.4.4 (8)` 的 schema v3 / 5 哈希基线取代。
 - [ ] 本次重启恢复了 Codex 对 Documents 的访问，但 `kern.boottime` 仍为 `1783987056`（2026-07-14），验证器明确返回 `boot_unchanged`；这只能证明应用会话恢复，不能替代一次真实的 macOS 内核重启。
 - [x] 一次候选安装因旧 shell 健康探针不能解析合法的 `todayTokens=null` 而失败；事务安装自动回滚，当前三枚可执行 CDHash 与 reboot baseline 完全一致，账本未回退。该探针现已与 Python、Swift、Schema 和诊断导出统一，并通过 Unknown、covered zero 和伪零拒绝回归。
-- [ ] 安全审计只读取了进程环境变量名称，发现菜单栏与 collector LaunchAgent 会继承 API-key 形态的父环境键；未读取或输出任何值。下一次真实部署前必须为常驻进程建立最小环境 allowlist，并增加不继承凭证名的回归测试。
+- [x] 常驻进程最小环境边界已部署到 `0.4.4 (8)`：签名的原生 `execve` launcher 只重建 Swift/Python 共享 allowlist，状态栏与 collector 分别转交固定的 bundle 内 runtime，不调用 shell、不修改全局 launchd 环境。行为测试只统计键名且从不保留或输出值；真实升级前两个进程各继承 3 个凭证形态环境键，升级后均为 0。
+- [x] `0.4.4 (8)` 已从候选包事务升级到 `/Applications`。深度签名、四个 Mach-O runtime、两个 LaunchAgent 固定路径、SQLite `quick_check` 与安装前后事实表计数均通过；`daily_model_usage=118`、`quota_snapshots=939`、`change_log` 单调推进，历史数据未丢失。
+- [x] 新常驻链路无需打开菜单栏即可自然采集：观察窗口内 `dataRevision=6820 → 6833`，随后继续推进；`/v1/capacity` 返回 5 条事实，Codex、MiniMax、Kiro 与 Step Plan 为本轮 direct 数据。全屏可见验收确认菜单栏 `chart.bar.xaxis + 18%` 与 API 最紧急的 MiniMax 18% 一致。
+- [x] 已生成 schema v3 重启 baseline：文件权限 `0600`、版本 `0.4.4 (8)`、`dataRevision=6856`，锁定外层 App、status launcher/runtime、collector launcher/runtime 共 5 枚签名哈希，并保存同轮 5 个成功来源的无凭证时间戳。重启前即时验证按预期返回 `boot_unchanged`。
 - [ ] 真实重启后登录项、collector、本地 API 与菜单栏恢复尚未验收；`launchctl` 等价检查不能替代 reboot。
 
 **验收：**

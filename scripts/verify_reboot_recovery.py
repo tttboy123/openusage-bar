@@ -28,7 +28,7 @@ from typing import Any
 from urllib.parse import quote
 
 
-BASELINE_SCHEMA_VERSION = 2
+BASELINE_SCHEMA_VERSION = 3
 API_SCHEMA_VERSION = "1.0"
 APP_BUNDLE_ID = "com.lune.openusagebar"
 STATUS_LABEL = "com.lune.openusagebar"
@@ -130,7 +130,9 @@ def validate_baseline(payload: object) -> dict[str, Any]:
             "build",
             "signatureHash",
             "statusProgramHash",
+            "statusRuntimeHash",
             "collectorProgramHash",
+            "collectorRuntimeHash",
         },
         "app",
     )
@@ -141,7 +143,9 @@ def validate_baseline(payload: object) -> dict[str, Any]:
     for field, label in (
         ("signatureHash", "signature hash"),
         ("statusProgramHash", "status program hash"),
+        ("statusRuntimeHash", "status runtime hash"),
         ("collectorProgramHash", "collector program hash"),
+        ("collectorRuntimeHash", "collector runtime hash"),
     ):
         signature_hash = _string(app[field], label)
         if not SIGNATURE_HASH_PATTERN.fullmatch(signature_hash):
@@ -611,7 +615,9 @@ def probe_runtime(
     *, app: Path, socket_path: Path, ledger: Path, launch_agents_directory: Path
 ) -> dict[str, object]:
     status_program = app / "Contents/MacOS/OpenUsage Bar"
-    collector_program = (
+    status_runtime = app / "Contents/MacOS/OpenUsage Bar.runtime"
+    collector_program = app / "Contents/MacOS/OpenUsage Collector"
+    collector_runtime = (
         app
         / "Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS"
         / "OpenUsage Provider Settings"
@@ -627,7 +633,9 @@ def probe_runtime(
     app_state = dict(_bundle_metadata(app))
     app_state["signatureHash"] = _signature_hash(app)
     app_state["statusProgramHash"] = _signature_hash(status_program)
+    app_state["statusRuntimeHash"] = _signature_hash(status_runtime)
     app_state["collectorProgramHash"] = _signature_hash(collector_program)
+    app_state["collectorRuntimeHash"] = _signature_hash(collector_runtime)
     return {
         "bootTimeSeconds": boot_time,
         "signatureOk": _signature_ok(app),

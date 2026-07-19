@@ -4,6 +4,22 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.4.4 - 2026-07-19
+
+### Changed
+
+- The menu-bar login item and background collector now cross a signed native
+  `execve` boundary that rebuilds a minimal non-secret environment before any
+  long-lived Swift or Python runtime starts.
+
+### Fixed
+
+- Provider-shaped variables present in the user launchd context are no longer
+  inherited by resident OpenUsage Bar processes; global launchd state is never
+  modified and credentials continue to be read only from Keychain.
+- A day with neither model rows nor explicit coverage remains unavailable in
+  the local API and menu bar instead of being rendered as zero Token usage.
+
 ## 0.4.3 - 2026-07-19
 
 ### Added
