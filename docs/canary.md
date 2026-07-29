@@ -94,8 +94,11 @@ scripts/privacy_scan.py /tmp/openusage-diagnostics.json
 The default schema remains diagnostics v1. It reads only `/v1/snapshot` and
 `/v1/capabilities`, then writes a mode-`0600` aggregate containing
 product/build, macOS/architecture, schema and data revision, aggregate
-fact/source counts, sanitized error-code counts, and the public capability
-catalog.
+fact/source counts, aggregate Balance state/quality/stale counts, sanitized
+error-code counts, and the public capability catalog. Capability sources retain
+only public `factFamilies`, authority, account/model scope and verification
+metadata. The export never includes Balance amounts, currencies, source IDs,
+Provider instances or account references.
 
 For an explicit daily reconciliation, choose diagnostics v2 and a bounded
 local-calendar range:

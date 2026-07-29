@@ -316,13 +316,28 @@ def _capability_declarations(payload: dict[str, Any]) -> list[dict[str, Any]]:
             if state not in CAPABILITY_STATES:
                 raise ValueError("invalid capability state")
             states[field] = state
-        sources: list[dict[str, str]] = []
+        sources: list[dict[str, Any]] = []
         for raw_source in _items(provider.get("sources"), "capability sources", limit=100):
             source = _mapping(raw_source, "capability source")
             sources.append({
+                "accountScope": _identifier(
+                    source.get("accountScope"), "source account scope"
+                ),
+                "authority": _identifier(
+                    source.get("authority"), "source authority"
+                ),
+                "factFamilies": _identifier_list(
+                    source.get("factFamilies"), "source fact families"
+                ),
                 "kind": _identifier(source.get("kind"), "source kind"),
+                "modelScope": _identifier(
+                    source.get("modelScope"), "source model scope"
+                ),
                 "provenance": _identifier(source.get("provenance"), "source provenance"),
                 "stability": _identifier(source.get("stability"), "source stability"),
+                "verification": _identifier(
+                    source.get("verification"), "source verification"
+                ),
             })
         supports_accounts = provider.get("supportsAccounts")
         if not isinstance(supports_accounts, bool):
@@ -341,7 +356,17 @@ def _capability_declarations(payload: dict[str, Any]) -> list[dict[str, Any]]:
             ),
             "regions": _identifier_list(provider.get("regions"), "regions"),
             "sources": sorted(
-                sources, key=lambda item: (item["kind"], item["stability"], item["provenance"])
+                sources,
+                key=lambda item: (
+                    item["kind"],
+                    item["stability"],
+                    item["provenance"],
+                    item["authority"],
+                    item["accountScope"],
+                    item["modelScope"],
+                    item["verification"],
+                    tuple(item["factFamilies"]),
+                ),
             ),
             "supportsAccounts": supports_accounts,
         })
@@ -431,6 +456,10 @@ def build_diagnostics(
     today_tokens, model_count, covered_day_count = _summary_totals(summary)
     providers = _items(snapshot.get("providers"), "providers")
     quotas = [_mapping(item, "quota window") for item in _items(snapshot.get("quotaWindows"), "quota windows")]
+    balances = [
+        _mapping(item, "balance")
+        for item in _items(snapshot.get("balances", []), "balances")
+    ]
     sources = [_mapping(item, "source") for item in _items(snapshot.get("sources"), "sources")]
     source_states = [_identifier(item.get("state"), "source state") for item in sources]
     errors = []
@@ -444,17 +473,30 @@ def build_diagnostics(
     stale_count = sum(item.get("stale") is True for item in quotas)
     if any(not isinstance(item.get("stale"), bool) for item in quotas):
         raise ValueError("quota stale state must be boolean")
+    balance_states = [
+        _identifier(item.get("state"), "balance state") for item in balances
+    ]
+    balance_quality = [
+        _identifier(item.get("quality"), "balance quality") for item in balances
+    ]
+    stale_balance_count = sum(item.get("stale") is True for item in balances)
+    if any(not isinstance(item.get("stale"), bool) for item in balances):
+        raise ValueError("balance stale state must be boolean")
     current = (clock or (lambda: datetime.now(timezone.utc)))()
     if current.tzinfo is None or current.utcoffset() is None:
         raise ValueError("clock must be timezone-aware")
     result = {
         "aggregates": {
+            "balanceCount": len(balances),
+            "balanceQuality": _counted(balance_quality),
+            "balanceStates": _counted(balance_states),
             "coveredDayCount": covered_day_count,
             "modelCount": model_count,
             "providerInstanceCount": len(providers),
             "quotaQuality": _counted(quota_quality),
             "quotaStates": _counted(quota_states),
             "quotaWindowCount": len(quotas),
+            "staleBalanceCount": stale_balance_count,
             "staleQuotaWindowCount": stale_count,
             "sourceCount": len(sources),
             "sourceErrorCodes": _counted(errors),

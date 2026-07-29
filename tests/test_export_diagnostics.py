@@ -52,6 +52,17 @@ def snapshot() -> dict[str, object]:
                 "remaining": "secret-value-is-never-copied",
             }
         ],
+        "balances": [
+            {
+                "accountRef": "personal-account",
+                "providerId": "private-instance",
+                "sourceId": "private-balance-source",
+                "state": "ok",
+                "quality": "direct",
+                "stale": False,
+                "available": "secret-balance-is-never-copied",
+            }
+        ],
         "sources": [
             {
                 "providerId": "private-instance",
@@ -99,6 +110,14 @@ def capabilities() -> dict[str, object]:
                         "kind": "provider_api",
                         "stability": "stable",
                         "provenance": "provider_official",
+                        "factFamilies": [
+                            "detection",
+                            "subscription_capacity",
+                        ],
+                        "authority": "provider_official",
+                        "accountScope": "configured_account",
+                        "modelScope": "mixed",
+                        "verification": "live_account",
                     }
                 ],
             }
@@ -323,13 +342,37 @@ class ExportDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["schemaVersion"], "openusage-diagnostics-1")
         self.assertEqual(payload["localAPI"]["dataRevision"], 19)
         self.assertEqual(payload["aggregates"]["providerInstanceCount"], 1)
+        self.assertEqual(payload["aggregates"]["balanceCount"], 1)
+        self.assertEqual(
+            payload["aggregates"]["balanceStates"],
+            {"ok": 1},
+        )
+        self.assertEqual(
+            payload["aggregates"]["balanceQuality"],
+            {"direct": 1},
+        )
+        self.assertEqual(payload["aggregates"]["staleBalanceCount"], 0)
         self.assertEqual(payload["aggregates"]["sourceStates"], {"error": 1, "live": 1})
         self.assertEqual(payload["aggregates"]["sourceErrorCodes"], {"AUTH_FAILED": 1})
         self.assertEqual(payload["capabilityDeclarations"][0]["familyId"], "minimax")
+        self.assertEqual(
+            payload["capabilityDeclarations"][0]["sources"],
+            [{
+                "accountScope": "configured_account",
+                "authority": "provider_official",
+                "factFamilies": ["detection", "subscription_capacity"],
+                "kind": "provider_api",
+                "modelScope": "mixed",
+                "provenance": "provider_official",
+                "stability": "stable",
+                "verification": "live_account",
+            }],
+        )
         encoded = json.dumps(payload, sort_keys=True)
         for forbidden in (
             "Alice private account", "personal-account", "private-instance",
-            "private-source", "keychain:private-label", "secret-value",
+            "private-source", "private-balance-source", "keychain:private-label",
+            "secret-value", "secret-balance",
             "accountRef", "displayName", "credentialSource", "sourceId",
             "payloadJson", "cookie", "prompt", "response",
         ):
@@ -350,6 +393,43 @@ class ExportDiagnosticsTests(unittest.TestCase):
         )
 
         self.assertIsNone(payload["aggregates"]["todayTokens"])
+
+    def test_v1_accepts_an_n_minus_one_snapshot_without_balances(self) -> None:
+        previous = snapshot()
+        previous.pop("balances")
+
+        payload = self.module.build_diagnostics(
+            previous,
+            capabilities(),
+            product={"version": "0.4.0", "build": "4"},
+            runtime={"macOS": "26.0", "architecture": "arm64"},
+        )
+
+        self.assertEqual(payload["aggregates"]["balanceCount"], 0)
+        self.assertEqual(payload["aggregates"]["balanceQuality"], {})
+        self.assertEqual(payload["aggregates"]["balanceStates"], {})
+        self.assertEqual(payload["aggregates"]["staleBalanceCount"], 0)
+
+    def test_v1_rejects_malformed_balance_and_capability_evidence(self) -> None:
+        invalid_balance = snapshot()
+        invalid_balance["balances"][0]["stale"] = "false"
+        with self.assertRaisesRegex(ValueError, "balance stale state"):
+            self.module.build_diagnostics(
+                invalid_balance,
+                capabilities(),
+                product={"version": "0.4.0", "build": "4"},
+                runtime={"macOS": "26.0", "architecture": "arm64"},
+            )
+
+        invalid_capability = capabilities()
+        del invalid_capability["providers"][0]["sources"][0]["verification"]
+        with self.assertRaisesRegex(ValueError, "source verification"):
+            self.module.build_diagnostics(
+                snapshot(),
+                invalid_capability,
+                product={"version": "0.4.0", "build": "4"},
+                runtime={"macOS": "26.0", "architecture": "arm64"},
+            )
 
     def test_v1_rejects_numeric_zero_without_usage_or_coverage(self) -> None:
         invalid = snapshot()

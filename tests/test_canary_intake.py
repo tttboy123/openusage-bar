@@ -19,6 +19,7 @@ class CanaryIntakeContractTests(unittest.TestCase):
             "Scheduled collection advanced after restart without Refresh",
             "Menu-bar item was visibly present and opened its popover",
             "UI, CLI JSON, and Local API agreed at one dataRevision",
+            "Balance state and freshness were checked",
             "Privacy scan result for attached diagnostics",
             "UTC event dates",
             "compatibility-v1.md",
@@ -47,6 +48,7 @@ class CanaryIntakeContractTests(unittest.TestCase):
         self.assertIn("intake_ready", protocol)
         self.assertIn("does not start the 30-day clock", protocol)
         self.assertIn("compatibility-v1.md", protocol)
+        self.assertIn("aggregate Balance state/quality/stale counts", protocol)
 
 
 if __name__ == "__main__":

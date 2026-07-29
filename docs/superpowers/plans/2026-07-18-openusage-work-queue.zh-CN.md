@@ -576,6 +576,13 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 
 **规模：** M，包含外部参与者协调。
 
+- [x] 2026-07-30 已复核 Canary 本地入口与当前 Schema：诊断 v1 现在聚合
+  Balance 数量、状态、质量与 stale 计数，并携带公开的 source fact、
+  authority、scope 与 verification；不导出余额数值、币种、sourceId、
+  Provider instance 或账号引用。N-1 缺少 `balances` 时保持空聚合。
+  Canary 表单同步要求核对 Balance 状态与 freshness，或明确该配置无
+  Balance 能力。诊断测试 22 项通过；尚未招募外部机器或启动 30 天时钟。
+
 ### WQ-15：建立性能与轻量化决策门槛
 
 **目标：** 用测量决定是否迁移常驻宿主，不因语言偏好重写成熟 Provider 与账本逻辑。
@@ -613,7 +620,7 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 - [x] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
 
 2026-07-30 已建立唯一的 `integration/0.6-rc` 共存候选，并完成 Python
-840 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
+843 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
 集成时修复了 `balances` 被误设为 Local API v1 必填字段的兼容回归；冻结
 0.4.2 snapshot 与包含 additive 字段的当前 snapshot 均通过。候选不导入
 Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未完成门禁见

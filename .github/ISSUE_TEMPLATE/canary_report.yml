@@ -98,6 +98,8 @@ body:
           required: true
         - label: UI, CLI JSON, and Local API agreed at one dataRevision
           required: true
+        - label: Balance state and freshness were checked, or this setup exposes no Balance capability
+          required: true
   - type: dropdown
     id: blocking-incident
     attributes:
