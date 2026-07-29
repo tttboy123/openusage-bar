@@ -494,6 +494,51 @@ class AggregatorTests(unittest.TestCase):
             self.assertTrue(result.cards[0].stale)
             self.assertIn("11.7M tokens", result.cards[0].detail or "")
 
+    def test_failed_cursor_enrichment_keeps_last_good_quota_and_auto_activity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = CardCache(Path(directory) / "cards.json")
+            cache.save(
+                [
+                    card(
+                        "cursor",
+                        primary="72% remaining",
+                        source="OpenUsage",
+                        family_id="cursor",
+                        remaining_percent=72,
+                        credential_source="openusage",
+                        source_kind="openusage",
+                    )
+                ]
+            )
+
+            result = Aggregator(
+                [
+                    Adapter(
+                        card(
+                            "cursor",
+                            primary="1.3M tokens",
+                            source="OpenUsage",
+                            family_id="cursor",
+                            credential_source="openusage",
+                            source_kind="openusage",
+                        )
+                    )
+                ],
+                cache,
+            ).refresh()
+
+            cursor = result.cards[0]
+            self.assertEqual(cursor.remaining_percent, 72)
+            self.assertEqual(cursor.primary, "72% remaining")
+            self.assertTrue(cursor.stale)
+            self.assertEqual(cursor.credential_source, "openusage")
+            self.assertEqual(cursor.source_kind, "openusage")
+            self.assertIn("1.3M tokens", cursor.detail or "")
+            self.assertEqual(
+                cursor.last_error,
+                "Quota enrichment did not return fresh data",
+            )
+
     def _assert_legacy_quota_fallback_publishes_openusage_identity(
         self, provider_id, quota, remaining, quota_source, activity
     ):

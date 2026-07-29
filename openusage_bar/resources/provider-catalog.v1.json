@@ -520,8 +520,10 @@
       "supports_accounts": false,
       "capabilities": {
         "quota_windows": {
-          "state": "unknown",
-          "values": []
+          "state": "supported",
+          "values": [
+            "billing_cycle"
+          ]
         },
         "token_history": "supported",
         "model_breakdown": "supported",
@@ -537,7 +539,7 @@
         {
           "source_id": "openusage",
           "kind": "openusage",
-          "timeout_seconds": 12,
+          "timeout_seconds": 40,
           "freshness_seconds": 300,
           "credential_type": "provider_owned",
           "operating_systems": [
@@ -547,12 +549,13 @@
           "provenance": "openusage_upstream",
           "fact_families": [
             "detection",
+            "subscription_capacity",
             "token_activity"
           ],
           "authority": "third_party",
           "account_scope": "local_profile",
-          "model_scope": "per_model",
-          "verification": "fixture"
+          "model_scope": "mixed",
+          "verification": "live_account"
         }
       ]
     },

@@ -299,7 +299,7 @@ public enum GeneratedProviderCatalog {
             credentialSourceTypes: [.none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
-                quotaWindows: .unknown,
+                quotaWindows: .supported(.billingCycle),
                 tokenHistory: .supported,
                 modelBreakdown: .supported,
                 resetTimestamps: .unknown,
@@ -311,7 +311,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .subscriptionCapacity, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .mixed, verification: .liveAccount),
             ]
         ),
         "deepseek": ProviderDisplayDescriptor(

@@ -236,6 +236,26 @@ class ProviderCatalogTests(unittest.TestCase):
         self.assertEqual(codex_openusage.authority, "third_party")
         self.assertEqual(codex_openusage.verification, "fixture")
 
+        cursor_openusage = self.catalog.require("cursor").sources[0]
+        self.assertEqual(
+            cursor_openusage.fact_families,
+            frozenset(
+                {"detection", "subscription_capacity", "token_activity"}
+            ),
+        )
+        self.assertEqual(cursor_openusage.timeout_seconds, 40)
+        self.assertEqual(cursor_openusage.authority, "third_party")
+        self.assertEqual(cursor_openusage.account_scope, "local_profile")
+        self.assertEqual(cursor_openusage.model_scope, "mixed")
+        self.assertEqual(cursor_openusage.verification, "live_account")
+        cursor_capabilities = self.catalog.require("cursor").capabilities
+        self.assertEqual(cursor_capabilities.quota_windows.state, "supported")
+        self.assertEqual(
+            cursor_capabilities.quota_windows.values,
+            ("billing_cycle",),
+        )
+        self.assertEqual(cursor_capabilities.reset_timestamps, "unknown")
+
         minimax, minimax_billing = self.catalog.require("minimax").sources[:2]
         self.assertEqual(
             minimax.fact_families,
@@ -266,11 +286,12 @@ class ProviderCatalogTests(unittest.TestCase):
     def test_all_37_families_encode_only_conservative_known_capabilities(self):
         quota_windows = {
             "codex": ["five_hour", "weekly"],
+            "cursor": ["billing_cycle"],
             "kiro_cli": ["billing_cycle"],
             "minimax": ["five_hour", "weekly"],
             "step_plan": ["five_hour", "weekly"],
         }
-        reset_providers = set(quota_windows)
+        reset_providers = {"codex", "kiro_cli", "minimax", "step_plan"}
         credit_providers = {"kiro_cli", "step_plan"}
 
         self.assertEqual(len(self.catalog.families), 37)
