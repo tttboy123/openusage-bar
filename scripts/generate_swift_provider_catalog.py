@@ -74,6 +74,7 @@ FACT_FAMILY_CASES = {
     "detection": "detection",
     "token_activity": "tokenActivity",
     "subscription_capacity": "subscriptionCapacity",
+    "api_balance": "apiBalance",
     "api_spend": "apiSpend",
 }
 AUTHORITY_CASES = {

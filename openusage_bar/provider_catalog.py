@@ -60,7 +60,13 @@ SOURCE_PROVENANCES = frozenset(
     }
 )
 SOURCE_FACT_FAMILIES = frozenset(
-    {"detection", "token_activity", "subscription_capacity", "api_spend"}
+    {
+        "detection",
+        "token_activity",
+        "subscription_capacity",
+        "api_balance",
+        "api_spend",
+    }
 )
 SOURCE_AUTHORITIES = frozenset(
     {
@@ -105,6 +111,7 @@ _SPECIAL_SOURCE_IDS = {
         "minimax_china_billing_web",
         "openusage",
     ),
+    "moonshot": ("moonshot_official_api", "openusage"),
     "step_plan": ("step_plan_browser_session", "step_plan_official_api"),
 }
 _EXPECTED_CREDENTIAL_SCOPES = {
@@ -113,6 +120,7 @@ _EXPECTED_CREDENTIAL_SCOPES = {
     ("kiro_cli", "kiro_codewhisperer_api"): "kiro",
     ("minimax", "minimax_builtin_api"): "minimax",
     ("minimax", "minimax_china_billing_web"): "minimax",
+    ("moonshot", "moonshot_official_api"): "moonshot_api_key",
     ("step_plan", "step_plan_browser_session"): "step_plan_session",
     ("step_plan", "step_plan_official_api"): "step_plan_api_key",
 }
@@ -457,12 +465,18 @@ def _parse_family(value: Any, index: int) -> ProviderFamily:
         capabilities.quota_windows.state == "supported"
         or capabilities.reset_timestamps == "supported"
         or capabilities.credits == "supported"
-        or capabilities.balance == "supported"
+    )
+    # Legacy quota families may label a remaining credit pool as "balance".
+    # A standalone API balance requires its own evidence only when the family
+    # does not also declare subscription-capacity semantics.
+    balance_supported = (
+        capabilities.balance == "supported" and not capacity_supported
     )
     spend_supported = capabilities.cost == "supported"
     evidence_contract = (
         ("token_activity", token_supported),
         ("subscription_capacity", capacity_supported),
+        ("api_balance", balance_supported),
         ("api_spend", spend_supported),
     )
     for fact_family, supported in evidence_contract:

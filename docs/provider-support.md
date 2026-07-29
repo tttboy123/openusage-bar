@@ -8,6 +8,7 @@ mix together:
 | Detection | A provider or local client is installed or configured |
 | Token activity | Daily input/output/cached Token totals, optionally by model |
 | API spend | Provider-reported billed cost or a clearly marked estimate |
+| API balance | Available currency balance reported by a provider |
 | Subscription capacity | Remaining plan quota and authoritative reset time |
 
 Detection never implies that the other three facts are available. Missing data
@@ -23,6 +24,7 @@ These adapters fill gaps that OpenUsage does not currently expose:
 | Cursor | Remaining subscription percentage from OpenUsage auto discovery, with targeted OpenUsage direct-mode enrichment when auto lacks quota |
 | Kiro | AWS CodeWhisperer plan quota and reset when Keychain credentials allow it; OpenUsage fallback |
 | MiniMax | China and International Coding Plan capacity; delayed daily model billing activity only where a separately verified feed exists |
+| Moonshot / Kimi API | China and International official API balance, kept separate from Token history and subscription capacity |
 | StepFun Step Plan | China and International plan capacity from a Keychain session; API-key connection state |
 | OpenAI Organization | Official daily Token activity and billed organization cost using an Admin key |
 | Generic HTTPS Provider | Configured remaining-capacity fact from a bounded HTTPS JSON endpoint |
@@ -69,6 +71,11 @@ Connection-specific notes:
   source because no equivalent International feed has been verified. Missing
   or incomplete billing coverage remains unavailable instead of becoming a
   real-time zero.
+- **Moonshot / Kimi API** uses the fixed official balance endpoint for the
+  selected China or International connection. It exposes currency,
+  `available`, `voucher`, and `cash` through `/v1/balances` and the snapshot
+  balance array. It does not invent daily Token history, a remaining
+  percentage, or a reset time.
 - **Custom Daily Token Feed** accepts only bounded, range-aware HTTPS JSON. It
   rejects embedded credentials, cross-host redirects, private-address targets,
   executable templates, and ambiguous partial pagination.

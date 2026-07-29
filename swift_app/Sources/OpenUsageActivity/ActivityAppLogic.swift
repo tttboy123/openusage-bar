@@ -167,6 +167,7 @@ struct ProviderSourceIssuePresentation: Sendable, Hashable, Identifiable {
         case "openusage.daily": AppLocalization.text("Daily token history")
         case "current.quota": AppLocalization.text("Current quota")
         case "minimax.billing": AppLocalization.text("Billing usage")
+        case "moonshot.balance": AppLocalization.text("API balance")
         case "openusage.detect": AppLocalization.text("Provider compatibility")
         default: sourceID.replacingOccurrences(of: ".", with: " ").capitalized
         }
@@ -293,12 +294,16 @@ struct ProviderConnectionSummary: Sendable, Hashable, Identifiable {
     var id: String { providerID }
     var isStepPlan: Bool { kind == "step_plan" && familyID == "step_plan" }
     var isManaged: Bool {
-        ["minimax", "step_plan", "openai_organization", "generic", "daily_usage_feed"]
+        [
+            "minimax", "moonshot", "step_plan", "openai_organization",
+            "generic", "daily_usage_feed",
+        ]
             .contains(kind)
     }
     var credentialLabel: String {
         switch kind {
         case "minimax": AppLocalization.text("Replacement Coding Plan key")
+        case "moonshot": AppLocalization.text("Replacement API key")
         case "openai_organization": AppLocalization.text("Replacement Admin API key")
         default: AppLocalization.text("Replacement API key")
         }
@@ -390,6 +395,7 @@ struct ProviderConnectionSummaryStore {
             let familyID = switch row.type {
             case "step_plan": "step_plan"
             case "minimax": "minimax"
+            case "moonshot": "moonshot"
             case "openai_organization": "openai"
             case "daily_usage_feed", "daily_cost_feed": row.familyID ?? row.providerID
             default: row.providerID
@@ -397,8 +403,10 @@ struct ProviderConnectionSummaryStore {
             guard Self.isStableID(familyID) else {
                 throw ProviderConnectionSummaryError.invalidConfiguration
             }
-            if ["minimax", "step_plan"].contains(row.type)
-                && !["china", "international"].contains(row.site ?? "china") {
+            if ["minimax", "moonshot", "step_plan"].contains(row.type)
+                && !["china", "international"].contains(
+                    row.site ?? (row.type == "minimax" ? "china" : "")
+                ) {
                 throw ProviderConnectionSummaryError.invalidConfiguration
             }
             return ProviderConnectionSummary(
@@ -406,7 +414,7 @@ struct ProviderConnectionSummaryStore {
                 familyID: familyID,
                 displayName: row.name,
                 kind: row.type,
-                site: ["minimax", "step_plan"].contains(row.type)
+                site: ["minimax", "moonshot", "step_plan"].contains(row.type)
                     ? row.site ?? "china"
                     : row.site,
                 configuration: .init(

@@ -59,6 +59,12 @@ struct ProviderCenterPresentationTests {
         )
         #expect(invalidMiniMaxSite.validation(action: .createConnection) == .invalidSite)
 
+        let invalidMoonshotSite = ManagedConnectionDraft.moonshot(
+            providerID: "moonshot-work", name: "Kimi", site: "elsewhere",
+            replacementCredential: "key"
+        )
+        #expect(invalidMoonshotSite.validation(action: .createConnection) == .invalidSite)
+
         let sessionOnly = ManagedConnectionDraft.stepPlan(
             providerID: "step-work", name: "Step Plan", site: "china",
             replacementCredential: "", replacementSession: "session"
@@ -68,6 +74,10 @@ struct ProviderCenterPresentationTests {
 
     @Test("Every managed Provider draft serializes its public configuration")
     func allManagedDraftEnvelopes() throws {
+        let moonshot = ManagedConnectionDraft.moonshot(
+            providerID: "moonshot-work", name: "Kimi Work", site: "china",
+            replacementCredential: "moonshot-key"
+        )
         let step = ManagedConnectionDraft.stepPlan(
             providerID: "step-work", name: "Step Work", site: "international",
             replacementCredential: "api-key", replacementSession: "web-session"
@@ -93,6 +103,19 @@ struct ProviderCenterPresentationTests {
             totalTokensPath: "$.total", sinceParameter: "since",
             untilParameter: "until", replacementCredential: "usage-key"
         ))
+
+        let moonshotObject = try mutationObject(
+            moonshot.request(action: .createConnection)
+        )
+        #expect(moonshotObject["kind"] as? String == "moonshot")
+        #expect(
+            (moonshotObject["configuration"] as? [String: Any])?["site"] as? String
+                == "china"
+        )
+        #expect(
+            (moonshotObject["credentialMaterial"] as? [String: Any])?["primary"]
+                as? String == "moonshot-key"
+        )
 
         let stepObject = try mutationObject(step.request(action: .createConnection))
         #expect(stepObject["kind"] as? String == "step_plan")
@@ -121,6 +144,7 @@ struct ProviderCenterPresentationTests {
         #expect(!ProviderCenterPresentation.canMutate(kind: "codex"))
         #expect(!ProviderCenterPresentation.canMutate(kind: "cursor"))
         #expect(ProviderCenterPresentation.canMutate(kind: "minimax"))
+        #expect(ProviderCenterPresentation.canMutate(kind: "moonshot"))
         #expect(ProviderCenterPresentation.canMutate(kind: "daily_usage_feed"))
     }
     @Test("Browse categories separate cloud services from API providers")

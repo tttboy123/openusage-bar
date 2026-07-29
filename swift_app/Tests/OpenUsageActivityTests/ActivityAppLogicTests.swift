@@ -215,6 +215,7 @@ struct ActivityAppLogicTests {
           "version": 2,
           "providers": [
             {"provider_id":"minimax-global","name":"Global","type":"minimax","site":"international"},
+            {"provider_id":"moonshot-main","name":"Kimi Main","type":"moonshot","site":"international"},
             {"provider_id":"step-plan-main","name":"Main","type":"step_plan","site":"china"},
             {"provider_id":"feed-zai","name":"ZAI Feed","type":"daily_usage_feed","family_id":"zai","endpoint":"https://example.com"},
             {"provider_id":"cost-openai","name":"OpenAI Cost","type":"daily_cost_feed","family_id":"openai","endpoint":"https://example.com"}
@@ -224,19 +225,27 @@ struct ActivityAppLogicTests {
 
         let connections = try ProviderConnectionSummaryStore(url: url).load()
 
-        #expect(connections.map(\.providerID) == ["minimax-global", "step-plan-main", "feed-zai", "cost-openai"])
+        #expect(connections.map(\.providerID) == [
+            "minimax-global", "moonshot-main", "step-plan-main", "feed-zai",
+            "cost-openai",
+        ])
         #expect(connections[0].familyID == "minimax")
         #expect(connections[0].site == "international")
-        #expect(connections[1].familyID == "step_plan")
-        #expect(connections[1].site == "china")
-        #expect(connections[1].isStepPlan)
         #expect(connections[0].isManaged)
-        #expect(connections[2].familyID == "zai")
-        #expect(!connections[2].isStepPlan)
+        #expect(connections[1].familyID == "moonshot")
+        #expect(connections[1].site == "international")
+        #expect(connections[1].isManaged)
+        #expect(connections[1].credentialLabel == "Replacement API key")
+        #expect(connections[2].familyID == "step_plan")
+        #expect(connections[2].site == "china")
+        #expect(connections[2].isStepPlan)
         #expect(connections[2].isManaged)
-        #expect(connections[2].credentialLabel == "Replacement API key")
-        #expect(connections[3].familyID == "openai")
-        #expect(connections[3].kind == "daily_cost_feed")
+        #expect(connections[3].familyID == "zai")
+        #expect(!connections[3].isStepPlan)
+        #expect(connections[3].isManaged)
+        #expect(connections[3].credentialLabel == "Replacement API key")
+        #expect(connections[4].familyID == "openai")
+        #expect(connections[4].kind == "daily_cost_feed")
     }
 
     @Test("Stale background loads cannot publish over a newer filter")

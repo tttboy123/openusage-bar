@@ -124,6 +124,43 @@ def render_schema() -> dict[str, object]:
             for name in ("used", "quotaLimit", "remaining", "remainingRatio")
         }},
     }]
+    balance = closed(
+        {
+            "recordId": {"type": "string"},
+            "providerId": {"type": "string"},
+            "accountRef": nullable("string"),
+            "currency": {"type": "string"},
+            "available": nullable("string"),
+            "voucher": nullable("string"),
+            "cash": nullable("string"),
+            "observedAt": {"type": "string", "format": "date-time"},
+            "freshnessSeconds": {"type": "integer", "minimum": 0},
+            "state": {"type": "string"},
+            "quality": {"type": "string"},
+            "stale": {"type": "boolean"},
+            "revision": {"type": "integer", "minimum": 1},
+            "sourceId": {"type": "string"},
+        },
+        [
+            "recordId", "providerId", "accountRef", "currency", "available",
+            "voucher", "cash", "observedAt", "freshnessSeconds", "state",
+            "quality", "stale", "revision", "sourceId",
+        ],
+    )
+    balance["allOf"] = [{
+        "if": {
+            "properties": {"state": {"const": "unknown"}},
+            "required": ["state"],
+        },
+        "then": {"properties": {
+            name: {"type": "null"}
+            for name in ("available", "voucher", "cash")
+        }},
+    }]
+    balances = envelope(
+        {"balances": {"type": "array", "items": balance}},
+        ["balances"],
+    )
     provider = closed(
         {
             "providerId": {"type": "string"}, "familyId": {"type": "string"},
@@ -156,12 +193,16 @@ def render_schema() -> dict[str, object]:
             "summary": summary_contract(
                 closed(dict(summary_properties), list(summary_required))
             ),
+            "balances": {"type": "array", "items": balance},
             "quotaWindows": {"type": "array", "items": quota},
             "providers": {"type": "array", "items": provider},
             "sources": {"type": "array", "items": source},
             "catalogRevision": {"type": "string"},
         },
-        ["localDay", "summary", "quotaWindows", "providers", "sources", "catalogRevision"],
+        [
+            "localDay", "summary", "balances", "quotaWindows", "providers",
+            "sources", "catalogRevision",
+        ],
     )
     activity_row = closed(
         {
@@ -247,7 +288,7 @@ def render_schema() -> dict[str, object]:
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://openusage.bar/schemas/local-api-v1.schema.json",
         "title": "OpenUsage Bar Local API v1",
-        "oneOf": [summary, snapshot, activity, changes, error],
+        "oneOf": [summary, snapshot, balances, activity, changes, error],
     }
 
 

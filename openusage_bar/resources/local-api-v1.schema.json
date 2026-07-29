@@ -91,6 +91,115 @@
     {
       "additionalProperties": false,
       "properties": {
+        "balances": {
+          "items": {
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "state": {
+                      "const": "unknown"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "available": {
+                      "type": "null"
+                    },
+                    "cash": {
+                      "type": "null"
+                    },
+                    "voucher": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "accountRef": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "available": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cash": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "currency": {
+                "type": "string"
+              },
+              "freshnessSeconds": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "observedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "quality": {
+                "type": "string"
+              },
+              "recordId": {
+                "type": "string"
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "stale": {
+                "type": "boolean"
+              },
+              "state": {
+                "type": "string"
+              },
+              "voucher": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "recordId",
+              "providerId",
+              "accountRef",
+              "currency",
+              "available",
+              "voucher",
+              "cash",
+              "observedAt",
+              "freshnessSeconds",
+              "state",
+              "quality",
+              "stale",
+              "revision",
+              "sourceId"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "catalogRevision": {
           "type": "string"
         },
@@ -497,10 +606,143 @@
         "generatedAt",
         "localDay",
         "summary",
+        "balances",
         "quotaWindows",
         "providers",
         "sources",
         "catalogRevision"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "balances": {
+          "items": {
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "state": {
+                      "const": "unknown"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "available": {
+                      "type": "null"
+                    },
+                    "cash": {
+                      "type": "null"
+                    },
+                    "voucher": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "accountRef": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "available": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cash": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "currency": {
+                "type": "string"
+              },
+              "freshnessSeconds": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "observedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "quality": {
+                "type": "string"
+              },
+              "recordId": {
+                "type": "string"
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "stale": {
+                "type": "boolean"
+              },
+              "state": {
+                "type": "string"
+              },
+              "voucher": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "recordId",
+              "providerId",
+              "accountRef",
+              "currency",
+              "available",
+              "voucher",
+              "cash",
+              "observedAt",
+              "freshnessSeconds",
+              "state",
+              "quality",
+              "stale",
+              "revision",
+              "sourceId"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "balances"
       ],
       "type": "object"
     },

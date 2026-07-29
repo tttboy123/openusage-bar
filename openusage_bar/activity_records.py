@@ -364,6 +364,54 @@ class QuotaState(QuotaObservation):
 
 
 @dataclass(frozen=True)
+class BalanceObservation:
+    record_id: str
+    observed_at: str
+    provider_id: str
+    currency: str
+    available: str | None
+    voucher: str | None
+    cash: str | None
+    state: str
+    quality: str
+    stale: bool
+    account_ref: str = ""
+    source_id: str = "current.balance"
+
+    def __post_init__(self) -> None:
+        validate_id("record_id", self.record_id)
+        validate_id("provider_id", self.provider_id)
+        if self.account_ref:
+            validate_id("account_ref", self.account_ref)
+        validate_id("source_id", self.source_id)
+        validate_id("currency", self.currency)
+        if self.currency != self.currency.upper() or not 3 <= len(self.currency) <= 8:
+            raise ValueError("currency must be an uppercase currency identifier")
+        validate_id("state", self.state)
+        validate_id("quality", self.quality)
+        object.__setattr__(
+            self, "observed_at", canonical_timestamp(self.observed_at, "observed_at")
+        )
+        for field in ("available", "voucher", "cash"):
+            value = canonical_decimal(getattr(self, field), field)
+            if value is not None and Decimal(value) < 0:
+                raise ValueError(f"{field} must be a nonnegative finite decimal value")
+            object.__setattr__(self, field, value)
+        if self.state == "unknown" and any(
+            value is not None for value in (self.available, self.voucher, self.cash)
+        ):
+            raise ValueError("unknown balance facts must not carry numeric values")
+        if not isinstance(self.stale, bool):
+            raise ValueError("stale must be boolean")
+
+
+@dataclass(frozen=True)
+class BalanceState(BalanceObservation):
+    revision: int = 1
+    payload_hash: str = ""
+
+
+@dataclass(frozen=True)
 class QuotaSnapshot:
     snapshot_id: int
     record_id: str
@@ -429,6 +477,15 @@ class QuotaStateSnapshot:
 
 
 @dataclass(frozen=True)
+class BalanceStateSnapshot:
+    rows: tuple[BalanceState, ...]
+    cursor: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "rows", tuple(self.rows))
+
+
+@dataclass(frozen=True)
 class ProviderInstanceSnapshot:
     rows: tuple[ProviderInstance, ...]
     cursor: int
@@ -466,11 +523,13 @@ class ResourceStateSnapshot:
     today_tokens: int
     model_count: int
     covered_day_count: int
+    balance_states: tuple[BalanceState, ...]
     quota_states: tuple[QuotaState, ...]
     provider_instances: tuple[ProviderInstance, ...]
     source_statuses: tuple[SourceStatus, ...]
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "balance_states", tuple(self.balance_states))
         object.__setattr__(self, "quota_states", tuple(self.quota_states))
         object.__setattr__(self, "provider_instances", tuple(self.provider_instances))
         object.__setattr__(self, "source_statuses", tuple(self.source_statuses))

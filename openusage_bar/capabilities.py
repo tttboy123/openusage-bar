@@ -66,6 +66,7 @@ class SourceFactFamily(StrEnum):
     DETECTION = "detection"
     TOKEN_ACTIVITY = "token_activity"
     SUBSCRIPTION_CAPACITY = "subscription_capacity"
+    API_BALANCE = "api_balance"
     API_SPEND = "api_spend"
 
 

@@ -120,15 +120,16 @@ def provider_instance(
 
 
 class ActivityStoreSchemaTests(unittest.TestCase):
-    def test_schema_v5_adds_a_backward_compatible_token_convention_sidecar(self):
+    def test_schema_v6_adds_balance_state_and_keeps_token_convention_sidecar(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "activity.sqlite3"
             with ActivityStore(path) as store:
-                self.assertEqual(store.schema_version, 5)
+                self.assertEqual(store.schema_version, 6)
                 self.assertEqual(
                     store.table_names(),
                     {
                         "change_log",
+                        "balance_state",
                         "daily_cost_coverage",
                         "daily_costs",
                         "daily_coverage",
@@ -188,7 +189,7 @@ class ActivityStoreSchemaTests(unittest.TestCase):
                     )
                 )
             with ActivityStore(path) as reopened:
-                self.assertEqual(reopened.schema_version, 5)
+                self.assertEqual(reopened.schema_version, 6)
 
     def test_quota_schema_has_explicit_non_identity_scope_columns(self):
         with ActivityStore(":memory:") as store:
@@ -280,7 +281,7 @@ class ActivityStoreSchemaTests(unittest.TestCase):
             connection.close()
 
             with ActivityStore(path) as reopened:
-                self.assertEqual(reopened.schema_version, 5)
+                self.assertEqual(reopened.schema_version, 6)
                 self.assertEqual(reopened.daily_costs("2020-01-01", "2030-01-01"), [])
                 changes = reopened.changes(before_cursor)
                 self.assertEqual([row.record_type for row in changes], ["ledger_schema"])
@@ -329,7 +330,7 @@ class ActivityStoreSchemaTests(unittest.TestCase):
             connection.close()
 
             with ActivityStore(path) as reopened:
-                self.assertEqual(reopened.schema_version, 5)
+                self.assertEqual(reopened.schema_version, 6)
                 snapshot = reopened.snapshot_daily_usage("2026-07-02", "2026-07-02")
                 self.assertEqual(snapshot.rows[0].source_id, "legacy")
                 self.assertEqual(
@@ -400,7 +401,7 @@ class ActivityStoreSchemaTests(unittest.TestCase):
             connection.close()
 
             with ActivityStore(path) as reopened:
-                self.assertEqual(reopened.schema_version, 5)
+                self.assertEqual(reopened.schema_version, 6)
                 state = reopened.quota_states()[0]
                 history = reopened.quota_snapshots(state.record_id)
                 self.assertEqual(state.source_id, "current.quota")
@@ -429,7 +430,7 @@ class ActivityStoreSchemaTests(unittest.TestCase):
             try:
                 self.assertEqual(
                     connection.execute("PRAGMA user_version").fetchone()[0],
-                    5,
+                    6,
                 )
                 main_columns = tuple(
                     row[1]
@@ -469,7 +470,7 @@ class ActivityStoreSchemaTests(unittest.TestCase):
                 connection.close()
 
             with ActivityStore(path) as reopened:
-                self.assertEqual(reopened.schema_version, 5)
+                self.assertEqual(reopened.schema_version, 6)
                 self.assertEqual(
                     reopened.snapshot_daily_usage(
                         "2026-07-02", "2026-07-02"
@@ -477,11 +478,43 @@ class ActivityStoreSchemaTests(unittest.TestCase):
                     74_200_000,
                 )
 
+    def test_v5_migration_adds_empty_balance_state_without_changing_existing_facts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "activity.sqlite3"
+            with ActivityStore(path) as store:
+                store.replace_daily_usage("codex", "2026-07-02", [usage()])
+                original = store.snapshot_daily_usage(
+                    "2026-07-02", "2026-07-02"
+                ).rows[0]
+
+            connection = sqlite3.connect(path)
+            before_cursor = connection.execute(
+                "SELECT COALESCE(MAX(change_seq),0) FROM change_log"
+            ).fetchone()[0]
+            connection.execute("DROP TABLE balance_state")
+            connection.execute("PRAGMA user_version=5")
+            connection.commit()
+            connection.close()
+
+            with ActivityStore(path) as reopened:
+                self.assertEqual(reopened.schema_version, 6)
+                self.assertEqual(reopened.balance_states(), [])
+                rows = reopened.snapshot_daily_usage(
+                    "2026-07-02", "2026-07-02"
+                ).rows
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0].revision, original.revision)
+                self.assertEqual(rows[0].total_tokens, original.total_tokens)
+                self.assertEqual(
+                    [row.record_type for row in reopened.changes(before_cursor)],
+                    ["ledger_schema"],
+                )
+
     def test_rejects_database_from_newer_schema_version(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "future.sqlite3"
             connection = sqlite3.connect(path)
-            connection.execute("PRAGMA user_version=6")
+            connection.execute("PRAGMA user_version=7")
             connection.close()
             with self.assertRaisesRegex(RuntimeError, "newer schema version"):
                 ActivityStore(path)

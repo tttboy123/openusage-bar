@@ -1237,8 +1237,11 @@
         "billing",
         "operational"
       ],
-      "regions": [],
-      "supports_accounts": false,
+      "regions": [
+        "cn",
+        "international"
+      ],
+      "supports_accounts": true,
       "capabilities": {
         "quota_windows": {
           "state": "unknown",
@@ -1249,12 +1252,33 @@
         "reset_timestamps": "unknown",
         "billing": "supported",
         "credits": "unknown",
-        "balance": "unknown",
+        "balance": "supported",
         "cost": "unknown",
         "rate_limits": "unknown",
         "service_status": "unknown"
       },
       "sources": [
+        {
+          "source_id": "moonshot_official_api",
+          "kind": "official_api",
+          "timeout_seconds": 15,
+          "freshness_seconds": 300,
+          "credential_type": "api_key",
+          "credential_scope": "moonshot_api_key",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "provider_official",
+          "fact_families": [
+            "api_balance",
+            "detection"
+          ],
+          "authority": "provider_official",
+          "account_scope": "configured_account",
+          "model_scope": "aggregate",
+          "verification": "fixture"
+        },
         {
           "source_id": "openusage",
           "kind": "openusage",

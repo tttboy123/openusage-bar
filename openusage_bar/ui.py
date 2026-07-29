@@ -12,6 +12,7 @@ from .config import (
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
+    MoonshotConfig,
     OpenAIOrganizationConfig,
     ProviderConfigStore,
     StepPlanConfig,
@@ -24,6 +25,7 @@ from .generic import GenericHTTPSAdapter
 from .keychain import MacOSKeychain
 from .kiro import KiroQuotaAdapter
 from .minimax import MiniMaxCodingPlanAdapter, minimax_endpoints_for_site
+from .moonshot import MoonshotBalanceAdapter
 from .models import Category, Overview, ProviderCard, ProviderStatus, canonical_category
 from .network import BoundedHTTPClient, UnsafeEndpoint, resolve_public_addresses, validate_endpoint
 from .openusage_adapter import OpenUsageAdapter
@@ -339,6 +341,13 @@ class ProviderController:
             return OperationResult(False, "MiniMax key is required")
         return self._save(config, secret.strip())
 
+    def add_moonshot(
+        self, config: MoonshotConfig, secret: str
+    ) -> OperationResult:
+        if not secret.strip():
+            return OperationResult(False, "Moonshot API key is required")
+        return self._save(config, secret.strip())
+
     def add_openai(
         self, config: OpenAIOrganizationConfig, secret: str
     ) -> OperationResult:
@@ -368,6 +377,8 @@ class ProviderController:
         """
         if isinstance(config, MiniMaxConfig):
             return self.add_minimax(config, secret)
+        if isinstance(config, MoonshotConfig):
+            return self.add_moonshot(config, secret)
         if isinstance(config, StepPlanConfig):
             return self.add_step_plan(config, secret, session_cookie)
         if isinstance(config, OpenAIOrganizationConfig):
@@ -698,6 +709,12 @@ def _build_aggregator(store: ProviderConfigStore, keychain: MacOSKeychain) -> Ag
                     config, keychain, minimax_client, clock
                 )
             )
+        elif isinstance(config, MoonshotConfig):
+            adapters.append(MoonshotBalanceAdapter(
+                config, keychain,
+                BoundedHTTPClient(allowed_redirect_hosts=set()),
+                 clock,
+             ))
         elif isinstance(config, OpenAIOrganizationConfig):
             adapters.append(OpenAIOrganizationCardAdapter(config, keychain, clock))
         elif isinstance(config, StepPlanConfig):

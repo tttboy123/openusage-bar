@@ -384,7 +384,12 @@ class ProviderCatalogTests(unittest.TestCase):
                     "supported" if family.family_id in credit_providers else "unknown"
                 )
                 self.assertEqual(capabilities.credits, credit_state)
-                self.assertEqual(capabilities.balance, credit_state)
+                self.assertEqual(
+                    capabilities.balance,
+                    "supported"
+                    if family.family_id == "moonshot"
+                    else credit_state,
+                )
                 self.assertEqual(
                     capabilities.cost,
                     "supported" if family.family_id == "openai" else "unknown",
@@ -404,6 +409,7 @@ class ProviderCatalogTests(unittest.TestCase):
                 "experimental",
                 "openusage_bar_builtin",
             ),
+            "moonshot_official_api": ("stable", "provider_official"),
             "step_plan_browser_session": ("experimental", "user_session"),
             "step_plan_official_api": ("stable", "provider_official"),
         }
@@ -694,12 +700,15 @@ class ProviderCatalogTests(unittest.TestCase):
                 "minimax_china_billing_web",
                 "openusage",
             ],
+            "moonshot": ["moonshot_official_api", "openusage"],
             "openai": ["openai_admin_api", "openusage"],
             "step_plan": [
                 "step_plan_browser_session", "step_plan_official_api"
             ],
         }
-        for family_id in EXPECTED_UPSTREAM - {"codex", "kiro_cli", "openai"}:
+        for family_id in EXPECTED_UPSTREAM - {
+            "codex", "kiro_cli", "moonshot", "openai"
+        }:
             special[family_id] = ["openusage"]
         expected_scopes = {
             ("openai", "openai_admin_api"): "openai_admin_api_key",
@@ -707,6 +716,7 @@ class ProviderCatalogTests(unittest.TestCase):
             ("kiro_cli", "kiro_codewhisperer_api"): "kiro",
             ("minimax", "minimax_builtin_api"): "minimax",
             ("minimax", "minimax_china_billing_web"): "minimax",
+            ("moonshot", "moonshot_official_api"): "moonshot_api_key",
             ("step_plan", "step_plan_browser_session"): "step_plan_session",
             ("step_plan", "step_plan_official_api"): "step_plan_api_key",
         }
@@ -986,6 +996,7 @@ class ProviderCatalogTests(unittest.TestCase):
                 "experimental",
                 "openusage_bar_builtin",
             ),
+            "moonshot_official_api": ("stable", "provider_official"),
             "step_plan_browser_session": ("experimental", "user_session"),
             "step_plan_official_api": ("stable", "provider_official"),
         }
@@ -1017,7 +1028,9 @@ class ProviderCatalogTests(unittest.TestCase):
                     else "unknown"
                 ),
                 "credits": credit_state,
-                "balance": credit_state,
+                "balance": (
+                    "supported" if family["id"] == "moonshot" else credit_state
+                ),
                 "cost": "supported" if family["id"] == "openai" else "unknown",
                 "rate_limits": "unknown",
                 "service_status": "unknown",
