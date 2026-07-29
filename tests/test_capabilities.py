@@ -207,6 +207,7 @@ class ProviderCapabilityTests(unittest.TestCase):
     def test_openai_declares_official_organization_usage_and_costs(self):
         descriptor = registry.require("openai")
 
+        self.assertTrue(descriptor.supports_accounts)
         self.assertEqual(
             descriptor.metric_families,
             frozenset({MetricFamily.TOKEN_ACTIVITY, MetricFamily.BILLING}),

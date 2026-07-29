@@ -730,7 +730,7 @@ public enum GeneratedProviderCatalog {
             category: .api,
             metricFamilies: [.billing, .tokenActivity],
             regions: [],
-            supportsAccounts: false,
+            supportsAccounts: true,
             credentialSourceTypes: [.apiKey, .none],
             acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openai_admin_api", sourceKind: "official_api"), ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(

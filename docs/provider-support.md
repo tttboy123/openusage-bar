@@ -30,14 +30,18 @@ These adapters fill gaps that OpenUsage does not currently expose:
 
 Connection-specific notes:
 
-- **OpenAI Organization** accepts one canonical connection in this release. It
-  uses an Admin API key for official daily usage and billed organization cost;
-  it does not expose ChatGPT or Codex subscription quota. Credentials stay in
-  Keychain and failures preserve the last-good ledger. Token activity comes
-  from official daily completions usage; billed cost comes from the official
-  organization costs endpoint. Cached input is treated as part of input tokens
-  and is not added twice. Usage and cost health are tracked as separate
-  sources, and rows are committed only after the required cursor pages validate.
+- **OpenAI Organization** supports multiple connections when each organization
+  uses a unique Provider ID and opaque account scope. It uses an Admin API key
+  for official daily usage and billed organization cost; it does not expose
+  ChatGPT or Codex subscription quota. Credentials stay in Keychain and
+  failures preserve the last-good ledger. Token activity comes from official
+  daily completions usage; billed cost comes from the official organization
+  costs endpoint. Per the
+  [OpenAI Usage API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage),
+  input includes cache reads and cache writes. OpenUsage Bar records both cache
+  components separately but does not add them to Total a second time. Usage and
+  cost health are tracked as separate sources, and rows are committed only after
+  every required cursor page validates.
 - **StepFun Step Plan** supports China and International accounts, but a web
   session is never retried against the other region. Follow the
   [StepFun quick start](stepfun-quick-start.md) for the safe connection flow.
