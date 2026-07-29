@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import json
 import os
-import selectors
-import signal
-import subprocess
 import tempfile
 import threading
-import time
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
-from .keychain import KeychainError
+from .keychain import (
+    BoundedMacOSKeychain,
+    BoundedReadOnlyKeychain,
+    KeychainError,
+)
 from .models import Category, Overview, ProviderCard, ProviderStatus, canonical_category
 from .performance_timing import (
     RefreshTimingRecorder,
@@ -23,119 +23,6 @@ from .performance_timing import (
 
 
 DEFAULT_CACHE_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "cards.json"
-KEYCHAIN_SERVICE = "com.lune.openusage-menubar"
-MAX_KEYCHAIN_VALUE_BYTES = 64 * 1024
-
-
-class BoundedReadOnlyKeychain:
-    """Read headless credentials without an unbounded Security-framework prompt."""
-
-    def __init__(
-        self,
-        timeout_seconds: int = 5,
-        security_executable: str = "/usr/bin/security",
-    ) -> None:
-        if (
-            isinstance(timeout_seconds, bool)
-            or not isinstance(timeout_seconds, int)
-            or not 1 <= timeout_seconds <= 30
-        ):
-            raise ValueError("Keychain timeout must be between 1 and 30 seconds")
-        if not security_executable.startswith("/") or "\x00" in security_executable:
-            raise ValueError("Security executable must be an absolute path")
-        self.timeout_seconds = timeout_seconds
-        self.security_executable = security_executable
-        self.last_read_bytes = 0
-        self.last_process_alive = False
-
-    @staticmethod
-    def _kill_and_reap(process: subprocess.Popen[bytes]) -> None:
-        if process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                try:
-                    process.kill()
-                except OSError:
-                    pass
-        try:
-            process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            try:
-                process.kill()
-            except OSError:
-                pass
-            process.wait()
-
-    def get(self, account: str) -> str | None:
-        if not account or any(character in account for character in "\x00\r\n"):
-            return None
-        environment = {"PATH": "/usr/bin:/bin"}
-        for name in ("HOME", "USER", "LOGNAME", "TMPDIR"):
-            value = os.environ.get(name)
-            if value and "\x00" not in value:
-                environment[name] = value
-        process: subprocess.Popen[bytes] | None = None
-        output = bytearray()
-        try:
-            process = subprocess.Popen(
-                [
-                    self.security_executable, "find-generic-password",
-                    "-s", KEYCHAIN_SERVICE, "-a", account, "-w",
-                ],
-                shell=False,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                env=environment,
-                start_new_session=True,
-            )
-            assert process.stdout is not None
-            deadline = time.monotonic() + self.timeout_seconds
-            with selectors.DefaultSelector() as selector:
-                selector.register(process.stdout, selectors.EVENT_READ)
-                while True:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0 or not selector.select(remaining):
-                        self._kill_and_reap(process)
-                        return None
-                    chunk = os.read(
-                        process.stdout.fileno(),
-                        min(8192, MAX_KEYCHAIN_VALUE_BYTES + 1 - len(output)),
-                    )
-                    if not chunk:
-                        break
-                    output.extend(chunk)
-                    self.last_read_bytes = len(output)
-                    if len(output) > MAX_KEYCHAIN_VALUE_BYTES:
-                        self._kill_and_reap(process)
-                        return None
-            remaining = max(0.0, deadline - time.monotonic())
-            try:
-                returncode = process.wait(timeout=remaining)
-            except subprocess.TimeoutExpired:
-                self._kill_and_reap(process)
-                return None
-        except (OSError, ValueError):
-            if process is not None:
-                self._kill_and_reap(process)
-            return None
-        finally:
-            self.last_process_alive = bool(process is not None and process.poll() is None)
-            if process is not None and process.stdout is not None:
-                process.stdout.close()
-        if returncode != 0:
-            return None
-        try:
-            value = bytes(output).decode("utf-8").rstrip("\r\n")
-        except UnicodeDecodeError:
-            return None
-        return value or None
-
-    def set(self, _account: str, _secret: str) -> None:
-        raise KeychainError("Headless Keychain access is read-only")
-
-
 class Adapter(Protocol):
     def fetch(self) -> Overview | ProviderCard: ...
 
@@ -418,7 +305,7 @@ def build_headless_refresher(
     from .providers.builtins import default_registry
 
     clock = lambda: datetime.now(timezone.utc)
-    keychain = BoundedReadOnlyKeychain()
+    keychain = BoundedMacOSKeychain()
     config_store = ProviderConfigStore()
     try:
         configs = config_store.load()

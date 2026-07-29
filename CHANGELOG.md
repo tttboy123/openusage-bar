@@ -34,6 +34,10 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Headless Step Plan refreshes now use a bounded, killable read-only Keychain
+  boundary instead of waiting indefinitely for an interactive Security prompt.
+  The private write helper accepts only Step Plan session updates over stdin
+  and cannot read or return credentials.
 - Codex local Token history no longer double-counts unchanged cumulative
   events, and parser-contract changes trigger one bounded historical backfill.
 - MiniMax regional sources, Cursor fallback, Kiro quota, and OpenAI

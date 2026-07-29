@@ -170,6 +170,18 @@ class AdapterRegistryTests(unittest.TestCase):
             frozenset(),
         )
 
+    def test_step_plan_reuses_the_shared_bounded_read_only_keychain(self):
+        keychain = BoundedReadOnlyKeychain()
+        binding = next(
+            item
+            for item in default_registry(
+                clock=lambda: NOW, keychain=keychain
+            ).build([StepPlanConfig("step-work", "Step Plan")])
+            if item.provider_id == "step-work"
+        )
+
+        self.assertIs(binding.quota_sources[0].keychain, keychain)
+
     def test_config_order_does_not_change_stable_bindings(self):
         forward = self.registry().build(self.configs())
         reverse = self.registry().build(reversed(self.configs()))

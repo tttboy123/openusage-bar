@@ -23,6 +23,10 @@ def main(argv: list[str] | None = None) -> int:
         from openusage_bar.provider_commands import run_provider_mutation
 
         return run_provider_mutation(sys.stdin, sys.stdout)
+    if arguments == ["__keychain-write"]:
+        from openusage_bar.keychain import run_native_keychain_write
+
+        return run_native_keychain_write(sys.stdin.buffer, sys.stdout.buffer)
     if arguments[0] not in COLLECTOR_COMMANDS:
         return 2
     from openusage_bar.collector_cli import main as collector_main

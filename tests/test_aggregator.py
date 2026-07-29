@@ -75,7 +75,7 @@ class BoundedReadOnlyKeychainTests(unittest.TestCase):
                 timeout_seconds=2, security_executable=str(helper)
             )
             with patch(
-                "openusage_bar.aggregator.subprocess.Popen", wraps=subprocess.Popen
+                "openusage_bar.keychain.subprocess.Popen", wraps=subprocess.Popen
             ) as popen:
                 self.assertEqual(keychain.get("minimax-main"), "value")
         command = popen.call_args.args[0]
@@ -187,10 +187,11 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
             ),),
         )
 
-    def test_daily_feed_uses_shared_read_only_keychain_and_no_redirect_client(self):
+    def test_daily_feed_uses_shared_bounded_keychain_and_no_redirect_client(self):
         from openusage_bar.aggregator import build_headless_refresher
         from openusage_bar.config import DailyUsageFeedConfig
         from openusage_bar.daily_feed import DailyUsageFeedCardAdapter
+        from openusage_bar.keychain import BoundedMacOSKeychain
 
         configured = DailyUsageFeedConfig(
             provider_id="glm-work", name="GLM Work", family_id="zai",
@@ -212,7 +213,7 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         )
         importer = refresher.collector.official_importers["glm-work"]
         self.assertIs(importer.keychain, card_adapter.keychain)
-        self.assertIsInstance(importer.keychain, BoundedReadOnlyKeychain)
+        self.assertIsInstance(importer.keychain, BoundedMacOSKeychain)
         self.assertEqual(importer.client.allowed_redirect_hosts, frozenset())
 
     def test_codex_local_sessions_are_primary_for_eager_collection(self):
@@ -252,9 +253,10 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         self.assertIs(importer.client, card_adapter.client)
         self.assertEqual(importer.client.allowed_redirect_hosts, frozenset())
 
-    def test_openai_organization_uses_read_only_keychain_and_no_redirect_client(self):
+    def test_openai_organization_uses_bounded_keychain_and_no_redirect_client(self):
         from openusage_bar.aggregator import build_headless_refresher
         from openusage_bar.config import OpenAIOrganizationConfig
+        from openusage_bar.keychain import BoundedMacOSKeychain
         from openusage_bar.openai_organization import OpenAIOrganizationCardAdapter
 
         with patch(
@@ -269,22 +271,19 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
             if isinstance(adapter, OpenAIOrganizationCardAdapter)
         )
         importer = refresher.collector.official_importers["openai"]
-        self.assertIsInstance(card_adapter.keychain, BoundedReadOnlyKeychain)
+        self.assertIsInstance(card_adapter.keychain, BoundedMacOSKeychain)
         self.assertIs(importer.keychain, card_adapter.keychain)
         self.assertEqual(importer.client.allowed_redirect_hosts, frozenset())
 
-    def test_step_plan_uses_dedicated_writable_keychain(self):
+    def test_headless_sources_share_bounded_read_write_keychain(self):
         from openusage_bar.aggregator import build_headless_refresher
         from openusage_bar.config import StepPlanConfig
+        from openusage_bar.keychain import BoundedMacOSKeychain
         from openusage_bar.step_plan import StepPlanAdapter
 
-        writable = Mock()
-        with (
-            patch(
-                "openusage_bar.config.ProviderConfigStore.load",
-                return_value=[StepPlanConfig("step-plan-main", "Step Plan")],
-            ),
-            patch("openusage_bar.keychain.MacOSKeychain", return_value=writable) as factory,
+        with patch(
+            "openusage_bar.config.ProviderConfigStore.load",
+            return_value=[StepPlanConfig("step-plan-main", "Step Plan")],
         ):
             refresher = build_headless_refresher(Mock())
 
@@ -293,32 +292,7 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
             for adapter in refresher.aggregator.adapters
             if isinstance(adapter, StepPlanAdapter)
         )
-        factory.assert_called_once_with()
-        self.assertIs(step_plan.keychain, writable)
-
-    def test_step_plan_falls_back_to_read_only_keychain_when_native_init_fails(self):
-        from openusage_bar.aggregator import build_headless_refresher
-        from openusage_bar.config import StepPlanConfig
-        from openusage_bar.step_plan import StepPlanAdapter
-
-        with (
-            patch(
-                "openusage_bar.config.ProviderConfigStore.load",
-                return_value=[StepPlanConfig("step-plan-main", "Step Plan")],
-            ),
-            patch(
-                "openusage_bar.keychain.MacOSKeychain",
-                side_effect=RuntimeError("Security unavailable"),
-            ),
-        ):
-            refresher = build_headless_refresher(Mock())
-
-        step_plan = next(
-            adapter
-            for adapter in refresher.aggregator.adapters
-            if isinstance(adapter, StepPlanAdapter)
-        )
-        self.assertIsInstance(step_plan.keychain, BoundedReadOnlyKeychain)
+        self.assertIsInstance(step_plan.keychain, BoundedMacOSKeychain)
 
 
 class AggregatorTests(unittest.TestCase):

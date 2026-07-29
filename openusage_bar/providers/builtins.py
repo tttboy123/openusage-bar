@@ -66,7 +66,6 @@ def default_registry(
     daily_feed_client = BoundedHTTPClient(allowed_redirect_hosts=set())
     openai_client = BoundedHTTPClient(allowed_redirect_hosts=set())
     moonshot_client = BoundedHTTPClient(allowed_redirect_hosts=set())
-    step_plan_keychain: object | None = None
 
     registry.register_global(lambda: ProviderBinding(
         provider_id="openusage", family_id="openusage",
@@ -179,15 +178,6 @@ def default_registry(
         )
 
     def step_plan(config: StepPlanConfig) -> ProviderBinding:
-        nonlocal step_plan_keychain
-        if step_plan_keychain is None:
-            try:
-                # Resolve lazily so unavailable Security/PyObjC support keeps the
-                # established read-only fallback and remains test-injectable.
-                from ..keychain import MacOSKeychain
-                step_plan_keychain = MacOSKeychain()
-            except (ImportError, OSError, RuntimeError):
-                step_plan_keychain = keychain
         endpoints = endpoints_for_site(config.site)
         client = BoundedHTTPClient(
             allowed_reserved_hosts={endpoints.api_host, endpoints.platform_host},
@@ -196,7 +186,7 @@ def default_registry(
         return ProviderBinding(
             provider_id=config.provider_id, family_id="step_plan",
             quota_sources=(_quota_source(StepPlanAdapter(
-                config, step_plan_keychain, client, clock
+                config, keychain, client, clock
             ), "step_plan.quota", 20),),
         )
 

@@ -59,6 +59,7 @@ def run_bounded(
     encoding: str | None = None,
     errors: str | None = None,
     env: Mapping[str, str] | None = None,
+    input_data: bytes | None = None,
 ) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
     """Run a one-shot argv in its own process group with bounded time/output.
 
@@ -76,11 +77,15 @@ def run_bounded(
         raise ValueError("stderr must be PIPE or DEVNULL")
     if stdout_limit < 0 or stderr_limit < 0:
         raise ValueError("stream limits must be nonnegative")
+    if input_data is not None and not isinstance(input_data, bytes):
+        raise TypeError("input_data must be bytes")
+    if input_data is not None and stdin != subprocess.DEVNULL:
+        raise ValueError("input_data owns the child stdin pipe")
 
     process = subprocess.Popen(
         list(args),
         shell=False,
-        stdin=stdin,
+        stdin=subprocess.PIPE if input_data is not None else stdin,
         stdout=stdout,
         stderr=stderr,
         env=None if env is None else dict(env),
@@ -108,6 +113,32 @@ def run_bounded(
             )
             readers.append(reader)
             reader.start()
+    input_writer: threading.Thread | None = None
+    if input_data is not None:
+        assert process.stdin is not None
+
+        def write_input() -> None:
+            try:
+                view = memoryview(input_data)
+                while view:
+                    written = os.write(process.stdin.fileno(), view)
+                    if written <= 0:
+                        raise OSError("child stdin is unavailable")
+                    view = view[written:]
+            except (BrokenPipeError, OSError):
+                pass
+            finally:
+                try:
+                    process.stdin.close()
+                except OSError:
+                    pass
+
+        input_writer = threading.Thread(
+            target=write_input,
+            name="bounded-process-input-writer",
+            daemon=True,
+        )
+        input_writer.start()
 
     def terminate_group() -> None:
         if process_group_id != os.getpgrp():
@@ -142,8 +173,10 @@ def run_bounded(
                 failure_code = "reader_failed"
                 break
             process_exited = direct_child_exited()
-            readers_exited = all(not reader.is_alive() for reader in readers)
-            if process_exited and readers_exited:
+            workers_exited = all(not reader.is_alive() for reader in readers) and (
+                input_writer is None or not input_writer.is_alive()
+            )
+            if process_exited and workers_exited:
                 break
             if time.monotonic() >= deadline:
                 failure_code = "timeout"
@@ -159,7 +192,7 @@ def run_bounded(
         except subprocess.TimeoutExpired:
             terminate_group()
             process.wait()
-        for stream in (process.stdout, process.stderr):
+        for stream in (process.stdin, process.stdout, process.stderr):
             if stream is not None:
                 try:
                     stream.close()
@@ -167,6 +200,8 @@ def run_bounded(
                     pass
         for reader in readers:
             reader.join(timeout=1)
+        if input_writer is not None:
+            input_writer.join(timeout=1)
 
     if failure_code is not None:
         raise BoundedProcessError(failure_code)

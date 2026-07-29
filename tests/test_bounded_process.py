@@ -124,6 +124,33 @@ class BoundedProcessTests(unittest.TestCase):
                 unrelated.kill()
                 unrelated.wait()
 
+    def test_private_input_is_delivered_without_appearing_in_argv(self):
+        from openusage_bar.bounded_process import run_bounded
+        with tempfile.TemporaryDirectory() as directory:
+            helper = self.helper(
+                Path(directory),
+                "import json,sys\n"
+                "payload=sys.stdin.buffer.read()\n"
+                "sys.stdout.write(json.dumps({"
+                "'argv':sys.argv[1:],'size':len(payload),'value':payload.decode()"
+                "}))\n",
+            )
+            secret = b"private-session-value"
+
+            result = run_bounded(
+                [str(helper), "keychain-operation"],
+                timeout=2,
+                input_data=secret,
+                text=True,
+                encoding="utf-8",
+            )
+
+        payload = __import__("json").loads(result.stdout)
+        self.assertEqual(payload["argv"], ["keychain-operation"])
+        self.assertEqual(payload["size"], len(secret))
+        self.assertEqual(payload["value"], secret.decode())
+        self.assertNotIn(secret.decode(), " ".join(result.args))
+
     def test_production_callers_do_not_use_unbounded_run(self):
         root=Path(__file__).resolve().parents[1]/"openusage_bar"
         for name in ("kiro.py","collector_cli.py","openusage_adapter.py","daily_history.py"):
