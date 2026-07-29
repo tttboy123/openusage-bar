@@ -969,6 +969,78 @@ class ActivityCollectorTests(unittest.TestCase):
         openusage.fetch.assert_not_called()
         official.fetch_costs.assert_not_called()
 
+    def test_changed_usage_contract_forces_one_year_reimport(self):
+        store = Mock()
+        store.has_source_success.return_value = True
+        store.source_contract_revision.return_value = 1
+        official = Mock()
+        official.account_ref = ""
+        official.usage_source_id = "codex.local_sessions"
+        official.cost_source_id = None
+        official.history_contract_revision = 2
+        official.fetch_usage.return_value = UsageImportSuccess(
+            date(2025, 7, 15),
+            date(2026, 7, 14),
+            (model_row(day="2026-07-14"),),
+        )
+
+        ActivityCollector(
+            store,
+            Mock(),
+            official_importers={"codex": official},
+            clock=lambda: NOW,
+        ).refresh(Overview([]))
+
+        official.fetch_usage.assert_called_once_with(
+            date(2025, 7, 15), date(2026, 7, 14)
+        )
+        store.commit_usage_import_success.assert_called_once_with(
+            "codex",
+            "codex.local_sessions",
+            date(2025, 7, 15),
+            date(2026, 7, 14),
+            official.fetch_usage.return_value.rows,
+            NOW,
+            account_ref="",
+            contract_revision=2,
+        )
+
+    def test_current_usage_contract_keeps_seven_day_incremental_window(self):
+        store = Mock()
+        store.has_source_success.return_value = True
+        store.source_contract_revision.return_value = 2
+        official = Mock()
+        official.account_ref = ""
+        official.usage_source_id = "codex.local_sessions"
+        official.cost_source_id = None
+        official.history_contract_revision = 2
+        official.fetch_usage.return_value = UsageImportSuccess(
+            date(2026, 7, 8),
+            date(2026, 7, 14),
+            (model_row(day="2026-07-14"),),
+        )
+
+        ActivityCollector(
+            store,
+            Mock(),
+            official_importers={"codex": official},
+            clock=lambda: NOW,
+        ).refresh(Overview([]))
+
+        official.fetch_usage.assert_called_once_with(
+            date(2026, 7, 8), date(2026, 7, 14)
+        )
+        store.commit_usage_import_success.assert_called_once_with(
+            "codex",
+            "codex.local_sessions",
+            date(2026, 7, 8),
+            date(2026, 7, 14),
+            official.fetch_usage.return_value.rows,
+            NOW,
+            account_ref="",
+            contract_revision=2,
+        )
+
     def test_official_importer_rejects_rows_from_another_account_scope(self):
         store = Mock()
         store.has_source_success.return_value = False

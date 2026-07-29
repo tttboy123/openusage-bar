@@ -268,6 +268,34 @@ def _token_reconciliation(
     }
 
 
+def _account_total_comparison(source_id: str) -> dict[str, Any]:
+    limitations = [
+        "deleted_or_unavailable_sessions",
+        "other_devices",
+        "web_or_mobile",
+    ]
+    if source_id == "codex.local_sessions":
+        return {
+            "status": "not_comparable",
+            "coverageScope": "local_device_sessions",
+            "reason": "local_sessions_are_partial_account_coverage",
+            "limitations": limitations,
+        }
+    if source_id == "openusage.daily":
+        return {
+            "status": "not_comparable",
+            "coverageScope": "local_collector",
+            "reason": "local_collector_is_not_account_total",
+            "limitations": limitations,
+        }
+    return {
+        "status": "unknown",
+        "coverageScope": "unknown",
+        "reason": "account_scope_not_declared",
+        "limitations": [],
+    }
+
+
 def _capability_declarations(payload: dict[str, Any]) -> list[dict[str, Any]]:
     declarations: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -556,6 +584,7 @@ def build_reconciliation_diagnostics(
         cache_creation_tokens = _integer(
             item.get("cacheCreationTokens"), "cache creation tokens"
         )
+        source_id = _identifier(item.get("sourceId"), "activity sourceId")
         covered = coverage_by_scope[coverage_key]
         daily_usage.append({
             "day": day,
@@ -569,7 +598,7 @@ def build_reconciliation_diagnostics(
             "cacheCreationTokens": cache_creation_tokens,
             "reasoningTokens": reasoning,
             "tokenCountingConvention": convention,
-            "sourceId": _identifier(item.get("sourceId"), "activity sourceId"),
+            "sourceId": source_id,
             "quality": _identifier(item.get("quality"), "activity quality"),
             "coverage": "covered" if covered else "missing",
             "importedAt": _timestamp(item.get("importedAt"), "activity importedAt"),
@@ -585,6 +614,7 @@ def build_reconciliation_diagnostics(
                 cache_creation_tokens=cache_creation_tokens,
                 reasoning_tokens=reasoning,
             ),
+            "accountTotalComparison": _account_total_comparison(source_id),
         })
     daily_usage.sort(key=lambda item: (
         item["day"], item["providerId"], item["accountRef"] or "",
@@ -746,6 +776,9 @@ def build_reconciliation_diagnostics(
             "qualityCounts": _counted([item["quality"] for item in daily_usage]),
             "reconciliationStatusCounts": _counted([
                 item["reconciliation"]["status"] for item in daily_usage
+            ]),
+            "accountTotalComparisonStatusCounts": _counted([
+                item["accountTotalComparison"]["status"] for item in daily_usage
             ]),
             "sourceCount": len(source_states),
             "sourceErrorCodes": _counted(source_errors),

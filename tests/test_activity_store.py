@@ -758,6 +758,11 @@ class AtomicImportCommitTests(unittest.TestCase):
         self.store.close()
 
     def test_usage_and_cost_success_commit_coverage_and_health_together(self):
+        self.assertIsNone(
+            self.store.source_contract_revision(
+                "openai", "openai.organization.usage"
+            )
+        )
         self.assertTrue(
             self.store.commit_usage_import_success(
                 "openai",
@@ -766,6 +771,7 @@ class AtomicImportCommitTests(unittest.TestCase):
                 self.until,
                 [usage(provider_id="openai")],
                 self.attempted,
+                contract_revision=2,
             )
         )
         self.assertTrue(
@@ -781,6 +787,12 @@ class AtomicImportCommitTests(unittest.TestCase):
 
         self.assertTrue(self.store.has_source_success("openai", "openai.organization.usage"))
         self.assertTrue(self.store.has_source_success("openai", "openai.organization.costs"))
+        self.assertEqual(
+            self.store.source_contract_revision(
+                "openai", "openai.organization.usage"
+            ),
+            2,
+        )
         self.assertTrue(self.store.has_cost_history("openai"))
         self.assertEqual(
             {status.source_id: status.state for status in self.store.source_statuses()},
@@ -805,12 +817,32 @@ class AtomicImportCommitTests(unittest.TestCase):
                     self.until,
                     [usage(provider_id="openai")],
                     self.attempted,
+                    contract_revision=2,
                 )
 
         self.assertEqual(
             self.store.snapshot_daily_usage("2026-07-01", "2026-07-03"), before
         )
         self.assertEqual(self.store.source_statuses(), [])
+        self.assertIsNone(
+            self.store.source_contract_revision(
+                "openai", "openai.organization.usage"
+            )
+        )
+
+    def test_usage_contract_revision_rejects_invalid_values(self):
+        for revision in (True, 0, -1, 2_147_483_648):
+            with self.subTest(revision=revision):
+                with self.assertRaises(ValueError):
+                    self.store.commit_usage_import_success(
+                        "openai",
+                        "openai.organization.usage",
+                        self.since,
+                        self.until,
+                        [usage(provider_id="openai")],
+                        self.attempted,
+                        contract_revision=revision,
+                    )
 
     def test_older_success_cannot_overwrite_a_newer_attempt(self):
         newer = datetime.fromisoformat("2026-07-14T03:00:00+00:00")

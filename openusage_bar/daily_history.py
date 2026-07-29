@@ -47,6 +47,7 @@ MAX_DAILY_DAYS = 5000
 MAX_DAILY_MODELS_PER_DAY = 4096
 MAX_DAILY_FIELDS = 64
 MAX_DAILY_LABEL_LENGTH = 4096
+MAX_HISTORY_CONTRACT_REVISION = 2_147_483_647
 DAILY_SOURCE_ID = DAILY_ACTIVITY_SOURCE_ID
 _AUTHORITATIVE_QUALITIES = frozenset({"direct", "authoritative"})
 OPENUSAGE_CATALOG_PROVIDER_ID = "openusage_catalog"
@@ -490,6 +491,21 @@ class ActivityCollector:
         return fallback
 
     @staticmethod
+    def _history_contract_revision(importer: Any) -> int | None:
+        missing = object()
+        candidate = vars(importer).get("history_contract_revision", missing)
+        if candidate is missing:
+            candidate = getattr(
+                type(importer), "history_contract_revision", missing
+            )
+        if (
+            type(candidate) is int
+            and 1 <= candidate <= MAX_HISTORY_CONTRACT_REVISION
+        ):
+            return candidate
+        return None
+
+    @staticmethod
     def _account_ref(importer: Any) -> str:
         missing = object()
         candidate = vars(importer).get("account_ref", missing)
@@ -870,6 +886,20 @@ class ActivityCollector:
                         )
                     except Exception:
                         had_official_usage = True
+                    history_contract_revision = (
+                        self._history_contract_revision(official)
+                    )
+                    if history_contract_revision is not None:
+                        try:
+                            stored_contract_revision = (
+                                self.store.source_contract_revision(
+                                    provider_id, usage_source_id
+                                )
+                            )
+                        except Exception:
+                            stored_contract_revision = None
+                        if stored_contract_revision != history_contract_revision:
+                            had_official_usage = False
                     usage_since = today - timedelta(
                         days=6 if had_official_usage else 364
                     )
@@ -893,11 +923,18 @@ class ActivityCollector:
                             )
                         else:
                             try:
+                                commit_options: dict[str, Any] = {
+                                    "account_ref": account_ref,
+                                }
+                                if history_contract_revision is not None:
+                                    commit_options["contract_revision"] = (
+                                        history_contract_revision
+                                    )
                                 self.store.commit_usage_import_success(
                                     provider_id, usage_source_id,
                                     official_usage.since, official_usage.until,
                                     official_usage.rows, attempted_at,
-                                    account_ref=account_ref,
+                                    **commit_options,
                                 )
                                 use_openusage_fallback = False
                             except Exception:

@@ -21,7 +21,7 @@ MAX_SESSION_FILES = 20_000
 MAX_RELEVANT_LINE_BYTES = 1024 * 1024
 MAX_TOTAL_SESSION_BYTES = 16 * 1024 * 1024 * 1024
 TAIL_BYTES = 256
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
 MAX_CACHE_BYTES = 64 * 1024 * 1024
 MAX_CACHE_FACTS = 200_000
 MAX_CACHE_FACTS_PER_SESSION = 4_096
@@ -64,6 +64,7 @@ class CodexLocalDailyImporter:
     """Incrementally aggregate public Token facts from local Codex JSONL sessions."""
 
     usage_source_id = "codex.local_sessions"
+    history_contract_revision = 2
     cost_source_id = None
     account_ref = ""
     eager_local = True
@@ -387,6 +388,12 @@ class CodexLocalDailyImporter:
         raw_total = info.get("total_token_usage")
         cumulative = cls._usage_object(raw_total) if raw_total is not None else previous
         if raw_last is not None:
+            if (
+                raw_total is not None
+                and previous is not None
+                and cumulative == previous
+            ):
+                return None, cumulative
             return cls._usage_object(raw_last), cumulative
         if cumulative is None:
             return None, previous

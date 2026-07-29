@@ -287,8 +287,10 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 
 **验收：**
 
-- [ ] 给定差异日期，可以解释差值来自统计口径、覆盖缺口或实现错误。
-- [ ] 本地可覆盖范围内不存在重复 Session 或重复 Cache。
+- [x] 首个实现切片已能把差值拆成实现错误与覆盖口径：重复且未变化的 Codex 累计事件不再重复计入；解析契约升级会原子记录版本并触发一次 365 天历史回填，成功后恢复 7 天增量窗口。
+- [x] 诊断 v2 对 `codex.local_sessions` 标记 `local_device_sessions`，对 `openusage.daily` 标记 `local_collector`，明确列出其他设备、Web/移动端和已删除或不可访问 Session 的覆盖缺口，禁止与账号总量直接比较。
+- [ ] 给定外部账号页面契约与同日脱敏样本后，完成账号级差值的端到端证明。
+- [x] 当前真实本地审计未发现跨 Session 重复；可证明的 7 月 17 日重复累计事件为 4,201,500 Token，修复后本地总量从 614,311,133 降为 610,109,633。Cache 仍按 `input_includes_cache` 口径单列，不再与 Total 重复相加。
 - [ ] 容量窗口与 Token 活动保持独立来源和健康状态。
 
 **验证：** Codex daily/attribution/Fallback 测试、真实脱敏对账报告。

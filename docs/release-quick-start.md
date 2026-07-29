@@ -127,5 +127,8 @@ Review either file before attaching it. V2 preserves source totals, marks
 non-comparable or incomplete rows, separates complete `tokenTotals` from
 partial `observedTokenTotals`, replaces account references with per-export
 pseudonyms, and only reports duplicate candidates backed by duplicate effective
-rows. It cannot observe source-selection history. The full 30-day process and
-the 1.0 release gate are documented in [canary.md](canary.md).
+rows. `accountTotalComparison` also makes local Codex session and OpenUsage
+collector coverage explicitly non-comparable with an account-wide dashboard;
+undeclared source scope stays `unknown`. It cannot observe source-selection
+history. The full 30-day process and the 1.0 release gate are documented in
+[canary.md](canary.md).
