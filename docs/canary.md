@@ -6,6 +6,26 @@ the GitHub canary form. Credentials, Provider responses, prompts, model
 responses, account identity, device serial numbers, and raw logs are never
 requested.
 
+The canary also verifies the
+[Local API v1 compatibility policy](api/compatibility-v1.md); UI text is not an
+automation interface.
+
+## Intake readiness and clock activation
+
+The repository state `intake_ready` means the issue form, privacy rules,
+diagnostic checks, and evidence contract are ready for testers. It does not start the 30-day clock.
+
+Clock activation is a deliberate external coordination step. It occurs only
+after maintainers have accepted five independently qualifying external
+machines covering the required configuration classes and recorded the UTC
+activation timestamp in the tracking issue. A green pull request, a local
+machine, an unreviewed report, or repository status alone cannot activate the
+clock.
+
+This protocol prepares the intake path but does not recruit testers, assert an
+external cohort, or start the public beta. Until a maintainer explicitly
+activates it, the clock state is `not_started`.
+
 ## Required cohort
 
 The gate runs for 30 consecutive calendar days after the fifth qualifying
@@ -55,7 +75,9 @@ Record pass/fail and UTC date for each event:
 5. Run `scripts/rollback_app.sh`, confirm Local API v1 recovers, then reinstall
    the candidate.
 6. Confirm menu-bar, Usage Details, Provider Center, CLI JSON, and Local API
-   describe the same revision and source health.
+   describe the same `dataRevision` and source health. Validate the N-1 reader
+   behavior described in the
+   [Local API v1 compatibility policy](api/compatibility-v1.md).
 7. Record every Unknown, stale, authentication, upgrade, rollback, crash,
    credential, or data-integrity incident. Do not wait until day 30 to report a
    security or data-loss issue.

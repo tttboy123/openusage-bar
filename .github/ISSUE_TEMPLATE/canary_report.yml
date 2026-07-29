@@ -6,6 +6,7 @@ body:
     attributes:
       value: |
         Never include API keys, cookies, account names, prompts, responses, raw Provider payloads, device serial numbers, or unredacted logs. Security issues belong in a private vulnerability report.
+        Follow the [canary protocol](https://github.com/tttboy123/openusage-bar/blob/main/docs/canary.md) and the [Local API v1 compatibility policy](https://github.com/tttboy123/openusage-bar/blob/main/docs/api/compatibility-v1.md).
   - type: input
     id: canary-label
     attributes:
@@ -19,6 +20,14 @@ body:
     attributes:
       label: Product version and build
       placeholder: 0.4.2 (6)
+    validations:
+      required: true
+  - type: input
+    id: previous-version
+    attributes:
+      label: Previous version and build
+      description: Record the published N-1 build used for the upgrade test.
+      placeholder: 0.4.1 (5)
     validations:
       required: true
   - type: input
@@ -56,6 +65,18 @@ body:
       placeholder: 2026-07-18 through 2026-08-16
     validations:
       required: true
+  - type: textarea
+    id: event-dates
+    attributes:
+      label: UTC event dates
+      description: Record only UTC dates and pass/fail results. Do not include hostnames, usernames, account names, or absolute home paths.
+      placeholder: |
+        Install: YYYY-MM-DD — Pass
+        Scheduled collection after restart: YYYY-MM-DD — Pass
+        N-1 upgrade: YYYY-MM-DD — Pass
+        Rollback and reinstall: YYYY-MM-DD — Pass
+    validations:
+      required: true
   - type: checkboxes
     id: checks
     attributes:
@@ -65,15 +86,17 @@ body:
           required: true
         - label: Clean install and first trustworthy fact completed
           required: true
-        - label: Scheduled refresh and collector restart completed
+        - label: Collector scheduled refresh completed
           required: true
-        - label: Mac restart completed
+        - label: Scheduled collection advanced after restart without Refresh
+          required: true
+        - label: Menu-bar item was visibly present and opened its popover
           required: true
         - label: N-1 upgrade completed without data decrease
           required: true
         - label: Rollback drill and candidate reinstall completed
           required: true
-        - label: No credentials, identity, prompts, responses, or raw payloads are included
+        - label: UI, CLI JSON, and Local API agreed at one dataRevision
           required: true
   - type: dropdown
     id: blocking-incident
@@ -85,14 +108,25 @@ body:
     validations:
       required: true
   - type: dropdown
-    id: diagnostics
+    id: diagnostic-scan
     attributes:
-      label: Redacted diagnostics attached
+      label: Privacy scan result for attached diagnostics
       options:
-        - No
-        - Yes - reviewed locally before attachment
+        - No diagnostics attached
+        - Passed locally before attachment
     validations:
       required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety review
+      options:
+        - label: I included no credentials, cookies, account identity, prompts, responses, raw Provider payloads, unredacted logs, or absolute home paths.
+          required: true
+        - label: My random canary label does not identify a person, device, host, or Provider account.
+          required: true
+        - label: I will report any suspected private-data disclosure through a private vulnerability report instead of this public issue.
+          required: true
   - type: textarea
     id: notes
     attributes:
