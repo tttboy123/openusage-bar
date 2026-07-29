@@ -4,6 +4,11 @@ This is a read-only, single-version API for local schedulers and native clients.
 It uses HTTP/1.1 over a user-only Unix domain socket by default. TCP is an
 explicit IPv4-loopback opt-in and always requires bearer authentication.
 
+The published additive/deprecation/breaking rules, N-1 test contract, and
+version upgrade procedure are frozen in the
+[Local API v1 compatibility policy](compatibility-v1.md). Consumers must
+ignore unknown v1 fields and retain the missing-versus-zero semantics below.
+
 ## Response contract
 
 Successful responses are UTF-8 JSON and preserve the canonical `QueryService`
@@ -75,6 +80,16 @@ offline CLI equivalent is:
 ```bash
 openusage-bar snapshot --today 2026-07-18 --format json --offline
 ```
+
+A bounded, standard-library Unix socket example is available from a source
+checkout:
+
+```bash
+python3 examples/local_api_v1_client.py
+```
+
+It prints only an allowlisted snapshot summary and is an integration example,
+not an application-specific SDK.
 
 Incremental consumers must process a complete `/v1/changes` page before
 persisting `nextCursor`, and continue while `hasMore` is true. They must ignore

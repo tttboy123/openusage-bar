@@ -5,6 +5,36 @@ import Testing
 
 @Suite("Bounded local API client")
 struct LocalAPIClientTests {
+    @Test("Current client reads the frozen N-1 snapshot and ignores additive fields")
+    func nMinusOneAndAdditiveCompatibility() async throws {
+        let old = try compatibilityFixture("v0.4.2.snapshot.json")
+        let oldServer = try UnixFixtureServer(json: old)
+        let oldSnapshot = try await LocalAPIClient(socketURL: oldServer.url)
+            .snapshot(localDay: "2026-07-18")
+        #expect(oldSnapshot.dataRevision == 9)
+        #expect(oldSnapshot.todayTokens == 42)
+
+        let current = try compatibilityFixture("current-additive.snapshot.json")
+        let wire = try JSONDecoder().decode(FrozenV042Snapshot.self, from: Data(current.utf8))
+        #expect(wire.schemaVersion == "1.0")
+        #expect(wire.dataRevision == 84)
+        #expect(wire.summary.todayTokens == 1_024)
+
+        let currentServer = try UnixFixtureServer(json: current)
+        let currentSnapshot = try await LocalAPIClient(socketURL: currentServer.url)
+            .snapshot(localDay: "2026-07-29")
+        #expect(currentSnapshot.dataRevision == 84)
+        #expect(currentSnapshot.todayTokens == 1_024)
+    }
+
+    @Test("Default client rejects a body over one MiB")
+    func defaultOneMiBMaximum() async throws {
+        let oversized = try UnixFixtureServer(json: String(repeating: "x", count: 1_048_577))
+        await #expect(throws: LocalAPIClientError.responseTooLarge) {
+            try await LocalAPIClient(socketURL: oversized.url).health()
+        }
+    }
+
     @Test("Health schema and snapshot use read-only Unix HTTP")
     func success() async throws {
         let healthServer = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":7,"generatedAt":"2026-07-18T01:00:00Z","sources":[],"health":{"ok":true,"status":"ok"}}"#)
@@ -111,6 +141,36 @@ struct LocalAPIClientTests {
             try await LocalAPIClient(socketURL: nonJSON.url).health()
         }
     }
+}
+
+private struct FrozenV042Snapshot: Decodable {
+    struct Summary: Decodable {
+        let todayTokens: Int64?
+        let modelCount: Int
+        let coveredDayCount: Int
+    }
+
+    let schemaVersion: String
+    let dataRevision: UInt64
+    let generatedAt: String
+    let localDay: String
+    let summary: Summary
+    let quotaWindows: [FrozenItem]
+    let providers: [FrozenItem]
+    let sources: [FrozenItem]
+    let catalogRevision: String
+}
+
+private struct FrozenItem: Decodable {}
+
+private func compatibilityFixture(_ name: String) throws -> String {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+    return try String(
+        contentsOf: root.appendingPathComponent("tests/fixtures/local-api-v1/\(name)"),
+        encoding: .utf8
+    )
 }
 
 private final class UnixFixtureServer: @unchecked Sendable {
