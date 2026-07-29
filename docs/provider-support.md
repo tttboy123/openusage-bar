@@ -20,7 +20,7 @@ These adapters fill gaps that OpenUsage does not currently expose:
 | Provider | Available facts |
 |---|---|
 | Codex | Local subscription windows and resets; incremental local session logs are the primary daily Token source, with OpenUsage as fallback |
-| Cursor | Remaining subscription percentage when the local client exposes it; OpenUsage fallback |
+| Cursor | Remaining subscription percentage from OpenUsage auto discovery, with targeted OpenUsage direct-mode enrichment when auto lacks quota |
 | Kiro | AWS CodeWhisperer plan quota and reset when Keychain credentials allow it; OpenUsage fallback |
 | MiniMax | Coding Plan capacity plus delayed daily model billing activity when the selected site supplies it |
 | StepFun Step Plan | China and International plan capacity from a Keychain session; API-key connection state |
@@ -38,6 +38,14 @@ Connection-specific notes:
   organization costs endpoint. Cached input is treated as part of input tokens
   and is not added twice. Usage and cost health are tracked as separate
   sources, and rows are committed only after the required cursor pages validate.
+- **Cursor** uses the Cursor CLI directory only inside a credential-free child
+  process environment. OpenUsage `auto` remains the primary snapshot; when it
+  finds Cursor but does not return capacity, one bounded `direct` export may
+  replace only the Cursor card. The two modes are alternatives, never summed.
+  A failed or empty direct result preserves the auto activity and cached
+  last-good quota, while repeated failures enter bounded exponential backoff.
+  Cursor currently exposes no verified reset timestamp, so reset remains
+  unavailable rather than being inferred.
 - **StepFun Step Plan** supports China and International accounts, but a web
   session is never retried against the other region. Follow the
   [StepFun quick start](stepfun-quick-start.md) for the safe connection flow.

@@ -329,6 +329,17 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - Kiro 验证只读 Keychain、AWS CodeWhisperer quota、计划与重置日期。
 - OpenAI Organization 分开验证官方 daily usage 和 billed cost 分页完整性。
 
+**Cursor 当前证据（2026-07-29）：**
+
+- 本机 Cursor App 与内置 CLI 存在，但父进程 `PATH` 不含 `cursor`；只读实测
+  确认子进程自动加入内置目录，父进程环境保持不变。
+- OpenUsage `auto` 在 12 秒边界内未返回可用结果，随后 `direct` 成功；完整
+  刷新耗时 34.09 秒并返回可用剩余百分比。两种模式只替换同一 Cursor
+  卡片，不相加。
+- 当前响应未提供可验证的重置时间，因此保持 `Reset unavailable`。
+- 失败或空的 direct enrichment 保留 auto 活动和 Last-good quota；连续失败
+  使用 5 分钟起、最长 6 小时的指数退避。
+
 **验收：**
 
 - [ ] 任一事实族失败不抑制同 Provider 其他事实。
