@@ -429,6 +429,16 @@ class ExportDiagnosticsTests(unittest.TestCase):
                 "expectedTotalTokens": 120,
                 "deltaTokens": 0,
             },
+            "accountTotalComparison": {
+                "status": "not_comparable",
+                "coverageScope": "local_collector",
+                "reason": "local_collector_is_not_account_total",
+                "limitations": [
+                    "deleted_or_unavailable_sessions",
+                    "other_devices",
+                    "web_or_mobile",
+                ],
+            },
         }])
         self.assertEqual(payload["observability"], {
             "accountReferences": "per_export_pseudonyms",
@@ -473,6 +483,10 @@ class ExportDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["aggregates"]["reconciliationStatusCounts"], {
             "matched": 1,
         })
+        self.assertEqual(
+            payload["aggregates"]["accountTotalComparisonStatusCounts"],
+            {"not_comparable": 1},
+        )
         encoded = json.dumps(payload, sort_keys=True)
         for forbidden in (
             "Alice private account", "keychain:private-label", "secret-value",
@@ -480,6 +494,34 @@ class ExportDiagnosticsTests(unittest.TestCase):
             "work-account",
         ):
             self.assertNotIn(forbidden, encoded)
+
+    def test_v2_marks_codex_local_sessions_as_not_account_total_comparable(self) -> None:
+        rows = activity()
+        rows["rows"][0]["sourceId"] = "codex.local_sessions"
+        rows["coverage"][0]["sourceId"] = "codex.local_sessions"
+
+        payload = self.module.build_reconciliation_diagnostics(
+            snapshot(), capabilities(), rows, source_status(),
+            from_day=date(2026, 7, 17),
+            to_day=date(2026, 7, 18),
+            local_timezone="Asia/Singapore",
+            product={"version": "0.4.0", "build": "4"},
+            runtime={"macOS": "26.0", "architecture": "arm64"},
+        )
+
+        self.assertEqual(
+            payload["dailyUsage"][0]["accountTotalComparison"],
+            {
+                "status": "not_comparable",
+                "coverageScope": "local_device_sessions",
+                "reason": "local_sessions_are_partial_account_coverage",
+                "limitations": [
+                    "deleted_or_unavailable_sessions",
+                    "other_devices",
+                    "web_or_mobile",
+                ],
+            },
+        )
 
     def test_v2_preserves_source_total_and_reports_known_convention_delta(self) -> None:
         rows = activity()

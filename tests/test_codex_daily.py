@@ -109,6 +109,35 @@ class CodexLocalDailyImporterTests(unittest.TestCase):
         self.assertEqual(row.total_tokens, 120)
         self.assertEqual(row.token_counting_convention, "input_includes_cache")
 
+    def test_unchanged_cumulative_event_does_not_repeat_last_usage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            event = token_event(
+                "2026-07-17T01:01:00Z",
+                input_tokens=100,
+                output_tokens=20,
+                cached_input_tokens=80,
+                total_tokens=120,
+                cumulative_total=120,
+            )
+            repeated = {
+                **event,
+                "timestamp": "2026-07-17T01:02:00Z",
+            }
+            write_events(root / "session.jsonl", [
+                model_event("2026-07-17T01:00:00Z"),
+                event,
+                repeated,
+            ])
+
+            result = self.importer(root).fetch_usage(
+                date(2026, 7, 17), date(2026, 7, 17)
+            )
+
+        self.assertIsInstance(result, UsageImportSuccess)
+        self.assertEqual(len(result.rows), 1)
+        self.assertEqual(result.rows[0].total_tokens, 120)
+
     def test_append_refresh_adds_only_new_events_and_truncation_rebuilds(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -213,7 +242,48 @@ class CodexLocalDailyImporterTests(unittest.TestCase):
         self.assertIsInstance(result, UsageImportSuccess)
         self.assertEqual(sum(row.total_tokens for row in result.rows), 10)
         self.assertEqual(importer.parsed_lines, 2)
-        self.assertEqual(rebuilt["schemaVersion"], 1)
+        self.assertEqual(rebuilt["schemaVersion"], 2)
+
+    def test_previous_cache_schema_rebuilds_duplicate_sensitive_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "sessions"
+            cache_path = Path(directory) / "state" / "codex-session-cache.json"
+            event = token_event(
+                "2026-07-17T01:01:00Z",
+                input_tokens=9,
+                output_tokens=1,
+                cached_input_tokens=8,
+                total_tokens=10,
+                cumulative_total=10,
+            )
+            write_events(root / "session.jsonl", [
+                model_event("2026-07-17T01:00:00Z"),
+                event,
+                {**event, "timestamp": "2026-07-17T01:02:00Z"},
+            ])
+            first = CountingCodexLocalDailyImporter(
+                session_roots=(root,), cache_path=cache_path,
+                local_timezone=SGT, clock=lambda: NOW,
+            )
+            first.fetch_usage(date(2026, 7, 17), date(2026, 7, 17))
+            stale = json.loads(cache_path.read_text(encoding="utf-8"))
+            stale["schemaVersion"] = 1
+            cache_path.write_text(json.dumps(stale), encoding="utf-8")
+            cache_path.chmod(0o600)
+
+            restarted = CountingCodexLocalDailyImporter(
+                session_roots=(root,), cache_path=cache_path,
+                local_timezone=SGT, clock=lambda: NOW,
+            )
+            result = restarted.fetch_usage(
+                date(2026, 7, 17), date(2026, 7, 17)
+            )
+            rebuilt = json.loads(cache_path.read_text(encoding="utf-8"))
+
+        self.assertIsInstance(result, UsageImportSuccess)
+        self.assertEqual(restarted.parsed_lines, 3)
+        self.assertEqual(result.rows[0].total_tokens, 10)
+        self.assertEqual(rebuilt["schemaVersion"], 2)
 
     def test_unsafe_cache_symlink_is_never_read_or_replaced(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -67,6 +67,8 @@ _DAILY_USAGE_SELECT = (
     "AND convention.model_id=usage.model_id "
 )
 
+_MAX_SOURCE_CONTRACT_REVISION = 2_147_483_647
+
 
 class ActivityStore:
     def __init__(self, path: str | Path) -> None:
@@ -1156,6 +1158,30 @@ class ActivityStore:
                 (provider_id, source_id),
             ).fetchone() is not None
 
+    @staticmethod
+    def _source_contract_key(provider_id: str, source_id: str) -> str:
+        return f"source_contract:{provider_id}:{source_id}"
+
+    def source_contract_revision(
+        self, provider_id: str, source_id: str
+    ) -> int | None:
+        _validate_id("provider_id", provider_id)
+        _validate_id("source_id", source_id)
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT value FROM ledger_meta WHERE key=?",
+                (self._source_contract_key(provider_id, source_id),),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            revision = int(str(row["value"]))
+        except (TypeError, ValueError) as error:
+            raise RuntimeError("invalid source contract revision") from error
+        if not 1 <= revision <= _MAX_SOURCE_CONTRACT_REVISION:
+            raise RuntimeError("invalid source contract revision")
+        return revision
+
     def commit_usage_import_success(
         self,
         provider_id: str,
@@ -1167,11 +1193,17 @@ class ActivityStore:
         *,
         account_ref: str = "",
         freshness_seconds: int = 300,
+        contract_revision: int | None = None,
     ) -> bool:
         _validate_id("provider_id", provider_id)
         _validate_id("source_id", source_id)
         if account_ref:
             _validate_id("account_ref", account_ref)
+        if contract_revision is not None and (
+            type(contract_revision) is not int
+            or not 1 <= contract_revision <= _MAX_SOURCE_CONTRACT_REVISION
+        ):
+            raise ValueError("contract_revision must be a positive bounded integer")
         if not isinstance(attempted_at, datetime) or attempted_at.tzinfo is None:
             raise ValueError("attempted_at must include a timezone")
         if since > until:
@@ -1202,6 +1234,15 @@ class ActivityStore:
             self._record_source_success_locked(
                 provider_id, source_id, attempted_at, freshness_seconds
             )
+            if contract_revision is not None:
+                self._connection.execute(
+                    "INSERT INTO ledger_meta(key,value) VALUES(?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (
+                        self._source_contract_key(provider_id, source_id),
+                        str(contract_revision),
+                    ),
+                )
         return True
 
     def commit_cost_import_success(

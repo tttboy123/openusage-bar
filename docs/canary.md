@@ -95,10 +95,15 @@ issues are emitted only when duplicate effective rows are actually present;
 source-selection history before those effective rows is explicitly not
 observable. Complete aggregate totals are emitted only for fully covered or
 explicitly covered-zero ranges; partial exports keep their available subtotal
-under `observedTokenTotals`. Account references are replaced with
-per-export pseudonyms. It does not read Provider configuration, Keychain,
-prompts, responses, or raw Provider payloads. Review the JSON yourself before
-attaching it.
+under `observedTokenTotals`. Each row also includes an
+`accountTotalComparison`: Codex session files are identified as
+`local_device_sessions`, OpenUsage daily data as `local_collector`, and both
+are explicitly not comparable with an account-wide dashboard that may include
+other devices, web or mobile activity, and unavailable local history. Sources
+without a declared account scope remain `unknown`. Account references are
+replaced with per-export pseudonyms. It does not read Provider configuration,
+Keychain, prompts, responses, or raw Provider payloads. Review the JSON
+yourself before attaching it.
 
 ## Incident definitions
 
