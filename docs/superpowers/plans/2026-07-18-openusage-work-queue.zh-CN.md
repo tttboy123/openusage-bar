@@ -291,7 +291,7 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] 诊断 v2 对 `codex.local_sessions` 标记 `local_device_sessions`，对 `openusage.daily` 标记 `local_collector`，明确列出其他设备、Web/移动端和已删除或不可访问 Session 的覆盖缺口，禁止与账号总量直接比较。
 - [ ] 给定外部账号页面契约与同日脱敏样本后，完成账号级差值的端到端证明。
 - [x] 当前真实本地审计未发现跨 Session 重复；可证明的 7 月 17 日重复累计事件为 4,201,500 Token，修复后本地总量从 614,311,133 降为 610,109,633。Cache 仍按 `input_includes_cache` 口径单列，不再与 Total 重复相加。
-- [ ] 容量窗口与 Token 活动保持独立来源和健康状态。
+- [x] 容量窗口与 Token 活动保持独立来源和健康状态。
 
 **验证：** Codex daily/attribution/Fallback 测试、真实脱敏对账报告。
 
@@ -393,10 +393,20 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 
 ### Checkpoint 0.5-A
 
-- [ ] Codex、MiniMax、StepFun、Cursor、Kiro、OpenAI Organization 均有公开能力声明。
-- [ ] 每个展示数值携带来源、质量、作用域、窗口、新鲜度和采集时间。
-- [ ] 官方、OpenUsage 与 Last-good 的选择规则通过失败注入。
-- [ ] 多账号隔离和 Unknown-not-zero 通过 Provider Conformance Kit。
+- [x] Codex、MiniMax、StepFun、Cursor、Kiro、OpenAI Organization 均有公开能力声明。
+- [x] 每个展示数值携带来源、质量、作用域、窗口、新鲜度和采集时间。
+- [x] 官方、OpenUsage 与 Last-good 的选择规则通过失败注入。
+- [x] 多账号隔离和 Unknown-not-zero 通过 Provider Conformance Kit。
+
+2026-07-30 集成候选复核确认：Canonical catalog 与 `/v1/capabilities`
+公开上述六类 Provider；Quota、Activity、Cost 与 Balance 的查询模型分别保留
+`sourceId`、`quality`、账号/模型作用域、窗口、`observedAt`、
+`freshnessSeconds` 和 Source Health。失败注入覆盖事实族独立失败、官方失败后
+选择 OpenUsage、空 fallback 保留 Last-good、同一事实不相加、多账号拒绝模糊
+归属与 Unknown-not-zero。Provider Conformance 的 14-case 矩阵及
+Python/Swift 生成目录在 clean-checkout build 中通过。这里证明的是公共契约，
+不替代 WQ-07 至 WQ-09 中仍待完成的外部账号页面、国际站和 OpenAI
+Organization 真实账号验收。
 
 ### WQ-10：验证 Claude Code、OpenCode 与本地工具
 
@@ -477,9 +487,20 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 
 **验收：**
 
-- [ ] 示例 Adapter 在干净 checkout 中通过全部 conformance case。
-- [ ] 新 Provider 不增加中央 `isinstance` 或 UI 特判。
-- [ ] Fixture、日志和失败输出不含凭证或直接账号身份。
+- [x] 示例 Adapter 在干净 checkout 中通过全部 conformance case。
+- [x] 新 Provider 不增加中央 `isinstance` 或 UI 特判。
+- [x] Fixture、日志和失败输出不含凭证或直接账号身份。
+
+2026-07-30 在提交 `f4dd473` 的全新 detached worktree 中，未执行 bootstrap
+前直接按公开文档运行
+`python3 scripts/check_provider_adapter.py examples/provider-adapter-kit/example-provider`，
+14 个 conformance case 与 `generic`、`daily_usage_feed`、`daily_cost_feed`
+三类声明式模板全部通过；Kit 与 Provider Conformance 11 项测试通过，示例目录
+隐私扫描和完整 Git 历史密钥扫描均为 0。随后执行标准 bootstrap 与完整
+clean-checkout build：Python 839 项重复两轮、Swift 255 项 / 21 个 Suite、
+生成文件、覆盖率、隐私、嵌套签名和 App bundle 均通过。Kit 实现提交
+`97c5276` 只增加文档、声明式示例、公开校验器和测试，没有修改生产聚合器、
+Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 
 **验证：** `tests/provider_conformance.py`、`tests/test_provider_conformance.py`、隐私扫描和 clean-checkout build。
 
@@ -490,9 +511,15 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 ### Checkpoint 0.5
 
 - [ ] 第一批 Provider 有真实账号脱敏验证，而不只是合成 Fixture。
-- [ ] 第二批 Provider 有明确的权威来源或 unsupported 结论。
-- [ ] UI、CLI 与 API 对同一 `dataRevision` 返回一致事实。
-- [ ] Provider Adapter Kit 可供新贡献者独立使用。
+- [x] 第二批 Provider 有明确的权威来源或 unsupported 结论。
+- [x] UI、CLI 与 API 对同一 `dataRevision` 返回一致事实。
+- [x] Provider Adapter Kit 可供新贡献者独立使用。
+
+第二批 Provider 的权威来源结论记录在
+`docs/provider-authoritative-sources.md`。同 revision 由
+`ResourceSnapshotTests`、API/CLI snapshot 精确相等测试、Python/SQLite/API/CLI
+跨语言 Fixture 与 Swift `CrossLanguageContractTests` 共同验证。Checkpoint
+0.5 仍不能关闭：第一批 Provider 的外部真实账号覆盖尚不完整。
 
 ---
 
