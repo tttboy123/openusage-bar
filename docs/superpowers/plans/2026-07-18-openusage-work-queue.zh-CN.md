@@ -110,7 +110,8 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] `Protect main` ruleset 已启用，禁止删除与非快进更新并要求最新 `verify` check 成功；`Protect release tags` 已启用，禁止更新或删除 `v*` Tag。两个 ruleset 均没有默认 bypass actor。
 - [x] PR #15 在提交 `c5b2936` 上的首轮远端 `verify` 已完整通过，耗时 8 分 47 秒；构建、打包、制品审计、隔离安装/升级/回滚/卸载与 artifact 上传均成功。该轮唯一注解是旧 `upload-artifact@v4.6.2` 的 Node.js 20 弃用提示。
 - [x] 已从官方 Action Tag 重新解析并核验 #5、#10、#11 的提交，将 `upload-artifact@v7.0.1`、`setup-python@v7.0.0` 与 `checkout@v7.0.1` 纳入当前受控清单；版本注释同步为精确 `vX.Y.Z`，不复用 #11 的陈旧 `# v5` 注释。
-- [ ] PR #15 的远端完整 CI、临时分支 required-check 行为和 release workflow 仍需完成验证；Dependabot PR、Release 与外部 Canary 未在本轮更新、合并、发布或协调。
+- [x] Action v7 更新提交 `0f3ac3e` 的远端 `verify` 已完整通过，耗时 7 分 45 秒且不再出现 Node.js 20 弃用注解；最新 Action、完整构建、打包、制品审计、隔离安装/升级/回滚/卸载与 artifact 上传均成功。
+- [ ] `v*` Tag 与 release workflow 的联动只在下一次受控发布中验证，不创建会误触发 Release 的伪版本 Tag。Dependabot PR、Release 与外部 Canary 未在本轮合并、发布或协调。
 
 **验收：**
 
