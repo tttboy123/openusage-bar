@@ -299,6 +299,15 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn('scripts/release_dmg_audit.sh', ci)
         self.assertIn('scripts/release_dmg_audit.sh', workflow)
 
+    def test_ci_and_release_run_the_same_dependency_and_install_gates(self):
+        for workflow_name in ("ci.yml", "release.yml"):
+            workflow = (
+                ROOT / ".github" / "workflows" / workflow_name
+            ).read_text(encoding="utf-8")
+            with self.subTest(workflow=workflow_name):
+                self.assertIn("scripts/audit_dependencies.sh", workflow)
+                self.assertIn("scripts/release_smoke.sh", workflow)
+
     def test_atomic_swap_helper_exchanges_two_directories_without_a_missing_target_window(self):
         helper = ROOT / "scripts/atomic_swap.c"
         self.assertTrue(helper.is_file())

@@ -116,6 +116,10 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   制品审计以及隔离安装/升级/回滚/卸载；`Protect main` 无 bypass actor，
   严格要求最新 `verify`。Dependabot #12、#13、#14 已通过同一门禁，
   #5、#10 因门禁失败保持不可合并，证明自动更新没有旁路。
+- [x] Pre-release workflow 现与 PR CI 一样显式执行锁定依赖漏洞审计和
+  隔离安装/升级/回滚/卸载；契约测试会阻止任一 workflow 删除这两项。
+  本地 workflow、release metadata、release smoke 与 secret-scan
+  相关 53 项测试通过，未创建 Tag 或 Release。
 - [ ] `v*` Tag 与 release workflow 的联动只在下一次受控发布中验证，不创建会误触发 Release 的伪版本 Tag。Dependabot PR、Release 与外部 Canary 未在本轮合并、发布或协调。
 
 **验收：**
