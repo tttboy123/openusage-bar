@@ -75,6 +75,9 @@ CAPABILITY_FIELDS = (
     "tokenHistory", "modelBreakdown", "resetTimestamps", "billing", "credits",
     "balance", "cost", "rateLimits", "serviceStatus",
 )
+SOURCE_EVIDENCE_FIELDS = (
+    "accountScope", "authority", "factFamilies", "modelScope", "verification",
+)
 FORBIDDEN_KEYS = frozenset({
     "accountref", "displayname", "credentialsource", "sourceid", "payloadjson",
     "apikey", "secret", "cookie", "prompt", "response", "rawpayload",
@@ -319,25 +322,41 @@ def _capability_declarations(payload: dict[str, Any]) -> list[dict[str, Any]]:
         sources: list[dict[str, Any]] = []
         for raw_source in _items(provider.get("sources"), "capability sources", limit=100):
             source = _mapping(raw_source, "capability source")
+            if any(field in source for field in SOURCE_EVIDENCE_FIELDS):
+                evidence = {
+                    "accountScope": _identifier(
+                        source.get("accountScope"), "source account scope"
+                    ),
+                    "authority": _identifier(
+                        source.get("authority"), "source authority"
+                    ),
+                    "factFamilies": _identifier_list(
+                        source.get("factFamilies"), "source fact families"
+                    ),
+                    "modelScope": _identifier(
+                        source.get("modelScope"), "source model scope"
+                    ),
+                    "verification": _identifier(
+                        source.get("verification"), "source verification"
+                    ),
+                }
+            else:
+                evidence = {
+                    "accountScope": "unknown",
+                    "authority": "unknown",
+                    "factFamilies": [],
+                    "modelScope": "unknown",
+                    "verification": "unverified",
+                }
             sources.append({
-                "accountScope": _identifier(
-                    source.get("accountScope"), "source account scope"
-                ),
-                "authority": _identifier(
-                    source.get("authority"), "source authority"
-                ),
-                "factFamilies": _identifier_list(
-                    source.get("factFamilies"), "source fact families"
-                ),
+                "accountScope": evidence["accountScope"],
+                "authority": evidence["authority"],
+                "factFamilies": evidence["factFamilies"],
                 "kind": _identifier(source.get("kind"), "source kind"),
-                "modelScope": _identifier(
-                    source.get("modelScope"), "source model scope"
-                ),
+                "modelScope": evidence["modelScope"],
                 "provenance": _identifier(source.get("provenance"), "source provenance"),
                 "stability": _identifier(source.get("stability"), "source stability"),
-                "verification": _identifier(
-                    source.get("verification"), "source verification"
-                ),
+                "verification": evidence["verification"],
             })
         supports_accounts = provider.get("supportsAccounts")
         if not isinstance(supports_accounts, bool):

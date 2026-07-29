@@ -53,7 +53,11 @@ directions:
 2. a frozen N-1 decoder reads the current response;
 3. unknown fields do not change known values;
 4. bodies over 1 MiB fail before JSON decoding;
-5. schema major drift and malformed framing fail with sanitized errors.
+5. schema major drift and malformed framing fail with sanitized errors;
+6. the current diagnostic exporter reads an N-1 capability source that lacks
+   the entire additive evidence group, but emits conservative
+   `unknown` / `unverified` metadata and no inferred fact families. A partially
+   present evidence group is malformed and still fails closed.
 
 The frozen fixture represents the last published Local API release, not an
 invented test shape. When a release becomes current, the fixture and recorded

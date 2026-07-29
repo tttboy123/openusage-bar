@@ -100,6 +100,14 @@ only public `factFamilies`, authority, account/model scope and verification
 metadata. The export never includes Balance amounts, currencies, source IDs,
 Provider instances or account references.
 
+When the candidate exporter captures a private N-1 baseline, an older
+capability source may lack the complete additive evidence group
+(`factFamilies`, authority, account/model scope and verification). The exporter
+keeps that source but labels the missing metadata `unknown` / `unverified` and
+uses an empty fact-family list; it never infers current support from legacy
+provenance. If only part of the evidence group is present, export fails closed
+as malformed instead of silently completing it.
+
 For an explicit daily reconciliation, choose diagnostics v2 and a bounded
 local-calendar range:
 

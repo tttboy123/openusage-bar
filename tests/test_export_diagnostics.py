@@ -410,6 +410,39 @@ class ExportDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["aggregates"]["balanceStates"], {})
         self.assertEqual(payload["aggregates"]["staleBalanceCount"], 0)
 
+    def test_v1_accepts_n_minus_one_capability_sources_without_evidence(self) -> None:
+        previous = capabilities()
+        source = previous["providers"][0]["sources"][0]
+        for field in (
+            "accountScope",
+            "authority",
+            "factFamilies",
+            "modelScope",
+            "verification",
+        ):
+            source.pop(field)
+
+        payload = self.module.build_diagnostics(
+            snapshot(),
+            previous,
+            product={"version": "0.4.4", "build": "8"},
+            runtime={"macOS": "26.0", "architecture": "arm64"},
+        )
+
+        self.assertEqual(
+            payload["capabilityDeclarations"][0]["sources"],
+            [{
+                "accountScope": "unknown",
+                "authority": "unknown",
+                "factFamilies": [],
+                "kind": "provider_api",
+                "modelScope": "unknown",
+                "provenance": "provider_official",
+                "stability": "stable",
+                "verification": "unverified",
+            }],
+        )
+
     def test_v1_rejects_malformed_balance_and_capability_evidence(self) -> None:
         invalid_balance = snapshot()
         invalid_balance["balances"][0]["stale"] = "false"
