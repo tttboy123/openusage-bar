@@ -68,6 +68,32 @@ class SettingsEntrypointTests(unittest.TestCase):
         self.assertEqual(payload["schemaVersion"], "1.0")
         self.assertEqual(payload["providers"], [])
 
+    def test_real_packaging_entry_script_serves_snapshot_json_offline(self):
+        with tempfile.TemporaryDirectory() as home:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "openusage_settings.py",
+                    "snapshot",
+                    "--format",
+                    "json",
+                    "--offline",
+                ],
+                shell=False,
+                check=False,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "HOME": home},
+                timeout=10,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stderr, "")
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["schemaVersion"], "1.0")
+        self.assertEqual(payload["dataRevision"], 0)
+        self.assertIsNone(payload["summary"]["todayTokens"])
+
     def test_unknown_arguments_fail_without_opening_settings(self):
         with patch.object(sys, "argv", ["openusage_settings.py", "--unexpected"]), patch(
             "openusage_bar.ui.run_provider_settings"

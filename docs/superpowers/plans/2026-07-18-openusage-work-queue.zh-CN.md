@@ -557,6 +557,13 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 
 **规模：** M。
 
+- [x] 2026-07-30 真实安装复核发现：collector parser、查询层与 Local API
+  已共享 canonical resource snapshot，但冻结 Helper 的严格命令白名单遗漏
+  `snapshot`，使文档中的已安装 CLI 命令返回 2。修复按 RED → GREEN 只加入
+  该只读命令；重建并事务安装 `0.6.0 (9)` 后，`API → CLI → API` 三次读取
+  均为 `dataRevision=47027`，移除唯一非语义字段 `generatedAt` 后完整 JSON
+  相等。未知命令仍 fail closed，未新增写操作。
+
 ### WQ-14：复核 Canary 入口并启动公开 Beta
 
 **目标：** 在不收集自动遥测的前提下获得外部真实证据。
@@ -637,7 +644,7 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 - [x] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
 
 2026-07-30 已建立唯一的 `integration/0.6-rc` 共存候选，并完成 Python
-863 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
+864 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
 集成时修复了 `balances` 被误设为 Local API v1 必填字段的兼容回归；冻结
 0.4.2 snapshot 与包含 additive 字段的当前 snapshot 均通过。候选不导入
 Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未完成门禁见

@@ -34,6 +34,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The packaged collector now accepts the documented read-only `snapshot`
+  command, so CLI and Local API consumers can retrieve the same revisioned
+  resource snapshot from an installed app.
 - Headless Step Plan refreshes now use a bounded, killable read-only Keychain
   boundary instead of waiting indefinitely for an interactive Security prompt.
   The private write helper accepts only Step Plan session updates over stdin

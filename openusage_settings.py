@@ -7,8 +7,8 @@ import sys
 
 
 COLLECTOR_COMMANDS = frozenset({
-    "__refresh-once", "daemon", "status", "usage", "costs", "quotas", "sources",
-    "providers", "changes", "doctor",
+    "__refresh-once", "daemon", "status", "snapshot", "usage", "costs", "quotas",
+    "sources", "providers", "changes", "doctor",
 })
 
 
