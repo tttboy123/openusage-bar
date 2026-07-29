@@ -29,6 +29,7 @@ from openusage_bar.openai_organization import (
     OpenAIOrganizationImporter,
 )
 from openusage_bar.openusage_adapter import OpenUsageAdapter
+from openusage_bar.performance_timing import RefreshTimingRecorder
 from openusage_bar.providers.builtins import default_registry
 from openusage_bar.providers.contracts import ProviderBinding
 from openusage_bar.providers.registry import AdapterRegistry, UnknownProviderConfig
@@ -208,6 +209,74 @@ class AdapterRegistryTests(unittest.TestCase):
         self.assertIs(runtime_types[0], OpenUsageAdapter)
         self.assertGreater(runtime_types.index(CodexSubscriptionAdapter), 0)
         self.assertGreater(runtime_types.index(KiroQuotaAdapter), 0)
+
+    def test_builtin_sources_declare_privacy_safe_performance_classes(self):
+        bindings = {
+            binding.provider_id: binding
+            for binding in self.registry().build(self.configs())
+        }
+
+        self.assertEqual(
+            bindings["openusage"].quota_sources[0].performance_source_class,
+            "child_process",
+        )
+        self.assertEqual(
+            bindings["openusage"].usage_sources[0].performance_source_class,
+            "child_process",
+        )
+        self.assertEqual(
+            bindings["codex"].quota_sources[0].performance_source_class,
+            "local_file",
+        )
+        self.assertEqual(
+            bindings["codex"].usage_sources[0].performance_source_class,
+            "local_file",
+        )
+        for provider_id in (
+            "kiro_cli",
+            "minimax-work",
+            "moonshot-work",
+            "openai",
+            "glm-work",
+            "cost-work",
+            "step-work",
+            "generic-work",
+        ):
+            binding = bindings[provider_id]
+            sources = (
+                *binding.balance_sources,
+                *binding.quota_sources,
+                *binding.usage_sources,
+                *binding.cost_sources,
+            )
+            self.assertTrue(sources)
+            self.assertTrue(
+                all(
+                    source.performance_source_class == "network"
+                    for source in sources
+                )
+            )
+
+    def test_headless_refresher_shares_one_timing_recorder(self):
+        recorder = RefreshTimingRecorder()
+        with patch(
+            "openusage_bar.config.ProviderConfigStore.load", return_value=[]
+        ):
+            refresher = build_headless_refresher(
+                Mock(), timing_recorder=recorder
+            )
+
+        self.assertIs(refresher.timing_recorder, recorder)
+        self.assertIs(refresher.aggregator.timing_recorder, recorder)
+        self.assertIs(refresher.collector.timing_recorder, recorder)
+        self.assertEqual(
+            refresher.performance_timing_snapshot(),
+            {
+                "schemaVersion": 1,
+                "scope": "source-class",
+                "classes": [],
+            },
+        )
 
     def test_duplicate_source_ids_and_provider_ids_are_rejected(self):
         class Source:

@@ -15,6 +15,11 @@ from typing import Protocol
 
 from .keychain import KeychainError
 from .models import Category, Overview, ProviderCard, ProviderStatus, canonical_category
+from .performance_timing import (
+    RefreshTimingRecorder,
+    measure_source_call,
+    source_class_for,
+)
 
 
 DEFAULT_CACHE_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "cards.json"
@@ -230,10 +235,18 @@ class CardCache:
 
 
 class Aggregator:
-    def __init__(self, adapters: list[Adapter], cache: CardCache, clock=None) -> None:
+    def __init__(
+        self,
+        adapters: list[Adapter],
+        cache: CardCache,
+        clock=None,
+        *,
+        timing_recorder: RefreshTimingRecorder | None = None,
+    ) -> None:
         self.adapters = adapters
         self.cache = cache
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.timing_recorder = timing_recorder
         self._refresh_lock = threading.Lock()
 
     def refresh(self) -> Overview:
@@ -244,7 +257,11 @@ class Aggregator:
             fresh: list[ProviderCard] = []
             for adapter in self.adapters:
                 try:
-                    result = adapter.fetch()
+                    result = measure_source_call(
+                        self.timing_recorder,
+                        source_class_for(adapter, "network"),
+                        adapter.fetch,
+                    )
                 except Exception:
                     continue
                 cards = result.cards if isinstance(result, Overview) else [result]
@@ -348,12 +365,14 @@ class LedgerRefresher:
     def __init__(
         self, aggregator, collector, quota_sources=(), balance_sources=(), *,
         eager_usage_provider_ids=(),
+        timing_recorder: RefreshTimingRecorder | None = None,
     ) -> None:
         self.aggregator = aggregator
         self.collector = collector
         self.quota_sources = tuple(quota_sources)
         self.balance_sources = tuple(balance_sources)
         self.eager_usage_provider_ids = tuple(eager_usage_provider_ids)
+        self.timing_recorder = timing_recorder
 
     def refresh(self) -> None:
         if self.eager_usage_provider_ids:
@@ -378,8 +397,21 @@ class LedgerRefresher:
             quota_results=results,
         )
 
+    def performance_timing_snapshot(self) -> dict:
+        if self.timing_recorder is None:
+            return {
+                "schemaVersion": 1,
+                "scope": "source-class",
+                "classes": [],
+            }
+        return self.timing_recorder.snapshot()
 
-def build_headless_refresher(activity_store):
+
+def build_headless_refresher(
+    activity_store,
+    *,
+    timing_recorder: RefreshTimingRecorder | None = None,
+):
     """Build the production collector without importing the AppKit UI module."""
     from .config import ProviderConfigStore
     from .daily_history import ActivityCollector
@@ -422,12 +454,18 @@ def build_headless_refresher(activity_store):
             )
         if sources:
             official_importers[binding.provider_id] = next(iter(sources.values()))
-    aggregator = Aggregator(adapters, CardCache(), clock)
+    aggregator = Aggregator(
+        adapters,
+        CardCache(),
+        clock,
+        timing_recorder=timing_recorder,
+    )
     collector = ActivityCollector(
         activity_store,
         openusage_importer,
         official_importers=official_importers,
         clock=clock,
+        timing_recorder=timing_recorder,
     )
     quota_sources = tuple(
         (
@@ -456,4 +494,5 @@ def build_headless_refresher(activity_store):
     return LedgerRefresher(
         aggregator, collector, quota_sources, balance_sources,
         eager_usage_provider_ids=eager_usage_provider_ids,
+        timing_recorder=timing_recorder,
     )

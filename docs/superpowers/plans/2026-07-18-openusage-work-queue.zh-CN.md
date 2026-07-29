@@ -615,6 +615,12 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
   0 项。现有宿主未达到语言迁移门槛，Python 继续作为唯一账本写入者。
   Provider 单源耗时当前明确标记为 `not_observable`；加入非账号化的
   source-class 计时前，不得据此提出 Provider 定向优化或语言迁移。
+- [x] 2026-07-30 已在 0.6 候选加入仅供性能测量工具使用的 source-class
+  计时：只聚合 `network`、`local_file`、`child_process` 的单调时钟耗时
+  与 success/timeout/backoff/unavailable/failed 结果，不记录 Provider、
+  source ID、账号、端点、路径或原始数据。旧版/无插桩应用继续返回
+  `not_observable`；尚未生成新的安装候选实机基线，因此当前不得据此提出
+  Provider 定向优化、Local API 暴露或语言迁移。
 
 ### Checkpoint 0.6 RC
 

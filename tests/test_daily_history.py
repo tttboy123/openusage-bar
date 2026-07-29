@@ -23,6 +23,7 @@ from openusage_bar.daily_history import (
 )
 from openusage_bar.codex_attribution import CodexAttributionResolver
 from openusage_bar.models import Category, Overview, ProviderCard, ProviderStatus
+from openusage_bar.performance_timing import RefreshTimingRecorder
 from openusage_bar.openusage_adapter import CURSOR_CLI_DIRECTORIES, OpenUsageAdapter
 from openusage_bar.openai_organization import (
     CostImportSuccess,
@@ -1971,6 +1972,43 @@ class ActivityStoreCollectorIntegrationTests(unittest.TestCase):
                 self.assertEqual(
                     current.last_attempt_at, "2026-07-14T02:00:00.000000Z"
                 )
+
+    def test_openusage_import_records_child_process_timing_without_provider_id(self):
+        ticks = iter((8.0, 8.625))
+        recorder = RefreshTimingRecorder(monotonic=lambda: next(ticks))
+        store = Mock()
+        store.has_daily_history.return_value = True
+        importer = Mock()
+        importer.performance_source_class = "child_process"
+        importer.fetch.return_value = DailyImportResult(
+            True, (model_row(day="2026-07-14"),)
+        )
+
+        ActivityCollector(
+            store,
+            importer,
+            clock=lambda: NOW,
+            timing_recorder=recorder,
+        ).refresh(Overview([card("private-provider")]))
+
+        payload = recorder.snapshot()
+        self.assertEqual(
+            payload["classes"][0],
+            {
+                "sourceClass": "child_process",
+                "sampleCount": 1,
+                "durationSecondsTotal": 0.625,
+                "durationSecondsMax": 0.625,
+                "outcomes": {
+                    "success": 1,
+                    "backoff": 0,
+                    "timeout": 0,
+                    "unavailable": 0,
+                    "failed": 0,
+                },
+            },
+        )
+        self.assertNotIn("private-provider", json.dumps(payload))
 
 
 if __name__ == "__main__":

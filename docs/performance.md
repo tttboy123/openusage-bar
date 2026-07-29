@@ -61,7 +61,7 @@ state, and measurement plan. Thermal state and other foreground workloads
 should be stable and noted outside the public report without adding device or
 account identity.
 
-## Provider and child-process timing gap
+## Source-class refresh timing
 
 The 0.4.4 report deliberately declares
 `perSourceTiming: "not_observable"`. It measures the full configured refresh,
@@ -69,12 +69,24 @@ but the current public and diagnostic contracts do not expose each Provider's
 network, local-file, or child-process duration. The report therefore cannot
 attribute the 41.490-second p95 to a Provider, timeout, or backoff path.
 
-Before a Provider-specific optimization is proposed, collector instrumentation
-must record monotonic duration, source class (`network`, `local_file`, or
-`child_process`), timeout/backoff outcome, and a stable non-account source
-identifier. It must not record endpoints, request/response bodies, credentials,
-local paths, account aliases, prompts, or responses. Publishing those metrics
-through Local API v1 requires a separate compatibility review.
+The 0.6 candidate adds opt-in instrumentation used only by the performance
+measurement tool. Each refresh round aggregates monotonic duration and
+success, timeout, backoff, unavailable, or failed outcome into one of three
+classes: `network`, `local_file`, or `child_process`. It intentionally does not
+retain a Provider ID, source ID, account reference, endpoint, local path,
+request/response body, credential, prompt, or response. The report can locate
+the expensive execution class without making account configuration
+fingerprintable.
+
+The committed 0.4.4 baseline remains unchanged. A new installed-candidate
+baseline is required before source-class measurements may be used for an
+optimization claim. These metrics are not published through Local API v1 or
+the diagnostics bundle; either exposure requires a separate compatibility and
+privacy review.
+
+Provider-specific timing remains intentionally unobservable. A Provider-level
+optimization still requires separate, privacy-reviewed evidence rather than
+inferring identity from source-class aggregates.
 
 ## Migration gate
 

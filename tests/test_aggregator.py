@@ -14,6 +14,7 @@ from openusage_bar.aggregator import (
 )
 from openusage_bar.daily_history import ActivityCollector, DailyImportResult
 from openusage_bar.models import Category, Overview, ProviderCard, ProviderStatus
+from openusage_bar.performance_timing import RefreshTimingRecorder
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
@@ -55,6 +56,10 @@ class Adapter:
 
     def fetch(self):
         return self.result
+
+
+class TimedAdapter(Adapter):
+    performance_source_class = "network"
 
 
 class BoundedReadOnlyKeychainTests(unittest.TestCase):
@@ -734,6 +739,23 @@ class AggregatorTests(unittest.TestCase):
 
             self.assertEqual(result.cards[0].family_id, "minimax")
             self.assertEqual(result.cards[0].remaining_percent, 55)
+
+    def test_refresh_records_only_adapter_source_class_timing(self):
+        ticks = iter((3.0, 3.4))
+        recorder = RefreshTimingRecorder(monotonic=lambda: next(ticks))
+        adapter = TimedAdapter(card("private-provider"))
+
+        with tempfile.TemporaryDirectory() as directory:
+            Aggregator(
+                [adapter],
+                CardCache(Path(directory) / "cards.json"),
+                timing_recorder=recorder,
+            ).refresh()
+
+        payload = recorder.snapshot()
+        self.assertEqual(payload["classes"][0]["sourceClass"], "network")
+        self.assertEqual(payload["classes"][0]["durationSecondsTotal"], 0.4)
+        self.assertNotIn("private-provider", json.dumps(payload))
 
 
 if __name__ == "__main__":

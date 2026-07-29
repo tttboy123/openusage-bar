@@ -36,12 +36,24 @@ from .contracts import ProviderBinding
 from .registry import AdapterRegistry
 
 
-def _quota_source(source: object, source_id: str, priority: int) -> object:
+def _performance_source(source: object, source_class: str) -> object:
+    if source_class not in {"network", "local_file", "child_process"}:
+        raise ValueError("invalid performance source class")
+    source.performance_source_class = source_class
+    return source
+
+
+def _quota_source(
+    source: object,
+    source_id: str,
+    priority: int,
+    source_class: str = "network",
+) -> object:
     # Existing adapters are intentionally left behavior-compatible in Task 1;
     # registry metadata makes their cross-Provider merge order explicit.
     source.source_id = source_id
     source.source_priority = priority
-    return source
+    return _performance_source(source, source_class)
 
 
 def default_registry(
@@ -59,9 +71,11 @@ def default_registry(
     registry.register_global(lambda: ProviderBinding(
         provider_id="openusage", family_id="openusage",
         quota_sources=(_quota_source(
-            OpenUsageAdapter(clock), "openusage.cards", 10
+            OpenUsageAdapter(clock), "openusage.cards", 10, "child_process"
         ),),
-        usage_sources=(OpenUsageDailyImporter(clock=clock),),
+        usage_sources=(_performance_source(
+            OpenUsageDailyImporter(clock=clock), "child_process"
+        ),),
     ))
     registry.register_global(lambda: ProviderBinding(
         provider_id="kiro_cli", family_id="kiro_cli",
@@ -72,9 +86,14 @@ def default_registry(
     registry.register_global(lambda: ProviderBinding(
         provider_id="codex", family_id="codex",
         quota_sources=(_quota_source(
-            CodexSubscriptionAdapter(clock=clock), "codex.local_rate_limits", 20
+            CodexSubscriptionAdapter(clock=clock),
+            "codex.local_rate_limits",
+            20,
+            "local_file",
         ),),
-        usage_sources=(CodexLocalDailyImporter(clock=clock),),
+        usage_sources=(_performance_source(
+            CodexLocalDailyImporter(clock=clock), "local_file"
+        ),),
     ))
 
     def minimax(config: MiniMaxConfig) -> ProviderBinding:
@@ -84,7 +103,10 @@ def default_registry(
             allowed_redirect_hosts=set(),
         )
         usage_sources = (
-            (MiniMaxBillingImporter(config, keychain, client, clock),)
+            (_performance_source(
+                MiniMaxBillingImporter(config, keychain, client, clock),
+                "network",
+            ),)
             if endpoints.billing is not None
             else ()
         )
@@ -97,7 +119,10 @@ def default_registry(
         )
 
     def openai(config: OpenAIOrganizationConfig) -> ProviderBinding:
-        importer = OpenAIOrganizationImporter(config, keychain, openai_client, clock)
+        importer = _performance_source(
+            OpenAIOrganizationImporter(config, keychain, openai_client, clock),
+            "network",
+        )
         return ProviderBinding(
             provider_id=config.provider_id, family_id="openai",
             quota_sources=(_quota_source(
@@ -112,14 +137,22 @@ def default_registry(
             provider_id=config.provider_id,
             family_id="moonshot",
             balance_sources=(
-                MoonshotBalanceAdapter(
-                    config, keychain, moonshot_client, clock
+                _performance_source(
+                    MoonshotBalanceAdapter(
+                        config, keychain, moonshot_client, clock
+                    ),
+                    "network",
                 ),
             ),
         )
 
     def daily_feed(config: DailyUsageFeedConfig) -> ProviderBinding:
-        importer = DailyUsageFeedImporter(config, keychain, daily_feed_client, clock)
+        importer = _performance_source(
+            DailyUsageFeedImporter(
+                config, keychain, daily_feed_client, clock
+            ),
+            "network",
+        )
         return ProviderBinding(
             provider_id=config.provider_id, family_id=config.family_id,
             quota_sources=(_quota_source(
@@ -130,8 +163,11 @@ def default_registry(
         )
 
     def cost_feed(config: DailyCostFeedConfig) -> ProviderBinding:
-        importer = DailyCostFeedImporter(
-            config, keychain, daily_feed_client, clock
+        importer = _performance_source(
+            DailyCostFeedImporter(
+                config, keychain, daily_feed_client, clock
+            ),
+            "network",
         )
         return ProviderBinding(
             provider_id=config.provider_id, family_id=config.family_id,

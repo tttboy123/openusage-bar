@@ -17,7 +17,9 @@ from scripts.measure_performance import (
     build_report,
     delta_usage,
     evaluate_budgets,
+    load_source_class_timing,
     run_refresh,
+    summarize_source_class_timings,
     validate_measurement_plan,
 )
 
@@ -147,6 +149,24 @@ class PerformanceMeasurementTests(unittest.TestCase):
             ["status", "--format", "json", "--fresh"],
         )
 
+    def test_instrumented_refresh_command_uses_private_bounded_contract(self):
+        app = Path("/Applications/OpenUsage Bar.app")
+        timing = Path("/private/tmp/source-class-timing.json")
+
+        command = _refresh_command(app, timing_output=timing)
+
+        self.assertEqual(
+            command[1:4],
+            ["__refresh-once", "--ledger", str(
+                Path.home()
+                / ".local/state/openusage-bar/activity.sqlite3"
+            )],
+        )
+        self.assertEqual(
+            command[4:],
+            ["--performance-output", str(timing)],
+        )
+
     def test_refresh_timeout_reaps_the_process_group(self):
         with tempfile.TemporaryDirectory() as temp:
             survived = Path(temp) / "survived"
@@ -168,6 +188,100 @@ class PerformanceMeasurementTests(unittest.TestCase):
             self.assertIsNone(result["exitCode"])
             self.assertLess(result["durationSeconds"], 3)
             self.assertFalse(survived.exists())
+
+    def test_source_class_timing_is_bounded_and_aggregated_across_rounds(self):
+        rounds = [
+            {
+                "sourceClassTiming": {
+                    "schemaVersion": 1,
+                    "scope": "source-class",
+                    "classes": [
+                        {
+                            "sourceClass": "network",
+                            "sampleCount": 2,
+                            "durationSecondsTotal": 1.25,
+                            "durationSecondsMax": 1.0,
+                            "outcomes": {
+                                "success": 1,
+                                "backoff": 1,
+                                "timeout": 0,
+                                "unavailable": 0,
+                                "failed": 0,
+                            },
+                        }
+                    ],
+                }
+            },
+            {
+                "sourceClassTiming": {
+                    "schemaVersion": 1,
+                    "scope": "source-class",
+                    "classes": [
+                        {
+                            "sourceClass": "network",
+                            "sampleCount": 1,
+                            "durationSecondsTotal": 0.5,
+                            "durationSecondsMax": 0.5,
+                            "outcomes": {
+                                "success": 0,
+                                "backoff": 0,
+                                "timeout": 1,
+                                "unavailable": 0,
+                                "failed": 0,
+                            },
+                        }
+                    ],
+                }
+            },
+        ]
+
+        summary = summarize_source_class_timings(rounds)
+
+        self.assertEqual(
+            summary,
+            {
+                "scope": "source-class",
+                "classes": [
+                    {
+                        "sourceClass": "network",
+                        "sampleCount": 3,
+                        "durationSecondsTotal": 1.75,
+                        "durationSecondsMax": 1.0,
+                        "outcomes": {
+                            "success": 1,
+                            "backoff": 1,
+                            "timeout": 1,
+                            "unavailable": 0,
+                            "failed": 0,
+                        },
+                    }
+                ],
+            },
+        )
+
+    def test_invalid_source_class_timing_file_is_not_observable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "timing.json"
+            output.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "scope": "source-class",
+                        "classes": [
+                            {
+                                "sourceClass": "provider-name",
+                                "sampleCount": 1,
+                                "durationSecondsTotal": 1,
+                                "durationSecondsMax": 1,
+                                "outcomes": {},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertIsNone(load_source_class_timing(output))
 
     def test_committed_baseline_is_three_rounds_and_privacy_safe(self):
         payload = json.loads(BASELINE.read_text(encoding="utf-8"))
@@ -193,6 +307,8 @@ class PerformanceMeasurementTests(unittest.TestCase):
             "Python remains the sole ledger writer",
             "two same-version baselines after separate boots",
             "perSourceTiming",
+            "source-class",
+            "not published through Local API v1",
             "scripts/measure_performance.py",
         ):
             self.assertIn(required, guide)

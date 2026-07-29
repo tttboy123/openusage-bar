@@ -17,6 +17,7 @@ from .activity_store import ActivityStore, SCHEMA_VERSION as LEDGER_SCHEMA_VERSI
 from .bounded_process import run_bounded
 from .openusage_adapter import child_subprocess_environment
 from .openusage_catalog import EXPECTED_PROVIDER_IDS
+from .performance_timing import RefreshTimingRecorder, write_timing_report
 from .query import QueryService, SCHEMA_VERSION, to_wire
 
 
@@ -45,11 +46,17 @@ class UnavailableRefresher:
         raise RuntimeError("refresh unavailable")
 
 
-def build_default_refresher(store: ActivityStore) -> Any:
+def build_default_refresher(
+    store: ActivityStore,
+    *,
+    timing_recorder: RefreshTimingRecorder | None = None,
+) -> Any:
     """Build credential-owning adapters lazily, outside all import-time paths."""
     from .aggregator import build_headless_refresher
 
-    return build_headless_refresher(store)
+    return build_headless_refresher(
+        store, timing_recorder=timing_recorder
+    )
 
 
 def _internal_refresh_once(
@@ -58,14 +65,49 @@ def _internal_refresh_once(
     stderr: TextIO,
     refresher_factory: Callable[[ActivityStore], Any] | None,
 ) -> int:
-    if len(argv) != 3 or argv[0] != INTERNAL_REFRESH_COMMAND or argv[1] != "--ledger":
+    valid_shape = (
+        len(argv) == 3
+        or (
+            len(argv) == 5
+            and argv[3] == "--performance-output"
+        )
+    )
+    if (
+        not valid_shape
+        or argv[0] != INTERNAL_REFRESH_COMMAND
+        or argv[1] != "--ledger"
+    ):
+        stderr.write("invalid command input\n")
+        return 2
+    timing_path = Path(argv[4]) if len(argv) == 5 else None
+    if timing_path is not None and (
+        not timing_path.is_absolute()
+        or not timing_path.parent.is_dir()
+        or timing_path.exists()
+    ):
         stderr.write("invalid command input\n")
         return 2
     store: ActivityStore | None = None
     try:
         store = ActivityStore(Path(argv[2]))
         factory = refresher_factory or build_default_refresher
-        factory(store).refresh()
+        timing_recorder = (
+            RefreshTimingRecorder() if timing_path is not None else None
+        )
+        if refresher_factory is None:
+            refresher = factory(
+                store, timing_recorder=timing_recorder
+            )
+        else:
+            refresher = factory(store)
+        refresher.refresh()
+        if timing_path is not None:
+            snapshot = (
+                refresher.performance_timing_snapshot()
+                if hasattr(refresher, "performance_timing_snapshot")
+                else timing_recorder.snapshot()
+            )
+            write_timing_report(timing_path, snapshot)
         return 0
     except Exception:
         stderr.write("refresh unavailable\n")

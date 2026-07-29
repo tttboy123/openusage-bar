@@ -40,6 +40,11 @@ from .providers.contracts import (
     QuotaFetchSuccess,
     UsageImportSuccess,
 )
+from .performance_timing import (
+    RefreshTimingRecorder,
+    measure_source_call,
+    source_class_for,
+)
 from .openai_organization import COST_SOURCE_ID, USAGE_SOURCE_ID
 
 
@@ -455,6 +460,7 @@ class ActivityCollector:
         official_importers: Mapping[str, Any] | None = None,
         clock: Callable[[], datetime] | None = None,
         local_timezone=None,
+        timing_recorder: RefreshTimingRecorder | None = None,
     ) -> None:
         self.store = store
         self.importer = importer
@@ -463,6 +469,7 @@ class ActivityCollector:
         self.local_timezone = (
             local_timezone or datetime.now().astimezone().tzinfo or timezone.utc
         )
+        self.timing_recorder = timing_recorder
         self._lock = threading.Lock()
 
     @staticmethod
@@ -595,7 +602,11 @@ class ActivityCollector:
             has_cost_history = True
         cost_since = today - timedelta(days=6 if has_cost_history else 364)
         try:
-            official_cost = importer.fetch_costs(cost_since, today)
+            official_cost = measure_source_call(
+                self.timing_recorder,
+                source_class_for(importer, "network"),
+                lambda: importer.fetch_costs(cost_since, today),
+            )
         except Exception:
             official_cost = ImportFailure("import_failed")
         if isinstance(official_cost, CostImportSuccess):
@@ -949,7 +960,11 @@ class ActivityCollector:
                         days=6 if had_official_usage else 364
                     )
                     try:
-                        official_usage = official.fetch_usage(usage_since, today)
+                        official_usage = measure_source_call(
+                            self.timing_recorder,
+                            source_class_for(official, "network"),
+                            lambda: official.fetch_usage(usage_since, today),
+                        )
                     except Exception:
                         official_usage = ImportFailure("import_failed")
                     if isinstance(official_usage, UsageImportSuccess):
@@ -1018,7 +1033,13 @@ class ActivityCollector:
                     if self.store.has_daily_history(provider_id, account_ref)
                     else 364
                 )
-                result = self.importer.fetch(openusage_provider_id, since, today)
+                result = measure_source_call(
+                    self.timing_recorder,
+                    source_class_for(self.importer, "child_process"),
+                    lambda: self.importer.fetch(
+                        openusage_provider_id, since, today
+                    ),
+                )
             except Exception:
                 self._safe_openusage_failure(
                     provider_id, "import_failed", attempted_at, account_ref

@@ -18,6 +18,7 @@ import re
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -30,6 +31,8 @@ RUSAGE_INFO_V2 = 2
 EXPECTED_BUNDLE_ID = "com.lune.openusagebar"
 STATUS_LABEL = "com.lune.openusagebar"
 COLLECTOR_LABEL = "com.lune.openusagebar.collector"
+SOURCE_CLASSES = ("network", "local_file", "child_process")
+OUTCOMES = ("success", "backoff", "timeout", "unavailable", "failed")
 
 
 @dataclass(frozen=True)
@@ -405,7 +408,10 @@ def _terminate_group(process: subprocess.Popen[bytes]) -> None:
 
 
 def run_refresh(
-    command: list[str], *, timeout_seconds: float
+    command: list[str],
+    *,
+    timeout_seconds: float,
+    timing_output: Path | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     try:
@@ -427,16 +433,22 @@ def run_refresh(
         return_code = process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
         _terminate_group(process)
-        return {
+        result = {
             "durationSeconds": _rounded(time.monotonic() - started),
             "status": "timeout",
             "exitCode": None,
         }
-    return {
-        "durationSeconds": _rounded(time.monotonic() - started),
-        "status": "success" if return_code == 0 else "failed",
-        "exitCode": return_code,
-    }
+    else:
+        result = {
+            "durationSeconds": _rounded(time.monotonic() - started),
+            "status": "success" if return_code == 0 else "failed",
+            "exitCode": return_code,
+        }
+    if timing_output is not None:
+        timing = load_source_class_timing(timing_output)
+        if timing is not None:
+            result["sourceClassTiming"] = timing
+    return result
 
 
 def summarize_refresh(rounds: Iterable[dict[str, Any]]) -> dict[str, Any]:
@@ -457,6 +469,103 @@ def summarize_refresh(rounds: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "timeoutCount": sum(item.get("status") == "timeout" for item in values),
         "failureCount": sum(item.get("status") == "failed" for item in values),
     }
+
+
+def load_source_class_timing(path: Path) -> dict[str, Any] | None:
+    try:
+        if path.stat().st_size > 64 * 1024:
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schemaVersion") != 1
+            or payload.get("scope") != "source-class"
+            or not isinstance(payload.get("classes"), list)
+        ):
+            return None
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in payload["classes"]:
+            if not isinstance(item, dict):
+                return None
+            source_class = item.get("sourceClass")
+            sample_count = item.get("sampleCount")
+            total = item.get("durationSecondsTotal")
+            maximum = item.get("durationSecondsMax")
+            outcomes = item.get("outcomes")
+            if (
+                source_class not in SOURCE_CLASSES
+                or source_class in seen
+                or type(sample_count) is not int
+                or sample_count < 0
+                or not isinstance(total, (int, float))
+                or isinstance(total, bool)
+                or total < 0
+                or not isinstance(maximum, (int, float))
+                or isinstance(maximum, bool)
+                or maximum < 0
+                or not isinstance(outcomes, dict)
+                or set(outcomes) != set(OUTCOMES)
+                or any(type(outcomes[key]) is not int or outcomes[key] < 0 for key in OUTCOMES)
+                or sum(outcomes.values()) != sample_count
+            ):
+                return None
+            seen.add(source_class)
+            normalized.append(
+                {
+                    "sourceClass": source_class,
+                    "sampleCount": sample_count,
+                    "durationSecondsTotal": _rounded(float(total)),
+                    "durationSecondsMax": _rounded(float(maximum)),
+                    "outcomes": {key: outcomes[key] for key in OUTCOMES},
+                }
+            )
+        normalized.sort(key=lambda item: SOURCE_CLASSES.index(item["sourceClass"]))
+        return {
+            "schemaVersion": 1,
+            "scope": "source-class",
+            "classes": normalized,
+        }
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+
+
+def summarize_source_class_timings(
+    rounds: Iterable[dict[str, Any]],
+) -> dict[str, Any] | str:
+    aggregate: dict[str, dict[str, Any]] = {}
+    observed = False
+    for round_result in rounds:
+        timing = round_result.get("sourceClassTiming")
+        if not isinstance(timing, dict) or timing.get("scope") != "source-class":
+            continue
+        observed = True
+        for item in timing.get("classes", []):
+            source_class = item["sourceClass"]
+            target = aggregate.setdefault(
+                source_class,
+                {
+                    "sourceClass": source_class,
+                    "sampleCount": 0,
+                    "durationSecondsTotal": 0.0,
+                    "durationSecondsMax": 0.0,
+                    "outcomes": {key: 0 for key in OUTCOMES},
+                },
+            )
+            target["sampleCount"] += item["sampleCount"]
+            target["durationSecondsTotal"] += item["durationSecondsTotal"]
+            target["durationSecondsMax"] = max(
+                target["durationSecondsMax"], item["durationSecondsMax"]
+            )
+            for outcome in OUTCOMES:
+                target["outcomes"][outcome] += item["outcomes"][outcome]
+    if not observed:
+        return "not_observable"
+    classes = [aggregate[key] for key in SOURCE_CLASSES if key in aggregate]
+    for item in classes:
+        item["durationSecondsTotal"] = _rounded(item["durationSecondsTotal"])
+        item["durationSecondsMax"] = _rounded(item["durationSecondsMax"])
+    return {"scope": "source-class", "classes": classes}
 
 
 def evaluate_budgets(
@@ -508,7 +617,7 @@ def build_report(
         "idle": {"rounds": idle_rounds, "summary": idle_summary},
         "refresh": {
             "scope": "all-configured-sources",
-            "perSourceTiming": "not_observable",
+            "perSourceTiming": summarize_source_class_timings(refresh_rounds),
             "rounds": refresh_rounds,
             "summary": summarize_refresh(refresh_rounds),
         },
@@ -565,14 +674,43 @@ def _default_app() -> Path:
     )
 
 
-def _refresh_command(app: Path) -> list[str]:
+def _refresh_command(
+    app: Path, *, timing_output: Path | None = None
+) -> list[str]:
+    executable = str(app / "Contents/MacOS/OpenUsage Collector")
+    if timing_output is not None:
+        return [
+            executable,
+            "__refresh-once",
+            "--ledger",
+            str(
+                Path.home()
+                / ".local/state/openusage-bar/activity.sqlite3"
+            ),
+            "--performance-output",
+            str(timing_output),
+        ]
     return [
-        str(app / "Contents/MacOS/OpenUsage Collector"),
+        executable,
         "status",
         "--format",
         "json",
         "--fresh",
     ]
+
+
+def run_instrumented_refresh(
+    app: Path, *, timeout_seconds: float
+) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(
+        prefix="openusage-performance-"
+    ) as directory:
+        timing_output = Path(directory) / "source-class-timing.json"
+        return run_refresh(
+            _refresh_command(app, timing_output=timing_output),
+            timeout_seconds=timeout_seconds,
+            timing_output=timing_output,
+        )
 
 
 def _write_report(payload: dict[str, Any], output: Path | None) -> None:
@@ -634,12 +772,11 @@ def main(argv: list[str] | None = None) -> int:
             collector = app / "Contents/MacOS/OpenUsage Collector"
             if not collector.is_file():
                 raise ValueError("collector unavailable")
-            command = _refresh_command(app)
             refresh_rounds = [
                 {
                     "round": index,
-                    **run_refresh(
-                        command, timeout_seconds=args.refresh_timeout
+                    **run_instrumented_refresh(
+                        app, timeout_seconds=args.refresh_timeout
                     ),
                 }
                 for index in range(1, args.rounds + 1)

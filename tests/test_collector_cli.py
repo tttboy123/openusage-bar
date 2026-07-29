@@ -21,7 +21,12 @@ from openusage_bar.activity_store import (
     ProviderInstance,
     QuotaObservation,
 )
-from openusage_bar.collector_cli import CLIError, DEFAULT_FRESH_TIMEOUT_SECONDS, main
+from openusage_bar.collector_cli import (
+    CLIError,
+    DEFAULT_FRESH_TIMEOUT_SECONDS,
+    INTERNAL_REFRESH_COMMAND,
+    main,
+)
 from openusage_bar.collector_cli import _default_refresh_command
 from openusage_bar.daily_history import DAILY_TIMEOUT_SECONDS
 from openusage_bar.openusage_adapter import AUTO_TIMEOUT_SECONDS, DIRECT_TIMEOUT_SECONDS
@@ -78,6 +83,43 @@ class FrozenRefreshCommandTests(unittest.TestCase):
         self.assertEqual(command, [
             executable, "__refresh-once", "--ledger", "/safe/ledger.sqlite3",
         ])
+
+    def test_internal_refresh_writes_privacy_safe_source_class_timing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = Path(directory) / "ledger.sqlite3"
+            timing = Path(directory) / "timing.json"
+
+            def factory(_store, *, timing_recorder=None):
+                class Refresher:
+                    def refresh(self):
+                        timing_recorder.record("local_file", "success", 0.25)
+
+                    def performance_timing_snapshot(self):
+                        return timing_recorder.snapshot()
+
+                return Refresher()
+
+            with patch(
+                "openusage_bar.collector_cli.build_default_refresher",
+                side_effect=factory,
+            ):
+                result = main(
+                    [
+                        INTERNAL_REFRESH_COMMAND,
+                        "--ledger",
+                        str(ledger),
+                        "--performance-output",
+                        str(timing),
+                    ],
+                    stderr=io.StringIO(),
+                )
+
+            self.assertEqual(result, 0)
+            payload = json.loads(timing.read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["classes"][0]["sourceClass"], "local_file"
+            )
+            self.assertEqual(timing.stat().st_mode & 0o777, 0o600)
 
     def test_frozen_helper_rejects_executable_outside_its_bundle(self):
         with (
