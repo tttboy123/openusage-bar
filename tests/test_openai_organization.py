@@ -26,13 +26,24 @@ def fixture(name):
 
 
 class OpenAIOrganizationImporterTests(unittest.TestCase):
-    def importer(self, responses, *, secret=SECRET):
+    def importer(
+        self,
+        responses,
+        *,
+        secret=SECRET,
+        provider_id="openai",
+        account_ref="",
+    ):
         keychain = Mock()
         keychain.get.return_value = secret
         client = Mock()
         client.get_json.side_effect = responses
         importer = OpenAIOrganizationImporter(
-            OpenAIOrganizationConfig("openai", "OpenAI Organization"),
+            OpenAIOrganizationConfig(
+                provider_id,
+                "OpenAI Organization",
+                account_ref=account_ref,
+            ),
             keychain,
             client,
             lambda: NOW,
@@ -54,6 +65,7 @@ class OpenAIOrganizationImporterTests(unittest.TestCase):
         first = next(row for row in result.rows if row.day == "2026-07-01" and row.model_id == "gpt-5.5")
         self.assertEqual((first.input_tokens, first.output_tokens), (100, 40))
         self.assertEqual(first.cache_read_tokens, 25)
+        self.assertEqual(first.cache_creation_tokens, 5)
         self.assertEqual(first.total_tokens, 140)
         self.assertEqual(first.token_counting_convention, "input_includes_cache")
         self.assertIsNone(first.cost_amount)
@@ -75,6 +87,51 @@ class OpenAIOrganizationImporterTests(unittest.TestCase):
         second_query = parse_qs(urlsplit(calls[1].args[0]).query)
         self.assertEqual(second_query["page"], ["cursor-two"])
 
+    def test_optional_cache_subtotals_default_to_zero_inside_a_complete_result(self):
+        payload = fixture("openai_organization_usage_page_2.json")
+        del payload["data"][0]["results"][0]["input_cached_tokens"]
+        importer, _, _ = self.importer([payload])
+
+        result = importer.fetch_usage(date(2026, 7, 2), date(2026, 7, 2))
+
+        self.assertIsInstance(result, UsageImportSuccess)
+        self.assertEqual(len(result.rows), 1)
+        row = result.rows[0]
+        self.assertEqual((row.cache_read_tokens, row.cache_creation_tokens), (0, 0))
+        self.assertEqual(row.total_tokens, row.input_tokens + row.output_tokens)
+
+    def test_multiple_organization_connections_keep_independent_scopes(self):
+        personal, personal_keychain, _ = self.importer(
+            [fixture("openai_organization_usage_page_2.json")],
+            provider_id="openai-personal",
+            account_ref="personal",
+        )
+        work, work_keychain, _ = self.importer(
+            [fixture("openai_organization_usage_page_2.json")],
+            provider_id="openai-work",
+            account_ref="work",
+        )
+
+        personal_result = personal.fetch_usage(
+            date(2026, 7, 2), date(2026, 7, 2)
+        )
+        work_result = work.fetch_usage(date(2026, 7, 2), date(2026, 7, 2))
+
+        self.assertIsInstance(personal_result, UsageImportSuccess)
+        self.assertIsInstance(work_result, UsageImportSuccess)
+        self.assertEqual(
+            {
+                (personal_result.rows[0].provider_id, personal_result.rows[0].account_ref),
+                (work_result.rows[0].provider_id, work_result.rows[0].account_ref),
+            },
+            {
+                ("openai-personal", "personal"),
+                ("openai-work", "work"),
+            },
+        )
+        personal_keychain.get.assert_called_once_with("openai-personal")
+        work_keychain.get.assert_called_once_with("openai-work")
+
     def test_costs_sum_each_utc_day_by_currency(self):
         importer, _, _ = self.importer([fixture("openai_organization_costs.json")])
 
@@ -88,6 +145,65 @@ class OpenAIOrganizationImporterTests(unittest.TestCase):
                 ("2026-07-01", "USD", "2", "provider_reported", "direct"),
             ],
         )
+
+    def test_costs_read_every_cursor_page_before_exposing_rows(self):
+        first = fixture("openai_organization_costs.json")
+        first["has_more"] = True
+        first["next_page"] = "cost-page-two"
+        second = {
+            "object": "page",
+            "data": [
+                {
+                    "object": "bucket",
+                    "start_time": 1782950400,
+                    "end_time": 1783036800,
+                    "results": [
+                        {
+                            "object": "organization.costs.result",
+                            "amount": {"value": "3.5", "currency": "usd"},
+                        }
+                    ],
+                }
+            ],
+            "has_more": False,
+            "next_page": None,
+        }
+        importer, _, client = self.importer([first, second])
+
+        result = importer.fetch_costs(date(2026, 7, 1), date(2026, 7, 2))
+
+        self.assertIsInstance(result, CostImportSuccess)
+        self.assertEqual(
+            [(row.day, row.currency, row.amount) for row in result.rows],
+            [
+                ("2026-07-01", "EUR", "2"),
+                ("2026-07-01", "USD", "2"),
+                ("2026-07-02", "USD", "3.5"),
+            ],
+        )
+        self.assertEqual(len(client.get_json.call_args_list), 2)
+        first_query = parse_qs(urlsplit(client.get_json.call_args_list[0].args[0]).query)
+        second_query = parse_qs(urlsplit(client.get_json.call_args_list[1].args[0]).query)
+        self.assertEqual(first_query["limit"], ["180"])
+        self.assertEqual(second_query["page"], ["cost-page-two"])
+
+    def test_complete_empty_pages_are_known_zero_not_missing(self):
+        empty = {
+            "object": "page",
+            "data": [],
+            "has_more": False,
+            "next_page": None,
+        }
+        usage, _, _ = self.importer([empty])
+        costs, _, _ = self.importer([empty])
+
+        usage_result = usage.fetch_usage(date(2026, 7, 1), date(2026, 7, 1))
+        cost_result = costs.fetch_costs(date(2026, 7, 1), date(2026, 7, 1))
+
+        self.assertIsInstance(usage_result, UsageImportSuccess)
+        self.assertIsInstance(cost_result, CostImportSuccess)
+        self.assertEqual(usage_result.rows, ())
+        self.assertEqual(cost_result.rows, ())
 
     def test_missing_key_and_network_errors_are_sanitized(self):
         missing, _, missing_client = self.importer([], secret=None)
@@ -187,6 +303,14 @@ class OpenAIOrganizationImporterTests(unittest.TestCase):
         invalid_usage = fixture("openai_organization_usage_page_2.json")
         invalid_usage["data"][0]["results"][0]["input_tokens"] = True
         importer, _, _ = self.importer([invalid_usage])
+        result = importer.fetch_usage(date(2026, 7, 2), date(2026, 7, 2))
+        self.assertIsInstance(result, ImportFailure)
+        self.assertEqual(result.error_code, "invalid_response")
+
+        invalid_cache = fixture("openai_organization_usage_page_2.json")
+        invalid_cache["data"][0]["results"][0]["input_cached_tokens"] = 40
+        invalid_cache["data"][0]["results"][0]["input_cache_write_tokens"] = 20
+        importer, _, _ = self.importer([invalid_cache])
         result = importer.fetch_usage(date(2026, 7, 2), date(2026, 7, 2))
         self.assertIsInstance(result, ImportFailure)
         self.assertEqual(result.error_code, "invalid_response")

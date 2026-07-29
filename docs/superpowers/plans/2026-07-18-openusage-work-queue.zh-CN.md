@@ -363,6 +363,22 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - 认证、Keychain、网络、限流或解析失败不会输出 token；空结果不会覆盖
   OpenUsage 活动或 Last-good quota。
 
+**OpenAI Organization 当前证据（2026-07-29）：**
+
+- 官方 Usage API 仍使用 `/v1/organization/usage/completions` 与
+  `/v1/organization/costs`；日桶上限分别为 31 和 180，并通过
+  `next_page` / `page` 完成游标分页。
+- 官方 `input_tokens` 已明确包含 Cache Read 与 Cache Write。账本分别保存
+  `input_cached_tokens` 和 `input_cache_write_tokens`，Total 仍只按
+  Input + Output 计算，避免重复计数。
+- 多个 Organization 连接使用不同 Provider ID 和不透明 `account_ref`；
+  Token、费用、健康状态和 fallback 均按连接隔离。
+- 完整空页是有覆盖证据的 Known Zero；重复游标、缺失后续页、重复日期桶、
+  认证、限流、网络或解析失败均不提交部分结果，也不覆盖 Last-good。
+- 当前机器未配置 OpenAI Organization Admin API Key，因此目录验证状态仍为
+  `fixture`，不能宣称真实 Organization 账号已通过；实机验收继续保留为
+  Issue #24 的开放门禁。
+
 **验收：**
 
 - [ ] 任一事实族失败不抑制同 Provider 其他事实。

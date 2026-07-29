@@ -282,6 +282,25 @@ class ProviderCatalogTests(unittest.TestCase):
         self.assertEqual(kiro_openusage.authority, "third_party")
         self.assertEqual(kiro_openusage.verification, "fixture")
 
+        openai = self.catalog.require("openai")
+        self.assertTrue(openai.supports_accounts)
+        openai_admin, openai_openusage = openai.sources
+        self.assertEqual(
+            openai_admin.fact_families,
+            frozenset({"api_spend", "detection", "token_activity"}),
+        )
+        self.assertEqual(openai_admin.kind, "official_api")
+        self.assertEqual(openai_admin.authority, "provider_official")
+        self.assertEqual(openai_admin.account_scope, "organization")
+        self.assertEqual(openai_admin.model_scope, "per_model")
+        self.assertEqual(openai_admin.verification, "fixture")
+        self.assertEqual(
+            openai_openusage.fact_families,
+            frozenset({"detection", "token_activity"}),
+        )
+        self.assertEqual(openai_openusage.authority, "third_party")
+        self.assertEqual(openai_openusage.verification, "fixture")
+
         minimax, minimax_billing = self.catalog.require("minimax").sources[:2]
         self.assertEqual(
             minimax.fact_families,

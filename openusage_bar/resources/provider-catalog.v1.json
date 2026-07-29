@@ -1383,7 +1383,7 @@
         "token_activity"
       ],
       "regions": [],
-      "supports_accounts": false,
+      "supports_accounts": true,
       "capabilities": {
         "quota_windows": {
           "state": "unknown",
