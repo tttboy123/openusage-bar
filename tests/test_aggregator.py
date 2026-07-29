@@ -209,12 +209,16 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         self.assertIsInstance(importer.keychain, BoundedReadOnlyKeychain)
         self.assertEqual(importer.client.allowed_redirect_hosts, frozenset())
 
-    def test_codex_openusage_is_registered_for_eager_collection(self):
+    def test_codex_local_sessions_are_primary_for_eager_collection(self):
         from openusage_bar.aggregator import build_headless_refresher
+        from openusage_bar.codex_daily import CodexLocalDailyImporter
 
         with patch("openusage_bar.config.ProviderConfigStore.load", return_value=[]):
             refresher = build_headless_refresher(Mock())
 
+        importer = refresher.collector.official_importers["codex"]
+        self.assertIsInstance(importer, CodexLocalDailyImporter)
+        self.assertEqual(importer.usage_source_id, "codex.local_sessions")
         self.assertEqual(refresher.eager_usage_provider_ids, ("codex",))
 
     def test_minimax_reuses_keychain_and_client_for_quota_and_daily_tokens(self):

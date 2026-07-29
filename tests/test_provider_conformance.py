@@ -82,6 +82,7 @@ class ProviderConformanceTests(unittest.TestCase):
 
         inventory = runtime_inventory(bindings)
         self.assertIn(("codex", "quota", "codex.local_rate_limits"), inventory)
+        self.assertIn(("codex", "usage", "codex.local_sessions"), inventory)
         self.assertIn(("openai", "cost", "custom.cost_feed"), inventory)
         self.assertIn(("openai", "usage", "openai.organization.usage"), inventory)
 

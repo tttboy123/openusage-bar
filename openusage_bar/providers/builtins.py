@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 
+from ..codex_daily import CodexLocalDailyImporter
 from ..codex_subscription import CodexSubscriptionAdapter
 from ..config import (
     DailyCostFeedConfig,
@@ -70,6 +71,7 @@ def default_registry(
         quota_sources=(_quota_source(
             CodexSubscriptionAdapter(clock=clock), "codex.local_rate_limits", 20
         ),),
+        usage_sources=(CodexLocalDailyImporter(clock=clock),),
     ))
 
     def minimax(config: MiniMaxConfig) -> ProviderBinding:

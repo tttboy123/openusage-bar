@@ -187,6 +187,7 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] `0.4.4 (8)` 已从候选包事务升级到 `/Applications`。深度签名、四个 Mach-O runtime、两个 LaunchAgent 固定路径、SQLite `quick_check` 与安装前后事实表计数均通过；`daily_model_usage=118`、`quota_snapshots=939`、`change_log` 单调推进，历史数据未丢失。
 - [x] 新常驻链路无需打开菜单栏即可自然采集：观察窗口内 `dataRevision=6820 → 6833`，随后继续推进；`/v1/capacity` 返回 5 条事实，Codex、MiniMax、Kiro 与 Step Plan 为本轮 direct 数据。全屏可见验收确认菜单栏 `chart.bar.xaxis + 18%` 与 API 最紧急的 MiniMax 18% 一致。
 - [x] 已生成 schema v3 重启 baseline：文件权限 `0600`、版本 `0.4.4 (8)`、`dataRevision=6856`，锁定外层 App、status launcher/runtime、collector launcher/runtime 共 5 枚签名哈希，并保存同轮 5 个成功来源的无凭证时间戳。重启前即时验证按预期返回 `boot_unchanged`。
+- [x] 2026-07-29 实机复核发现 `CodexLocalDailyImporter` 已实现但未注册到生产 Provider Registry，导致后台只尝试 OpenUsage fallback，`codex.local_sessions` 停留在 2026-07-18。修复按 RED → GREEN 接入本地会话作为 Codex 主来源，OpenUsage 仅在直接来源失败时备用；Provider Conformance fixture 同步声明 `codex.local_sessions`。候选包事务安装后，在未点击菜单栏的启动采集周期内，API 自动从 `dataRevision=43828` 推进到 `43852`、`todayTokens=null` 更新为 `218261817`，直接来源的 `lastAttemptAt`/`lastSuccessAt` 推进到 `2026-07-29T10:20:26.682149Z`，旧 `openusage.daily` 仍为 stale 且未与直接数据相加。Usage Details 手动重新读取后显示最近采集于 18:23。完整 Python 758 项、候选构建、签名和隐私扫描均通过；本机约 4.7GB / 819 个 Codex JSONL 的首次冷扫描约需 70 秒，后续仍需单独做增量冷启动性能优化。
 - [ ] 真实重启后登录项、collector、本地 API 与菜单栏恢复尚未验收；`launchctl` 等价检查不能替代 reboot。
 
 **验收：**
