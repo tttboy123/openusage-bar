@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time as time_module
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 from urllib.parse import urlencode
@@ -27,6 +28,32 @@ MAX_TOKEN_VALUE = 9_223_372_036_854_775_807
 
 class MiniMaxParseError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class MiniMaxEndpoints:
+    host: str
+    quota: str
+    billing: str | None
+
+
+def minimax_endpoints_for_site(site: str) -> MiniMaxEndpoints:
+    if site == "china":
+        return MiniMaxEndpoints(
+            host="www.minimaxi.com",
+            quota=MINIMAX_ENDPOINT,
+            billing=MINIMAX_BILLING_ENDPOINT,
+        )
+    if site == "international":
+        return MiniMaxEndpoints(
+            host="www.minimax.io",
+            quota="https://www.minimax.io/v1/token_plan/remains",
+            # MiniMax documents the international Token Plan endpoint, but
+            # does not document an international equivalent of the China web
+            # console's delayed billing feed.
+            billing=None,
+        )
+    raise MiniMaxParseError("Unsupported MiniMax site")
 
 
 def parse_minimax_quota_observations(
@@ -156,6 +183,7 @@ class MiniMaxBillingImporter:
         local_timezone=timezone(timedelta(hours=8)),
     ) -> None:
         self.config = config
+        self.endpoints = minimax_endpoints_for_site(config.site)
         self.account_ref = config.account_ref
         self.keychain = keychain
         self.client = client
@@ -167,6 +195,8 @@ class MiniMaxBillingImporter:
         request = self._request_bounds(since, until)
         if isinstance(request, ImportFailure):
             return request
+        if self.endpoints.billing is None:
+            return ImportFailure("not_available_yet")
         covered_since, covered_until, start_time, end_time = request
         secret = self._secret()
         if secret is None:
@@ -234,7 +264,7 @@ class MiniMaxBillingImporter:
             if self.monotonic() - started_at > 60:
                 raise _MiniMaxBillingResponseError("operation deadline exceeded")
             payload = self.client.get_json(
-                f"{MINIMAX_BILLING_ENDPOINT}?{urlencode({'page': page, 'limit': MAX_BILLING_PAGE_SIZE, 'aggregate': 'false'})}",
+                f"{self.endpoints.billing}?{urlencode({'page': page, 'limit': MAX_BILLING_PAGE_SIZE, 'aggregate': 'false'})}",
                 {"Authorization": f"Bearer {secret}"},
             )
             base = payload.get("base_resp")
@@ -364,7 +394,12 @@ class MiniMaxCodingPlanAdapter:
         self.keychain = keychain
         self.client = client
         self.clock = clock
+        self.endpoints = minimax_endpoints_for_site(config.site)
         self.last_quota_result = QuotaFetchFailure("not_collected")
+
+    @staticmethod
+    def _site_label(config: MiniMaxConfig) -> str:
+        return "International" if config.site == "international" else "China"
 
     @staticmethod
     def parse(config: MiniMaxConfig, payload: dict[str, Any], now: datetime) -> ProviderCard:
@@ -464,7 +499,10 @@ class MiniMaxCodingPlanAdapter:
             detail=detail,
             remaining_percent=remaining_percentage,
             resets_at=reset_at,
-            source="MiniMax Coding Plan",
+            source=(
+                f"MiniMax {MiniMaxCodingPlanAdapter._site_label(config)} "
+                "Coding Plan"
+            ),
             refreshed_at=now,
             family_id="minimax",
             credential_source="minimax_builtin_api",
@@ -480,7 +518,7 @@ class MiniMaxCodingPlanAdapter:
             return self._error_card(ProviderStatus.AUTH, "Credential required", now)
         try:
             payload = self.client.get_json(
-                MINIMAX_ENDPOINT,
+                self.endpoints.quota,
                 {
                     "Authorization": f"Bearer {secret}",
                     "Content-Type": "application/json",
@@ -516,7 +554,9 @@ class MiniMaxCodingPlanAdapter:
             detail=error,
             remaining_percent=None,
             resets_at=None,
-            source="MiniMax Coding Plan",
+            source=(
+                f"MiniMax {self._site_label(self.config)} Coding Plan"
+            ),
             refreshed_at=now,
             last_error=error,
             family_id="minimax",

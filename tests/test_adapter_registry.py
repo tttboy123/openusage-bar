@@ -114,6 +114,51 @@ class AdapterRegistryTests(unittest.TestCase):
             bindings["minimax-work"].usage_sources[0].client,
         )
 
+    def test_minimax_sites_use_isolated_clients_and_only_verified_usage_sources(self):
+        bindings = {
+            binding.provider_id: binding
+            for binding in self.registry().build(
+                [
+                    MiniMaxConfig(
+                        "minimax-cn", "MiniMax China", site="china"
+                    ),
+                    MiniMaxConfig(
+                        "minimax-global",
+                        "MiniMax Global",
+                        site="international",
+                    ),
+                ]
+            )
+        }
+
+        china = bindings["minimax-cn"]
+        international = bindings["minimax-global"]
+        self.assertEqual(
+            tuple(map(type, china.usage_sources)),
+            (MiniMaxBillingImporter,),
+        )
+        self.assertEqual(international.usage_sources, ())
+        self.assertIsNot(
+            china.quota_sources[0].client,
+            international.quota_sources[0].client,
+        )
+        self.assertEqual(
+            china.quota_sources[0].client.allowed_reserved_hosts,
+            frozenset({"www.minimaxi.com"}),
+        )
+        self.assertEqual(
+            international.quota_sources[0].client.allowed_reserved_hosts,
+            frozenset({"www.minimax.io"}),
+        )
+        self.assertEqual(
+            china.quota_sources[0].client.allowed_redirect_hosts,
+            frozenset(),
+        )
+        self.assertEqual(
+            international.quota_sources[0].client.allowed_redirect_hosts,
+            frozenset(),
+        )
+
     def test_config_order_does_not_change_stable_bindings(self):
         forward = self.registry().build(self.configs())
         reverse = self.registry().build(reversed(self.configs()))

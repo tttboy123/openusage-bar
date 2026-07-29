@@ -236,15 +236,22 @@ class ProviderCatalogTests(unittest.TestCase):
         self.assertEqual(codex_openusage.authority, "third_party")
         self.assertEqual(codex_openusage.verification, "fixture")
 
-        minimax = self.catalog.require("minimax").sources[0]
+        minimax, minimax_billing = self.catalog.require("minimax").sources[:2]
         self.assertEqual(
             minimax.fact_families,
-            frozenset({"detection", "subscription_capacity", "token_activity"}),
+            frozenset({"detection", "subscription_capacity"}),
         )
         self.assertEqual(minimax.authority, "provider_official")
         self.assertEqual(minimax.account_scope, "configured_account")
         self.assertEqual(minimax.model_scope, "mixed")
         self.assertEqual(minimax.verification, "live_account")
+        self.assertEqual(
+            minimax_billing.fact_families,
+            frozenset({"token_activity"}),
+        )
+        self.assertEqual(minimax_billing.stability, "experimental")
+        self.assertEqual(minimax_billing.model_scope, "per_model")
+        self.assertEqual(minimax_billing.verification, "live_account")
 
         for family in self.catalog.families:
             for source in family.sources:
@@ -311,6 +318,10 @@ class ProviderCatalogTests(unittest.TestCase):
             "kiro_keychain": ("stable", "provider_local"),
             "kiro_codewhisperer_api": ("stable", "provider_official"),
             "minimax_builtin_api": ("stable", "openusage_bar_builtin"),
+            "minimax_china_billing_web": (
+                "experimental",
+                "openusage_bar_builtin",
+            ),
             "step_plan_browser_session": ("experimental", "user_session"),
             "step_plan_official_api": ("stable", "provider_official"),
         }
@@ -575,7 +586,11 @@ class ProviderCatalogTests(unittest.TestCase):
         )
         self.assertEqual(
             [source.source_id for source in self.catalog.require("minimax").sources],
-            ["minimax_builtin_api", "openusage"],
+            [
+                "minimax_builtin_api",
+                "minimax_china_billing_web",
+                "openusage",
+            ],
         )
         self.assertEqual(
             [source.source_id for source in self.catalog.require("openai").sources],
@@ -592,7 +607,11 @@ class ProviderCatalogTests(unittest.TestCase):
             "kiro_cli": [
                 "kiro_keychain", "kiro_codewhisperer_api", "openusage"
             ],
-            "minimax": ["minimax_builtin_api", "openusage"],
+            "minimax": [
+                "minimax_builtin_api",
+                "minimax_china_billing_web",
+                "openusage",
+            ],
             "openai": ["openai_admin_api", "openusage"],
             "step_plan": [
                 "step_plan_browser_session", "step_plan_official_api"
@@ -605,6 +624,7 @@ class ProviderCatalogTests(unittest.TestCase):
             ("kiro_cli", "kiro_keychain"): "kiro",
             ("kiro_cli", "kiro_codewhisperer_api"): "kiro",
             ("minimax", "minimax_builtin_api"): "minimax",
+            ("minimax", "minimax_china_billing_web"): "minimax",
             ("step_plan", "step_plan_browser_session"): "step_plan_session",
             ("step_plan", "step_plan_official_api"): "step_plan_api_key",
         }
@@ -880,6 +900,10 @@ class ProviderCatalogTests(unittest.TestCase):
             "kiro_keychain": ("stable", "provider_local"),
             "kiro_codewhisperer_api": ("stable", "provider_official"),
             "minimax_builtin_api": ("stable", "openusage_bar_builtin"),
+            "minimax_china_billing_web": (
+                "experimental",
+                "openusage_bar_builtin",
+            ),
             "step_plan_browser_session": ("experimental", "user_session"),
             "step_plan_official_api": ("stable", "provider_official"),
         }

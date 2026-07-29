@@ -39,6 +39,29 @@ class SwiftProviderCatalogGeneratorTests(unittest.TestCase):
             rendered,
         )
 
+    def test_non_detection_sources_cannot_become_provider_identity(self):
+        rendered = load_generator().render()
+        minimax = rendered.split(
+            '"minimax": ProviderDisplayDescriptor(', 1
+        )[1].split(
+            '"mistral": ProviderDisplayDescriptor(', 1
+        )[0]
+
+        self.assertIn(
+            'ProviderIdentitySource(credentialSource: "minimax_builtin_api"',
+            minimax,
+        )
+        self.assertNotIn(
+            'ProviderIdentitySource(credentialSource: '
+            '"minimax_china_billing_web"',
+            minimax,
+        )
+        self.assertIn(
+            'ProviderSourceCapability(sourceID: '
+            '"minimax_china_billing_web"',
+            minimax,
+        )
+
     def test_swift_string_escapes_literals_interpolation_and_control_scalars(self):
         swift_string = load_generator().swift_string
         cases = {

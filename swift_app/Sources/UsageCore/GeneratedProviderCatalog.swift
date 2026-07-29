@@ -567,7 +567,7 @@ public enum GeneratedProviderCatalog {
             regions: [],
             supportsAccounts: false,
             credentialSourceTypes: [.keychain, .none, .oauth],
-            acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "kiro_codewhisperer_api", sourceKind: "official_api"), ProviderIdentitySource(credentialSource: "kiro_keychain", sourceKind: "keychain"), ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
+            acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "kiro_keychain", sourceKind: "keychain"), ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
                 quotaWindows: .supported(.billingCycle),
                 tokenHistory: .supported,
@@ -610,7 +610,8 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "minimax_builtin_api", sourceKind: "builtin_api", operatingSystems: [.macOS], stability: .stable, provenance: .openUsageBarBuiltIn, factFamilies: [.detection, .subscriptionCapacity, .tokenActivity], authority: .providerOfficial, accountScope: .configuredAccount, modelScope: .mixed, verification: .liveAccount),
+                ProviderSourceCapability(sourceID: "minimax_builtin_api", sourceKind: "builtin_api", operatingSystems: [.macOS], stability: .stable, provenance: .openUsageBarBuiltIn, factFamilies: [.detection, .subscriptionCapacity], authority: .providerOfficial, accountScope: .configuredAccount, modelScope: .mixed, verification: .liveAccount),
+                ProviderSourceCapability(sourceID: "minimax_china_billing_web", sourceKind: "builtin_api", operatingSystems: [.macOS], stability: .experimental, provenance: .openUsageBarBuiltIn, factFamilies: [.tokenActivity], authority: .providerOfficial, accountScope: .configuredAccount, modelScope: .perModel, verification: .liveAccount),
                 ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),

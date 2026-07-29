@@ -18,7 +18,11 @@ from ..daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
 from ..daily_history import OpenUsageDailyImporter
 from ..generic import GenericHTTPSAdapter
 from ..kiro import KiroQuotaAdapter
-from ..minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
+from ..minimax import (
+    MiniMaxBillingImporter,
+    MiniMaxCodingPlanAdapter,
+    minimax_endpoints_for_site,
+)
 from ..network import BoundedHTTPClient
 from ..openai_organization import (
     OpenAIOrganizationCardAdapter,
@@ -46,10 +50,6 @@ def default_registry(
     registry = AdapterRegistry()
     generic_client = BoundedHTTPClient()
     daily_feed_client = BoundedHTTPClient(allowed_redirect_hosts=set())
-    minimax_client = BoundedHTTPClient(
-        allowed_reserved_hosts={"www.minimaxi.com"},
-        allowed_redirect_hosts=set(),
-    )
     openai_client = BoundedHTTPClient(allowed_redirect_hosts=set())
     step_plan_keychain: object | None = None
 
@@ -75,13 +75,22 @@ def default_registry(
     ))
 
     def minimax(config: MiniMaxConfig) -> ProviderBinding:
-        importer = MiniMaxBillingImporter(config, keychain, minimax_client, clock)
+        endpoints = minimax_endpoints_for_site(config.site)
+        client = BoundedHTTPClient(
+            allowed_reserved_hosts={endpoints.host},
+            allowed_redirect_hosts=set(),
+        )
+        usage_sources = (
+            (MiniMaxBillingImporter(config, keychain, client, clock),)
+            if endpoints.billing is not None
+            else ()
+        )
         return ProviderBinding(
             provider_id=config.provider_id, family_id="minimax",
             quota_sources=(_quota_source(MiniMaxCodingPlanAdapter(
-                config, keychain, minimax_client, clock
+                config, keychain, client, clock
             ), "minimax.coding_plan", 20),),
-            usage_sources=(importer,),
+            usage_sources=usage_sources,
         )
 
     def openai(config: OpenAIOrganizationConfig) -> ProviderBinding:
