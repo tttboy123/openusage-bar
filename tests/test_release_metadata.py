@@ -9,6 +9,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERIFIER = ROOT / "scripts" / "verify_release_metadata.py"
+OFFICIAL_ACTION_REFERENCE = re.compile(
+    r"^\s*(?:-\s*)?uses:\s*(actions/[A-Za-z0-9_./-]+)@([^\s#]+)",
+    re.MULTILINE,
+)
+FULL_COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def unpinned_official_actions(source):
+    return [
+        f"{repository}@{reference}"
+        for repository, reference in OFFICIAL_ACTION_REFERENCE.findall(source)
+        if FULL_COMMIT_SHA.fullmatch(reference) is None
+    ]
 
 
 class ReleaseMetadataTests(unittest.TestCase):
@@ -119,23 +132,52 @@ class ReleaseMetadataTests(unittest.TestCase):
 
 
 class CommittedWorkflowMetadataTests(unittest.TestCase):
+    def test_full_sha_pin_accepts_new_action_major_version_comment(self):
+        source = (
+            "- uses: actions/setup-python@"
+            "5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n"
+        )
+        self.assertEqual(unpinned_official_actions(source), [])
+
+    def test_tag_reference_is_rejected_even_with_an_expected_version_comment(self):
+        source = "- uses: actions/setup-python@v6 # v6\n"
+        self.assertEqual(
+            unpinned_official_actions(source),
+            ["actions/setup-python@v6"],
+        )
+
+    def test_each_official_action_reference_is_checked(self):
+        source = (
+            "- uses: actions/checkout@"
+            "93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5\n"
+            "- uses: actions/checkout@v5 # unpinned duplicate\n"
+        )
+        self.assertEqual(
+            unpinned_official_actions(source),
+            ["actions/checkout@v5"],
+        )
+
+    def test_official_action_subpath_is_checked(self):
+        source = "- uses: actions/cache/restore@v4\n"
+        self.assertEqual(
+            unpinned_official_actions(source),
+            ["actions/cache/restore@v4"],
+        )
+
     def test_official_actions_are_pinned_to_full_commit_shas(self):
-        expected = {
-            "actions/checkout": "v5",
-            "actions/setup-python": "v6",
-            "actions/upload-artifact": "v4",
-            "actions/attest": "v4",
-        }
-        for workflow_name in ("ci.yml", "release.yml"):
-            source = (ROOT / ".github/workflows" / workflow_name).read_text("utf-8")
-            for repository, version in expected.items():
-                if repository not in source:
-                    continue
-                match = re.search(
-                    rf"uses:\s*{re.escape(repository)}@([0-9a-f]{{40}})\s+#\s*{version}\b",
-                    source,
-                )
-                self.assertIsNotNone(match, f"{workflow_name} must pin {repository}")
+        workflow_directory = ROOT / ".github/workflows"
+        workflows = sorted(
+            (*workflow_directory.glob("*.yml"), *workflow_directory.glob("*.yaml")),
+            key=lambda path: path.name,
+        )
+        self.assertTrue(workflows, "at least one committed workflow is required")
+        for workflow in workflows:
+            source = workflow.read_text("utf-8")
+            self.assertEqual(
+                unpinned_official_actions(source),
+                [],
+                f"{workflow.name} must pin every official action",
+            )
 
 
 if __name__ == "__main__":
