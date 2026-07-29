@@ -4,14 +4,44 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.6.0 - 2026-07-30
+
+### Added
+
+- Provider capability evidence now records fact families, source authority,
+  account and model scope, and whether validation used a live account, fixture,
+  or upstream declaration.
+- Moonshot/Kimi official account balances are available as a distinct Balance
+  fact and are never presented as subscription capacity.
+- A standalone Provider Adapter Kit includes declarative quota, daily Token,
+  and daily cost templates plus a reusable conformance command.
+- No-telemetry Canary diagnostics include aggregate Balance health and public
+  capability evidence without exporting amounts, account references, Provider
+  instances, or source identifiers.
+
+### Changed
+
+- Local API v1 has an executable N-1 compatibility policy: additive fields,
+  including `balances`, remain optional to older clients.
+- Pre-release builds now run the same dependency audit and isolated install,
+  upgrade, rollback, and uninstall gates as pull-request CI.
 - Updated the pinned GitHub Actions baseline to `actions/checkout@v7.0.1`,
   `actions/setup-python@v7.0.0`, and `actions/upload-artifact@v7.0.1`, with
   every workflow reference still bound to an approved immutable commit.
-### Changed
-
 - Local and GitHub builds now verify every official GitHub Action against a
   committed pin manifest, requiring both an immutable 40-character commit SHA
   and its exact human-readable release tag.
+
+### Fixed
+
+- Codex local Token history no longer double-counts unchanged cumulative
+  events, and parser-contract changes trigger one bounded historical backfill.
+- MiniMax regional sources, Cursor fallback, Kiro quota, and OpenAI
+  Organization usage/cost pagination preserve independent fact health,
+  Last-good data, and account scope instead of combining or replacing facts.
+- Supported Billing or Cost capabilities must have a matching `api_spend`
+  source fact, preventing capability declarations from drifting away from
+  runtime evidence.
 
 ## 0.4.4 - 2026-07-19
 

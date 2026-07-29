@@ -627,6 +627,13 @@ Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未�
 `docs/0.6-rc-integration.md`。外部机器仍为 0 / 5，公开 Canary 时钟保持
 `not_started`，因此 Beta 安装、升级与回滚项不得勾选。
 
+同日对远端 CI 制品的隔离复核发现，集成候选仍沿用稳定线
+`0.4.4 (8)` 的产品身份，不能和已部署版本可靠区分。Bundle 版本契约先以
+期望 `0.6.0 (9)` 产生失败，再同步三套 Info.plist、Python Helper 与
+CHANGELOG 转绿。本地 `0.6.0 (9)` ZIP/DMG 已通过 checksum、制品审计、
+SPDX SBOM、隐私扫描和隔离安装/升级/回滚/卸载；该未提交本地包不对外
+发布，外部 Canary 只能使用提交后由远端 CI 重新生成的可追溯候选。
+
 ---
 
 ## Q4：1.0 Canary 与稳定发布
