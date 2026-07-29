@@ -318,6 +318,22 @@ class ProviderCatalogTests(unittest.TestCase):
         self.assertEqual(minimax_billing.model_scope, "per_model")
         self.assertEqual(minimax_billing.verification, "live_account")
 
+        for family_id in ("claude_code", "opencode", "hermes", "openclaw"):
+            family = self.catalog.require(family_id)
+            source = family.sources[0]
+            with self.subTest(family=family_id):
+                self.assertEqual(family.capabilities.quota_windows.state, "unknown")
+                self.assertEqual(family.capabilities.quota_windows.values, ())
+                self.assertEqual(source.source_id, "openusage")
+                self.assertEqual(
+                    source.fact_families,
+                    frozenset({"detection", "token_activity"}),
+                )
+                self.assertEqual(source.authority, "third_party")
+                self.assertEqual(source.account_scope, "local_profile")
+                self.assertEqual(source.model_scope, "per_model")
+                self.assertEqual(source.verification, "live_account")
+
         for family in self.catalog.families:
             for source in family.sources:
                 with self.subTest(family=family.family_id, source=source.source_id):

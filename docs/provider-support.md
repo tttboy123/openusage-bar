@@ -107,6 +107,31 @@ Current health, freshness, and sanitized errors come from
 `/v1/sources/status`. Provider Center renders the same canonical evidence as
 `/v1/capabilities`; it does not maintain a second hand-written matrix.
 
+### Local client evidence
+
+On 2026-07-29, a bounded, offline OpenUsage daily export returned non-empty
+per-model Token history for Claude Code, OpenCode, Hermes, and OpenClaw on this
+macOS machine. The acceptance run retained only provider-level coverage facts;
+it did not record paths, account identity, prompts, responses, raw payloads, or
+exact personal usage totals.
+
+That evidence proves the OpenUsage Token-history path, not subscription
+capacity. All four families still declare unknown quota windows and their
+OpenUsage source exposes only detection and Token activity. Consequently they
+cannot create Capacity rows unless a separate authoritative quota source is
+added later. OpenUsage cost values attached to these local histories are
+price-table estimates, not billed subscription charges.
+
+An empty or failed daily export remains a Source Health issue and cannot replace
+last-good rows with zero. An unattributed model remains `unknown` inside its
+original Provider scope; OpenUsage Bar never moves it to another client or
+vendor.
+
+The locally installed exporter reports a development build. `live_account`
+therefore records that the current adapter path passed a real local acceptance
+run; it is not a compatibility guarantee for every historical OpenUsage
+release.
+
 ### Provider discovery names
 
 The catalog carries public search aliases so common product names remain easy
