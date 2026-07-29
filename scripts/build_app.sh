@@ -25,6 +25,7 @@ CODESIGN_IDENTITY=${OPENUSAGE_CODESIGN_IDENTITY:--}
 
 cd "$ROOT"
 "$PYTHON" scripts/release_secret_scan.py
+"$PYTHON" scripts/verify_action_pins.py
 CATALOG_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-provider-catalog.XXXXXX")
 LOCAL_API_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-local-api-schema.XXXXXX")
 ACTIVITY_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-activity-schema.XXXXXX")

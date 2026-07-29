@@ -98,7 +98,8 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 
 - GitHub 当前有 0 个普通 Issue、0 个 Milestone、0 个 ruleset；`main` 分支保护接口返回 `404 Branch not protected`。仓库已开启 secret scanning 与 push protection，但公开工作面和发布引用保护尚未建立。
 - PR #12、#13、#14 的现有 CI 为成功；PR #5 与 #10 的唯一失败都是远端 `main@9cd134a` 上旧版 `test_official_actions_are_pinned_to_full_commit_shas` 把 Action 版本注释固定为旧 major。两个 PR 实际分别使用 `actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0` 和 `actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97`，均为完整 40 位 SHA，不能把这两次失败归类为“未固定 SHA”。
-- 本地提交 `72318a2` 已把门禁改为扫描全部 workflow 中的每一个官方 Action 引用，并拒绝任何非完整 40 位 SHA；该提交尚未在远端 `main` 运行，因此 #5 与 #10 仍需在同步新门禁后重跑完整 CI，不能依据本地推断合并。
+- 本地提交 `72318a2` 先把门禁改为扫描全部 workflow 中的每一个官方 Action 引用，并拒绝任何非完整 40 位 SHA；随后当前分支又增加受控 `.github/action-pins.json`，要求 workflow 的 SHA 与精确 `vX.Y.Z` 注释同时匹配清单，未登记、重复、非完整 SHA、major-only 注释和陈旧清单均失败。本地构建与两条 GitHub workflow 都执行同一验证器。该门禁尚未在远端 `main` 运行，因此 #5 与 #10 需要同时更新受控清单并重跑完整 CI，不能依据本地推断合并。
+- 最终工作树的完整本地构建已执行该门禁并通过：`action_pin_verification_ok`、Python 772 项、Swift 251 项、Swift 产品行覆盖率 87.29%、隐私扫描 0、两个原生 release product、冻结设置 Helper 与深度签名全部成功。
 - PR #11 的现有 CI 虽为成功，但其标题与 SHA 将 `actions/checkout` 升至 7.0.1，workflow 注释仍保留 `# v5`。这是人类可读元数据漂移；更正注释并在当前基线重跑完整门禁前不合并。
 - 本地已补充双语 Provider 接入 Issue Form，并形成可审阅的 Milestone、Issue、ruleset 与授权分界执行草案；工作队列仍是任务与依赖的唯一权威。
 - 本轮没有创建 Issue/Milestone、修改 ruleset、更新 PR、推送、合并或发布。以上均为外部写操作，仍需仓库所有者明确批准。

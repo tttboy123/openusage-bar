@@ -90,6 +90,14 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn(direct, source)
         self.assertLess(source.index(direct), source.index(traced))
 
+    def test_build_verifies_action_pin_manifest_before_python_suite(self):
+        source = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
+        verifier = '"$PYTHON" scripts/verify_action_pins.py'
+        suite = '"$PYTHON" -m unittest discover -s tests -v'
+
+        self.assertIn(verifier, source)
+        self.assertLess(source.index(verifier), source.index(suite))
+
     def test_build_rejects_a_stale_generated_swift_provider_catalog(self):
         source = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
         generated = ROOT / "swift_app/Sources/UsageCore/GeneratedProviderCatalog.swift"

@@ -4,6 +4,12 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Changed
+
+- Local and GitHub builds now verify every official GitHub Action against a
+  committed pin manifest, requiring both an immutable 40-character commit SHA
+  and its exact human-readable release tag.
+
 ## 0.4.4 - 2026-07-19
 
 ### Changed

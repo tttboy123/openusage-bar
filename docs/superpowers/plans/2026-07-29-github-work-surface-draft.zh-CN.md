@@ -11,7 +11,8 @@
 - Secret scanning 与 push protection 已开启。
 - 开放 Dependabot PR：#5、#10、#11、#12、#13、#14。
 - #5 与 #10 因远端旧版 Action 注释门禁失败；#11 的 CI 虽成功，但 7.0.1
-  对应的人类注释仍为 `# v5`。同步当前本地门禁并重跑前，不合并这些 PR。
+  对应的人类注释仍为 `# v5`。当前本地门禁已要求 workflow 同时匹配受控清单中的
+  完整 SHA 与精确 `vX.Y.Z`；同步门禁、更新清单并重跑前，不合并这些 PR。
 
 ## Milestone 草案
 
@@ -32,7 +33,7 @@ Unknown-not-zero、凭证不进入 Issue、真实验证不能由 hermetic 测试
 | 标题 | Milestone | 现有标签 | 来源与依赖 |
 | --- | --- | --- | --- |
 | `Complete real macOS reboot recovery acceptance` | `0.4.x Hardening` | `enhancement` | WQ-05；真实内核重启后验证登录项、collector、API、账本与菜单栏。 |
-| `Reconcile immutable Action pin gates with Dependabot updates` | `0.4.x Hardening` | `dependencies`, `github_actions` | WQ-02；同步 `72318a2` 后重跑 #5、#10、#11，不在旧基线判断可合并。 |
+| `Reconcile immutable Action pin gates with Dependabot updates` | `0.4.x Hardening` | `dependencies`, `github_actions` | WQ-02；同步当前 Action pin manifest 门禁后更新清单并重跑 #5、#10、#11，不在旧基线判断可合并。 |
 | `Audit Provider capability declarations against live evidence` | `0.5 Data Trust` | `enhancement`, `help wanted` | WQ-06；依赖 0.4.x Checkpoint。 |
 | `Reconcile Codex local-session Token coverage with account totals` | `0.5 Data Trust` | `enhancement` | WQ-07；依赖 WQ-03、WQ-04、WQ-06。 |
 | `Validate MiniMax capacity and delayed daily billing` | `0.5 Data Trust` | `enhancement`, `help wanted` | WQ-08；中国站、国际站与多账号分别验证。 |

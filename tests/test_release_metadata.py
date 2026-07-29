@@ -1,10 +1,13 @@
 import plistlib
+import json
 import re
 import subprocess
 import tempfile
 import unittest
 import os
 from pathlib import Path
+
+from scripts.verify_action_pins import action_pin_issues, verify_action_pin_repository
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -132,6 +135,21 @@ class ReleaseMetadataTests(unittest.TestCase):
 
 
 class CommittedWorkflowMetadataTests(unittest.TestCase):
+    def test_mismatched_human_version_comment_is_rejected(self):
+        commit = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+        source = f"- uses: actions/checkout@{commit} # v5\n"
+        approved = {
+            ("actions/checkout", commit): "v7.0.1",
+        }
+
+        self.assertEqual(
+            action_pin_issues(source, approved),
+            [
+                "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 "
+                "must use version comment v7.0.1, found v5"
+            ],
+        )
+
     def test_full_sha_pin_accepts_new_action_major_version_comment(self):
         source = (
             "- uses: actions/setup-python@"
@@ -178,6 +196,227 @@ class CommittedWorkflowMetadataTests(unittest.TestCase):
                 [],
                 f"{workflow.name} must pin every official action",
             )
+
+
+class ActionPinRepositoryTests(unittest.TestCase):
+    def test_exact_manifest_pin_and_version_comment_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workflow_directory = root / ".github/workflows"
+            workflow_directory.mkdir(parents=True)
+            commit = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+            (workflow_directory / "ci.yml").write_text(
+                f"- uses: actions/checkout@{commit} # v7.0.1\n",
+                encoding="utf-8",
+            )
+            (root / ".github/action-pins.json").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "pins": [{
+                        "repository": "actions/checkout",
+                        "commit": commit,
+                        "version": "v7.0.1",
+                    }],
+                }),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(verify_action_pin_repository(root), [])
+
+    def test_unapproved_full_sha_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workflow_directory = root / ".github/workflows"
+            workflow_directory.mkdir(parents=True)
+            commit = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+            (workflow_directory / "ci.yml").write_text(
+                f"- uses: actions/checkout@{commit} # v7.0.1\n",
+                encoding="utf-8",
+            )
+            (root / ".github/action-pins.json").write_text(
+                json.dumps({"schemaVersion": 1, "pins": []}),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                verify_action_pin_repository(root),
+                [
+                    "ci.yml: actions/checkout@"
+                    "3d3c42e5aac5ba805825da76410c181273ba90b1 "
+                    "is not present in .github/action-pins.json"
+                ],
+            )
+
+    def test_quoted_unapproved_action_reference_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workflow_directory = root / ".github/workflows"
+            workflow_directory.mkdir(parents=True)
+            commit = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+            (workflow_directory / "ci.yml").write_text(
+                f'- uses: "actions/checkout@{commit}" # v7.0.1\n',
+                encoding="utf-8",
+            )
+            (root / ".github/action-pins.json").write_text(
+                json.dumps({"schemaVersion": 1, "pins": []}),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                verify_action_pin_repository(root),
+                [
+                    "ci.yml: actions/checkout@"
+                    "3d3c42e5aac5ba805825da76410c181273ba90b1 "
+                    "is not present in .github/action-pins.json"
+                ],
+            )
+
+    def test_stale_manifest_pin_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".github/workflows").mkdir(parents=True)
+            commit = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+            (root / ".github/action-pins.json").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "pins": [{
+                        "repository": "actions/checkout",
+                        "commit": commit,
+                        "version": "v7.0.1",
+                    }],
+                }),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                verify_action_pin_repository(root),
+                [
+                    "action-pins.json: actions/checkout@"
+                    "3d3c42e5aac5ba805825da76410c181273ba90b1 is not used "
+                    "by a committed workflow"
+                ],
+            )
+
+    def test_non_full_sha_is_rejected_even_when_listed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workflow_directory = root / ".github/workflows"
+            workflow_directory.mkdir(parents=True)
+            (workflow_directory / "ci.yml").write_text(
+                "- uses: actions/checkout@v7.0.1 # v7.0.1\n",
+                encoding="utf-8",
+            )
+            (root / ".github/action-pins.json").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "pins": [{
+                        "repository": "actions/checkout",
+                        "commit": "v7.0.1",
+                        "version": "v7.0.1",
+                    }],
+                }),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                verify_action_pin_repository(root),
+                [
+                    "action-pins.json: pin 1 commit must be a full lowercase "
+                    "40-character SHA"
+                ],
+            )
+
+    def test_manifest_version_must_be_an_exact_release_tag(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workflow_directory = root / ".github/workflows"
+            workflow_directory.mkdir(parents=True)
+            commit = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+            (workflow_directory / "ci.yml").write_text(
+                f"- uses: actions/checkout@{commit} # v7\n",
+                encoding="utf-8",
+            )
+            (root / ".github/action-pins.json").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "pins": [{
+                        "repository": "actions/checkout",
+                        "commit": commit,
+                        "version": "v7",
+                    }],
+                }),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                verify_action_pin_repository(root),
+                [
+                    "action-pins.json: pin 1 version must be an exact vX.Y.Z "
+                    "release tag"
+                ],
+            )
+
+    def test_trailing_comment_text_cannot_hide_version_mismatch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workflow_directory = root / ".github/workflows"
+            workflow_directory.mkdir(parents=True)
+            commit = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+            (workflow_directory / "ci.yml").write_text(
+                f"- uses: actions/checkout@{commit} # v5 stale comment\n",
+                encoding="utf-8",
+            )
+            (root / ".github/action-pins.json").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "pins": [{
+                        "repository": "actions/checkout",
+                        "commit": commit,
+                        "version": "v7.0.1",
+                    }],
+                }),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                verify_action_pin_repository(root),
+                [
+                    "ci.yml: actions/checkout@"
+                    "3d3c42e5aac5ba805825da76410c181273ba90b1 "
+                    "must use version comment v7.0.1, found v5 stale comment"
+                ],
+            )
+
+    def test_duplicate_manifest_pin_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workflow_directory = root / ".github/workflows"
+            workflow_directory.mkdir(parents=True)
+            commit = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+            (workflow_directory / "ci.yml").write_text(
+                f"- uses: actions/checkout@{commit} # v7.0.1\n",
+                encoding="utf-8",
+            )
+            pin = {
+                "repository": "actions/checkout",
+                "commit": commit,
+                "version": "v7.0.1",
+            }
+            (root / ".github/action-pins.json").write_text(
+                json.dumps({"schemaVersion": 1, "pins": [pin, pin]}),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                verify_action_pin_repository(root),
+                [
+                    "action-pins.json: duplicate pin actions/checkout@"
+                    "3d3c42e5aac5ba805825da76410c181273ba90b1"
+                ],
+            )
+
+    def test_committed_workflows_match_action_pin_manifest(self):
+        self.assertEqual(verify_action_pin_repository(ROOT), [])
 
 
 if __name__ == "__main__":

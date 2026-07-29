@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "pins": [
+    {
+      "repository": "actions/attest",
+      "version": "v4.2.0",
+      "commit": "f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6"
+    },
+    {
+      "repository": "actions/checkout",
+      "version": "v5.0.1",
+      "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd"
+    },
+    {
+      "repository": "actions/setup-python",
+      "version": "v6.3.0",
+      "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1"
+    },
+    {
+      "repository": "actions/upload-artifact",
+      "version": "v4.6.2",
+      "commit": "ea165f8d65b6e75b540449e92b4886f43607fa02"
+    }
+  ]
+}
