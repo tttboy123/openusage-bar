@@ -200,7 +200,7 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] 两个无人点击的五分钟采集周期已通过。以 `minimax-1783978290 / minimax.coding_plan` 为固定哨兵：T0=`2026-07-18T20:14:46.677591Z`、`dataRevision=5784`；T1=`2026-07-18T20:21:34.749783Z`、`dataRevision=5801`；T2=`2026-07-18T20:27:42.947299Z`、观察时 `dataRevision=5818`，最终 API 复核继续推进到 `5826`。T2 时 MiniMax、Step Plan、Codex、Kiro 四个直连来源的 `lastAttemptAt` 与 `lastSuccessAt` 相同且均为 `ok`，全程未点击 Refresh。候选 helper 的本地签名变化曾触发一次 macOS Keychain ACL 授权，当前 Keychain 读取已恢复。
 - [x] 新增 `scripts/verify_reboot_recovery.py`：重启前以 `0600` 保存无凭证 baseline，并分别锁定 App bundle、菜单栏 LaunchAgent 可执行文件和 collector LaunchAgent 可执行文件的 CDHash；重启后只有在 `kern.boottime` 确实推进、baseline 对应当前 canary、新 boot 距 capture 以及验证距新 boot 均不超过 6 小时、两个 LaunchAgent 进程晚于新 boot 启动、三个签名指纹与应用版本均不变、socket 在连接前已确认为当前用户所有且为 `0600`、Local API 三条核心路由通过、SQLite cursor 不倒退、同一轮 5 分钟窗口内的自然采集来源在新 boot 后全部成功推进时才返回通过。它不调用 Keychain、Refresh 或 launchd mutation，并明确保留 `visualMenuCheck=pending`。
 - [x] `0.4.3 (7)` 阶段的重启前门禁已在本机通过：验证器 26 项测试、脚本行覆盖率 87%、Python 743 项、Swift 250 项、Swift 产品行覆盖率 87.26%，秘密扫描为 0、依赖审计无已知漏洞、release smoke 的干净安装/升级/回滚/4 个注入失败回滚/保留与清除数据卸载均通过。当时 `2026-07-18T22:12:05.412172Z` 创建的是 schema v2 私密 baseline：权限 `0600`、`dataRevision=6081`、覆盖 5 个同轮来源并锁定 3 枚 40 位 CDHash；该历史基线现已由下方 `0.4.4 (8)` 的 schema v3 / 5 哈希基线取代。
-- [ ] 本次重启恢复了 Codex 对 Documents 的访问，但 `kern.boottime` 仍为 `1783987056`（2026-07-14），验证器明确返回 `boot_unchanged`；这只能证明应用会话恢复，不能替代一次真实的 macOS 内核重启。
+- [x] 此前一次应用会话恢复虽然恢复了 Codex 对 Documents 的访问，但 `kern.boottime` 仍为 `1783987056`（2026-07-14）；验证器正确返回 `boot_unchanged`，没有把应用重开误报为真实 macOS 内核重启。
 - [x] 一次候选安装因旧 shell 健康探针不能解析合法的 `todayTokens=null` 而失败；事务安装自动回滚，当前三枚可执行 CDHash 与 reboot baseline 完全一致，账本未回退。该探针现已与 Python、Swift、Schema 和诊断导出统一，并通过 Unknown、covered zero 和伪零拒绝回归。
 - [x] 常驻进程最小环境边界已部署到 `0.4.4 (8)`：签名的原生 `execve` launcher 只重建 Swift/Python 共享 allowlist，状态栏与 collector 分别转交固定的 bundle 内 runtime，不调用 shell、不修改全局 launchd 环境。行为测试只统计键名且从不保留或输出值；真实升级前两个进程各继承 3 个凭证形态环境键，升级后均为 0。
 - [x] `0.4.4 (8)` 已从候选包事务升级到 `/Applications`。深度签名、四个 Mach-O runtime、两个 LaunchAgent 固定路径、SQLite `quick_check` 与安装前后事实表计数均通过；`daily_model_usage=118`、`quota_snapshots=939`、`change_log` 单调推进，历史数据未丢失。
@@ -208,13 +208,13 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] 已生成 schema v3 重启 baseline：文件权限 `0600`、版本 `0.4.4 (8)`、`dataRevision=6856`，锁定外层 App、status launcher/runtime、collector launcher/runtime 共 5 枚签名哈希，并保存同轮 5 个成功来源的无凭证时间戳。重启前即时验证按预期返回 `boot_unchanged`。
 - [x] 2026-07-29 实机复核发现 `CodexLocalDailyImporter` 已实现但未注册到生产 Provider Registry，导致后台只尝试 OpenUsage fallback，`codex.local_sessions` 停留在 2026-07-18。修复按 RED → GREEN 接入本地会话作为 Codex 主来源，OpenUsage 仅在直接来源失败时备用；Provider Conformance fixture 同步声明 `codex.local_sessions`。候选包事务安装后，在未点击菜单栏的启动采集周期内，API 自动从 `dataRevision=43828` 推进到 `43852`、`todayTokens=null` 更新为 `218261817`，直接来源的 `lastAttemptAt`/`lastSuccessAt` 推进到 `2026-07-29T10:20:26.682149Z`，旧 `openusage.daily` 仍为 stale 且未与直接数据相加。Usage Details 手动重新读取后显示最近采集于 18:23。完整 Python 758 项、候选构建、签名和隐私扫描均通过；本机约 4.7GB / 819 个 Codex JSONL 的首次冷扫描约需 70 秒，后续仍需单独做增量冷启动性能优化。
 - [x] Codex 跨进程增量冷启动已按准确性优先落地：不按日期过滤长会话，而是在私有 `0600` 缓存中仅保存日期/模型 Token 聚合、文件游标/状态和 256 字节尾部的 SHA-256 摘要；不保存路径、文件名、Prompt、Response、原始 JSONL 或尾部内容。损坏缓存会全量重建，权限异常或符号链接缓存会 fail closed，追加只解析新增行，截断/替换会重扫完整会话。真实会话库成对基准为首次完整扫描 `11.228s`、新 importer 实例命中缓存 `0.058s`（约 194 倍），两次均返回 16 条聚合记录；生产缓存为 `0600`、369322 bytes。事务重装和驻留进程恢复共 `3.944s`，`codex.local_sessions.lastSuccessAt` 从 `2026-07-29T10:47:54.816879Z` 推进到 `2026-07-29T10:50:52.989043Z`，`dataRevision=43947 → 43949`。随后今日 API 仍返回 2 条 `codex.local_sessions/direct` 记录，并分别保留 Input、Cache Read、Output、Reasoning 与 Total。Python 762 项、完整候选构建、`codex_daily` 行覆盖率 83%、隐私扫描 0、深度签名与 Local API 健康门禁均通过。当前安装已重新生成 schema v3 私密重启基线，`dataRevision=43965`；即时验证按预期返回 `boot_unchanged`，不把应用重启误报为内核重启。
-- [ ] 真实重启后登录项、collector、本地 API 与菜单栏恢复尚未验收；`launchctl` 等价检查不能替代 reboot。
+- [x] 2026-07-29 完成真实 macOS 内核重启。重启前 schema v3 baseline 为 `0600`、版本 `0.4.4 (8)`、`dataRevision=44632`；新 `kern.boottime` 为 2026-07-29 22:29:57，验证器返回 `reboot_recovery_ok`，确认五枚签名哈希与版本不变、两个 LaunchAgent 在新 boot 后启动、Local API 与 SQLite cursor 未倒退，并由计划采集自然推进到 `dataRevision=44710`、`scheduledCollectionAdvanced=1`。随后只用于本机核验的全屏截图直接显示菜单栏柱状图与容量百分比；点击状态项后 popover 正常展示最近更新时间、今日 Token、三个 Provider 的容量与重置时间，以及详情、数据健康和设置入口。截图未进入仓库或 Issue，未公开具体用量。
 
 **验收：**
 
-- [ ] 用户可直接确认菜单栏、详情窗口和后台刷新都正常。
+- [x] 用户可直接确认菜单栏、详情窗口和后台刷新都正常。
 - [x] 手动 Refresh 不是数据更新的必要条件。
-- [ ] 安装、升级、重启和回滚后 Unknown 仍不变成 0，历史数据不丢失。
+- [x] 安装、升级、重启和回滚后 Unknown 仍不变成 0，历史数据不丢失。
 
 **验证：** `scripts/release_smoke.sh`、`scripts/verify_local_api.py`、`scripts/verify_reboot_recovery.py`、安装前后数据库计数与一次人工可见验收。
 
@@ -228,8 +228,8 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] `scripts/package_release.sh` 通过。
 - [x] `scripts/release_smoke.sh` 通过，包含 launchd 瞬时失败后的真实回滚重试回归。
 - [x] Token 对账能解释至少一个真实差异日期，并分别保留来源总量、Input、Output、Cache 与计数口径。
-- [ ] 干净安装、自动刷新、重启、升级与回滚通过可见验收。
-- [ ] 只有存在实际代码或发布修复时才发布下一补丁版。
+- [x] 干净安装、自动刷新、重启、升级与回滚通过可见验收。
+- [x] 当前候选包含 Codex 生产注册、增量扫描、常驻环境隔离、Unknown 语义和恢复链路的实际修复；没有用纯文档变化虚构补丁发布理由。
 
 ---
 
