@@ -479,6 +479,16 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 
 **规模：** S 级测量；迁移实现必须另立计划。
 
+- [x] 2026-07-29 已建立 `scripts/measure_performance.py` 与隐私安全 JSON
+  契约，使用 `proc_pid_rusage` 的 CPU 时间、物理占用和唤醒增量，默认要求
+  三轮空闲与三轮真实刷新，不输出 PID、命令、路径、Provider 身份或原始数据。
+  0.4.4 build 8 实机基线为：常驻 CPU p95 `0.001%`、常驻唤醒 p95
+  `2.298/s`、常驻物理占用峰值 `77.5 MiB`、Activity 峰值 `95.1 MiB`、
+  全量刷新中位数 `40.562s`、p95 `41.490s`，三次刷新全部成功，隐私扫描
+  0 项。现有宿主未达到语言迁移门槛，Python 继续作为唯一账本写入者。
+  Provider 单源耗时当前明确标记为 `not_observable`；加入非账号化的
+  source-class 计时前，不得据此提出 Provider 定向优化或语言迁移。
+
 ### Checkpoint 0.6 RC
 
 - [ ] Local API v1 通过 N-1 兼容测试。

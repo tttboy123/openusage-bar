@@ -13,7 +13,7 @@
 ![Local First](https://img.shields.io/badge/Local--First-Keychain%20%2B%20SQLite-111111?style=flat-square)
 ![License](https://img.shields.io/badge/License-Apache--2.0-111111?style=flat-square)
 
-[English](README.en.md) | [路线图](ROADMAP.md) | [本地 API](docs/api/local-api-v1.md) | [Provider 支持](docs/provider-support.md) | [安装指南](docs/release-quick-start.md)
+[English](README.en.md) | [路线图](ROADMAP.md) | [本地 API](docs/api/local-api-v1.md) | [Provider 支持](docs/provider-support.md) | [性能预算](docs/performance.md) | [安装指南](docs/release-quick-start.md)
 
 </div>
 
