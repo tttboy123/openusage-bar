@@ -91,8 +91,17 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 
 - 建立 `0.4.x Hardening`、`0.5 Data Trust`、`0.6 RC`、`1.0 Canary` Milestone。
 - 将本文件中的可独立任务转成 Issue，并标记依赖、验收和适合贡献者的范围。
-- 审查 Dependabot PR #4、#5、#6，只有完整门禁通过才合并。
+- 审查当前全部 Dependabot PR；截至 2026-07-29 为 #5、#10、#11、#12、#13、#14，只有完整门禁通过才合并。
 - 为 `main` 配置要求 CI 通过、禁止强推和保护 Tag 的 ruleset。
+
+**2026-07-29 只读审计：**
+
+- GitHub 当前有 0 个普通 Issue、0 个 Milestone、0 个 ruleset；`main` 分支保护接口返回 `404 Branch not protected`。仓库已开启 secret scanning 与 push protection，但公开工作面和发布引用保护尚未建立。
+- PR #12、#13、#14 的现有 CI 为成功；PR #5 与 #10 的唯一失败都是远端 `main@9cd134a` 上旧版 `test_official_actions_are_pinned_to_full_commit_shas` 把 Action 版本注释固定为旧 major。两个 PR 实际分别使用 `actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0` 和 `actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97`，均为完整 40 位 SHA，不能把这两次失败归类为“未固定 SHA”。
+- 本地提交 `72318a2` 已把门禁改为扫描全部 workflow 中的每一个官方 Action 引用，并拒绝任何非完整 40 位 SHA；该提交尚未在远端 `main` 运行，因此 #5 与 #10 仍需在同步新门禁后重跑完整 CI，不能依据本地推断合并。
+- PR #11 的现有 CI 虽为成功，但其标题与 SHA 将 `actions/checkout` 升至 7.0.1，workflow 注释仍保留 `# v5`。这是人类可读元数据漂移；更正注释并在当前基线重跑完整门禁前不合并。
+- 本地已补充双语 Provider 接入 Issue Form，并形成可审阅的 Milestone、Issue、ruleset 与授权分界执行草案；工作队列仍是任务与依赖的唯一权威。
+- 本轮没有创建 Issue/Milestone、修改 ruleset、更新 PR、推送、合并或发布。以上均为外部写操作，仍需仓库所有者明确批准。
 
 **验收：**
 
