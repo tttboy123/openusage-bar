@@ -728,6 +728,10 @@ private struct ProviderConnectionDetail: View {
             return
         }
         let draft: ManagedConnectionDraft = switch connection.kind {
+        case "moonshot": .moonshot(
+            providerID: connection.providerID, name: connection.displayName,
+            site: connection.site ?? "china", replacementCredential: ""
+        )
         case "step_plan": .stepPlan(
             providerID: connection.providerID, name: connection.displayName,
             site: connection.site ?? "china", replacementCredential: "",
@@ -847,6 +851,7 @@ private struct NativeProviderConnectionSheet: View {
         self.onSaved = onSaved
         let initialKind = switch descriptor.familyID {
         case "minimax": "minimax"
+        case "moonshot": "moonshot"
         case "step_plan": "step_plan"
         case "openai": "openai_organization"
         default: "generic"
@@ -875,12 +880,15 @@ private struct NativeProviderConnectionSheet: View {
                     Text("Quota API").tag("generic")
                     Text("Daily Usage Feed").tag("daily_usage_feed")
                     if descriptor.familyID == "minimax" { Text("MiniMax").tag("minimax") }
+                    if descriptor.familyID == "moonshot" {
+                        Text(AppLocalization.text("Kimi / Moonshot")).tag("moonshot")
+                    }
                     if descriptor.familyID == "step_plan" { Text("Step Plan").tag("step_plan") }
                     if descriptor.familyID == "openai" { Text("OpenAI Organization").tag("openai_organization") }
                 }
                 TextField("Connection ID", text: $providerID)
                 TextField("Account label", text: $name)
-                if kind == "step_plan" {
+                if ["moonshot", "step_plan"].contains(kind) {
                     Picker("Site", selection: $site) {
                         Text("China").tag("china")
                         Text("International").tag("international")
@@ -978,6 +986,10 @@ private struct NativeProviderConnectionSheet: View {
         switch kind {
         case "minimax": .minimax(
             providerID: providerID, name: name, replacementCredential: credential
+        )
+        case "moonshot": .moonshot(
+            providerID: providerID, name: name, site: site,
+            replacementCredential: credential
         )
         case "step_plan": .stepPlan(
             providerID: providerID, name: name, site: site,

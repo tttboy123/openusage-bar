@@ -129,6 +129,7 @@ public enum ProviderSourceFactFamily: String, CaseIterable, Sendable, Hashable {
     case detection
     case tokenActivity = "token_activity"
     case subscriptionCapacity = "subscription_capacity"
+    case apiBalance = "api_balance"
     case apiSpend = "api_spend"
 }
 

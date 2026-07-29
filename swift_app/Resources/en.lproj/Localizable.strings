@@ -391,7 +391,9 @@
 "Detection" = "Detection";
 "Token activity" = "Token activity";
 "Subscription capacity" = "Subscription capacity";
+"API balance" = "API balance";
 "API spend" = "API spend";
+"Kimi / Moonshot" = "Kimi / Moonshot";
 "No declared facts" = "No declared facts";
 "Provider official data" = "Provider official data";
 "Provider local data" = "Provider local data";

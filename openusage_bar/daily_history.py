@@ -32,6 +32,8 @@ from .openusage_catalog import (
     OpenUsageCatalogDiscovery,
 )
 from .providers.contracts import (
+    BalanceFetchFailure,
+    BalanceFetchSuccess,
     CostImportSuccess,
     ImportFailure,
     QuotaFetchFailure,
@@ -820,6 +822,49 @@ class ActivityCollector:
         except Exception:
             pass
 
+    def _refresh_balance_sources(
+        self,
+        attempted_at: datetime,
+        balance_results: tuple[tuple[str, str, object], ...],
+    ) -> None:
+        def mark_stale(provider_id: str, source_id: str) -> None:
+            try:
+                self.store.mark_balance_source_stale(
+                    provider_id, source_id, attempted_at
+                )
+            except Exception:
+                pass
+
+        for provider_id, source_id, result in balance_results:
+            if isinstance(result, BalanceFetchSuccess):
+                try:
+                    if any(
+                        observation.provider_id != provider_id
+                        or observation.source_id != source_id
+                        for observation in result.observations
+                    ):
+                        raise ValueError("balance result scope mismatch")
+                    for observation in result.observations:
+                        self.store.record_balance(observation)
+                    self.store.record_source_success(
+                        provider_id, source_id, attempted_at
+                    )
+                except Exception:
+                    mark_stale(provider_id, source_id)
+                    self._safe_source_failure(
+                        provider_id, "persistence_failed", attempted_at, source_id
+                    )
+            elif isinstance(result, BalanceFetchFailure):
+                mark_stale(provider_id, source_id)
+                self._safe_source_failure(
+                    provider_id, result.error_code, attempted_at, source_id
+                )
+            else:
+                mark_stale(provider_id, source_id)
+                self._safe_source_failure(
+                    provider_id, "invalid_import_result", attempted_at, source_id
+                )
+
     def _refresh_usage_sources(
         self,
         overview: Overview,
@@ -1006,6 +1051,7 @@ class ActivityCollector:
         self,
         overview: Overview,
         *,
+        balance_results: tuple[tuple[str, str, object], ...] = (),
         quota_results: tuple[tuple[str, str, object], ...] = (),
     ) -> bool:
         if not self._lock.acquire(blocking=False):
@@ -1016,6 +1062,7 @@ class ActivityCollector:
             today = current.astimezone(self.local_timezone).date()
             provider_ids = self._provider_ids(overview, self.official_importers)
             self._publish_provider_instances(overview, attempted_at)
+            self._refresh_balance_sources(attempted_at, balance_results)
             self._refresh_quota_sources(overview, attempted_at, quota_results)
             self._refresh_usage_sources(
                 overview, provider_ids, today, attempted_at

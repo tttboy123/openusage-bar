@@ -10,6 +10,7 @@ from openusage_bar.config import (
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
+    MoonshotConfig,
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
@@ -30,6 +31,9 @@ NOW = datetime(2026, 7, 18, 8, tzinfo=timezone.utc)
 def configured_sources():
     return (
         MiniMaxConfig("minimax-work", "MiniMax", account_ref="fixture-a"),
+        MoonshotConfig(
+            "moonshot-work", "Kimi", site="china", account_ref="fixture-a"
+        ),
         StepPlanConfig("step-work", "Step Plan", account_ref="fixture-a"),
         OpenAIOrganizationConfig("openai-work", "OpenAI", account_ref="fixture-a"),
         GenericProviderConfig(
@@ -67,7 +71,10 @@ class ProviderConformanceTests(unittest.TestCase):
 
         self.assertEqual(
             {fixture.fixture_id for fixture in fixtures},
-            {"codex", "kiro", "minimax", "step_plan", "openusage", "custom"},
+            {
+                "codex", "kiro", "minimax", "moonshot",
+                "step_plan", "openusage", "custom",
+            },
         )
         for fixture in fixtures:
             self.assertEqual(fixture.cases, REQUIRED_CASES)
@@ -83,6 +90,7 @@ class ProviderConformanceTests(unittest.TestCase):
         inventory = runtime_inventory(bindings)
         self.assertIn(("codex", "quota", "codex.local_rate_limits"), inventory)
         self.assertIn(("codex", "usage", "codex.local_sessions"), inventory)
+        self.assertIn(("moonshot", "balance", "moonshot.balance"), inventory)
         self.assertIn(("openai", "cost", "custom.cost_feed"), inventory)
         self.assertIn(("openai", "usage", "openai.organization.usage"), inventory)
 

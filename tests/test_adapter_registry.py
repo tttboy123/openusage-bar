@@ -13,6 +13,7 @@ from openusage_bar.config import (
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
+    MoonshotConfig,
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
@@ -22,6 +23,7 @@ from openusage_bar.daily_history import OpenUsageDailyImporter
 from openusage_bar.generic import GenericHTTPSAdapter
 from openusage_bar.kiro import KiroQuotaAdapter
 from openusage_bar.minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
+from openusage_bar.moonshot import MoonshotBalanceAdapter
 from openusage_bar.openai_organization import (
     OpenAIOrganizationCardAdapter,
     OpenAIOrganizationImporter,
@@ -45,6 +47,9 @@ class AdapterRegistryTests(unittest.TestCase):
     def configs(self):
         return [
             MiniMaxConfig("minimax-work", "MiniMax Work"),
+            MoonshotConfig(
+                "moonshot-work", "Kimi Work", site="china", account_ref="work"
+            ),
             OpenAIOrganizationConfig("openai", "OpenAI Org"),
             DailyUsageFeedConfig(
                 provider_id="glm-work", name="GLM Work", family_id="zai",
@@ -88,6 +93,7 @@ class AdapterRegistryTests(unittest.TestCase):
             "minimax-work": (
                 (MiniMaxCodingPlanAdapter,), (MiniMaxBillingImporter,), (),
             ),
+            "moonshot-work": ((), (), ()),
             "openai": (
                 (OpenAIOrganizationCardAdapter,),
                 (OpenAIOrganizationImporter,),
@@ -105,6 +111,10 @@ class AdapterRegistryTests(unittest.TestCase):
             self.assertEqual(tuple(map(type, binding.quota_sources)), groups[0])
             self.assertEqual(tuple(map(type, binding.usage_sources)), groups[1])
             self.assertEqual(tuple(map(type, binding.cost_sources)), groups[2])
+        self.assertEqual(
+            tuple(map(type, bindings["moonshot-work"].balance_sources)),
+            (MoonshotBalanceAdapter,),
+        )
         self.assertIs(
             bindings["openai"].usage_sources[0],
             bindings["openai"].cost_sources[0],

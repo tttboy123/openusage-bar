@@ -24,6 +24,23 @@ public struct LocalAPISchema: Sendable, Hashable {
     public let routes: [String]
 }
 
+public struct LocalAPIBalance: Sendable, Hashable {
+    public let recordID: String
+    public let providerID: String
+    public let accountRef: String?
+    public let currency: String
+    public let available: String?
+    public let voucher: String?
+    public let cash: String?
+    public let observedAt: String
+    public let freshnessSeconds: Int
+    public let state: String
+    public let quality: String
+    public let stale: Bool
+    public let revision: Int64
+    public let sourceID: String
+}
+
 public struct LocalAPIResourceSnapshot: Sendable, Hashable {
     public let schemaVersion: String
     public let dataRevision: UInt64
@@ -32,6 +49,7 @@ public struct LocalAPIResourceSnapshot: Sendable, Hashable {
     public let todayTokens: Int64?
     public let modelCount: Int
     public let coveredDayCount: Int
+    public let balances: [LocalAPIBalance]
     public let quotaWindowCount: Int
     public let providerCount: Int
     public let sourceCount: Int
@@ -122,15 +140,47 @@ public struct LocalAPIClient: LocalAPIReading, Sendable {
         }
         guard wire.modelCount >= 0, wire.coveredDayCount >= 0,
               summaryIsValid,
+              wire.balances.count <= 10_000,
               wire.quotaWindows.count <= 10_000,
               wire.providers.count <= 10_000,
               wire.sources.count <= 10_000
         else { throw LocalAPIClientError.invalidResponse }
+        let balances = try wire.balances.map { item -> LocalAPIBalance in
+            let decimalValues = [item.available, item.voucher, item.cash]
+            guard Self.safeText(item.recordID, maximumBytes: 512),
+                  Self.safeText(item.providerID, maximumBytes: 128),
+                  item.accountRef.map({
+                      Self.safeText($0, maximumBytes: 256, allowEmpty: true)
+                  }) ?? true,
+                  Self.safeText(item.currency, maximumBytes: 16),
+                  item.currency == item.currency.uppercased(),
+                  decimalValues.allSatisfy({ value in
+                      value.map(Self.safeNonnegativeDecimal) ?? true
+                  }),
+                  Self.safeText(item.observedAt, maximumBytes: 64),
+                  item.freshnessSeconds >= 0,
+                  Self.safeText(item.state, maximumBytes: 128),
+                  Self.safeText(item.quality, maximumBytes: 128),
+                  item.revision > 0,
+                  Self.safeText(item.sourceID, maximumBytes: 128),
+                  item.state != "unknown" || decimalValues.allSatisfy({ $0 == nil })
+            else { throw LocalAPIClientError.invalidResponse }
+            return LocalAPIBalance(
+                recordID: item.recordID, providerID: item.providerID,
+                accountRef: item.accountRef, currency: item.currency,
+                available: item.available, voucher: item.voucher, cash: item.cash,
+                observedAt: item.observedAt,
+                freshnessSeconds: item.freshnessSeconds,
+                state: item.state, quality: item.quality, stale: item.stale,
+                revision: item.revision, sourceID: item.sourceID
+            )
+        }
         return LocalAPIResourceSnapshot(
             schemaVersion: wire.schemaVersion, dataRevision: wire.dataRevision,
             generatedAt: wire.generatedAt, localDay: wire.localDay,
             todayTokens: wire.todayTokens, modelCount: wire.modelCount,
             coveredDayCount: wire.coveredDayCount,
+            balances: balances,
             quotaWindowCount: wire.quotaWindows.count,
             providerCount: wire.providers.count, sourceCount: wire.sources.count
         )
@@ -228,6 +278,14 @@ public struct LocalAPIClient: LocalAPIReading, Sendable {
                 scalar.value >= 0x20 && scalar.value != 0x7f
             }
     }
+
+    private static func safeNonnegativeDecimal(_ value: String) -> Bool {
+        value.utf8.count <= 128
+            && value.range(
+                of: #"^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$"#,
+                options: .regularExpression
+            ) != nil
+    }
 }
 
 private struct HealthWire: Decodable {
@@ -252,17 +310,60 @@ private struct SnapshotWire: Decodable {
         let coveredDayCount: Int
     }
     struct Item: Decodable {}
+    struct Balance: Decodable {
+        let recordID: String
+        let providerID: String
+        let accountRef: String?
+        let currency: String
+        let available: String?
+        let voucher: String?
+        let cash: String?
+        let observedAt: String
+        let freshnessSeconds: Int
+        let state: String
+        let quality: String
+        let stale: Bool
+        let revision: Int64
+        let sourceID: String
+
+        enum CodingKeys: String, CodingKey {
+            case accountRef, currency, available, voucher, cash, observedAt
+            case freshnessSeconds, state, quality, stale, revision
+            case recordID = "recordId"
+            case providerID = "providerId"
+            case sourceID = "sourceId"
+        }
+    }
     let schemaVersion: String
     let dataRevision: UInt64
     let generatedAt: String
     let localDay: String
     let summary: Summary
+    let balances: [Balance]
     let quotaWindows: [Item]
     let providers: [Item]
     let sources: [Item]
     var todayTokens: Int64? { summary.todayTokens }
     var modelCount: Int { summary.modelCount }
     var coveredDayCount: Int { summary.coveredDayCount }
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, dataRevision, generatedAt, localDay, summary
+        case balances, quotaWindows, providers, sources
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(String.self, forKey: .schemaVersion)
+        dataRevision = try values.decode(UInt64.self, forKey: .dataRevision)
+        generatedAt = try values.decode(String.self, forKey: .generatedAt)
+        localDay = try values.decode(String.self, forKey: .localDay)
+        summary = try values.decode(Summary.self, forKey: .summary)
+        balances = try values.decodeIfPresent([Balance].self, forKey: .balances) ?? []
+        quotaWindows = try values.decode([Item].self, forKey: .quotaWindows)
+        providers = try values.decode([Item].self, forKey: .providers)
+        sources = try values.decode([Item].self, forKey: .sources)
+    }
 }
 
 private struct ActivityWire: Decodable {

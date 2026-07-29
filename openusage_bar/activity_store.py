@@ -13,6 +13,9 @@ from typing import Any, Iterable
 
 from .provider_catalog import catalog
 from .activity_records import (
+    BalanceObservation,
+    BalanceState,
+    BalanceStateSnapshot,
     ChangeRecord,
     ChangeSnapshot,
     DailyCostRecord,
@@ -317,6 +320,13 @@ class ActivityStore:
 
     def _initialize_schema(self) -> None:
         schema = """
+        CREATE TABLE IF NOT EXISTS balance_state(
+            record_id TEXT PRIMARY KEY, observed_at TEXT NOT NULL,
+            provider_id TEXT NOT NULL, account_ref TEXT NOT NULL DEFAULT '',
+            currency TEXT NOT NULL, available TEXT, voucher TEXT, cash TEXT,
+            state TEXT NOT NULL, quality TEXT NOT NULL, stale INTEGER NOT NULL,
+            revision INTEGER NOT NULL, payload_hash TEXT NOT NULL,
+            source_id TEXT NOT NULL DEFAULT 'current.balance');
         CREATE TABLE IF NOT EXISTS daily_costs(
             day TEXT NOT NULL, provider_id TEXT NOT NULL, account_ref TEXT NOT NULL DEFAULT '',
             cost_kind TEXT NOT NULL, currency TEXT NOT NULL, amount TEXT NOT NULL,
@@ -1359,6 +1369,133 @@ class ActivityStore:
         return payload_json, _hash(payload_json)
 
     @staticmethod
+    def _balance_semantic_payload(
+        observation: BalanceObservation,
+    ) -> tuple[str, str]:
+        payload = asdict(observation)
+        payload.pop("observed_at")
+        payload_json = _json(payload)
+        return payload_json, _hash(payload_json)
+
+    def record_balance(self, observation: BalanceObservation) -> BalanceState:
+        payload_json, payload_hash = self._balance_semantic_payload(observation)
+        with self._write_transaction():
+            old = self._connection.execute(
+                "SELECT * FROM balance_state WHERE record_id=?",
+                (observation.record_id,),
+            ).fetchone()
+            if old is not None and observation.observed_at < str(old["observed_at"]):
+                return self._balance_state_by_id_locked(observation.record_id)
+            changed = old is None or old["payload_hash"] != payload_hash
+            revision = (
+                1 if old is None else int(old["revision"]) + (1 if changed else 0)
+            )
+            values = asdict(observation)
+            columns = list(values) + ["revision", "payload_hash"]
+            self._connection.execute(
+                f"INSERT OR REPLACE INTO balance_state({','.join(columns)}) "
+                f"VALUES({','.join('?' for _ in columns)})",
+                tuple(values.values()) + (revision, payload_hash),
+            )
+            if changed:
+                self._append_change(
+                    "balance",
+                    observation.record_id,
+                    revision,
+                    "insert" if old is None else "update",
+                    observation.observed_at,
+                    payload_json,
+                    payload_hash,
+                )
+            return self._balance_state_by_id_locked(observation.record_id)
+
+    @staticmethod
+    def _row_to_balance_state(row: sqlite3.Row) -> BalanceState:
+        values = dict(row)
+        values["stale"] = bool(values["stale"])
+        return BalanceState(**values)
+
+    def _balance_state_by_id_locked(self, record_id: str) -> BalanceState:
+        row = self._connection.execute(
+            "SELECT * FROM balance_state WHERE record_id=?", (record_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(record_id)
+        return self._row_to_balance_state(row)
+
+    def balance_states(self) -> list[BalanceState]:
+        with self._lock:
+            return list(self._resource_balance_states_locked())
+
+    def mark_balance_source_stale(
+        self,
+        provider_id: str,
+        source_id: str,
+        attempted_at: datetime,
+    ) -> int:
+        _validate_id("provider_id", provider_id)
+        _validate_id("source_id", source_id)
+        changed_at = _timestamp(attempted_at.isoformat(), "attempted_at")
+        changed = 0
+        with self._write_transaction():
+            rows = self._connection.execute(
+                "SELECT * FROM balance_state "
+                "WHERE provider_id=? AND source_id=? AND stale=0 "
+                "ORDER BY record_id",
+                (provider_id, source_id),
+            ).fetchall()
+            for row in rows:
+                state = self._row_to_balance_state(row)
+                observation = BalanceObservation(
+                    record_id=state.record_id,
+                    observed_at=state.observed_at,
+                    provider_id=state.provider_id,
+                    account_ref=state.account_ref,
+                    currency=state.currency,
+                    available=state.available,
+                    voucher=state.voucher,
+                    cash=state.cash,
+                    state=state.state,
+                    quality=state.quality,
+                    stale=True,
+                    source_id=state.source_id,
+                )
+                payload_json, payload_hash = self._balance_semantic_payload(
+                    observation
+                )
+                revision = state.revision + 1
+                self._connection.execute(
+                    "UPDATE balance_state "
+                    "SET stale=1,revision=?,payload_hash=? WHERE record_id=?",
+                    (revision, payload_hash, state.record_id),
+                )
+                self._append_change(
+                    "balance",
+                    state.record_id,
+                    revision,
+                    "update",
+                    changed_at,
+                    payload_json,
+                    payload_hash,
+                )
+                changed += 1
+        return changed
+
+    def _resource_balance_states_locked(self) -> tuple[BalanceState, ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM balance_state "
+            "ORDER BY provider_id,account_ref,currency,record_id"
+        ).fetchall()
+        return tuple(self._row_to_balance_state(row) for row in rows)
+
+    def snapshot_balance_states(self) -> BalanceStateSnapshot:
+        with self._read_snapshot():
+            return BalanceStateSnapshot(
+                self._resource_balance_states_locked(),
+                self._current_change_seq_locked(),
+            )
+
+    @staticmethod
     def _quota_snapshot_payload(observation: QuotaObservation) -> tuple[str, str]:
         payload_json = _json(asdict(observation))
         return payload_json, _hash(payload_json)
@@ -1799,6 +1936,7 @@ class ActivityStore:
                 "SELECT COUNT(*) FROM daily_coverage WHERE day=?",
                 (local_day,),
             ).fetchone()[0]
+            balance_states = self._resource_balance_states_locked()
             quota_states = self._resource_quota_states_locked()
             provider_instances = self._resource_provider_instances_locked()
             source_statuses = self._resource_source_statuses_locked()
@@ -1809,6 +1947,7 @@ class ActivityStore:
                 today_tokens=int(total),
                 model_count=int(count),
                 covered_day_count=int(covered),
+                balance_states=balance_states,
                 quota_states=quota_states,
                 provider_instances=provider_instances,
                 source_statuses=source_statuses,

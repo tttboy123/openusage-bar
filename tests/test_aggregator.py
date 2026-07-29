@@ -176,6 +176,7 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
 
         collector.refresh.assert_called_once_with(
             overview,
+            balance_results=(),
             quota_results=((
                 "codex", "codex.local_rate_limits", adapter.last_quota_result,
             ),),

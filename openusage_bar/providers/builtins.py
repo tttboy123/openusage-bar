@@ -10,6 +10,7 @@ from ..config import (
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
+    MoonshotConfig,
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
@@ -19,6 +20,7 @@ from ..daily_history import OpenUsageDailyImporter
 from ..generic import GenericHTTPSAdapter
 from ..kiro import KiroQuotaAdapter
 from ..minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
+from ..moonshot import MoonshotBalanceAdapter
 from ..network import BoundedHTTPClient
 from ..openai_organization import (
     OpenAIOrganizationCardAdapter,
@@ -51,6 +53,7 @@ def default_registry(
         allowed_redirect_hosts=set(),
     )
     openai_client = BoundedHTTPClient(allowed_redirect_hosts=set())
+    moonshot_client = BoundedHTTPClient(allowed_redirect_hosts=set())
     step_plan_keychain: object | None = None
 
     registry.register_global(lambda: ProviderBinding(
@@ -93,6 +96,17 @@ def default_registry(
                 "openai.organization", 20
             ),),
             usage_sources=(importer,), cost_sources=(importer,),
+        )
+
+    def moonshot(config: MoonshotConfig) -> ProviderBinding:
+        return ProviderBinding(
+            provider_id=config.provider_id,
+            family_id="moonshot",
+            balance_sources=(
+                MoonshotBalanceAdapter(
+                    config, keychain, moonshot_client, clock
+                ),
+            ),
         )
 
     def daily_feed(config: DailyUsageFeedConfig) -> ProviderBinding:
@@ -151,6 +165,7 @@ def default_registry(
         )
 
     registry.register_config(MiniMaxConfig, minimax)
+    registry.register_config(MoonshotConfig, moonshot)
     registry.register_config(OpenAIOrganizationConfig, openai)
     registry.register_config(DailyUsageFeedConfig, daily_feed)
     registry.register_config(DailyCostFeedConfig, cost_feed)

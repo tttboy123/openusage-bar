@@ -9,7 +9,7 @@
 | Provider | 每日 Token | API 费用 | 余额 | 订阅额度与重置 | 当前决策 |
 |---|---|---|---|---|---|
 | Z.AI / GLM | OpenUsage 可提供本地活动；官方仅公开单次请求 `usage` | 官方控制台次日更新，未公开历史查询 API | 未公开只读 API | 未公开只读 API | 保留 OpenUsage；不开发网页爬虫 |
-| Moonshot / Kimi API | 官方控制台可查看，但 OpenAPI 未公开历史查询 API | 官方控制台可查看，但 OpenAPI 未公开历史查询 API | 中国站、国际站均有官方只读 API | Kimi API 是按量计费，不是订阅额度 | 下一步开发官方余额 Adapter |
+| Moonshot / Kimi API | 官方控制台可查看，但 OpenAPI 未公开历史查询 API | 官方控制台可查看，但 OpenAPI 未公开历史查询 API | 中国站、国际站均已接入官方只读 API | Kimi API 是按量计费，不是订阅额度 | 已实现独立余额 Adapter；历史用量仍不支持 |
 | Alibaba Cloud / Qwen | OpenUsage 可提供本地活动；官方监控可通过 Prometheus 查询 | 费用中心 BSS OpenAPI 可查询账单 | 费用中心可查询账户余额 | 普通 DashScope Key 不提供订阅额度 | 默认保留 OpenUsage；高权限连接器后置 |
 
 `Unknown` 仍然是 `Unknown`。余额、费用、Token 和订阅额度是不同事实，
@@ -79,7 +79,7 @@
 
 ### OpenUsage Bar 决策
 
-1. 新增官方 Moonshot Balance Adapter，支持中国站和国际站多账号。
+1. 已新增官方 Moonshot Balance Adapter，支持中国站和国际站多账号。
 2. UI/API 显示带币种的 `available`、`voucher`、`cash`，不转换为剩余百分比。
 3. 不生成重置时间，不把余额叫作订阅额度，不用余额推导 Token。
 4. 官方余额失败时保留 Last-good 并标记 Stale；从未成功时显示 No data。
@@ -125,9 +125,12 @@
 5. Coding Plan、Token Plan 或资源包剩余量没有被普通 DashScope Key 证明，
    因此保持不支持。
 
-## 后续实现顺序
+## 实现状态与后续顺序
 
-1. **Moonshot Balance Adapter**：接口稳定、只读、低权限，优先实现。
+1. **Moonshot Balance Adapter**：已实现固定区域端点、Keychain、多账号、
+   Last-good、独立 `api_balance` 事实，以及 `/v1/balances` 和
+   `/v1/snapshot.balances`。当前验证等级为脱敏 Fixture；真实账号验收完成前
+   不升级为 `live_account`。
 2. **GLM**：等待官方公开余额或订阅用量 API；当前仅保留 OpenUsage Token 活动。
 3. **Qwen**：先设计可选的 Prometheus/费用中心最小权限连接，再进行真实账号验证。
 4. 三者都必须遵守 Provider Conformance Kit：Keychain、固定 HTTPS 端点、区域锁定、

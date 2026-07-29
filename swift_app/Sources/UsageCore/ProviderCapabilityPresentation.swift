@@ -189,6 +189,7 @@ public struct ProviderSourceStrategyPresentation: Sendable, Hashable {
             case .detection: AppLocalization.text("Detection")
             case .tokenActivity: AppLocalization.text("Token activity")
             case .subscriptionCapacity: AppLocalization.text("Subscription capacity")
+            case .apiBalance: AppLocalization.text("API balance")
             case .apiSpend: AppLocalization.text("API spend")
             }
         }

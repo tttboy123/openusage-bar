@@ -391,7 +391,9 @@
 "Detection" = "自动发现";
 "Token activity" = "Token 活动";
 "Subscription capacity" = "订阅额度";
+"API balance" = "API 余额";
 "API spend" = "API 消耗";
+"Kimi / Moonshot" = "Kimi / Moonshot";
 "No declared facts" = "未声明可用事实";
 "Provider official data" = "厂商官方数据";
 "Provider local data" = "厂商本地数据";

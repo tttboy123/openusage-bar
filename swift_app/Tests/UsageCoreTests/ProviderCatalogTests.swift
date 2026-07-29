@@ -205,7 +205,8 @@ struct ProviderCatalogTests {
             "provider_local", "user_session",
         ])
         #expect(Set(ProviderSourceFactFamily.allCases.map(\.rawValue)) == [
-            "detection", "token_activity", "subscription_capacity", "api_spend",
+            "detection", "token_activity", "subscription_capacity",
+            "api_balance", "api_spend",
         ])
         #expect(Set(ProviderSourceAuthority.allCases.map(\.rawValue)) == [
             "provider_official", "provider_local", "third_party", "user_supplied", "unknown",

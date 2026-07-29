@@ -9,6 +9,7 @@ from openusage_bar.config import (
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
+    MoonshotConfig,
     OpenAIOrganizationConfig,
     ProviderConfigStore,
     StepPlanConfig,
@@ -175,6 +176,32 @@ class ProviderConfigTests(unittest.TestCase):
                 store.save(
                     [StepPlanConfig("step-plan-main", "Step Plan", site="unknown")]
                 )
+
+    def test_moonshot_sites_round_trip_without_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "providers.json"
+            store = ProviderConfigStore(path)
+            configs = [
+                MoonshotConfig(
+                    "moonshot-cn", "Kimi China", site="china", account_ref="cn"
+                ),
+                MoonshotConfig(
+                    "moonshot-global",
+                    "Kimi International",
+                    site="international",
+                    account_ref="global",
+                ),
+            ]
+
+            store.save(configs)
+
+            self.assertEqual(store.load(), configs)
+            payload = path.read_text()
+            self.assertNotIn("api_key", payload.lower())
+            with self.assertRaises(ValueError):
+                store.save([
+                    MoonshotConfig("moonshot-bad", "Kimi", site="unknown")
+                ])
 
     def test_serialization_omits_secrets_and_uses_private_mode(self):
         with tempfile.TemporaryDirectory() as directory:

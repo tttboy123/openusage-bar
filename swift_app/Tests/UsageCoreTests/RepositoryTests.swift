@@ -681,7 +681,7 @@ struct RepositoryTests {
             #expect(!String(describing: error).contains("private-account"))
         }
 
-        let newer = try SQLiteFixture(userVersion: 6)
+        let newer = try SQLiteFixture(userVersion: 7)
         do {
             _ = try UsageRepository(databaseURL: newer.databaseURL)
             Issue.record("newer schema unexpectedly opened")

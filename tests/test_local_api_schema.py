@@ -19,14 +19,20 @@ NOW = datetime(2026, 7, 18, 1, 0, tzinfo=timezone.utc)
 def validate_snapshot(payload: dict[str, object]) -> None:
     required = {
         "schemaVersion", "dataRevision", "generatedAt", "localDay", "summary",
-        "quotaWindows", "providers", "sources", "catalogRevision",
+        "balances", "quotaWindows", "providers", "sources", "catalogRevision",
     }
     if set(payload) != required or payload.get("schemaVersion") != "1.0":
         raise ValueError("invalid snapshot envelope")
     if isinstance(payload.get("dataRevision"), bool) or not isinstance(payload.get("dataRevision"), int):
         raise ValueError("invalid revision")
     forbidden = ("secret", "password", "cookie", "token", "authorization")
-    for value in (payload, *payload["quotaWindows"], *payload["providers"], *payload["sources"]):
+    for value in (
+        payload,
+        *payload["balances"],
+        *payload["quotaWindows"],
+        *payload["providers"],
+        *payload["sources"],
+    ):
         if any(any(term in key.lower() for term in forbidden) for key in value):
             raise ValueError("private field")
     for window in payload["quotaWindows"]:

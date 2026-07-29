@@ -648,10 +648,10 @@ public enum GeneratedProviderCatalog {
             aliases: ["Kimi API", "Moonshot AI"],
             category: .api,
             metricFamilies: [.billing, .operational],
-            regions: [],
-            supportsAccounts: false,
-            credentialSourceTypes: [.none],
-            acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
+            regions: ["cn", "international"],
+            supportsAccounts: true,
+            credentialSourceTypes: [.apiKey, .none],
+            acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "moonshot_official_api", sourceKind: "official_api"), ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
                 quotaWindows: .unknown,
                 tokenHistory: .unknown,
@@ -659,12 +659,13 @@ public enum GeneratedProviderCatalog {
                 resetTimestamps: .unknown,
                 billing: .supported,
                 credits: .unknown,
-                balance: .unknown,
+                balance: .supported,
                 cost: .unknown,
                 rateLimits: .unknown,
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
+                ProviderSourceCapability(sourceID: "moonshot_official_api", sourceKind: "official_api", operatingSystems: [.macOS], stability: .stable, provenance: .providerOfficial, factFamilies: [.apiBalance, .detection], authority: .providerOfficial, accountScope: .configuredAccount, modelScope: .aggregate, verification: .fixture),
                 ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
             ]
         ),

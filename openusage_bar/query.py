@@ -101,6 +101,32 @@ class CapacityResult(ResultEnvelope):
 
 
 @dataclass(frozen=True)
+class BalanceItem:
+    record_id: str
+    provider_id: str
+    account_ref: str | None
+    currency: str
+    available: str | None
+    voucher: str | None
+    cash: str | None
+    observed_at: str
+    freshness_seconds: int
+    state: str
+    quality: str
+    stale: bool
+    revision: int
+    source_id: str
+
+
+@dataclass(frozen=True)
+class BalancesResult(ResultEnvelope):
+    balances: tuple[BalanceItem, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "balances", tuple(self.balances))
+
+
+@dataclass(frozen=True)
 class ActivityRow:
     day: str
     provider_id: str
@@ -271,12 +297,14 @@ class SnapshotSummary:
 class ResourceSnapshotResult(ResultEnvelope):
     local_day: str
     summary: SnapshotSummary
+    balances: tuple[BalanceItem, ...]
     quota_windows: tuple[CapacityProvider, ...]
     providers: tuple[ProviderInstanceItem, ...]
     sources: tuple[SourceStatusItem, ...]
     catalog_revision: str
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "balances", tuple(self.balances))
         object.__setattr__(self, "quota_windows", tuple(self.quota_windows))
         object.__setattr__(self, "providers", tuple(self.providers))
         object.__setattr__(self, "sources", tuple(self.sources))
@@ -367,6 +395,28 @@ class QueryService:
         )
 
     @staticmethod
+    def _balance_item(state: Any, generated_dt: datetime) -> BalanceItem:
+        observed = datetime.fromisoformat(state.observed_at.replace("Z", "+00:00"))
+        return BalanceItem(
+            record_id=state.record_id,
+            provider_id=state.provider_id,
+            account_ref=state.account_ref or None,
+            currency=state.currency,
+            available=state.available,
+            voucher=state.voucher,
+            cash=state.cash,
+            observed_at=state.observed_at,
+            freshness_seconds=max(
+                0, int((generated_dt - observed).total_seconds())
+            ),
+            state=state.state,
+            quality=state.quality,
+            stale=state.stale,
+            revision=state.revision,
+            source_id=state.source_id,
+        )
+
+    @staticmethod
     def _provider_instance_item(row: Any) -> ProviderInstanceItem:
         return ProviderInstanceItem(
             provider_id=row.provider_id,
@@ -406,6 +456,10 @@ class QueryService:
                 snapshot.model_count,
                 snapshot.covered_day_count,
             ),
+            balances=tuple(
+                self._balance_item(state, generated_dt)
+                for state in snapshot.balance_states
+            ),
             quota_windows=tuple(
                 self._capacity_provider(state, generated_dt)
                 for state in snapshot.quota_states
@@ -419,6 +473,23 @@ class QueryService:
                 for row in snapshot.source_statuses
             ),
             catalog_revision=catalog.upstream_revision,
+        )
+
+    def balances(self, limit: int | None = None) -> BalancesResult:
+        selected_limit = _valid_limit(limit)
+        snapshot = self.store.snapshot_balance_states()
+        generated_dt, generated = self._generated()
+        rows = list(snapshot.rows)
+        rows.sort(key=lambda state: (
+            state.provider_id, state.account_ref, state.currency, state.record_id
+        ))
+        if selected_limit is not None:
+            rows = rows[:selected_limit]
+        return BalancesResult(
+            SCHEMA_VERSION,
+            snapshot.cursor,
+            generated,
+            tuple(self._balance_item(state, generated_dt) for state in rows),
         )
 
     def capacity(self, limit: int | None = None) -> CapacityResult:

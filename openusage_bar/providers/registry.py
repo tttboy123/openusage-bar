@@ -50,6 +50,7 @@ def _normalized(binding: ProviderBinding) -> ProviderBinding:
 
     return replace(
         binding,
+        balance_sources=normalize(binding.balance_sources, "balance"),
         quota_sources=normalize(binding.quota_sources, "quota"),
         usage_sources=normalize(binding.usage_sources, "usage"),
         cost_sources=normalize(binding.cost_sources, "cost"),

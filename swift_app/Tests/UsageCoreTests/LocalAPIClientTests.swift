@@ -16,11 +16,15 @@ struct LocalAPIClientTests {
         let schema = try await LocalAPIClient(socketURL: schemaServer.url).schema()
         #expect(schema.routes == ["/v1/health", "/v1/snapshot"])
 
-        let snapshotServer = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":9,"generatedAt":"2026-07-18T01:02:00Z","localDay":"2026-07-18","summary":{"todayTokens":42,"modelCount":1,"coveredDayCount":1},"quotaWindows":[],"providers":[],"sources":[],"catalogRevision":"test"}"#)
+        let snapshotServer = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":9,"generatedAt":"2026-07-18T01:02:00Z","localDay":"2026-07-18","summary":{"todayTokens":42,"modelCount":1,"coveredDayCount":1},"balances":[{"recordId":"moonshot-main.balance","providerId":"moonshot-main","accountRef":null,"currency":"CNY","available":"123.45","voucher":"10","cash":"113.45","observedAt":"2026-07-18T01:01:00Z","freshnessSeconds":60,"state":"ok","quality":"direct","stale":false,"revision":2,"sourceId":"moonshot.balance"}],"quotaWindows":[],"providers":[],"sources":[],"catalogRevision":"test"}"#)
         let snapshot = try await LocalAPIClient(socketURL: snapshotServer.url)
             .snapshot(localDay: "2026-07-18")
         #expect(snapshot.localDay == "2026-07-18")
         #expect(snapshot.dataRevision == 9)
+        #expect(snapshot.balances.count == 1)
+        #expect(snapshot.balances.first?.available == "123.45")
+        #expect(snapshot.balances.first?.currency == "CNY")
+        #expect(snapshot.balances.first?.providerID == "moonshot-main")
         #expect(snapshotServer.request.contains("GET /v1/snapshot?today=2026-07-18 HTTP/1.1"))
 
         let missingServer = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":10,"generatedAt":"2026-07-18T01:03:00Z","localDay":"2026-07-19","summary":{"todayTokens":null,"modelCount":0,"coveredDayCount":0},"quotaWindows":[],"providers":[],"sources":[],"catalogRevision":"test"}"#)
@@ -34,6 +38,21 @@ struct LocalAPIClientTests {
             .snapshot(localDay: "2026-07-20")
         #expect(coveredZero.todayTokens == 0)
         #expect(coveredZero.coveredDayCount == 1)
+    }
+
+    @Test("Snapshot rejects malformed balance facts")
+    func invalidBalances() async throws {
+        let negative = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":14,"generatedAt":"2026-07-18T01:07:00Z","localDay":"2026-07-22","summary":{"todayTokens":null,"modelCount":0,"coveredDayCount":0},"balances":[{"recordId":"moonshot.balance","providerId":"moonshot","accountRef":null,"currency":"CNY","available":"-1","voucher":null,"cash":null,"observedAt":"2026-07-18T01:01:00Z","freshnessSeconds":60,"state":"ok","quality":"direct","stale":false,"revision":1,"sourceId":"moonshot.balance"}],"quotaWindows":[],"providers":[],"sources":[]}"#)
+        await #expect(throws: LocalAPIClientError.invalidResponse) {
+            try await LocalAPIClient(socketURL: negative.url)
+                .snapshot(localDay: "2026-07-22")
+        }
+
+        let inventedUnknown = try UnixFixtureServer(json: #"{"schemaVersion":"1.0","dataRevision":15,"generatedAt":"2026-07-18T01:08:00Z","localDay":"2026-07-22","summary":{"todayTokens":null,"modelCount":0,"coveredDayCount":0},"balances":[{"recordId":"moonshot.balance","providerId":"moonshot","accountRef":null,"currency":"CNY","available":"1","voucher":null,"cash":null,"observedAt":"2026-07-18T01:01:00Z","freshnessSeconds":60,"state":"unknown","quality":"direct","stale":true,"revision":1,"sourceId":"moonshot.balance"}],"quotaWindows":[],"providers":[],"sources":[]}"#)
+        await #expect(throws: LocalAPIClientError.invalidResponse) {
+            try await LocalAPIClient(socketURL: inventedUnknown.url)
+                .snapshot(localDay: "2026-07-22")
+        }
     }
 
     @Test("Snapshot rejects invented zero and contradictory unknown totals")
