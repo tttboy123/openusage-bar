@@ -1,8 +1,8 @@
 # OpenUsage Bar GitHub 工作面执行草案
 
-> 状态：本地草案，未执行任何 GitHub 写操作。任务范围、依赖与验收仍以
+> 状态：已于 2026-07-29 获得仓库所有者授权并执行。任务范围、依赖与验收仍以
 > [工作队列](2026-07-18-openusage-work-queue.zh-CN.md) 为唯一权威；本文只把 WQ-02
-> 转换成可审阅的远端执行清单。
+> 转换成可审阅、可复核的远端执行记录。
 
 ## 当前远端事实
 
@@ -13,6 +13,24 @@
 - #5 与 #10 因远端旧版 Action 注释门禁失败；#11 的 CI 虽成功，但 7.0.1
   对应的人类注释仍为 `# v5`。当前本地门禁已要求 workflow 同时匹配受控清单中的
   完整 SHA 与精确 `vX.Y.Z`；同步门禁、更新清单并重跑前，不合并这些 PR。
+
+## 远端执行结果
+
+- 分支 `docs/refresh-work-queue` 已推送，Draft PR
+  [#15](https://github.com/tttboy123/openusage-bar/pull/15) 已创建；真实重启仍明确列为
+  未完成验收，不把本地构建替代成远端或实机证据。
+- 四个 Milestone 已创建且没有虚构截止日期：`0.4.x Hardening`、
+  `0.5 Data Trust`、`0.6 RC`、`1.0 Canary`。
+- Issue
+  [#16](https://github.com/tttboy123/openusage-bar/issues/16) 至
+  [#34](https://github.com/tttboy123/openusage-bar/issues/34) 共 19 项已创建，并分别
+  绑定 Milestone、现有标签、依赖、验收、验证与隐私边界。
+- `Protect main` ruleset（ID `19975515`）已启用：目标为 `~DEFAULT_BRANCH`，
+  禁止删除与非快进更新，并要求最新 `verify` check 成功；没有默认 bypass actor。
+- `Protect release tags` ruleset（ID `19975516`）已启用：仅匹配
+  `refs/tags/v*`，允许首次创建但禁止更新与删除；没有默认 bypass actor。
+- Dependabot PR、Release 与外部 Canary 均未在本轮更新、合并、发布或协调，仍需遵守
+  各自独立授权与验收门禁。
 
 ## Milestone 草案
 

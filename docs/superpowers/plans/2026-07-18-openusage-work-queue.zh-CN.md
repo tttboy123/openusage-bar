@@ -102,11 +102,17 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - 最终工作树的完整本地构建已执行该门禁并通过：`action_pin_verification_ok`、Python 772 项、Swift 251 项、Swift 产品行覆盖率 87.29%、隐私扫描 0、两个原生 release product、冻结设置 Helper 与深度签名全部成功。
 - PR #11 的现有 CI 虽为成功，但其标题与 SHA 将 `actions/checkout` 升至 7.0.1，workflow 注释仍保留 `# v5`。这是人类可读元数据漂移；更正注释并在当前基线重跑完整门禁前不合并。
 - 本地已补充双语 Provider 接入 Issue Form，并形成可审阅的 Milestone、Issue、ruleset 与授权分界执行草案；工作队列仍是任务与依赖的唯一权威。
-- 本轮没有创建 Issue/Milestone、修改 ruleset、更新 PR、推送、合并或发布。以上均为外部写操作，仍需仓库所有者明确批准。
+
+**2026-07-29 授权执行：**
+
+- [x] `docs/refresh-work-queue` 已推送并创建 Draft PR [#15](https://github.com/tttboy123/openusage-bar/pull/15)；PR 保留真实重启验收为未完成项。
+- [x] 四个 Milestone 已创建；Issue [#16](https://github.com/tttboy123/openusage-bar/issues/16) 至 [#34](https://github.com/tttboy123/openusage-bar/issues/34) 共 19 项已按阶段、标签和依赖发布。
+- [x] `Protect main` ruleset 已启用，禁止删除与非快进更新并要求最新 `verify` check 成功；`Protect release tags` 已启用，禁止更新或删除 `v*` Tag。两个 ruleset 均没有默认 bypass actor。
+- [ ] PR #15 的远端完整 CI、临时分支 required-check 行为和 release workflow 仍需完成验证；Dependabot PR、Release 与外部 Canary 未在本轮更新、合并、发布或协调。
 
 **验收：**
 
-- [ ] GitHub 不再以“零 Issue”隐藏真实待办。
+- [x] GitHub 不再以“零 Issue”隐藏真实待办。
 - [ ] 自动依赖更新不绕过构建、隐私、覆盖率和发布审计。
 - [ ] 受保护分支与 Tag 规则不破坏自动发布流程。
 
