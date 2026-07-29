@@ -90,6 +90,10 @@ version-one catalog to 37 families. Actual data depends on the installed
 OpenUsage version, local clients, provider authentication, and what each
 upstream source can authoritatively report.
 
+GLM、Kimi 与 Qwen 的官方接口边界、区域、认证和后续实现决策记录在
+[权威数据源核验](provider-authoritative-sources.md)；搜索别名和单次推理
+`usage` 不代表历史用量或订阅额度已经可用。
+
 Each catalog source also declares the fact families it can provide, whether
 the data is provider-official, provider-local, third-party-derived, or
 user-supplied, its account and model scope, and one of four verification
