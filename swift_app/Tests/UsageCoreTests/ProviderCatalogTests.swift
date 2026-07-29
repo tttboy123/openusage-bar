@@ -115,7 +115,9 @@ struct ProviderCatalogTests {
             let expectedCredentials = Set(family.sources.map {
                 $0.credentialType == "provider_owned" ? "none" : $0.credentialType
             })
-            let expectedIdentitySources = Set(family.sources.map {
+            let expectedIdentitySources = Set(family.sources.filter {
+                $0.factFamilies.contains("detection")
+            }.map {
                 ProviderIdentitySource(credentialSource: $0.sourceID, sourceKind: $0.kind)
             })
             let expectedSources = try family.sources.map { source in

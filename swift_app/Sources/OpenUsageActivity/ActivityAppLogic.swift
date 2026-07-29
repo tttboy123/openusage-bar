@@ -397,7 +397,8 @@ struct ProviderConnectionSummaryStore {
             guard Self.isStableID(familyID) else {
                 throw ProviderConnectionSummaryError.invalidConfiguration
             }
-            if row.type == "step_plan" && !["china", "international"].contains(row.site) {
+            if ["minimax", "step_plan"].contains(row.type)
+                && !["china", "international"].contains(row.site ?? "china") {
                 throw ProviderConnectionSummaryError.invalidConfiguration
             }
             return ProviderConnectionSummary(
@@ -405,7 +406,9 @@ struct ProviderConnectionSummaryStore {
                 familyID: familyID,
                 displayName: row.name,
                 kind: row.type,
-                site: row.site,
+                site: ["minimax", "step_plan"].contains(row.type)
+                    ? row.site ?? "china"
+                    : row.site,
                 configuration: .init(
                     endpoint: row.endpoint, headerName: row.headerName,
                     authPrefix: row.authPrefix, primaryPath: row.primaryPath,

@@ -163,7 +163,9 @@ def render() -> str:
             {CREDENTIAL_CASES[source.credential_type] for source in family.sources}
         )
         identity_sources = sorted(
-            (source.source_id, source.kind) for source in family.sources
+            (source.source_id, source.kind)
+            for source in family.sources
+            if "detection" in source.fact_families
         )
         swift_identity_sources = "[" + ", ".join(
             "ProviderIdentitySource(credentialSource: "

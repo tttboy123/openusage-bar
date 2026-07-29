@@ -9,6 +9,7 @@ struct ProviderCenterPresentationTests {
     func mutationV2Envelopes() throws {
         let draft = ManagedConnectionDraft.minimax(
             providerID: "minimax-work", name: "MiniMax Work",
+            site: "international",
             replacementCredential: "private-key"
         )
         let create = try mutationObject(draft.request(action: .createConnection))
@@ -16,6 +17,7 @@ struct ProviderCenterPresentationTests {
         #expect(create["action"] as? String == "create_connection")
         #expect(create["kind"] as? String == "minimax")
         #expect((create["configuration"] as? [String: Any])?["name"] as? String == "MiniMax Work")
+        #expect((create["configuration"] as? [String: Any])?["site"] as? String == "international")
         #expect((create["credentialMaterial"] as? [String: Any])?["primary"] as? String == "private-key")
 
         let remove = try mutationObject(draft.request(action: .removeConnection))
@@ -33,13 +35,15 @@ struct ProviderCenterPresentationTests {
 
         let missingCredential = ManagedConnectionDraft.minimax(
             providerID: "minimax-work", name: "MiniMax",
+            site: "china",
             replacementCredential: ""
         )
         #expect(missingCredential.validation(action: .createConnection) == .missingCredential)
         #expect(missingCredential.validation(action: .updateConnection) == nil)
 
         let missingProvider = ManagedConnectionDraft.minimax(
-            providerID: "  ", name: "MiniMax", replacementCredential: "key"
+            providerID: "  ", name: "MiniMax", site: "china",
+            replacementCredential: "key"
         )
         #expect(missingProvider.validation(action: .createConnection) == .missingProviderID)
 
@@ -48,6 +52,12 @@ struct ProviderCenterPresentationTests {
             replacementCredential: "key", replacementSession: ""
         )
         #expect(invalidSite.validation(action: .createConnection) == .invalidSite)
+
+        let invalidMiniMaxSite = ManagedConnectionDraft.minimax(
+            providerID: "minimax-work", name: "MiniMax", site: "elsewhere",
+            replacementCredential: "key"
+        )
+        #expect(invalidMiniMaxSite.validation(action: .createConnection) == .invalidSite)
 
         let sessionOnly = ManagedConnectionDraft.stepPlan(
             providerID: "step-work", name: "Step Plan", site: "china",

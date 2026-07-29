@@ -100,12 +100,20 @@ class ProviderCapabilityTests(unittest.TestCase):
         self.assertEqual(descriptor.regions, frozenset({"cn", "international"}))
         self.assertEqual(
             [source.kind for source in descriptor.sources],
-            [SourceKind.BUILTIN_API, SourceKind.OPENUSAGE],
+            [
+                SourceKind.BUILTIN_API,
+                SourceKind.BUILTIN_API,
+                SourceKind.OPENUSAGE,
+            ],
         )
         self.assertEqual(descriptor.category, "subscription")
         self.assertEqual(
             [source.credential_type for source in descriptor.sources],
-            [CredentialType.API_KEY, CredentialType.PROVIDER_OWNED],
+            [
+                CredentialType.API_KEY,
+                CredentialType.API_KEY,
+                CredentialType.PROVIDER_OWNED,
+            ],
         )
         self.assertEqual(
             descriptor.capabilities.quota_windows.values,

@@ -243,14 +243,13 @@ class UIModelTests(unittest.TestCase):
         store = Mock()
         store.load.return_value = [config]
         default_client = Mock(name="default-client")
-        minimax_client = Mock(name="minimax-client")
         step_client = Mock(name="step-client")
         step_adapter = Mock(name="step-adapter")
 
         with (
             patch(
                 "openusage_bar.ui.BoundedHTTPClient",
-                side_effect=[default_client, minimax_client, step_client],
+                side_effect=[default_client, step_client],
             ) as client_factory,
             patch("openusage_bar.ui.OpenUsageAdapter", return_value=Mock()),
             patch("openusage_bar.ui.KiroQuotaAdapter", return_value=Mock()),
@@ -265,6 +264,40 @@ class UIModelTests(unittest.TestCase):
         )
         adapter_factory.assert_called_once_with(config, unittest.mock.ANY, step_client, unittest.mock.ANY)
         self.assertIn(step_adapter, aggregator.adapters)
+
+    def test_minimax_uses_a_site_locked_client_that_cannot_cross_regions(self):
+        config = MiniMaxConfig(
+            "minimax-global", "MiniMax Global", site="international"
+        )
+        store = Mock()
+        store.load.return_value = [config]
+        default_client = Mock(name="default-client")
+        minimax_client = Mock(name="minimax-client")
+        minimax_adapter = Mock(name="minimax-adapter")
+
+        with (
+            patch(
+                "openusage_bar.ui.BoundedHTTPClient",
+                side_effect=[default_client, minimax_client],
+            ) as client_factory,
+            patch("openusage_bar.ui.OpenUsageAdapter", return_value=Mock()),
+            patch("openusage_bar.ui.KiroQuotaAdapter", return_value=Mock()),
+            patch("openusage_bar.ui.CodexSubscriptionAdapter", return_value=Mock()),
+            patch(
+                "openusage_bar.ui.MiniMaxCodingPlanAdapter",
+                return_value=minimax_adapter,
+            ) as adapter_factory,
+        ):
+            aggregator = _build_aggregator(store, Mock())
+
+        client_factory.assert_any_call(
+            allowed_reserved_hosts={"www.minimax.io"},
+            allowed_redirect_hosts=set(),
+        )
+        adapter_factory.assert_called_once_with(
+            config, unittest.mock.ANY, minimax_client, unittest.mock.ANY
+        )
+        self.assertIn(minimax_adapter, aggregator.adapters)
 
     def test_visibility_drives_status_title_and_provider_count_together(self):
         status_button = Mock()

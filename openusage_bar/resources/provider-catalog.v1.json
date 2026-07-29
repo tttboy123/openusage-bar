@@ -1125,12 +1125,31 @@
           "provenance": "openusage_bar_builtin",
           "fact_families": [
             "detection",
-            "subscription_capacity",
-            "token_activity"
+            "subscription_capacity"
           ],
           "authority": "provider_official",
           "account_scope": "configured_account",
           "model_scope": "mixed",
+          "verification": "live_account"
+        },
+        {
+          "source_id": "minimax_china_billing_web",
+          "kind": "builtin_api",
+          "timeout_seconds": 60,
+          "freshness_seconds": 86400,
+          "credential_type": "api_key",
+          "credential_scope": "minimax",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "experimental",
+          "provenance": "openusage_bar_builtin",
+          "fact_families": [
+            "token_activity"
+          ],
+          "authority": "provider_official",
+          "account_scope": "configured_account",
+          "model_scope": "per_model",
           "verification": "live_account"
         },
         {

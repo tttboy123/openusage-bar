@@ -22,7 +22,7 @@ These adapters fill gaps that OpenUsage does not currently expose:
 | Codex | Local subscription windows and resets; incremental local session logs are the primary daily Token source, with OpenUsage as fallback |
 | Cursor | Remaining subscription percentage when the local client exposes it; OpenUsage fallback |
 | Kiro | AWS CodeWhisperer plan quota and reset when Keychain credentials allow it; OpenUsage fallback |
-| MiniMax | Coding Plan capacity plus delayed daily model billing activity when the selected site supplies it |
+| MiniMax | China and International Coding Plan capacity; delayed daily model billing activity only where a separately verified feed exists |
 | StepFun Step Plan | China and International plan capacity from a Keychain session; API-key connection state |
 | OpenAI Organization | Official daily Token activity and billed organization cost using an Admin key |
 | Generic HTTPS Provider | Configured remaining-capacity fact from a bounded HTTPS JSON endpoint |
@@ -41,9 +41,13 @@ Connection-specific notes:
 - **StepFun Step Plan** supports China and International accounts, but a web
   session is never retried against the other region. Follow the
   [StepFun quick start](stepfun-quick-start.md) for the safe connection flow.
-- **MiniMax** keeps documented Coding Plan capacity separate from delayed
-  platform billing activity. Missing or incomplete billing coverage remains
-  unavailable instead of becoming a real-time zero.
+- **MiniMax** locks every account to either China (`www.minimaxi.com`) or
+  International (`www.minimax.io`) and never retries a credential against the
+  other site. Both sites use their documented Coding Plan capacity endpoint.
+  The delayed daily model billing feed is a separate, experimental China-only
+  source because no equivalent International feed has been verified. Missing
+  or incomplete billing coverage remains unavailable instead of becoming a
+  real-time zero.
 - **Custom Daily Token Feed** accepts only bounded, range-aware HTTPS JSON. It
   rejects embedded credentials, cross-host redirects, private-address targets,
   executable templates, and ambiguous partial pagination.

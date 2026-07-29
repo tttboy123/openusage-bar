@@ -754,6 +754,7 @@ private struct ProviderConnectionDetail: View {
         ))
         default: .minimax(
             providerID: connection.providerID, name: connection.displayName,
+            site: connection.site ?? "china",
             replacementCredential: ""
         )
         }
@@ -880,7 +881,7 @@ private struct NativeProviderConnectionSheet: View {
                 }
                 TextField("Connection ID", text: $providerID)
                 TextField("Account label", text: $name)
-                if kind == "step_plan" {
+                if ["minimax", "step_plan"].contains(kind) {
                     Picker("Site", selection: $site) {
                         Text("China").tag("china")
                         Text("International").tag("international")
@@ -977,7 +978,8 @@ private struct NativeProviderConnectionSheet: View {
     private func makeDraft() -> ManagedConnectionDraft {
         switch kind {
         case "minimax": .minimax(
-            providerID: providerID, name: name, replacementCredential: credential
+            providerID: providerID, name: name, site: site,
+            replacementCredential: credential
         )
         case "step_plan": .stepPlan(
             providerID: providerID, name: name, site: site,

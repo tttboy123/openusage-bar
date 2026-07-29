@@ -167,6 +167,28 @@ class ProviderConfigTests(unittest.TestCase):
 
             self.assertEqual(config.site, "china")
 
+    def test_legacy_minimax_without_site_migrates_to_china(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "providers.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "providers": [
+                            {
+                                "type": "minimax",
+                                "provider_id": "minimax-main",
+                                "name": "MiniMax",
+                            }
+                        ],
+                    }
+                )
+            )
+
+            config = ProviderConfigStore(path).load()[0]
+
+            self.assertEqual(config.site, "china")
+
     def test_rejects_unknown_step_plan_site(self):
         with tempfile.TemporaryDirectory() as directory:
             store = ProviderConfigStore(Path(directory) / "providers.json")
@@ -174,6 +196,15 @@ class ProviderConfigTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.save(
                     [StepPlanConfig("step-plan-main", "Step Plan", site="unknown")]
+                )
+
+    def test_rejects_unknown_minimax_site(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProviderConfigStore(Path(directory) / "providers.json")
+
+            with self.assertRaises(ValueError):
+                store.save(
+                    [MiniMaxConfig("minimax-main", "MiniMax", site="unknown")]
                 )
 
     def test_serialization_omits_secrets_and_uses_private_mode(self):

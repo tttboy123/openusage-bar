@@ -192,7 +192,8 @@ OpenUsage Bar 是独立仓库和独立发布。OpenUsage.sh 是可选数据源�
 
 - OpenUsage 0.23.0 catalog：覆盖 35 个上游 family。
 - 内置增强：MiniMax、StepFun、Codex、Cursor、Kiro、OpenAI Organization、Generic HTTPS Provider、Custom Daily Token Feed。
-- MiniMax：订阅额度与延迟 billing feed 分离，当前日缺失不会显示为实时 0。
+- MiniMax：中国站与国际站账号严格隔离，订阅额度与中国站实验性延迟
+  billing feed 分离；国际站未验证的历史用量和当前日缺失都不会显示为 0。
 - StepFun：支持中国站和国际站多账号。
 - Generic HTTPS Provider：校验 endpoint、redirect、响应大小和 JSON path。
 - Daily Token Feed：支持 range-aware HTTPS JSON、字段映射、分页和 Keychain 鉴权。

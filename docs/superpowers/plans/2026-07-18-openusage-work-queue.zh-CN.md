@@ -309,6 +309,16 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - StepFun 中国站和国际站 Session 永不跨站重试。
 - 多账号分别验证 Keychain、账本作用域、刷新和凭证替换。
 
+**当前证据（2026-07-29）：**
+
+- MiniMax 中国站实机返回 5 小时与周额度共 4 条事实，4 条均有重置时间。
+- MiniMax 中国站和国际站使用独立白名单客户端；国际站只调用官方
+  `www.minimax.io/v1/token_plan/remains`，不会回退中国站。
+- 未发现可验证的国际站 daily billing feed，因此国际站 Token 历史保持
+  `Unknown`，不会注册中国站的实验性 billing source，也不会写入 0。
+- StepFun 中国站运行态额度可读；当前响应未提供可用重置时间，界面继续显示
+  `Reset unavailable`。国际站真实账号与跨账号 Last-good 仍待外部验收。
+
 **验收：**
 
 - [ ] 当前 Billing 缺失不会变成实时零。

@@ -23,7 +23,7 @@ from .codex_subscription import CodexSubscriptionAdapter
 from .generic import GenericHTTPSAdapter
 from .keychain import MacOSKeychain
 from .kiro import KiroQuotaAdapter
-from .minimax import MiniMaxCodingPlanAdapter
+from .minimax import MiniMaxCodingPlanAdapter, minimax_endpoints_for_site
 from .models import Category, Overview, ProviderCard, ProviderStatus, canonical_category
 from .network import BoundedHTTPClient, UnsafeEndpoint, resolve_public_addresses, validate_endpoint
 from .openusage_adapter import OpenUsageAdapter
@@ -677,7 +677,6 @@ class ProviderController:
 def _build_aggregator(store: ProviderConfigStore, keychain: MacOSKeychain) -> Aggregator:
     clock = lambda: datetime.now(timezone.utc)
     client = BoundedHTTPClient()
-    minimax_client = BoundedHTTPClient(allowed_reserved_hosts={"www.minimaxi.com"})
     adapters = [
         OpenUsageAdapter(clock),
         KiroQuotaAdapter(clock=clock),
@@ -689,7 +688,16 @@ def _build_aggregator(store: ProviderConfigStore, keychain: MacOSKeychain) -> Ag
         configs = []
     for config in configs:
         if isinstance(config, MiniMaxConfig):
-            adapters.append(MiniMaxCodingPlanAdapter(config, keychain, minimax_client, clock))
+            minimax_endpoints = minimax_endpoints_for_site(config.site)
+            minimax_client = BoundedHTTPClient(
+                allowed_reserved_hosts={minimax_endpoints.host},
+                allowed_redirect_hosts=set(),
+            )
+            adapters.append(
+                MiniMaxCodingPlanAdapter(
+                    config, keychain, minimax_client, clock
+                )
+            )
         elif isinstance(config, OpenAIOrganizationConfig):
             adapters.append(OpenAIOrganizationCardAdapter(config, keychain, clock))
         elif isinstance(config, StepPlanConfig):
@@ -1508,18 +1516,30 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             alert.setMessageText_(self._text("settings.add_minimax"))
             alert.addButtonWithTitle_(self._text("settings.save"))
             alert.addButtonWithTitle_(self._text("settings.cancel"))
-            accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 330, 68))
+            accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 330, 102))
+            site = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+                NSMakeRect(0, 72, 330, 24), False
+            )
+            site.addItemsWithTitles_(["China", "International"])
             name = input_field(
                 self._text("settings.account_label"), NSMakeRect(0, 38, 330, 24)
             )
             secret = input_field("MiniMax Coding Plan key", NSMakeRect(0, 6, 330, 24), secure=True)
+            accessory.addSubview_(site)
             accessory.addSubview_(name)
             accessory.addSubview_(secret)
             alert.setAccessoryView_(accessory)
             if alert.runModal() != NSAlertFirstButtonReturn:
                 return
+            selected_site = (
+                "international" if site.indexOfSelectedItem() == 1 else "china"
+            )
             provider_id = f"minimax-{int(datetime.now().timestamp())}"
-            config = MiniMaxConfig(provider_id, name.stringValue().strip() or "MiniMax")
+            config = MiniMaxConfig(
+                provider_id,
+                name.stringValue().strip() or "MiniMax",
+                site=selected_site,
+            )
             result = self.provider_controller.add_minimax(config, secret.stringValue())
             self._finish_add(result)
 

@@ -87,7 +87,7 @@ def _v2_config(payload: dict):
         return provider_id, kind, None
 
     schemas = {
-        "minimax": {"name"},
+        "minimax": {"name", "site"},
         "step_plan": {"name", "site"},
         "openai_organization": {"name"},
         "generic": {
@@ -105,7 +105,10 @@ def _v2_config(payload: dict):
     _exact_object(raw, schemas[kind], "Provider configuration")
     name = _text_field(raw, "name", 160, required=True)
     if kind == "minimax":
-        config = MiniMaxConfig(provider_id, name)
+        site = _text_field(raw, "site", 32) or "china"
+        if site not in {"china", "international"}:
+            raise ValueError("MiniMax site is invalid")
+        config = MiniMaxConfig(provider_id, name, site=site)
     elif kind == "step_plan":
         site = _text_field(raw, "site", 32, required=True)
         if site not in {"china", "international"}:

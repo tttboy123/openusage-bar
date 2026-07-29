@@ -100,7 +100,11 @@ _SPECIAL_SOURCE_IDS = {
     "openai": ("openai_admin_api", "openusage"),
     "codex": ("codex_local_log", "openusage"),
     "kiro_cli": ("kiro_keychain", "kiro_codewhisperer_api", "openusage"),
-    "minimax": ("minimax_builtin_api", "openusage"),
+    "minimax": (
+        "minimax_builtin_api",
+        "minimax_china_billing_web",
+        "openusage",
+    ),
     "step_plan": ("step_plan_browser_session", "step_plan_official_api"),
 }
 _EXPECTED_CREDENTIAL_SCOPES = {
@@ -108,6 +112,7 @@ _EXPECTED_CREDENTIAL_SCOPES = {
     ("kiro_cli", "kiro_keychain"): "kiro",
     ("kiro_cli", "kiro_codewhisperer_api"): "kiro",
     ("minimax", "minimax_builtin_api"): "minimax",
+    ("minimax", "minimax_china_billing_web"): "minimax",
     ("step_plan", "step_plan_browser_session"): "step_plan_session",
     ("step_plan", "step_plan_official_api"): "step_plan_api_key",
 }

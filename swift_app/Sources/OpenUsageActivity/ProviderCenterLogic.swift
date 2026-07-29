@@ -49,7 +49,10 @@ struct DailyUsageFeedDraft: Sendable, Equatable {
 }
 
 enum ManagedConnectionDraft: Sendable, Equatable {
-    case minimax(providerID: String, name: String, replacementCredential: String)
+    case minimax(
+        providerID: String, name: String, site: String,
+        replacementCredential: String
+    )
     case stepPlan(
         providerID: String, name: String, site: String,
         replacementCredential: String, replacementSession: String
@@ -62,7 +65,7 @@ enum ManagedConnectionDraft: Sendable, Equatable {
 
     var providerID: String {
         switch self {
-        case let .minimax(providerID, _, _),
+        case let .minimax(providerID, _, _, _),
              let .stepPlan(providerID, _, _, _, _),
              let .openAIOrganization(providerID, _, _): providerID
         case let .generic(draft): draft.providerID
@@ -72,7 +75,7 @@ enum ManagedConnectionDraft: Sendable, Equatable {
 
     private var name: String {
         switch self {
-        case let .minimax(_, name, _),
+        case let .minimax(_, name, _, _),
              let .stepPlan(_, name, _, _, _),
              let .openAIOrganization(_, name, _): name
         case let .generic(draft): draft.name
@@ -82,7 +85,7 @@ enum ManagedConnectionDraft: Sendable, Equatable {
 
     private var primaryCredential: String {
         switch self {
-        case let .minimax(_, _, credential),
+        case let .minimax(_, _, _, credential),
              let .openAIOrganization(_, _, credential): credential
         case let .stepPlan(_, _, _, credential, _): credential
         case let .generic(draft): draft.replacementCredential
@@ -97,8 +100,12 @@ enum ManagedConnectionDraft: Sendable, Equatable {
         if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return .missingName
         }
-        if case let .stepPlan(_, _, site, _, _) = self,
-           !["china", "international"].contains(site) {
+        let site: String? = switch self {
+        case let .minimax(_, _, site, _): site
+        case let .stepPlan(_, _, site, _, _): site
+        default: nil
+        }
+        if let site, !["china", "international"].contains(site) {
             return .invalidSite
         }
         if action == .createConnection {
@@ -145,6 +152,7 @@ extension ProviderConnectionSummary {
         switch kind {
         case "minimax": return .minimax(
             providerID: providerID, name: connectionName,
+            site: site ?? "china",
             replacementCredential: replacementCredential
         )
         case "step_plan": return .stepPlan(
@@ -224,13 +232,13 @@ struct ProviderMutationRequestV2: Encodable, Sendable, Equatable {
             return
         }
         switch draft {
-        case let .minimax(_, name, credential):
+        case let .minimax(_, name, site, credential):
             kind = "minimax"
-            configuration = .named(name)
+            configuration = .regional(name: name, site: site)
             credentialMaterial = .values(primary: credential, session: "")
         case let .stepPlan(_, name, site, credential, session):
             kind = "step_plan"
-            configuration = .stepPlan(name: name, site: site)
+            configuration = .regional(name: name, site: site)
             credentialMaterial = .values(primary: credential, session: session)
         case let .openAIOrganization(_, name, credential):
             kind = "openai_organization"
@@ -259,7 +267,7 @@ struct ProviderMutationRequestV2: Encodable, Sendable, Equatable {
     enum Configuration: Encodable, Sendable, Equatable {
         case empty
         case named(String)
-        case stepPlan(name: String, site: String)
+        case regional(name: String, site: String)
         case generic(GenericQuotaDraft)
         case dailyUsageFeed(DailyUsageFeedDraft)
 
@@ -268,7 +276,7 @@ struct ProviderMutationRequestV2: Encodable, Sendable, Equatable {
             switch self {
             case .empty: break
             case let .named(name): try container.encode(name, forKey: "name")
-            case let .stepPlan(name, site):
+            case let .regional(name, site):
                 try container.encode(name, forKey: "name")
                 try container.encode(site, forKey: "site")
             case let .generic(draft):

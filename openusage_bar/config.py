@@ -21,6 +21,7 @@ class MiniMaxConfig:
     name: str
     type: str = "minimax"
     account_ref: str = ""
+    site: str = "china"
 
 
 @dataclass(frozen=True)
@@ -162,11 +163,11 @@ def _validate_config(config: ProviderConfig) -> None:
             raise ValueError("Account ref must use the stable identifier grammar")
         if config.account_ref.casefold() == config.name.strip().casefold():
             raise ValueError("Account ref must not copy the provider display name")
-    if isinstance(config, StepPlanConfig) and config.site not in {
+    if isinstance(config, (MiniMaxConfig, StepPlanConfig)) and config.site not in {
         "china",
         "international",
     }:
-        raise ValueError("StepFun site must be china or international")
+        raise ValueError("Provider site must be china or international")
     if isinstance(config, GenericProviderConfig):
         if config.family_id and ID_PATTERN.fullmatch(config.family_id) is None:
             raise ValueError("Generic quota family ID is invalid")
