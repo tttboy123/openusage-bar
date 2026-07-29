@@ -260,6 +260,10 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] 目录对账修正两项误报：MiniMax 已有官方延迟账单 importer，因此
   Token history/model breakdown 从 Unknown 改为 Supported；Step Plan
   当前只提供订阅额度而没有 API spend，移除 Billing 支持声明。
+- [x] 目录校验现已要求每个 Supported Token、Capacity、Balance 与
+  Billing/Cost 能力都有匹配的 source fact；26 个 OpenUsage Billing
+  声明补齐 `api_spend` 证据，并继续保留 `third_party` 与
+  `fixture`/`upstream_declared` 标签，不能被误读为官方账单。
 - [ ] 其余 Provider 仍需按 Issue #19-#29 逐个补真实账号证据或降级为
   `unknown`/`unsupported`；本切片没有把 Fixture 冒充实账号验证。
 

@@ -144,7 +144,7 @@ Each source retains the existing `sourceId`, `kind`, `timeoutSeconds`,
 | `operatingSystems` | string array | `macos`, `windows`, `linux` |
 | `stability` | string | `stable`, `experimental`, `pinned`, `opaque` |
 | `provenance` | string | `openusage_upstream`, `openusage_bar_builtin`, `provider_official`, `provider_local`, `user_session` |
-| `factFamilies` | string array | `detection`, `token_activity`, `subscription_capacity`, `api_spend` |
+| `factFamilies` | string array | `detection`, `token_activity`, `subscription_capacity`, `api_balance`, `api_spend` |
 | `authority` | string | `provider_official`, `provider_local`, `third_party`, `user_supplied`, `unknown` |
 | `accountScope` | string | `local_profile`, `configured_account`, `organization`, `provider`, `unknown` |
 | `modelScope` | string | `per_model`, `aggregate`, `mixed`, `unknown` |
@@ -161,6 +161,11 @@ connection is healthy. Runtime health remains available from
 `/v1/sources/status`. `fixture`, `upstream_declared`, and `unverified` remain
 visibly weaker evidence and must not be promoted to real-account support by UI
 or consumers.
+
+`api_spend` covers both Provider-reported billed cost and OpenUsage price-table
+estimates. Consumers must use each cost record's `costBasis`, `quality`, and
+source metadata rather than treating every `api_spend` source as an official
+invoice.
 
 `/v1/providers` is the dynamic instance ledger. It exposes only
 `providerId`, `familyId`, `displayName`, `category`, `credentialSource`,

@@ -67,7 +67,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "amp": ProviderDisplayDescriptor(
@@ -94,7 +94,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "anthropic": ProviderDisplayDescriptor(
@@ -175,7 +175,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .liveAccount),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .liveAccount),
             ]
         ),
         "codebuff": ProviderDisplayDescriptor(
@@ -202,7 +202,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "codex": ProviderDisplayDescriptor(
@@ -257,7 +257,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "crush": ProviderDisplayDescriptor(
@@ -284,7 +284,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "cursor": ProviderDisplayDescriptor(
@@ -311,7 +311,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .subscriptionCapacity, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .mixed, verification: .liveAccount),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .subscriptionCapacity, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .mixed, verification: .liveAccount),
             ]
         ),
         "deepseek": ProviderDisplayDescriptor(
@@ -338,7 +338,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
             ]
         ),
         "droid": ProviderDisplayDescriptor(
@@ -365,7 +365,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "gemini_api": ProviderDisplayDescriptor(
@@ -446,7 +446,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "groq": ProviderDisplayDescriptor(
@@ -500,7 +500,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .liveAccount),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .liveAccount),
             ]
         ),
         "kilo_code": ProviderDisplayDescriptor(
@@ -527,7 +527,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "kimi_cli": ProviderDisplayDescriptor(
@@ -554,7 +554,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "kiro_cli": ProviderDisplayDescriptor(
@@ -639,7 +639,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
             ]
         ),
         "moonshot": ProviderDisplayDescriptor(
@@ -667,7 +667,7 @@ public enum GeneratedProviderCatalog {
             ),
             sourceCapabilities: [
                 ProviderSourceCapability(sourceID: "moonshot_official_api", sourceKind: "official_api", operatingSystems: [.macOS], stability: .stable, provenance: .providerOfficial, factFamilies: [.apiBalance, .detection], authority: .providerOfficial, accountScope: .configuredAccount, modelScope: .aggregate, verification: .fixture),
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
             ]
         ),
         "mux": ProviderDisplayDescriptor(
@@ -694,7 +694,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "ollama": ProviderDisplayDescriptor(
@@ -776,7 +776,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .liveAccount),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .liveAccount),
             ]
         ),
         "opencode": ProviderDisplayDescriptor(
@@ -803,7 +803,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .liveAccount),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .liveAccount),
             ]
         ),
         "openrouter": ProviderDisplayDescriptor(
@@ -830,7 +830,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "perplexity": ProviderDisplayDescriptor(
@@ -857,7 +857,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "pi": ProviderDisplayDescriptor(
@@ -884,7 +884,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "qwen_cli": ProviderDisplayDescriptor(
@@ -911,7 +911,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "roocode": ProviderDisplayDescriptor(
@@ -938,7 +938,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "step_plan": ProviderDisplayDescriptor(
@@ -993,7 +993,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
             ]
         ),
         "zai": ProviderDisplayDescriptor(
@@ -1020,7 +1020,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
         "zed": ProviderDisplayDescriptor(
@@ -1047,7 +1047,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
     ]

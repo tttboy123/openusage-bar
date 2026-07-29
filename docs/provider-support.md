@@ -118,6 +118,11 @@ Current health, freshness, and sanitized errors come from
 `/v1/sources/status`. Provider Center renders the same canonical evidence as
 `/v1/capabilities`; it does not maintain a second hand-written matrix.
 
+The catalog also requires every supported Token, capacity, balance, or spend
+capability to name a matching source fact. OpenUsage-backed billing facts are
+third-party price-table estimates unless their cost records say otherwise;
+they are not promoted to Provider-official invoices.
+
 ### Local client evidence
 
 On 2026-07-29, a bounded, offline OpenUsage daily export returned non-empty

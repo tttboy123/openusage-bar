@@ -240,7 +240,12 @@ class ProviderCatalogTests(unittest.TestCase):
         self.assertEqual(
             cursor_openusage.fact_families,
             frozenset(
-                {"detection", "subscription_capacity", "token_activity"}
+                {
+                    "api_spend",
+                    "detection",
+                    "subscription_capacity",
+                    "token_activity",
+                }
             ),
         )
         self.assertEqual(cursor_openusage.timeout_seconds, 40)
@@ -327,7 +332,7 @@ class ProviderCatalogTests(unittest.TestCase):
                 self.assertEqual(source.source_id, "openusage")
                 self.assertEqual(
                     source.fact_families,
-                    frozenset({"detection", "token_activity"}),
+                    frozenset({"api_spend", "detection", "token_activity"}),
                 )
                 self.assertEqual(source.authority, "third_party")
                 self.assertEqual(source.account_scope, "local_profile")
@@ -585,6 +590,15 @@ class ProviderCatalogTests(unittest.TestCase):
                     *family(value, "codex")["sources"][0]["fact_families"],
                 ]
             }),
+            "supported billing without api spend source": lambda value: [
+                source.update({
+                    "fact_families": [
+                        fact for fact in source["fact_families"]
+                        if fact != "api_spend"
+                    ]
+                })
+                for source in family(value, "alibaba_cloud")["sources"]
+            ],
             "token source without token capability": lambda value: family(
                 value, "anthropic"
             )["sources"][0].update({
@@ -597,6 +611,24 @@ class ProviderCatalogTests(unittest.TestCase):
                 mutate(candidate)
                 with self.assertRaisesRegex(ValueError, "fact evidence"):
                     self._load_payload(candidate)
+
+    def test_supported_billing_or_cost_requires_api_spend_source_evidence(self):
+        for family in self.catalog.families:
+            capabilities = family.capabilities
+            spend_supported = (
+                capabilities.billing == "supported"
+                or capabilities.cost == "supported"
+            )
+            declared_facts = {
+                fact
+                for source in family.sources
+                for fact in source.fact_families
+            }
+            with self.subTest(family=family.family_id):
+                self.assertEqual(
+                    "api_spend" in declared_facts,
+                    spend_supported,
+                )
 
     def test_catalog_container_cannot_diverge_from_its_lookup_index(self):
         original_ids = self.catalog.family_ids

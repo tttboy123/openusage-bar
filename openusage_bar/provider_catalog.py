@@ -472,7 +472,10 @@ def _parse_family(value: Any, index: int) -> ProviderFamily:
     balance_supported = (
         capabilities.balance == "supported" and not capacity_supported
     )
-    spend_supported = capabilities.cost == "supported"
+    spend_supported = (
+        capabilities.billing == "supported"
+        or capabilities.cost == "supported"
+    )
     evidence_contract = (
         ("token_activity", token_supported),
         ("subscription_capacity", capacity_supported),
