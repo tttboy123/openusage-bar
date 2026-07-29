@@ -9,6 +9,8 @@ body:
         OpenUsage Bar prefers an existing OpenUsage integration, then an official read-only API, then a documented custom feed. It does not accept credentials, raw Provider payloads, prompts, responses, direct account identity, or fragile browser scraping without a separate security review.
 
         OpenUsage Bar 优先复用 OpenUsage，其次使用官方只读 API，再使用有文档的自定义 Feed。请勿提交密钥、Cookie、原始厂商响应、Prompt、Response 或直接账号身份。
+
+        Contributors should start with the Provider Adapter Kit in `docs/provider-adapter-kit.md` and submit synthetic fixtures only. / 贡献者请从 `docs/provider-adapter-kit.md` 的 Provider Adapter Kit 开始，只提交合成 Fixture。
   - type: input
     id: provider
     attributes:

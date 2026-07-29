@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "providers": [
+    {
+      "provider_id": "example-cost",
+      "name": "Example Daily Cost",
+      "family_id": "example",
+      "endpoint": "https://api.example.invalid/v1/costs",
+      "method": "GET",
+      "header_name": "Authorization",
+      "auth_prefix": "Bearer ",
+      "items_path": "data.items",
+      "date_path": "day",
+      "amount_path": "amount",
+      "currency_path": "currency",
+      "timestamp_format": "date",
+      "timezone": "UTC",
+      "pagination": "cursor",
+      "page_parameter": "page",
+      "limit_parameter": "limit",
+      "cursor_parameter": "cursor",
+      "next_cursor_path": "data.next_cursor",
+      "page_size": 100,
+      "since_parameter": "from",
+      "until_parameter": "to",
+      "request_body": null,
+      "cost_kind": "actual",
+      "basis": "provider_reported",
+      "type": "daily_cost_feed",
+      "account_ref": "fixture-a"
+    }
+  ]
+}

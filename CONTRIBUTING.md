@@ -35,3 +35,16 @@ verification. Do not bypass a failing gate.
 
 Provider adapters must preserve last-good data on failure and represent unknown
 quota as unavailable, never as zero.
+
+## Provider Adapter Kit
+
+Prefer a declarative quota, daily usage, or daily cost feed before adding
+provider-specific Python or Swift code. Start from the
+[Provider Adapter Kit](docs/provider-adapter-kit.md) example and validate it:
+
+```bash
+python3 scripts/check_provider_adapter.py examples/provider-adapter-kit/example-provider
+```
+
+The bundle and its fixtures must be synthetic and redacted. Static conformance
+does not replace a separately reported live-account canary.
