@@ -1,5 +1,8 @@
+import os
+import shutil
 import subprocess
 import sqlite3
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -10,6 +13,37 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PrivacyScanTests(unittest.TestCase):
+    def test_release_scanner_runs_with_only_packaged_schema_module(self):
+        from openusage_bar.activity_store import ActivityStore
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            database = root / "activity.sqlite3"
+            store = ActivityStore(database)
+            store.close()
+
+            scripts = root / "release" / "scripts"
+            scripts.mkdir(parents=True)
+            scanner = scripts / "privacy_scan.py"
+            shutil.copy2(ROOT / "scripts/privacy_scan.py", scanner)
+            shutil.copy2(
+                ROOT / "openusage_bar/activity_schema.py",
+                scripts / "activity_schema.py",
+            )
+            result = subprocess.run(
+                [sys.executable, str(scanner), str(database)],
+                cwd=root / "release",
+                env={**os.environ, "PYTHONPATH": ""},
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout,
+                "privacy_scan_matches=0 files=0 sqlite_files=1\n",
+            )
+
     def test_empty_or_null_forbidden_fields_fail_every_scan_target(self):
         scanner = ROOT / "scripts/privacy_scan.py"
         for payload in ('{"apiKey":null}', '{"prompt":""}', '{"authorization":""}'):

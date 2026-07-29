@@ -34,6 +34,7 @@ cp \
   "$ROOT/scripts/privacy_scan.py" \
   "$ROOT/scripts/verify_local_api.py" \
   "$STAGE/scripts/"
+cp "$ROOT/openusage_bar/activity_schema.py" "$STAGE/scripts/"
 cp \
   "$ROOT/LICENSE" \
   "$ROOT/THIRD_PARTY_NOTICES.md" \

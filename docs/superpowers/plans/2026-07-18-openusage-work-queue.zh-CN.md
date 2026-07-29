@@ -624,7 +624,7 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 - [x] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
 
 2026-07-30 已建立唯一的 `integration/0.6-rc` 共存候选，并完成 Python
-844 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
+845 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
 集成时修复了 `balances` 被误设为 Local API v1 必填字段的兼容回归；冻结
 0.4.2 snapshot 与包含 additive 字段的当前 snapshot 均通过。候选不导入
 Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未完成门禁见
@@ -637,6 +637,11 @@ Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未�
 CHANGELOG 转绿。本地 `0.6.0 (9)` ZIP/DMG 已通过 checksum、制品审计、
 SPDX SBOM、隐私扫描和隔离安装/升级/回滚/卸载；该未提交本地包不对外
 发布，外部 Canary 只能使用提交后由远端 CI 重新生成的可追溯候选。
+
+同日补齐发行 ZIP 的独立诊断契约：当前 exporter 已能读取 N-1 Local API；
+隐私扫描器随包携带同源的纯数据 SQLite schema，并在无源码、空
+`PYTHONPATH` 环境扫描真实账本通过。扫描器继续要求完整表集合与精确列
+签名，未把兼容性修复降级成宽松解析。
 
 ---
 

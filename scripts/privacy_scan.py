@@ -10,11 +10,14 @@ from enum import Enum
 from pathlib import Path
 from urllib.parse import quote
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from openusage_bar.activity_store import _EXPECTED_SCHEMA
+PACKAGED_SCHEMA = Path(__file__).with_name("activity_schema.py")
+if PACKAGED_SCHEMA.is_file():
+    from activity_schema import EXPECTED_SCHEMA as _EXPECTED_SCHEMA
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from openusage_bar.activity_schema import EXPECTED_SCHEMA as _EXPECTED_SCHEMA
 
 
 FORBIDDEN_NAME = (

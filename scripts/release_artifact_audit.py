@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 
 ARCHIVE_PATTERN = re.compile(r"^OpenUsage-Bar-v(\d+\.\d+\.\d+)-macos-arm64\.zip$")
 ALLOWED_SCRIPTS = frozenset({
+    "activity_schema.py",
     "activity_install_process.sh", "install_app.sh",
     "install_location.sh", "install_app_transaction.sh", "rollback_app.sh",
     "uninstall_app.sh",

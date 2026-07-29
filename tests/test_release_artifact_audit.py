@@ -54,6 +54,7 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
                 f"{ROOT_NAME}/scripts/export_diagnostics.py",
                 'DENIED_HOME_PREFIXES = ("/Users/", "/home/")',
             ),
+            (f"{ROOT_NAME}/scripts/activity_schema.py", "EXPECTED_SCHEMA = {}"),
             (f"{ROOT_NAME}/scripts/install_app.sh", "#!/bin/zsh"),
             (f"{ROOT_NAME}/dist/OpenUsage Bar.app/Contents/Info.plist", "plist"),
         ))
