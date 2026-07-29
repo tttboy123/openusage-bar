@@ -59,6 +59,25 @@ SOURCE_PROVENANCES = frozenset(
         "user_session",
     }
 )
+SOURCE_FACT_FAMILIES = frozenset(
+    {"detection", "token_activity", "subscription_capacity", "api_spend"}
+)
+SOURCE_AUTHORITIES = frozenset(
+    {
+        "provider_official",
+        "provider_local",
+        "third_party",
+        "user_supplied",
+        "unknown",
+    }
+)
+ACCOUNT_SCOPES = frozenset(
+    {"local_profile", "configured_account", "organization", "provider", "unknown"}
+)
+MODEL_SCOPES = frozenset({"per_model", "aggregate", "mixed", "unknown"})
+SOURCE_VERIFICATIONS = frozenset(
+    {"live_account", "fixture", "upstream_declared", "unverified"}
+)
 
 _EXPECTED_UPSTREAM_FAMILY_IDS = tuple(
     sorted(
@@ -135,6 +154,11 @@ _SOURCE_FIELDS = frozenset(
         "operating_systems",
         "stability",
         "provenance",
+        "fact_families",
+        "authority",
+        "account_scope",
+        "model_scope",
+        "verification",
     }
 )
 
@@ -169,6 +193,11 @@ class CatalogSource:
     operating_systems: frozenset[str]
     stability: str
     provenance: str
+    fact_families: frozenset[str]
+    authority: str
+    account_scope: str
+    model_scope: str
+    verification: str
     credential_scope: str | None = None
 
 
@@ -258,6 +287,11 @@ class ProviderCatalog:
                     frozenset({"macos"}),
                     "pinned",
                     "openusage_upstream",
+                    frozenset({"detection"}),
+                    "third_party",
+                    "local_profile",
+                    "unknown",
+                    "unverified",
                 ),
             ),
         )
@@ -405,6 +439,32 @@ def _parse_family(value: Any, index: int) -> ProviderFamily:
     source_ids = [source.source_id for source in sources]
     if len(set(source_ids)) != len(source_ids):
         raise ValueError(f"{context} source IDs must be unique")
+    declared_facts = frozenset(
+        fact
+        for source in sources
+        for fact in source.fact_families
+    )
+    token_supported = (
+        capabilities.token_history == "supported"
+        or capabilities.model_breakdown == "supported"
+    )
+    capacity_supported = (
+        capabilities.quota_windows.state == "supported"
+        or capabilities.reset_timestamps == "supported"
+        or capabilities.credits == "supported"
+        or capabilities.balance == "supported"
+    )
+    spend_supported = capabilities.cost == "supported"
+    evidence_contract = (
+        ("token_activity", token_supported),
+        ("subscription_capacity", capacity_supported),
+        ("api_spend", spend_supported),
+    )
+    for fact_family, supported in evidence_contract:
+        if (fact_family in declared_facts) != supported:
+            raise ValueError(
+                f"{context} fact evidence does not match {fact_family} capability"
+            )
     return ProviderFamily(
         family_id=family_id,
         display_name=display_name,
@@ -478,6 +538,23 @@ def _parse_source(value: Any, family_id: str, index: int) -> CatalogSource:
         raise ValueError(f"{context} must support macos")
     stability = _require_enum(raw["stability"], SOURCE_STABILITIES, context)
     provenance = _require_enum(raw["provenance"], SOURCE_PROVENANCES, context)
+    fact_families = _require_sorted_unique_strings(
+        raw["fact_families"], f"{context} fact families"
+    )
+    if not fact_families or not set(fact_families) <= SOURCE_FACT_FAMILIES:
+        raise ValueError(f"{context} has invalid fact families")
+    authority = _require_enum(
+        raw["authority"], SOURCE_AUTHORITIES, f"{context} authority"
+    )
+    account_scope = _require_enum(
+        raw["account_scope"], ACCOUNT_SCOPES, f"{context} account scope"
+    )
+    model_scope = _require_enum(
+        raw["model_scope"], MODEL_SCOPES, f"{context} model scope"
+    )
+    verification = _require_enum(
+        raw["verification"], SOURCE_VERIFICATIONS, f"{context} verification"
+    )
     return CatalogSource(
         source_id=source_id,
         kind=kind,
@@ -487,6 +564,11 @@ def _parse_source(value: Any, family_id: str, index: int) -> CatalogSource:
         operating_systems=frozenset(operating_systems),
         stability=stability,
         provenance=provenance,
+        fact_families=frozenset(fact_families),
+        authority=authority,
+        account_scope=account_scope,
+        model_scope=model_scope,
+        verification=verification,
         credential_scope=scope,
     )
 

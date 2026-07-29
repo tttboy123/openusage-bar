@@ -548,6 +548,13 @@ class LocalAPIRouter:
                         ),
                         "stability": source.stability.value,
                         "provenance": source.provenance.value,
+                        "factFamilies": sorted(
+                            value.value for value in source.fact_families
+                        ),
+                        "authority": source.authority.value,
+                        "accountScope": source.account_scope.value,
+                        "modelScope": source.model_scope.value,
+                        "verification": source.verification.value,
                     } for source in item.sources],
                 } for item in descriptors]
                 return {

@@ -110,7 +110,8 @@ The `capabilities` object has these exact fields:
 | `serviceStatus` | capability state | Provider service-status data |
 
 A capability state is one of `supported`, `unsupported`, or `unknown`.
-`supported` is a conservative declaration backed by a known source;
+`supported` means the adapter contract has a known source; it does not by
+itself claim that the source has been exercised with a real account.
 `unsupported` means the capability is known not to be available; `unknown`
 means OpenUsage Bar has no reliable declaration. `unknown` is not equivalent
 to `unsupported` and must not be presented as a vendor limitation. In
@@ -128,12 +129,23 @@ Each source retains the existing `sourceId`, `kind`, `timeoutSeconds`,
 | `operatingSystems` | string array | `macos`, `windows`, `linux` |
 | `stability` | string | `stable`, `experimental`, `pinned`, `opaque` |
 | `provenance` | string | `openusage_upstream`, `openusage_bar_builtin`, `provider_official`, `provider_local`, `user_session` |
+| `factFamilies` | string array | `detection`, `token_activity`, `subscription_capacity`, `api_spend` |
+| `authority` | string | `provider_official`, `provider_local`, `third_party`, `user_supplied`, `unknown` |
+| `accountScope` | string | `local_profile`, `configured_account`, `organization`, `provider`, `unknown` |
+| `modelScope` | string | `per_model`, `aggregate`, `mixed`, `unknown` |
+| `verification` | string | `live_account`, `fixture`, `upstream_declared`, `unverified` |
 
 All sources in the current catalog are macOS-only, so their
 `operatingSystems` value is currently `["macos"]`; the enum is intentionally
 extensible to the declared Windows and Linux values. Source array order is the
 catalog's declared priority. Credential scopes, credential/account values,
 local paths, tokens, and raw provider data are never serialized.
+`verification=live_account` means that adapter path has passed a sanitized
+real-account acceptance run; it is not a statement that the current user's
+connection is healthy. Runtime health remains available from
+`/v1/sources/status`. `fixture`, `upstream_declared`, and `unverified` remain
+visibly weaker evidence and must not be promoted to real-account support by UI
+or consumers.
 
 `/v1/providers` is the dynamic instance ledger. It exposes only
 `providerId`, `familyId`, `displayName`, `category`, `credentialSource`,

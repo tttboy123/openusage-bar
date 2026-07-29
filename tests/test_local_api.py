@@ -23,13 +23,18 @@ from openusage_bar.activity_store import (
     QuotaObservation,
 )
 from openusage_bar.capabilities import (
+    AccountScope,
     CapabilityState,
+    ModelScope,
     OperatingSystem,
     ProviderRegistry,
     QuotaWindow,
     QuotaWindowCapability,
+    SourceAuthority,
+    SourceFactFamily,
     SourceProvenance,
     SourceStability,
+    SourceVerification,
     registry,
 )
 from openusage_bar.local_api import create_tcp_server, create_unix_server
@@ -320,7 +325,8 @@ class UnixLocalAPITests(unittest.TestCase):
                 self.assertEqual(set(source), {
                     "sourceId", "kind", "timeoutSeconds", "freshnessSeconds",
                     "credentialType", "requiresCredential", "operatingSystems",
-                    "stability", "provenance",
+                    "stability", "provenance", "factFamilies", "authority",
+                    "accountScope", "modelScope", "verification",
                 })
         lowered = json.dumps(payload, ensure_ascii=False).lower()
         for localized in ("正常", "错误", "未配置", "过期"):
@@ -355,7 +361,7 @@ class UnixLocalAPITests(unittest.TestCase):
             providers["kiro_cli"]["capabilities"]["credits"], "supported"
         )
         self.assertEqual(
-            providers["step_plan"]["capabilities"]["billing"], "supported"
+            providers["step_plan"]["capabilities"]["billing"], "unknown"
         )
         self.assertEqual(
             providers["step_plan"]["sources"][0], {
@@ -368,6 +374,11 @@ class UnixLocalAPITests(unittest.TestCase):
                 "operatingSystems": ["macos"],
                 "stability": "experimental",
                 "provenance": "user_session",
+                "factFamilies": ["detection", "subscription_capacity"],
+                "authority": "provider_official",
+                "accountScope": "configured_account",
+                "modelScope": "aggregate",
+                "verification": "live_account",
             },
         )
         openusage = providers["codex"]["sources"][1]
@@ -475,6 +486,11 @@ class UnixLocalAPITests(unittest.TestCase):
             }),
             "stability": SourceStability.STABLE,
             "provenance": SourceProvenance.PROVIDER_OFFICIAL,
+            "fact_families": frozenset({SourceFactFamily.DETECTION}),
+            "authority": SourceAuthority.UNKNOWN,
+            "account_scope": AccountScope.UNKNOWN,
+            "model_scope": ModelScope.UNKNOWN,
+            "verification": SourceVerification.UNVERIFIED,
         }
         for field, changed in source_mutations.items():
             mutations.append((

@@ -84,7 +84,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -124,7 +132,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -166,7 +182,14 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "unknown",
+          "verification": "upstream_declared"
         }
       ]
     },
@@ -205,7 +228,14 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "unknown",
+          "verification": "upstream_declared"
         }
       ]
     },
@@ -248,7 +278,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -288,7 +326,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -331,7 +377,16 @@
             "macos"
           ],
           "stability": "stable",
-          "provenance": "provider_local"
+          "provenance": "provider_local",
+          "fact_families": [
+            "detection",
+            "subscription_capacity",
+            "token_activity"
+          ],
+          "authority": "provider_local",
+          "account_scope": "local_profile",
+          "model_scope": "mixed",
+          "verification": "live_account"
         },
         {
           "source_id": "openusage",
@@ -343,7 +398,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -384,7 +447,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -424,7 +495,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -465,7 +544,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -505,7 +592,14 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "unknown",
+          "verification": "upstream_declared"
         }
       ]
     },
@@ -545,7 +639,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -587,7 +689,14 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "unknown",
+          "verification": "upstream_declared"
         }
       ]
     },
@@ -627,7 +736,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -667,7 +784,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -706,7 +831,14 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "unknown",
+          "verification": "upstream_declared"
         }
       ]
     },
@@ -746,7 +878,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -786,7 +926,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -829,7 +977,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -872,7 +1028,14 @@
             "macos"
           ],
           "stability": "stable",
-          "provenance": "provider_local"
+          "provenance": "provider_local",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "provider_local",
+          "account_scope": "local_profile",
+          "model_scope": "aggregate",
+          "verification": "live_account"
         },
         {
           "source_id": "kiro_codewhisperer_api",
@@ -885,7 +1048,14 @@
             "macos"
           ],
           "stability": "stable",
-          "provenance": "provider_official"
+          "provenance": "provider_official",
+          "fact_families": [
+            "subscription_capacity"
+          ],
+          "authority": "provider_official",
+          "account_scope": "local_profile",
+          "model_scope": "aggregate",
+          "verification": "live_account"
         },
         {
           "source_id": "openusage",
@@ -897,7 +1067,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -906,7 +1084,8 @@
       "display_name": "MiniMax",
       "category": "subscription",
       "metric_families": [
-        "subscription_quota"
+        "subscription_quota",
+        "token_activity"
       ],
       "regions": [
         "cn",
@@ -921,8 +1100,8 @@
             "weekly"
           ]
         },
-        "token_history": "unknown",
-        "model_breakdown": "unknown",
+        "token_history": "supported",
+        "model_breakdown": "supported",
         "reset_timestamps": "supported",
         "billing": "unknown",
         "credits": "unknown",
@@ -943,7 +1122,16 @@
             "macos"
           ],
           "stability": "stable",
-          "provenance": "openusage_bar_builtin"
+          "provenance": "openusage_bar_builtin",
+          "fact_families": [
+            "detection",
+            "subscription_capacity",
+            "token_activity"
+          ],
+          "authority": "provider_official",
+          "account_scope": "configured_account",
+          "model_scope": "mixed",
+          "verification": "live_account"
         },
         {
           "source_id": "openusage",
@@ -955,7 +1143,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -996,7 +1192,14 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "unknown",
+          "verification": "upstream_declared"
         }
       ]
     },
@@ -1040,7 +1243,14 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "unknown",
+          "verification": "upstream_declared"
         }
       ]
     },
@@ -1080,7 +1290,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -1119,7 +1337,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -1163,7 +1389,16 @@
             "macos"
           ],
           "stability": "stable",
-          "provenance": "provider_official"
+          "provenance": "provider_official",
+          "fact_families": [
+            "api_spend",
+            "detection",
+            "token_activity"
+          ],
+          "authority": "provider_official",
+          "account_scope": "organization",
+          "model_scope": "per_model",
+          "verification": "fixture"
         },
         {
           "source_id": "openusage",
@@ -1175,7 +1410,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -1215,7 +1458,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -1256,7 +1507,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -1297,7 +1556,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -1338,7 +1605,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -1378,7 +1653,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -1421,7 +1704,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -1461,7 +1752,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -1470,7 +1769,6 @@
       "display_name": "StepFun Step Plan",
       "category": "subscription",
       "metric_families": [
-        "billing",
         "subscription_quota"
       ],
       "regions": [
@@ -1489,7 +1787,7 @@
         "token_history": "unknown",
         "model_breakdown": "unknown",
         "reset_timestamps": "supported",
-        "billing": "supported",
+        "billing": "unknown",
         "credits": "supported",
         "balance": "supported",
         "cost": "unknown",
@@ -1508,7 +1806,15 @@
             "macos"
           ],
           "stability": "experimental",
-          "provenance": "user_session"
+          "provenance": "user_session",
+          "fact_families": [
+            "detection",
+            "subscription_capacity"
+          ],
+          "authority": "provider_official",
+          "account_scope": "configured_account",
+          "model_scope": "aggregate",
+          "verification": "live_account"
         },
         {
           "source_id": "step_plan_official_api",
@@ -1521,7 +1827,14 @@
             "macos"
           ],
           "stability": "stable",
-          "provenance": "provider_official"
+          "provenance": "provider_official",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "provider_official",
+          "account_scope": "configured_account",
+          "model_scope": "unknown",
+          "verification": "live_account"
         }
       ]
     },
@@ -1564,7 +1877,14 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "unknown",
+          "verification": "upstream_declared"
         }
       ]
     },
@@ -1611,7 +1931,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     },
@@ -1651,7 +1979,15 @@
             "macos"
           ],
           "stability": "pinned",
-          "provenance": "openusage_upstream"
+          "provenance": "openusage_upstream",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "per_model",
+          "verification": "fixture"
         }
       ]
     }

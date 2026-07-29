@@ -166,6 +166,12 @@ GET /v1/sources/status
 GET /v1/changes?after=0&limit=100
 ```
 
+`/v1/capabilities` 不只返回“是否有代码适配器”，还会按数据源声明
+Detection、Token Activity、Subscription Capacity、API Spend、权威程度、
+账号/模型作用域，以及 `live_account`、`fixture`、`upstream_declared` 或
+`unverified` 验证等级。当前连接是否健康仍以 `/v1/sources/status` 为准；
+两者不能混为一谈。
+
 也可以通过签名的采集器启动器输出 JSON；它会先重建最小非秘密环境：
 
 ```bash

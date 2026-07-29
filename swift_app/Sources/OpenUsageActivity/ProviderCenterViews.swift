@@ -466,6 +466,40 @@ private struct ProviderConnectionDetail: View {
                     .font(.callout)
                     Divider()
                 }
+                if !capability.sourceStrategies.isEmpty {
+                    Text("Data Sources")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .padding(.top, 2)
+                    ForEach(
+                        Array(capability.sourceStrategies.enumerated()),
+                        id: \.offset
+                    ) { index, strategy in
+                        HStack(alignment: .top, spacing: 18) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(strategy.kindTitle)
+                                    .font(.callout.weight(.medium))
+                                Text(strategy.factSummary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 18)
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text(strategy.trustSummary)
+                                    .font(.callout)
+                                Text("\(strategy.scopeSummary) · \(strategy.platforms)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .multilineTextAlignment(.trailing)
+                        }
+                        .accessibilityElement(children: .combine)
+                        if index < capability.sourceStrategies.count - 1 {
+                            Divider()
+                        }
+                    }
+                }
             }
         }
     }

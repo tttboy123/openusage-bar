@@ -19,7 +19,7 @@ These adapters fill gaps that OpenUsage does not currently expose:
 
 | Provider | Available facts |
 |---|---|
-| Codex | Local subscription windows and resets; OpenUsage is the primary daily Token source |
+| Codex | Local subscription windows and resets; incremental local session logs are the primary daily Token source, with OpenUsage as fallback |
 | Cursor | Remaining subscription percentage when the local client exposes it; OpenUsage fallback |
 | Kiro | AWS CodeWhisperer plan quota and reset when Keychain credentials allow it; OpenUsage fallback |
 | MiniMax | Coding Plan capacity plus delayed daily model billing activity when the selected site supplies it |
@@ -64,6 +64,23 @@ MiniMax and StepFun are additional OpenUsage Bar families, bringing the
 version-one catalog to 37 families. Actual data depends on the installed
 OpenUsage version, local clients, provider authentication, and what each
 upstream source can authoritatively report.
+
+Each catalog source also declares the fact families it can provide, whether
+the data is provider-official, provider-local, third-party-derived, or
+user-supplied, its account and model scope, and one of four verification
+levels:
+
+| Verification | Meaning |
+|---|---|
+| `live_account` | The adapter path passed a sanitized real-account acceptance run |
+| `fixture` | Hermetic fixtures pass, but a real account is not yet recorded |
+| `upstream_declared` | The released upstream catalog declares the source |
+| `unverified` | No stronger reusable evidence exists yet |
+
+This verification describes adapter evidence, not current connection health.
+Current health, freshness, and sanitized errors come from
+`/v1/sources/status`. Provider Center renders the same canonical evidence as
+`/v1/capabilities`; it does not maintain a second hand-written matrix.
 
 ### Provider discovery names
 

@@ -123,6 +123,9 @@ public struct ProviderCapabilityPresentation: Sendable, Hashable {
 public struct ProviderSourceStrategyPresentation: Sendable, Hashable {
     public let kindTitle: String
     public let summary: String
+    public let factSummary: String
+    public let trustSummary: String
+    public let scopeSummary: String
     public let platforms: String
 
     public init(source: ProviderSourceCapability) {
@@ -131,6 +134,15 @@ public struct ProviderSourceStrategyPresentation: Sendable, Hashable {
             kindTitle,
             Self.stabilityTitle(source.stability),
             Self.provenanceTitle(source.provenance),
+        ].joined(separator: " · ")
+        factSummary = Self.factSummary(source.factFamilies)
+        trustSummary = [
+            Self.authorityTitle(source.authority),
+            Self.verificationTitle(source.verification),
+        ].joined(separator: " · ")
+        scopeSummary = [
+            Self.accountScopeTitle(source.accountScope),
+            Self.modelScopeTitle(source.modelScope),
         ].joined(separator: " · ")
         platforms = Self.platformsTitle(source.operatingSystems)
     }
@@ -165,6 +177,65 @@ public struct ProviderSourceStrategyPresentation: Sendable, Hashable {
         case .providerOfficial: AppLocalization.text("Provider official")
         case .providerLocal: AppLocalization.text("Provider local")
         case .userSession: AppLocalization.text("User session")
+        }
+    }
+
+    private static func factSummary(
+        _ facts: Set<ProviderSourceFactFamily>
+    ) -> String {
+        let values = ProviderSourceFactFamily.allCases.compactMap { fact -> String? in
+            guard facts.contains(fact) else { return nil }
+            return switch fact {
+            case .detection: AppLocalization.text("Detection")
+            case .tokenActivity: AppLocalization.text("Token activity")
+            case .subscriptionCapacity: AppLocalization.text("Subscription capacity")
+            case .apiSpend: AppLocalization.text("API spend")
+            }
+        }
+        return values.isEmpty
+            ? AppLocalization.text("No declared facts")
+            : values.joined(separator: " · ")
+    }
+
+    private static func authorityTitle(_ authority: ProviderSourceAuthority) -> String {
+        switch authority {
+        case .providerOfficial: AppLocalization.text("Provider official data")
+        case .providerLocal: AppLocalization.text("Provider local data")
+        case .thirdParty: AppLocalization.text("Third-party derived")
+        case .userSupplied: AppLocalization.text("User supplied")
+        case .unknown: AppLocalization.text("Authority unknown")
+        }
+    }
+
+    private static func verificationTitle(
+        _ verification: ProviderSourceVerification
+    ) -> String {
+        switch verification {
+        case .liveAccount: AppLocalization.text("Real account verified")
+        case .fixture: AppLocalization.text("Fixture verified")
+        case .upstreamDeclared: AppLocalization.text("Upstream declared")
+        case .unverified: AppLocalization.text("Unverified")
+        }
+    }
+
+    private static func accountScopeTitle(
+        _ scope: ProviderSourceAccountScope
+    ) -> String {
+        switch scope {
+        case .localProfile: AppLocalization.text("Local profile")
+        case .configuredAccount: AppLocalization.text("Configured account")
+        case .organization: AppLocalization.text("Organization")
+        case .provider: AppLocalization.text("Provider aggregate")
+        case .unknown: AppLocalization.text("Account scope unknown")
+        }
+    }
+
+    private static func modelScopeTitle(_ scope: ProviderSourceModelScope) -> String {
+        switch scope {
+        case .perModel: AppLocalization.text("Per model")
+        case .aggregate: AppLocalization.text("Aggregate only")
+        case .mixed: AppLocalization.text("Mixed model scope")
+        case .unknown: AppLocalization.text("Model scope unknown")
         }
     }
 

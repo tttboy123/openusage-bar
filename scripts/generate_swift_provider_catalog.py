@@ -70,6 +70,38 @@ PROVENANCE_CASES = {
     "provider_local": "providerLocal",
     "user_session": "userSession",
 }
+FACT_FAMILY_CASES = {
+    "detection": "detection",
+    "token_activity": "tokenActivity",
+    "subscription_capacity": "subscriptionCapacity",
+    "api_spend": "apiSpend",
+}
+AUTHORITY_CASES = {
+    "provider_official": "providerOfficial",
+    "provider_local": "providerLocal",
+    "third_party": "thirdParty",
+    "user_supplied": "userSupplied",
+    "unknown": "unknown",
+}
+ACCOUNT_SCOPE_CASES = {
+    "local_profile": "localProfile",
+    "configured_account": "configuredAccount",
+    "organization": "organization",
+    "provider": "provider",
+    "unknown": "unknown",
+}
+MODEL_SCOPE_CASES = {
+    "per_model": "perModel",
+    "aggregate": "aggregate",
+    "mixed": "mixed",
+    "unknown": "unknown",
+}
+VERIFICATION_CASES = {
+    "live_account": "liveAccount",
+    "fixture": "fixture",
+    "upstream_declared": "upstreamDeclared",
+    "unverified": "unverified",
+}
 
 
 def swift_string(value: str) -> str:
@@ -147,7 +179,12 @@ def render() -> str:
             f"sourceKind: {swift_string(source.kind)}, "
             f"operatingSystems: {swift_cases([OPERATING_SYSTEM_CASES[value] for value in sorted(source.operating_systems)])}, "
             f"stability: .{STABILITY_CASES[source.stability]}, "
-            f"provenance: .{PROVENANCE_CASES[source.provenance]}),"
+            f"provenance: .{PROVENANCE_CASES[source.provenance]}, "
+            f"factFamilies: {swift_cases([FACT_FAMILY_CASES[value] for value in sorted(source.fact_families)])}, "
+            f"authority: .{AUTHORITY_CASES[source.authority]}, "
+            f"accountScope: .{ACCOUNT_SCOPE_CASES[source.account_scope]}, "
+            f"modelScope: .{MODEL_SCOPE_CASES[source.model_scope]}, "
+            f"verification: .{VERIFICATION_CASES[source.verification]}),"
             for source in family.sources
         ]
         lines.extend(

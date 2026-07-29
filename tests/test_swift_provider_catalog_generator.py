@@ -24,6 +24,21 @@ class SwiftProviderCatalogGeneratorTests(unittest.TestCase):
         self.assertIn('        "zed",', rendered)
         self.assertNotIn('        "minimax",\n        "step_plan",\n    ]\n    public static let families', rendered)
 
+    def test_render_emits_source_evidence_metadata(self):
+        rendered = load_generator().render()
+        self.assertIn(
+            "factFamilies: [.detection, .subscriptionCapacity, .tokenActivity], "
+            "authority: .providerLocal, accountScope: .localProfile, "
+            "modelScope: .mixed, verification: .liveAccount",
+            rendered,
+        )
+        self.assertIn(
+            "factFamilies: [.detection, .tokenActivity], "
+            "authority: .thirdParty, accountScope: .localProfile, "
+            "modelScope: .perModel, verification: .fixture",
+            rendered,
+        )
+
     def test_swift_string_escapes_literals_interpolation_and_control_scalars(self):
         swift_string = load_generator().swift_string
         cases = {

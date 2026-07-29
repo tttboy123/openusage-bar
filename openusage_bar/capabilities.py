@@ -62,6 +62,43 @@ class SourceProvenance(StrEnum):
     USER_SESSION = "user_session"
 
 
+class SourceFactFamily(StrEnum):
+    DETECTION = "detection"
+    TOKEN_ACTIVITY = "token_activity"
+    SUBSCRIPTION_CAPACITY = "subscription_capacity"
+    API_SPEND = "api_spend"
+
+
+class SourceAuthority(StrEnum):
+    PROVIDER_OFFICIAL = "provider_official"
+    PROVIDER_LOCAL = "provider_local"
+    THIRD_PARTY = "third_party"
+    USER_SUPPLIED = "user_supplied"
+    UNKNOWN = "unknown"
+
+
+class AccountScope(StrEnum):
+    LOCAL_PROFILE = "local_profile"
+    CONFIGURED_ACCOUNT = "configured_account"
+    ORGANIZATION = "organization"
+    PROVIDER = "provider"
+    UNKNOWN = "unknown"
+
+
+class ModelScope(StrEnum):
+    PER_MODEL = "per_model"
+    AGGREGATE = "aggregate"
+    MIXED = "mixed"
+    UNKNOWN = "unknown"
+
+
+class SourceVerification(StrEnum):
+    LIVE_ACCOUNT = "live_account"
+    FIXTURE = "fixture"
+    UPSTREAM_DECLARED = "upstream_declared"
+    UNVERIFIED = "unverified"
+
+
 class SourceKind(StrEnum):
     OPENUSAGE = "openusage"
     BUILTIN_API = "builtin_api"
@@ -160,6 +197,11 @@ class SourceCapability:
     stability: SourceStability
     provenance: SourceProvenance
     credential_scope: str | None = None
+    fact_families: frozenset[SourceFactFamily] = frozenset()
+    authority: SourceAuthority = SourceAuthority.UNKNOWN
+    account_scope: AccountScope = AccountScope.UNKNOWN
+    model_scope: ModelScope = ModelScope.UNKNOWN
+    verification: SourceVerification = SourceVerification.UNVERIFIED
 
     def __post_init__(self) -> None:
         _require_instance(self.source_id, str, "Source ID")
@@ -184,6 +226,19 @@ class SourceCapability:
             )
         _require_instance(self.stability, SourceStability, "Source stability")
         _require_instance(self.provenance, SourceProvenance, "Source provenance")
+        _require_instance(
+            self.fact_families, frozenset, "Source fact families"
+        )
+        for fact_family in self.fact_families:
+            _require_instance(
+                fact_family, SourceFactFamily, "Source fact family"
+            )
+        _require_instance(self.authority, SourceAuthority, "Source authority")
+        _require_instance(self.account_scope, AccountScope, "Source account scope")
+        _require_instance(self.model_scope, ModelScope, "Source model scope")
+        _require_instance(
+            self.verification, SourceVerification, "Source verification"
+        )
         if self.credential_scope is not None:
             _require_instance(self.credential_scope, str, "Credential scope")
         if not ID_PATTERN.fullmatch(self.source_id):
@@ -299,6 +354,11 @@ class ProviderRegistry:
                     operating_systems=frozenset({OperatingSystem.MACOS}),
                     stability=SourceStability.PINNED,
                     provenance=SourceProvenance.OPENUSAGE_UPSTREAM,
+                    fact_families=frozenset({SourceFactFamily.DETECTION}),
+                    authority=SourceAuthority.THIRD_PARTY,
+                    account_scope=AccountScope.LOCAL_PROFILE,
+                    model_scope=ModelScope.UNKNOWN,
+                    verification=SourceVerification.UNVERIFIED,
                 ),
             ),
             capabilities=_unknown_capabilities(),
@@ -340,6 +400,13 @@ def _descriptor_from_family(family: ProviderFamily) -> ProviderDescriptor:
                 stability=SourceStability(source.stability),
                 provenance=SourceProvenance(source.provenance),
                 credential_scope=source.credential_scope,
+                fact_families=frozenset(
+                    SourceFactFamily(value) for value in source.fact_families
+                ),
+                authority=SourceAuthority(source.authority),
+                account_scope=AccountScope(source.account_scope),
+                model_scope=ModelScope(source.model_scope),
+                verification=SourceVerification(source.verification),
             )
             for source in family.sources
         ),

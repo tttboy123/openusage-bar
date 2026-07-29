@@ -246,11 +246,28 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - 在现有能力声明上补充来源类型、权威程度、账号/模型作用域、刷新窗口和真实验证状态。
 - UI、README 和本地 API 继续使用同一份生成数据，不新增第二套手工表格。
 
+**2026-07-29 首个纵向切片：**
+
+- [x] 已确认旧契约只暴露 `kind`、`stability` 与 `provenance`，无法区分
+  OpenUsage-only Fixture、上游声明和真实账号已验证的内置来源。
+- [x] Canonical Provider catalog 的每个 source 现在显式声明
+  `factFamilies`、`authority`、`accountScope`、`modelScope` 与
+  `verification`；Python registry、`/v1/capabilities`、生成 Swift
+  catalog、Provider Center 和双语文档读取同一份 JSON。
+- [x] `verification` 严格区分 `live_account`、`fixture`、
+  `upstream_declared` 与 `unverified`；它描述 adapter 证据，不替代
+  `/v1/sources/status` 的当前连接健康。
+- [x] 目录对账修正两项误报：MiniMax 已有官方延迟账单 importer，因此
+  Token history/model breakdown 从 Unknown 改为 Supported；Step Plan
+  当前只提供订阅额度而没有 API spend，移除 Billing 支持声明。
+- [ ] 其余 Provider 仍需按 Issue #19-#29 逐个补真实账号证据或降级为
+  `unknown`/`unsupported`；本切片没有把 Fixture 冒充实账号验证。
+
 **验收：**
 
-- [ ] 搜索别名不再被误解成完整数据支持。
+- [x] 搜索别名只参与发现，不再被误解成完整数据支持。
 - [ ] 没有权威来源的能力显示 `unsupported` 或 `unknown`。
-- [ ] 文档、Provider Center 与 `/v1/capabilities` 内容一致。
+- [x] 文档、Provider Center 与 `/v1/capabilities` 的证据字段来自同一目录。
 
 **验证：** `tests/test_provider_catalog.py`、`tests/test_capabilities.py`、Swift Provider capability tests。
 
