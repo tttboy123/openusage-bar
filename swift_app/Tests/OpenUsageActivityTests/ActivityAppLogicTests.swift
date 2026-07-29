@@ -183,6 +183,26 @@ struct ActivityAppLogicTests {
         #expect(!section.contains("Button(\"Open Provider Settings\""))
     }
 
+    @Test("Provider source evidence adapts to compact detail widths")
+    func providerSourceEvidenceUsesAdaptiveLayout() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/OpenUsageActivity/ProviderCenterViews.swift"),
+            encoding: .utf8
+        )
+        let row = try #require(source.range(of: "private struct ProviderSourceStrategyRow"))
+        let nextView = try #require(source.range(
+            of: "private struct ProviderDetailSection",
+            range: row.lowerBound..<source.endIndex
+        ))
+        let section = String(source[row.lowerBound..<nextView.lowerBound])
+
+        #expect(section.contains("ViewThatFits(in: .horizontal)"))
+        #expect(section.contains("horizontalLayout"))
+        #expect(section.contains("verticalLayout"))
+    }
+
     @Test("Configured connections remain editable before a successful collection")
     func configuredProviderConnections() throws {
         let directory = FileManager.default.temporaryDirectory

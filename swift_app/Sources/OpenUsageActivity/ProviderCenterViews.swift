@@ -476,25 +476,7 @@ private struct ProviderConnectionDetail: View {
                         Array(capability.sourceStrategies.enumerated()),
                         id: \.offset
                     ) { index, strategy in
-                        HStack(alignment: .top, spacing: 18) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(strategy.kindTitle)
-                                    .font(.callout.weight(.medium))
-                                Text(strategy.factSummary)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 18)
-                            VStack(alignment: .trailing, spacing: 3) {
-                                Text(strategy.trustSummary)
-                                    .font(.callout)
-                                Text("\(strategy.scopeSummary) · \(strategy.platforms)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .multilineTextAlignment(.trailing)
-                        }
-                        .accessibilityElement(children: .combine)
+                        ProviderSourceStrategyRow(strategy: strategy)
                         if index < capability.sourceStrategies.count - 1 {
                             Divider()
                         }
@@ -1027,6 +1009,61 @@ private struct NativeProviderConnectionSheet: View {
 
     private func emptyToNil(_ value: String) -> String? { value.isEmpty ? nil : value }
     private func clearSecrets() { credential = ""; session = "" }
+}
+
+private struct ProviderSourceStrategyRow: View {
+    let strategy: ProviderSourceStrategyPresentation
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            horizontalLayout
+                .fixedSize(horizontal: true, vertical: false)
+            verticalLayout
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var horizontalLayout: some View {
+        HStack(alignment: .top, spacing: 18) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(strategy.kindTitle)
+                    .font(.callout.weight(.medium))
+                Text(strategy.factSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 18)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(strategy.trustSummary)
+                    .font(.callout)
+                Text("\(strategy.scopeSummary) · \(strategy.platforms)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private var verticalLayout: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(strategy.kindTitle)
+                    .font(.callout.weight(.medium))
+                Spacer(minLength: 12)
+                Text(strategy.platforms)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(strategy.factSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(strategy.trustSummary)
+                .font(.callout)
+            Text(strategy.scopeSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
 }
 
 private struct ProviderDetailSection<Content: View>: View {
