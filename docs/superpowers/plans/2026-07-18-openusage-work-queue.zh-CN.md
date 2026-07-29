@@ -352,6 +352,17 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - 失败或空的 direct enrichment 保留 auto 活动和 Last-good quota；连续失败
   使用 5 分钟起、最长 6 小时的指数退避。
 
+**Kiro 当前证据（2026-07-29）：**
+
+- `/Applications/Kiro.app` 当前不存在，但既有 Kiro Keychain 登录仍可只读
+  验证；适配器不刷新、不回写也不删除凭证。
+- 官方 AWS CodeWhisperer quota 实机返回 1 条账号级 `billing_cycle` 事实；
+  计划标签、剩余容量和重置时间均可用，来源为 `official_api`。
+- region 只从通过语法验证的 profile ARN 得到，请求只允许对应的
+  `q.<region>.amazonaws.com`，恶意 hostname 注入会在网络前失败。
+- 认证、Keychain、网络、限流或解析失败不会输出 token；空结果不会覆盖
+  OpenUsage 活动或 Last-good quota。
+
 **验收：**
 
 - [ ] 任一事实族失败不抑制同 Provider 其他事实。

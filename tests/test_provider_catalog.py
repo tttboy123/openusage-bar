@@ -256,6 +256,32 @@ class ProviderCatalogTests(unittest.TestCase):
         )
         self.assertEqual(cursor_capabilities.reset_timestamps, "unknown")
 
+        kiro_keychain, kiro_quota, kiro_openusage = self.catalog.require(
+            "kiro_cli"
+        ).sources
+        self.assertEqual(kiro_keychain.fact_families, frozenset({"detection"}))
+        self.assertEqual(kiro_keychain.kind, "keychain")
+        self.assertEqual(kiro_keychain.timeout_seconds, 5)
+        self.assertEqual(kiro_keychain.authority, "provider_local")
+        self.assertEqual(kiro_keychain.verification, "live_account")
+
+        self.assertEqual(
+            kiro_quota.fact_families,
+            frozenset({"subscription_capacity"}),
+        )
+        self.assertEqual(kiro_quota.kind, "official_api")
+        self.assertEqual(kiro_quota.authority, "provider_official")
+        self.assertEqual(kiro_quota.account_scope, "local_profile")
+        self.assertEqual(kiro_quota.model_scope, "aggregate")
+        self.assertEqual(kiro_quota.verification, "live_account")
+
+        self.assertEqual(
+            kiro_openusage.fact_families,
+            frozenset({"detection", "token_activity"}),
+        )
+        self.assertEqual(kiro_openusage.authority, "third_party")
+        self.assertEqual(kiro_openusage.verification, "fixture")
+
         minimax, minimax_billing = self.catalog.require("minimax").sources[:2]
         self.assertEqual(
             minimax.fact_families,

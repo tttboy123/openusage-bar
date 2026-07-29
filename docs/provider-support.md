@@ -46,6 +46,15 @@ Connection-specific notes:
   last-good quota, while repeated failures enter bounded exponential backoff.
   Cursor currently exposes no verified reset timestamp, so reset remains
   unavailable rather than being inferred.
+- **Kiro** reads the existing social-login item through the fixed macOS
+  `security find-generic-password` command. The reader is bounded, shell-free,
+  service-scoped, and never refreshes, rewrites, or logs a token. The validated
+  region from the profile ARN selects one allowlisted
+  `q.<region>.amazonaws.com` host for the official CodeWhisperer quota request.
+  Its billing-cycle credits, remaining capacity, plan label, and reset time
+  replace the OpenUsage consumption card only after a complete successful
+  response. Authentication, network, or parsing failure preserves OpenUsage
+  activity and cached last-good quota as stale data.
 - **StepFun Step Plan** supports China and International accounts, but a web
   session is never retried against the other region. Follow the
   [StepFun quick start](stepfun-quick-start.md) for the safe connection flow.
