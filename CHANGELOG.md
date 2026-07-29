@@ -4,6 +4,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- Updated the pinned GitHub Actions baseline to `actions/checkout@v7.0.1`,
+  `actions/setup-python@v7.0.0`, and `actions/upload-artifact@v7.0.1`, with
+  every workflow reference still bound to an approved immutable commit.
 ### Changed
 
 - Local and GitHub builds now verify every official GitHub Action against a

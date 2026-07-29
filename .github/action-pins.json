@@ -8,18 +8,18 @@
     },
     {
       "repository": "actions/checkout",
-      "version": "v5.0.1",
-      "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd"
+      "version": "v7.0.1",
+      "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1"
     },
     {
       "repository": "actions/setup-python",
-      "version": "v6.3.0",
-      "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1"
+      "version": "v7.0.0",
+      "commit": "5fda3b95a4ea91299a34e894583c3862153e4b97"
     },
     {
       "repository": "actions/upload-artifact",
-      "version": "v4.6.2",
-      "commit": "ea165f8d65b6e75b540449e92b4886f43607fa02"
+      "version": "v7.0.1",
+      "commit": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     }
   ]
 }
