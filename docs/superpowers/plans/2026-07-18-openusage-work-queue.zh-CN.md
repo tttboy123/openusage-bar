@@ -619,8 +619,15 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
   计时：只聚合 `network`、`local_file`、`child_process` 的单调时钟耗时
   与 success/timeout/backoff/unavailable/failed 结果，不记录 Provider、
   source ID、账号、端点、路径或原始数据。旧版/无插桩应用继续返回
-  `not_observable`；尚未生成新的安装候选实机基线，因此当前不得据此提出
-  Provider 定向优化、Local API 暴露或语言迁移。
+  `not_observable`。
+- [x] 同日已将安全收窄后的 `0.6.0 (9)` 候选事务式安装到本机并生成三轮
+  稳定态实机基线：常驻 CPU p95 `0.001%`、常驻唤醒 p95 `2.200/s`、
+  常驻物理占用峰值 `50.4 MiB`、Activity 峰值 `97.8 MiB`、全量刷新
+  中位数 `51.493s`、p95 `52.044s`，三次刷新 0 超时、0 失败。source-class
+  单次最大耗时分别为 network `10.048s`、local_file `0.150s`、
+  child_process `38.133s`；全部预算通过且隐私扫描 0 项。成本集中在有界
+  child process，仍未达到语言迁移门槛，也不构成向 Local API 暴露性能
+  明细的授权。
 
 ### Checkpoint 0.6 RC
 
@@ -630,7 +637,7 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 - [x] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
 
 2026-07-30 已建立唯一的 `integration/0.6-rc` 共存候选，并完成 Python
-845 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
+863 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
 集成时修复了 `balances` 被误设为 Local API v1 必填字段的兼容回归；冻结
 0.4.2 snapshot 与包含 additive 字段的当前 snapshot 均通过。候选不导入
 Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未完成门禁见

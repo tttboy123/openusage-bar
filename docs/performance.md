@@ -7,7 +7,8 @@ language.
 
 ## Current decision
 
-No resident-host migration is justified by the 0.4.4 baseline. The resident
+No resident-host migration is justified by the installed 0.6.0 candidate
+baseline. The resident
 status host and collector remain inside the initial CPU, physical-footprint,
 wakeup, package-size, and refresh-duration budgets. Activity is measured only
 while its window is open; its absence is `Unknown`, never numeric zero.
@@ -41,19 +42,25 @@ Missing, restarted, or unverified processes remain unavailable.
 
 ## Initial budgets
 
-| Metric | Initial maximum | 0.4.4 build 8 |
-| --- | ---: | ---: |
-| Logical app size | 75 MiB | 47.7 MiB |
-| Resident CPU p95 | 1.0% of one core | 0.001% |
-| Resident wakeups p95 | 5.0/s | 2.298/s |
-| Resident physical footprint peak | 100 MiB | 77.5 MiB |
-| Activity physical footprint peak | 120 MiB | 95.1 MiB |
-| Full refresh duration p95 | 90 s | 41.490 s |
+| Metric | Initial maximum | 0.4.4 build 8 | 0.6.0 build 9 |
+| --- | ---: | ---: | ---: |
+| Logical app size | 75 MiB | 47.7 MiB | 48.1 MiB |
+| Resident CPU p95 | 1.0% of one core | 0.001% | 0.001% |
+| Resident wakeups p95 | 5.0/s | 2.298/s | 2.200/s |
+| Resident physical footprint peak | 100 MiB | 77.5 MiB | 50.4 MiB |
+| Activity physical footprint peak | 120 MiB | 95.1 MiB | 97.8 MiB |
+| Full refresh duration p95 | 90 s | 41.490 s | 52.044 s |
 
 The committed evidence is
 [`performance-baselines/0.4.4-build8-2026-07-29.json`](performance-baselines/0.4.4-build8-2026-07-29.json).
 It contains three 10-second idle rounds and three successful full refreshes.
 The report passed the repository privacy scanner with zero findings.
+
+The installed 0.6 candidate evidence is
+[`performance-baselines/0.6.0-build9-2026-07-30.json`](performance-baselines/0.6.0-build9-2026-07-30.json).
+It also contains three 10-second idle rounds and three successful full
+refreshes. All six budgets pass; refresh has zero timeout and failure results,
+and the report passes the repository privacy scanner with zero findings.
 
 These are regression budgets, not universal performance claims. A candidate
 must be compared with the same version, Provider configuration class, window
@@ -78,11 +85,15 @@ request/response body, credential, prompt, or response. The report can locate
 the expensive execution class without making account configuration
 fingerprintable.
 
-The committed 0.4.4 baseline remains unchanged. A new installed-candidate
-baseline is required before source-class measurements may be used for an
-optimization claim. These metrics are not published through Local API v1 or
-the diagnostics bundle; either exposure requires a separate compatibility and
-privacy review.
+The installed 0.6 candidate recorded maximum per-operation durations of
+10.048 seconds for `network`, 0.150 seconds for `local_file`, and 38.133
+seconds for `child_process`. Across three refreshes, all class samples had zero
+timeout and failed outcomes. The longer end-to-end refresh is therefore
+bounded and dominated by child-process collection; it does not justify a
+resident-host language migration.
+
+These metrics are not published through Local API v1 or the diagnostics
+bundle; either exposure requires a separate compatibility and privacy review.
 
 Provider-specific timing remains intentionally unobservable. A Provider-level
 optimization still requires separate, privacy-reviewed evidence rather than
