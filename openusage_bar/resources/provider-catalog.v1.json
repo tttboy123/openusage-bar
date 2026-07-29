@@ -286,7 +286,7 @@
           "authority": "third_party",
           "account_scope": "local_profile",
           "model_scope": "per_model",
-          "verification": "fixture"
+          "verification": "live_account"
         }
       ]
     },
@@ -886,7 +886,7 @@
           "authority": "third_party",
           "account_scope": "local_profile",
           "model_scope": "per_model",
-          "verification": "fixture"
+          "verification": "live_account"
         }
       ]
     },
@@ -1466,7 +1466,7 @@
           "authority": "third_party",
           "account_scope": "local_profile",
           "model_scope": "per_model",
-          "verification": "fixture"
+          "verification": "live_account"
         }
       ]
     },
@@ -1515,7 +1515,7 @@
           "authority": "third_party",
           "account_scope": "local_profile",
           "model_scope": "per_model",
-          "verification": "fixture"
+          "verification": "live_account"
         }
       ]
     },

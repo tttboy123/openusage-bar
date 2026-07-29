@@ -358,6 +358,22 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - 只在可证明时显示 Token；没有订阅额度来源时保持不支持。
 - Unattributed 按 Provider 保留，不能猜测成其他模型或厂商。
 
+**当前证据（2026-07-29）：**
+
+- 在本机对 Claude Code、OpenCode、Hermes、OpenClaw 执行有界、离线、
+  只输出脱敏聚合的 OpenUsage 日历史核验；四个 Provider 均返回了非空的
+  按日模型 Token 行，没有读取或保存路径、账号身份、Prompt、Response、
+  原始 Payload 或个人精确用量。
+- 四个 Provider 的 OpenUsage source 现标记为 `live_account`，但其事实边界
+  仍只有 detection 与 token activity；quota window 继续是 Unknown，不能
+  因为客户端被发现或存在历史 Token 就生成 Capacity。
+- OpenUsage 空结果继续作为 `empty_result` Source Health 失败处理，不以零
+  覆盖 Last-good；同一个 `unknown` 模型标识在 Claude Code、OpenCode、
+  Hermes、OpenClaw 中仍分别绑定原 Provider，不做跨客户端猜测。
+- 本地历史中的费用字段是价目表估算，不等同于厂商账单或订阅扣费。
+- 本机 OpenUsage 自报为 development build；`live_account` 证明的是当前
+  Adapter 路径通过真实本机验收，不等同于所有历史 OpenUsage 版本均兼容。
+
 **验收：** 本地工具不会出现在订阅额度区域，也不会把 Unknown 模型错误归属。
 
 **验证：** OpenUsage catalog fixture、归属测试与本地脱敏样本。

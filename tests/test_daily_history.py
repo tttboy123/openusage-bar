@@ -181,6 +181,38 @@ class OpenUsageDailyImporterTests(unittest.TestCase):
             "payload": {"model": model},
         }
 
+    def test_local_client_unknown_rows_remain_scoped_to_their_provider(self):
+        payload = daily_payload(
+            {
+                "key": "2026-07-02",
+                "model_breakdown": [
+                    {
+                        "key": "(unknown)",
+                        "input_tokens": 1,
+                        "output_tokens": 2,
+                        "cache_read_tokens": 3,
+                        "cache_creation_tokens": 4,
+                        "reasoning_tokens": None,
+                        "total_tokens": 10,
+                        "cost_usd": None,
+                    },
+                ],
+            }
+        )
+
+        for provider_id in ("claude_code", "opencode", "hermes", "openclaw"):
+            with self.subTest(provider=provider_id):
+                result = OpenUsageDailyImporter(
+                    runner=Mock(return_value=completed(payload)),
+                    clock=lambda: NOW,
+                ).fetch(provider_id, SINCE, UNTIL)
+
+                self.assertTrue(result.ok)
+                self.assertEqual(len(result.rows), 1)
+                self.assertEqual(result.rows[0].provider_id, provider_id)
+                self.assertEqual(result.rows[0].model_id, "unknown")
+                self.assertEqual(result.rows[0].total_tokens, 10)
+
     def test_codex_unknown_moves_only_with_single_model_session_evidence(self):
         unknown_day = day_payload()
         unknown_day["model_breakdown"] = [
@@ -254,7 +286,8 @@ class OpenUsageDailyImporterTests(unittest.TestCase):
 
     def test_reused_openusage_local_client_slices_preserve_no_data(self):
         for provider_id in (
-            "claude_code", "opencode", "kimi_cli", "gemini_cli", "qwen_cli"
+            "claude_code", "opencode", "hermes", "openclaw",
+            "kimi_cli", "gemini_cli", "qwen_cli",
         ):
             with self.subTest(provider_id=provider_id):
                 importer = OpenUsageDailyImporter(
