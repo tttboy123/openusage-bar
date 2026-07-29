@@ -200,7 +200,7 @@ def render_schema() -> dict[str, object]:
             "catalogRevision": {"type": "string"},
         },
         [
-            "localDay", "summary", "balances", "quotaWindows", "providers",
+            "localDay", "summary", "quotaWindows", "providers",
             "sources", "catalogRevision",
         ],
     )

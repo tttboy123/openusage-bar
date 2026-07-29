@@ -84,6 +84,13 @@ class LocalAPIV1CompatibilityTests(unittest.TestCase):
         self.assertEqual(payload["schemaVersion"], "1.0")
         self.assertEqual(payload["dataRevision"], 9)
 
+    def test_current_validator_accepts_additive_snapshot_fields(self):
+        payload = json.loads(fixture("current-additive.snapshot.json"))
+
+        validate_snapshot(payload)
+        self.assertIn("futureEnvelope", payload)
+        self.assertIsInstance(payload["balances"], list)
+
     def test_minimal_client_reads_old_and_additive_current_snapshots(self):
         for name in ("v0.4.2.snapshot.json", "current-additive.snapshot.json"):
             with self.subTest(name=name):

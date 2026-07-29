@@ -19,16 +19,19 @@ NOW = datetime(2026, 7, 18, 1, 0, tzinfo=timezone.utc)
 def validate_snapshot(payload: dict[str, object]) -> None:
     required = {
         "schemaVersion", "dataRevision", "generatedAt", "localDay", "summary",
-        "balances", "quotaWindows", "providers", "sources", "catalogRevision",
+        "quotaWindows", "providers", "sources", "catalogRevision",
     }
-    if set(payload) != required or payload.get("schemaVersion") != "1.0":
+    if not required <= set(payload) or payload.get("schemaVersion") != "1.0":
         raise ValueError("invalid snapshot envelope")
     if isinstance(payload.get("dataRevision"), bool) or not isinstance(payload.get("dataRevision"), int):
         raise ValueError("invalid revision")
+    balances = payload.get("balances", [])
+    if not isinstance(balances, list):
+        raise ValueError("invalid balances")
     forbidden = ("secret", "password", "cookie", "token", "authorization")
     for value in (
         payload,
-        *payload["balances"],
+        *balances,
         *payload["quotaWindows"],
         *payload["providers"],
         *payload["sources"],
@@ -53,6 +56,16 @@ class LocalAPISchemaTests(unittest.TestCase):
     def test_generated_schema_is_current_and_draft_2020_12(self):
         self.assertEqual(json.loads(SCHEMA.read_text()), render_schema())
         self.assertEqual(render_schema()["$schema"], "https://json-schema.org/draft/2020-12/schema")
+
+    def test_snapshot_balance_extension_remains_optional_in_local_api_v1(self):
+        snapshot = next(
+            branch
+            for branch in render_schema()["oneOf"]
+            if "summary" in branch.get("properties", {})
+        )
+
+        self.assertIn("balances", snapshot["properties"])
+        self.assertNotIn("balances", snapshot["required"])
 
     def test_snapshot_allows_unknown_today_tokens_but_keeps_counts_numeric(self):
         snapshot = next(

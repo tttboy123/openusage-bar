@@ -606,7 +606,6 @@
         "generatedAt",
         "localDay",
         "summary",
-        "balances",
         "quotaWindows",
         "providers",
         "sources",

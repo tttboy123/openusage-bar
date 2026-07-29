@@ -567,10 +567,18 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 
 ### Checkpoint 0.6 RC
 
-- [ ] Local API v1 通过 N-1 兼容测试。
+- [x] Local API v1 通过 N-1 兼容测试。
 - [ ] Beta 安装、升级、回滚和诊断路径有外部参与者验证。
-- [ ] 性能满足基线，或已形成独立且可回滚的优化计划。
-- [ ] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
+- [x] 性能满足基线，或已形成独立且可回滚的优化计划。
+- [x] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
+
+2026-07-30 已建立唯一的 `integration/0.6-rc` 共存候选，并完成 Python
+839 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
+集成时修复了 `balances` 被误设为 Local API v1 必填字段的兼容回归；冻结
+0.4.2 snapshot 与包含 additive 字段的当前 snapshot 均通过。候选不导入
+Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未完成门禁见
+`docs/0.6-rc-integration.md`。外部机器仍为 0 / 5，公开 Canary 时钟保持
+`not_started`，因此 Beta 安装、升级与回滚项不得勾选。
 
 ---
 
