@@ -378,9 +378,18 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 
 **验收：**
 
-- [ ] 每个厂商有来源、认证方式、区域、分页、速率限制与隐私审查记录。
-- [ ] 无官方能力时明确标记 unsupported，不维护脆弱网页爬虫。
+- [x] 每个厂商有来源、认证方式、区域、分页、速率限制与隐私审查记录，见
+  `docs/provider-authoritative-sources.md`。
+- [x] 无官方能力时明确标记 unsupported，不维护脆弱网页爬虫。
 - [ ] 新 Adapter 通过完整 Provider Conformance Kit。
+
+**2026-07-29 调研检查点：**
+
+- Kimi 中国站与国际站均有低权限官方余额 API，进入独立 Adapter 实现。
+- GLM 暂无公开的余额、历史用量或 Coding Plan 额度 API，保留 OpenUsage
+  Token 活动并等待官方能力。
+- Qwen 官方历史 Token 和账单读取需要 Prometheus/RAM 权限，普通 DashScope
+  Key 不足；在最小权限和真实账号验证完成前不内置高权限 Adapter。
 
 **验证：** 官方文档证据、脱敏 Fixture、失败注入和能力矩阵一致性测试。
 
