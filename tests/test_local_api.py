@@ -918,6 +918,16 @@ class DeadlineTests(unittest.TestCase):
                 request_deadline=0.12,
             )
             thread = start(server)
+            expired = threading.Event()
+            original_expire = server._expire_request
+
+            def mark_expired(request):
+                try:
+                    original_expire(request)
+                finally:
+                    expired.set()
+
+            server._expire_request = mark_expired
             slow = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             slow.connect(str(path))
 
@@ -931,7 +941,14 @@ class DeadlineTests(unittest.TestCase):
 
             dripper = threading.Thread(target=drip)
             dripper.start()
-            time.sleep(0.25)
+            self.assertTrue(expired.wait(2))
+            deadline = time.monotonic() + 2
+            while (
+                server.active_deadline_count != 0
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+            self.assertEqual(server.active_deadline_count, 0)
             status, _, _ = unix_request(path, "/v1/health")
             self.assertEqual(status, 200)
             dripper.join(1)
