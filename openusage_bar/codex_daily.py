@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
+import stat
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -18,6 +21,11 @@ MAX_SESSION_FILES = 20_000
 MAX_RELEVANT_LINE_BYTES = 1024 * 1024
 MAX_TOTAL_SESSION_BYTES = 16 * 1024 * 1024 * 1024
 TAIL_BYTES = 256
+CACHE_SCHEMA_VERSION = 1
+MAX_CACHE_BYTES = 64 * 1024 * 1024
+MAX_CACHE_FACTS = 200_000
+MAX_CACHE_FACTS_PER_SESSION = 4_096
+MAX_CACHE_INTEGER = (1 << 63) - 1
 
 
 @dataclass
@@ -44,7 +52,7 @@ class _SessionState:
     inode: int
     offset: int = 0
     mtime_ns: int = 0
-    tail: bytes = b""
+    tail_digest: bytes = b""
     model_id: str = "unknown"
     models_seen: set[str] = field(default_factory=set)
     cumulative: _Aggregate | None = None
@@ -64,20 +72,286 @@ class CodexLocalDailyImporter:
         self,
         *,
         session_roots: Iterable[Path] | None = None,
+        cache_path: Path | None = None,
         local_timezone=None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         home = Path.home()
+        uses_default_roots = session_roots is None
         self.session_roots = tuple(session_roots or (
             home / ".codex/sessions",
             home / ".codex/archived_sessions",
         ))
+        if cache_path is not None and not cache_path.is_absolute():
+            raise ValueError("cache path must be absolute")
+        self.cache_path = cache_path or (
+            home / ".local/state/openusage-bar/codex-session-cache.json"
+            if uses_default_roots
+            else None
+        )
         self.local_timezone = (
             local_timezone or datetime.now().astimezone().tzinfo or timezone.utc
         )
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._cache: dict[str, _SessionState] = {}
+        self._cache_loaded = False
+        self._cache_digest: bytes | None = None
+        self._cache_writable = True
         self._lock = threading.Lock()
+
+    @staticmethod
+    def _session_key(path: Path) -> str:
+        return hashlib.sha256(path.name.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _cache_integer(value: object) -> int:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+            or value > MAX_CACHE_INTEGER
+        ):
+            raise ValueError("invalid cache integer")
+        return value
+
+    @classmethod
+    def _aggregate_payload(cls, value: _Aggregate | None) -> list[int] | None:
+        if value is None:
+            return None
+        return [
+            value.input_tokens,
+            value.output_tokens,
+            value.cache_read_tokens,
+            value.cache_creation_tokens,
+            value.reasoning_tokens,
+            value.total_tokens,
+        ]
+
+    @classmethod
+    def _aggregate_from_payload(cls, raw: object) -> _Aggregate | None:
+        if raw is None:
+            return None
+        if not isinstance(raw, list) or len(raw) != 6:
+            raise ValueError("invalid cached aggregate")
+        values = [cls._cache_integer(value) for value in raw]
+        return _Aggregate(*values)
+
+    @classmethod
+    def _state_payload(cls, key: str, state: _SessionState) -> dict:
+        return {
+            "key": key,
+            "device": state.device,
+            "inode": state.inode,
+            "offset": state.offset,
+            "mtimeNs": state.mtime_ns,
+            "tailDigest": state.tail_digest.hex(),
+            "modelId": state.model_id,
+            "modelsSeen": sorted(state.models_seen),
+            "cumulative": cls._aggregate_payload(state.cumulative),
+            "rows": [
+                [day, model, *cls._aggregate_payload(usage)]
+                for (day, model), usage in sorted(state.rows.items())
+            ],
+            "pending": [
+                [day, *cls._aggregate_payload(usage)]
+                for day, usage in sorted(state.pending.items())
+            ],
+        }
+
+    @classmethod
+    def _state_from_payload(cls, raw: object) -> tuple[str, _SessionState, int]:
+        expected = {
+            "key", "device", "inode", "offset", "mtimeNs", "tailDigest",
+            "modelId", "modelsSeen", "cumulative", "rows", "pending",
+        }
+        if not isinstance(raw, dict) or set(raw) != expected:
+            raise ValueError("invalid cached state")
+        key = raw["key"]
+        tail_digest = raw["tailDigest"]
+        model_id = raw["modelId"]
+        if (
+            not isinstance(key, str)
+            or len(key) != 64
+            or any(character not in "0123456789abcdef" for character in key)
+            or not isinstance(tail_digest, str)
+            or len(tail_digest) not in (0, 64)
+            or any(
+                character not in "0123456789abcdef"
+                for character in tail_digest
+            )
+            or not isinstance(model_id, str)
+            or cls._model(model_id) != model_id
+        ):
+            raise ValueError("invalid cached identity")
+        models_seen = raw["modelsSeen"]
+        rows = raw["rows"]
+        pending = raw["pending"]
+        if (
+            not isinstance(models_seen, list)
+            or len(models_seen) > 256
+            or not isinstance(rows, list)
+            or len(rows) > MAX_CACHE_FACTS_PER_SESSION
+            or not isinstance(pending, list)
+            or len(pending) > MAX_CACHE_FACTS_PER_SESSION
+        ):
+            raise ValueError("cached collection exceeds boundary")
+        canonical_models: set[str] = set()
+        for value in models_seen:
+            if (
+                not isinstance(value, str)
+                or cls._model(value) != value
+                or value in canonical_models
+            ):
+                raise ValueError("invalid cached model")
+            canonical_models.add(value)
+        cached_rows: dict[tuple[str, str], _Aggregate] = {}
+        for row in rows:
+            if not isinstance(row, list) or len(row) != 8:
+                raise ValueError("invalid cached row")
+            day, model = row[:2]
+            if (
+                not isinstance(day, str)
+                or date.fromisoformat(day).isoformat() != day
+                or not isinstance(model, str)
+                or cls._model(model) != model
+                or (day, model) in cached_rows
+            ):
+                raise ValueError("invalid cached row identity")
+            aggregate = cls._aggregate_from_payload(row[2:])
+            if aggregate is None:
+                raise ValueError("missing cached aggregate")
+            cached_rows[(day, model)] = aggregate
+        cached_pending: dict[str, _Aggregate] = {}
+        for row in pending:
+            if not isinstance(row, list) or len(row) != 7:
+                raise ValueError("invalid cached pending row")
+            day = row[0]
+            if (
+                not isinstance(day, str)
+                or date.fromisoformat(day).isoformat() != day
+                or day in cached_pending
+            ):
+                raise ValueError("invalid cached pending identity")
+            aggregate = cls._aggregate_from_payload(row[1:])
+            if aggregate is None:
+                raise ValueError("missing cached aggregate")
+            cached_pending[day] = aggregate
+        state = _SessionState(
+            device=cls._cache_integer(raw["device"]),
+            inode=cls._cache_integer(raw["inode"]),
+            offset=cls._cache_integer(raw["offset"]),
+            mtime_ns=cls._cache_integer(raw["mtimeNs"]),
+            tail_digest=bytes.fromhex(tail_digest),
+            model_id=model_id,
+            models_seen=canonical_models,
+            cumulative=cls._aggregate_from_payload(raw["cumulative"]),
+            rows=cached_rows,
+            pending=cached_pending,
+        )
+        return key, state, len(rows) + len(pending)
+
+    def _load_persistent_cache(self) -> dict[str, _SessionState]:
+        path = self.cache_path
+        if path is None:
+            return {}
+        try:
+            details = path.lstat()
+        except FileNotFoundError:
+            return {}
+        except OSError:
+            self._cache_writable = False
+            return {}
+        if (
+            not stat.S_ISREG(details.st_mode)
+            or details.st_uid != os.getuid()
+            or details.st_mode & 0o077
+            or details.st_size > MAX_CACHE_BYTES
+        ):
+            self._cache_writable = False
+            return {}
+        try:
+            encoded = path.read_bytes()
+            payload = json.loads(encoded)
+            if (
+                not isinstance(payload, dict)
+                or set(payload) != {"schemaVersion", "sessions"}
+                or payload["schemaVersion"] != CACHE_SCHEMA_VERSION
+                or not isinstance(payload["sessions"], list)
+                or len(payload["sessions"]) > MAX_SESSION_FILES
+            ):
+                raise ValueError("invalid cache envelope")
+            states: dict[str, _SessionState] = {}
+            fact_count = 0
+            for raw in payload["sessions"]:
+                key, state, facts = self._state_from_payload(raw)
+                if key in states:
+                    raise ValueError("duplicate cached session")
+                states[key] = state
+                fact_count += facts
+                if fact_count > MAX_CACHE_FACTS:
+                    raise ValueError("cache fact boundary exceeded")
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError):
+            return {}
+        self._cache_digest = hashlib.sha256(encoded).digest()
+        return states
+
+    def _cache_parent_is_safe(self) -> bool:
+        path = self.cache_path
+        if path is None or not self._cache_writable:
+            return False
+        parent = path.parent
+        try:
+            parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            details = parent.lstat()
+        except OSError:
+            return False
+        return (
+            stat.S_ISDIR(details.st_mode)
+            and details.st_uid == os.getuid()
+            and not (details.st_mode & 0o022)
+        )
+
+    def _save_persistent_cache(self, states: dict[str, _SessionState]) -> None:
+        path = self.cache_path
+        if path is None or not self._cache_parent_is_safe():
+            return
+        payload = {
+            "schemaVersion": CACHE_SCHEMA_VERSION,
+            "sessions": [
+                self._state_payload(key, state)
+                for key, state in sorted(states.items())
+            ],
+        }
+        encoded = json.dumps(
+            payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+        if len(encoded) > MAX_CACHE_BYTES:
+            return
+        digest = hashlib.sha256(encoded).digest()
+        if digest == self._cache_digest:
+            return
+        temporary: str | None = None
+        try:
+            descriptor, temporary = tempfile.mkstemp(
+                prefix=".codex-session-cache.", dir=path.parent
+            )
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            temporary = None
+            os.chmod(path, 0o600)
+            self._cache_digest = digest
+        except OSError:
+            pass
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
 
     @staticmethod
     def _valid_range(since: date, until: date) -> bool:
@@ -180,9 +454,13 @@ class CodexLocalDailyImporter:
             return False
         if state.offset == 0:
             return True
-        start = max(0, state.offset - len(state.tail))
+        tail_length = min(TAIL_BYTES, state.offset)
+        start = state.offset - tail_length
         handle.seek(start)
-        return handle.read(state.offset - start) == state.tail
+        return (
+            hashlib.sha256(handle.read(tail_length)).digest()
+            == state.tail_digest
+        )
 
     def _parse_line(self, raw: bytes, state: _SessionState) -> None:
         relevant = b'"token_count"' in raw or b'"turn_context"' in raw
@@ -270,7 +548,9 @@ class CodexLocalDailyImporter:
             state.mtime_ns = stat_result.st_mtime_ns
             start = max(0, state.offset - TAIL_BYTES)
             handle.seek(start)
-            state.tail = handle.read(state.offset - start)
+            state.tail_digest = hashlib.sha256(
+                handle.read(state.offset - start)
+            ).digest()
             return state
 
     def fetch_usage(self, since: date, until: date):
@@ -279,18 +559,23 @@ class CodexLocalDailyImporter:
         if not self._lock.acquire(blocking=False):
             return ImportFailure("import_in_progress")
         try:
+            if not self._cache_loaded:
+                self._cache = self._load_persistent_cache()
+                self._cache_loaded = True
             try:
                 paths = self._paths()
                 states: dict[str, _SessionState] = {}
                 for path in paths:
-                    states[path.name] = self._read_session(
-                        path, self._cache.get(path.name)
+                    key = self._session_key(path)
+                    states[key] = self._read_session(
+                        path, self._cache.get(key)
                     )
             except FileNotFoundError:
                 return ImportFailure("sessions_unavailable")
             except (OSError, ValueError, TypeError):
                 return ImportFailure("sessions_invalid")
             self._cache = states
+            self._save_persistent_cache(states)
             totals: dict[tuple[str, str], _Aggregate] = {}
             for state in states.values():
                 for key, usage in state.rows.items():
