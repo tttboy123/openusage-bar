@@ -111,12 +111,17 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [x] PR #15 在提交 `c5b2936` 上的首轮远端 `verify` 已完整通过，耗时 8 分 47 秒；构建、打包、制品审计、隔离安装/升级/回滚/卸载与 artifact 上传均成功。该轮唯一注解是旧 `upload-artifact@v4.6.2` 的 Node.js 20 弃用提示。
 - [x] 已从官方 Action Tag 重新解析并核验 #5、#10、#11 的提交，将 `upload-artifact@v7.0.1`、`setup-python@v7.0.0` 与 `checkout@v7.0.1` 纳入当前受控清单；版本注释同步为精确 `vX.Y.Z`，不复用 #11 的陈旧 `# v5` 注释。
 - [x] Action v7 更新提交 `0f3ac3e` 的远端 `verify` 已完整通过，耗时 7 分 45 秒且不再出现 Node.js 20 弃用注解；最新 Action、完整构建、打包、制品审计、隔离安装/升级/回滚/卸载与 artifact 上传均成功。
+- [x] 2026-07-30 再次核对公开仓库：CI 对全部 `pull_request` 触发，
+  `verify` 同时执行依赖审计、完整历史密钥扫描、构建与覆盖率、隐私扫描、
+  制品审计以及隔离安装/升级/回滚/卸载；`Protect main` 无 bypass actor，
+  严格要求最新 `verify`。Dependabot #12、#13、#14 已通过同一门禁，
+  #5、#10 因门禁失败保持不可合并，证明自动更新没有旁路。
 - [ ] `v*` Tag 与 release workflow 的联动只在下一次受控发布中验证，不创建会误触发 Release 的伪版本 Tag。Dependabot PR、Release 与外部 Canary 未在本轮合并、发布或协调。
 
 **验收：**
 
 - [x] GitHub 不再以“零 Issue”隐藏真实待办。
-- [ ] 自动依赖更新不绕过构建、隐私、覆盖率和发布审计。
+- [x] 自动依赖更新不绕过构建、隐私、覆盖率和发布审计。
 - [ ] 受保护分支与 Tag 规则不破坏自动发布流程。
 
 **验证：** GitHub ruleset 只读复查、PR required checks、从临时分支验证 release workflow。
@@ -604,7 +609,7 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 - [x] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
 
 2026-07-30 已建立唯一的 `integration/0.6-rc` 共存候选，并完成 Python
-839 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
+840 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
 集成时修复了 `balances` 被误设为 Local API v1 必填字段的兼容回归；冻结
 0.4.2 snapshot 与包含 additive 字段的当前 snapshot 均通过。候选不导入
 Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未完成门禁见
