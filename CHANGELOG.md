@@ -18,6 +18,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 - No-telemetry Canary diagnostics include aggregate Balance health and public
   capability evidence without exporting amounts, account references, Provider
   instances, or source identifiers.
+- A privacy-safe Canary surface verifier proves that the installed CLI and
+  Local API expose the same revision and source-health facts while leaving
+  menu-bar visibility as an explicit manual check.
 
 ### Changed
 

@@ -19,7 +19,8 @@ ALLOWED_SCRIPTS = frozenset({
     "activity_install_process.sh", "install_app.sh",
     "install_location.sh", "install_app_transaction.sh", "rollback_app.sh",
     "uninstall_app.sh",
-    "export_diagnostics.py", "privacy_scan.py", "verify_local_api.py",
+    "export_diagnostics.py", "privacy_scan.py", "verify_canary_surfaces.py",
+    "verify_local_api.py",
 })
 SENSITIVE_NAMES = frozenset({
     ".env", "providers.json", "activity.sqlite3", "activity.sqlite3-wal",

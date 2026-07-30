@@ -49,6 +49,10 @@ class CanaryIntakeContractTests(unittest.TestCase):
         self.assertIn("does not start the 30-day clock", protocol)
         self.assertIn("compatibility-v1.md", protocol)
         self.assertIn("aggregate Balance state/quality/stale counts", protocol)
+        self.assertIn("scripts/verify_canary_surfaces.py", protocol)
+        self.assertIn("visualMenu", protocol)
+        self.assertIn("pending_manual", protocol)
+        self.assertIn("does not replace the visual menu-bar check", protocol)
 
 
 if __name__ == "__main__":

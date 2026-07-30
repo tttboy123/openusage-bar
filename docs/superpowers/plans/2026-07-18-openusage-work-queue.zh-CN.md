@@ -593,6 +593,16 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
   与空 factFamilies，对部分缺失继续 fail closed。读取当前 `0.4.4 (8)`
   Local API 的诊断 v1 与七日范围 v2 均成功，文件权限 `0600`，隐私扫描
   均为 0。诊断测试 23 项通过；尚未招募外部机器或启动 30 天时钟。
+- [x] 同日补齐随发行 ZIP 分发的只读跨界面校验器：用
+  `API → installed CLI → API` 的三点读取证明同一 `dataRevision` 和
+  Source Health 事实一致；读取前以固定系统 `codesign` 对安装包做深度严格
+  验证，revision 漂移最多有界重试 3 轮。只忽略
+  `generatedAt` 与 capacity 行的派生 `freshnessSeconds`，其他差异
+  fail closed。报告不含用量、Provider/source ID、账号、路径、凭证或原始
+  snapshot，原子写入 `0600` 文件，并固定保留
+  `visualMenu=pending_manual`。发行目录脚本在空 `PYTHONPATH` 下对真实安装
+  返回 revision 47095，隐私扫描 0；这只完成 intake 工具准备，外部机器
+  仍为 0 / 5，30 天时钟仍为 `not_started`。
 
 ### WQ-15：建立性能与轻量化决策门槛
 
@@ -644,7 +654,7 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 - [x] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
 
 2026-07-30 已建立唯一的 `integration/0.6-rc` 共存候选，并完成 Python
-864 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
+870 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
 集成时修复了 `balances` 被误设为 Local API v1 必填字段的兼容回归；冻结
 0.4.2 snapshot 与包含 additive 字段的当前 snapshot 均通过。候选不导入
 Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未完成门禁见

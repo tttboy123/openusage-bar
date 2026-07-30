@@ -75,20 +75,25 @@ Record pass/fail and UTC date for each event:
 5. Run `scripts/rollback_app.sh`, confirm Local API v1 recovers, then reinstall
    the candidate.
 6. Confirm menu-bar, Usage Details, Provider Center, CLI JSON, and Local API
-   describe the same `dataRevision` and source health. The signed collector in
-   the installed app exposes the canonical offline snapshot:
+   describe the same `dataRevision` and source health. From the extracted
+   release or source checkout, run the privacy-safe surface verifier:
 
    ```bash
-   APP="/Applications/OpenUsage Bar.app"
-   [[ -d "$APP" ]] || APP="$HOME/Applications/OpenUsage Bar.app"
-   "$APP/Contents/MacOS/OpenUsage Collector" \
-     snapshot --format json --offline
+   scripts/verify_canary_surfaces.py \
+     --output /tmp/openusage-canary-surfaces.json
+   scripts/privacy_scan.py /tmp/openusage-canary-surfaces.json
    ```
 
-   Compare it with `/v1/snapshot` only when both responses report the same
-   `dataRevision`; a scheduled collection between reads requires retrying the
-   comparison rather than reporting drift. `generatedAt` is render time and is
-   the only non-semantic field permitted to differ. Validate the N-1 reader
+   The verifier first deep-verifies the installed app signature, then reads
+   `/v1/snapshot` before and after the installed collector's canonical offline
+   snapshot. It retries bounded revision drift,
+   permits only top-level `generatedAt` and the capacity rows'
+   render-time `freshnessSeconds` to differ, and writes a mode-`0600` report
+   containing no usage values, Provider identifiers, account references,
+   credentials, paths, or raw snapshots. A passing report records
+   `visualMenu: pending_manual`: it does not replace the visual menu-bar check.
+   Separately confirm the menu-bar item, Usage Details, and Provider Center
+   visibly represent that revision and source health. Validate the N-1 reader
    behavior described in the
    [Local API v1 compatibility policy](api/compatibility-v1.md).
 7. Record every Unknown, stale, authentication, upgrade, rollback, crash,
