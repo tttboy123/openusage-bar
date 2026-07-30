@@ -141,6 +141,16 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   `30546771069` 通过不可移动 Tag、依赖、完整历史凭证、构建、制品、发行
   smoke 与 attestation 门禁后自动发布六个资产；受保护 Tag 未被更新或
   删除。
+- [x] #48 合入后，#36-#47 的所有来源提交均已由同名或后续加固提交进入
+  `main`。12 个 Draft PR 分别留下 #48、合并提交与 CI 证据后关闭，未重复
+  合并；对应 Provider Issue 只按自身实机验收关闭，#19-#21 与 #24 继续
+  保持 Open。发布入口修复 #49 随后通过 required `verify` 和 main push CI
+  合入，且没有移动 `v0.6.0` Tag 或替换公开资产。
+- [x] Action 固定策略 Issue #17 已关闭：当前 `main` 中 checkout v7.0.1、
+  setup-python v7.0.0 与 upload-artifact v7.0.1 均使用清单登记的完整 SHA
+  和精确版本注释，验证器通过；Dependabot #5、#10、#11 因等价更新已进入
+  `main` 而作为过期 PR 关闭，没有绕过门禁合并。Python 审计依赖
+  #12-#14 保持独立审查，不由 #17 自动合并。
 
 **验收：**
 
@@ -293,8 +303,10 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   Billing/Cost 能力都有匹配的 source fact；26 个 OpenUsage Billing
   声明补齐 `api_spend` 证据，并继续保留 `third_party` 与
   `fixture`/`upstream_declared` 标签，不能被误读为官方账单。
-- [ ] 其余 Provider 仍需按 Issue #19-#29 逐个补真实账号证据或降级为
-  `unknown`/`unsupported`；本切片没有把 Fixture 冒充实账号验证。
+- [ ] 剩余真实账号门禁继续由 Issue #19-#21 与 #24 承载；Cursor、Kiro、
+  本地工具覆盖、GLM/Kimi/Qwen 权威来源研究和 Adapter Kit 已分别在
+  #22、#23、#25-#29 达到自身验收并于 2026-07-30 关闭。本切片没有把
+  Fixture 冒充实账号验证。
 
 **2026-07-30 本机证据收敛审计：**
 
@@ -312,12 +324,29 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   Last-good。
 - 当前机器没有可用于 GLM、Kimi/Qwen 官方账号验收或 OpenAI Organization
   管理员验收的连接。剩余 `fixture`/`upstream_declared` 状态因此保持不变，
-  真实账号门禁继续由 Issue #19-#29 承载。
+  当前第一批 Provider 的真实账号门禁继续由开放的 Issue #19-#21 与 #24
+  承载；未来新增 Provider 使用请求模板建立独立门禁。
+- 2026-07-30 已为剩余四个门禁发布公开、可执行且不要求泄露凭证的外部证据
+  交接：Codex 账号级对账见
+  [#19](https://github.com/tttboy123/openusage-bar/issues/19#issuecomment-5132045362)，
+  MiniMax 国内站/国际站见
+  [#20](https://github.com/tttboy123/openusage-bar/issues/20#issuecomment-5132045695)，
+  StepFun 国内站/国际站见
+  [#21](https://github.com/tttboy123/openusage-bar/issues/21#issuecomment-5132046277)，
+  OpenAI Organization 管理员账号见
+  [#24](https://github.com/tttboy123/openusage-bar/issues/24#issuecomment-5132046748)。
+  四个 Issue 均标记 `help wanted`；交接本身不是实机证据，因此仍保持 Open，
+  也不改变 `fixture`、`upstream_declared` 或 `unverified` 状态。
+- Provider 能力声明审计 #18 已在其契约验收、#48 required CI 和 main push
+  CI 均通过后关闭；已进入 `main` 的 stacked Draft PR #35 同步关闭，避免把
+  已集成实现继续显示为待合并。#18 的关闭不代替上述四个真实账号门禁。
 
 **验收：**
 
 - [x] 搜索别名只参与发现，不再被误解成完整数据支持。
-- [ ] 没有权威来源的能力显示 `unsupported` 或 `unknown`。
+- [x] 没有权威来源的能力显示 `unsupported` 或 `unknown`；37 个 family
+  的目录校验要求每个 Supported 事实都有匹配来源证据，GLM、Kimi 与 Qwen
+  的保守结论见 `docs/provider-authoritative-sources.md`。
 - [x] 文档、Provider Center 与 `/v1/capabilities` 的证据字段来自同一目录。
 
 **验证：** `tests/test_provider_catalog.py`、`tests/test_capabilities.py`、Swift Provider capability tests。
@@ -469,6 +498,10 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   `fixture`，不能宣称真实 Organization 账号已通过；实机验收继续保留为
   Issue #24 的开放门禁。
 
+2026-07-30 在 #48 合入并通过 required CI 后，Cursor #22 与 Kiro #23
+已按上述脱敏实机证据关闭；OpenAI Organization #24 继续保持 Open，不能用
+Fixture、Cursor 或 Kiro 的实机结果替代管理员账号验收。
+
 **验收：**
 
 - [ ] 任一事实族失败不抑制同 Provider 其他事实。
@@ -526,6 +559,8 @@ Organization 真实账号验收。
 
 **验收：** 本地工具不会出现在订阅额度区域，也不会把 Unknown 模型错误归属。
 
+Issue #25 已在 #48 合入、required CI 与上述四类本机脱敏样本均通过后关闭。
+
 **验证：** OpenUsage catalog fixture、归属测试与本地脱敏样本。
 
 **依赖：** WQ-06。
@@ -557,6 +592,9 @@ Organization 真实账号验收。
   Token 活动并等待官方能力。
 - Qwen 官方历史 Token 和账单读取需要 Prometheus/RAM 权限，普通 DashScope
   Key 不足；在最小权限和真实账号验证完成前不内置高权限 Adapter。
+- Issue #26-#28 已在权威来源文档、保守能力矩阵、Moonshot Adapter
+  conformance 与 #48 required CI 均通过后关闭；未来出现新的官方接口时应
+  新建实现任务，而不是重新把已完成的来源调研保持为 Open。
 
 **验证：** 官方文档证据、脱敏 Fixture、失败注入和能力矩阵一致性测试。
 
@@ -591,6 +629,9 @@ clean-checkout build：Python 839 项重复两轮、Swift 255 项 / 21 个 Suite
 生成文件、覆盖率、隐私、嵌套签名和 App bundle 均通过。Kit 实现提交
 `97c5276` 只增加文档、声明式示例、公开校验器和测试，没有修改生产聚合器、
 Provider Registry 或 SwiftUI，因此没有新增厂商特判。
+
+Issue #29 已在 #48 合入和 main push CI 均通过后关闭；公开 Kit、示例、
+conformance 命令与 Provider 请求表单继续保留在仓库中。
 
 **验证：** `tests/provider_conformance.py`、`tests/test_provider_conformance.py`、隐私扫描和 clean-checkout build。
 
@@ -640,6 +681,8 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
   该只读命令；重建并事务安装 `0.6.0 (9)` 后，`API → CLI → API` 三次读取
   均为 `dataRevision=47027`，移除唯一非语义字段 `generatedAt` 后完整 JSON
   相等。未知命令仍 fail closed，未新增写操作。
+- [x] 对应 Issue #30 已在来源 PR #45 的提交确认进入 `main`、#48 required
+  CI 与合并后 main CI 均通过后关闭；外部 Beta 和 Canary 仍由独立门禁承载。
 
 ### WQ-14：复核 Canary 入口并启动公开 Beta
 
@@ -738,6 +781,9 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
   child_process `38.133s`；全部预算通过且隐私扫描 0 项。成本集中在有界
   child process，仍未达到语言迁移门槛，也不构成向 Local API 暴露性能
   明细的授权。
+- [x] 对应 Issue #32 已在来源 PR #47 的提交确认进入 `main`、#48 required
+  CI 与合并后 main CI 均通过后关闭；后续语言迁移仍须新的预算失败证据与
+  独立 ADR。
 
 ### Checkpoint 0.6 RC
 
