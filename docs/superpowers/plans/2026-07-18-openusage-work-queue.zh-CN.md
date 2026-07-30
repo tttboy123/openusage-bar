@@ -126,7 +126,7 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   Goal / Implementation / Acceptance / Verification / Dependencies /
   Guardrails / Source 七个结构全部存在，Open 状态、Milestone 与标签均未
   改变。Draft PR #48 的陈旧版本、测试与安装说明也已同步到
-  `0.6.0 (9)` / Python 870 / Swift 255，并补充 `0.6 RC` Milestone、
+  `0.6.0 (9)` / Python 882 / Swift 257，并补充 `0.6 RC` Milestone、
   `enhancement` 标签和不触发自动关闭的 Issue 证据映射。PR 正文不再
   硬编码易漂移的 Head SHA 或单次 CI 运行号；当前候选必须以 GitHub
   Checks 表面的 required `verify` 成功状态为准。
@@ -726,7 +726,7 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 - [x] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
 
 2026-07-30 已建立唯一的 `integration/0.6-rc` 共存候选，并完成 Python
-870 项、Swift 255 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
+882 项、Swift 257 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
 集成时修复了 `balances` 被误设为 Local API v1 必填字段的兼容回归；冻结
 0.4.2 snapshot 与包含 additive 字段的当前 snapshot 均通过。候选不导入
 Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未完成门禁见
@@ -758,8 +758,16 @@ Swift 增至 257 项且发布构建通过；Kiro 已在同轮恢复实时 `ok`�
 同一轮安装验证发现，磁盘候选已更新但 07:04 启动的 Provider Settings
 可见进程未被事务安装器重启，因此可能继续显示旧窗口。安装器现与 Activity
 一致地记录、精确停止、回滚恢复并重开 Settings helper；匹配同时锁定完整
-可执行路径和启动时间，带 `daemon` 参数的 collector 继续存活。该缺陷必须
-在重装候选后以新进程启动时间和授权按钮目视验证闭环。
+可执行路径和启动时间，带 `daemon` 参数的 collector 继续存活。重装后两个
+已安装 Helper 的 SHA-256 均与 `dist` 候选一致，Provider Center 新进程也
+已目视显示新的 Step Plan 修复状态；该安装生命周期缺陷已闭环。
+
+同日已为当前安装的 `0.6.0 (9)` 生成新的 schema v3 私密重启基线：
+文件权限 `0600`、`dataRevision=49293`，并锁定 App、菜单栏与 collector
+的五枚签名哈希。重启前即时验证按预期返回 `boot_unchanged`，证明验证器
+不会把应用重开误报为 macOS 内核重启。该记录只完成 0.6 RC 的重启前准备；
+尚未发生新的系统重启，因此不会替代 2026-07-29 已完成的 `0.4.4 (8)`
+真实重启验收，也不会把 0.6 RC 的重启后恢复标为通过。
 
 ---
 
