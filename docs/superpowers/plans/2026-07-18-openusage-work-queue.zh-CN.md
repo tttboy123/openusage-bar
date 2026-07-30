@@ -127,7 +127,9 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   Guardrails / Source 七个结构全部存在，Open 状态、Milestone 与标签均未
   改变。Draft PR #48 的陈旧版本、测试与安装说明也已同步到
   `0.6.0 (9)` / Python 870 / Swift 255，并补充 `0.6 RC` Milestone、
-  `enhancement` 标签和不触发自动关闭的 Issue 证据映射。
+  `enhancement` 标签和不触发自动关闭的 Issue 证据映射。PR 正文不再
+  硬编码易漂移的 Head SHA 或单次 CI 运行号；当前候选必须以 GitHub
+  Checks 表面的 required `verify` 成功状态为准。
 - [x] 同轮复核发现作为集成来源证据的 Draft PR #36-#47 虽然全部
   `CLEAN` 且 CI 成功，但没有 Milestone 或标签。#36-#44 现归入
   `0.5 Data Trust`，#45-#47 归入 `0.6 RC`，12 个 PR 均增加
