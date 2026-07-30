@@ -279,6 +279,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn('hdiutil create', package)
         self.assertIn('Applications', package)
         self.assertIn('.dmg', package)
+        self.assertIn('--dmg "$DMG"', package)
         self.assertIn('OpenUsage-Bar-*.dmg', workflow)
         self.assertIn('OpenUsage-Bar-*.dmg.sha256', workflow)
         self.assertIn('hdiutil attach -readonly -nobrowse', audit)

@@ -79,6 +79,7 @@ hdiutil verify "$DMG"
 "$PYTHON" "$ROOT/scripts/generate_release_manifest.py" \
   --app "$APP" \
   --archive "$ARCHIVE" \
+  --dmg "$DMG" \
   --requirements "$ROOT/requirements-build.txt" \
   --swift-package "$ROOT/swift_app" \
   --output "$MANIFEST" \

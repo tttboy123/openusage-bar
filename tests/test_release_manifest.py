@@ -45,6 +45,13 @@ class ReleaseManifestTests(unittest.TestCase):
                 f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n",
                 encoding="ascii",
             )
+            dmg = root / "OpenUsage-Bar-v0.4.0-macos-arm64.dmg"
+            dmg.write_bytes(b"synthetic dmg")
+            dmg_checksum = Path(f"{dmg}.sha256")
+            dmg_checksum.write_text(
+                f"{hashlib.sha256(dmg.read_bytes()).hexdigest()}  {dmg.name}\n",
+                encoding="ascii",
+            )
             requirements = root / "requirements-build.txt"
             requirements.write_text(
                 "zeta==2.0 --hash=sha256:" + "b" * 64 + "\n"
@@ -54,7 +61,8 @@ class ReleaseManifestTests(unittest.TestCase):
             manifest_path = root / "OpenUsage-Bar-v0.4.0-manifest.json"
             sbom_path = root / "OpenUsage-Bar-v0.4.0-sbom.spdx.json"
             arguments = dict(
-                root=root, app=app, archive=archive, requirements=requirements,
+                root=root, app=app, archive=archive, dmg=dmg,
+                requirements=requirements,
                 swift_dependencies={
                     "name": "OpenUsageBar",
                     "path": str(root / "swift_app"),
@@ -94,7 +102,16 @@ class ReleaseManifestTests(unittest.TestCase):
                 ["Alpha", "zeta"],
             )
             self.assertEqual(manifest["executables"][0]["path"], "Contents/MacOS/OpenUsage Bar")
-            self.assertEqual(len(manifest["publishedAssets"]), 3)
+            self.assertEqual(
+                [row["name"] for row in manifest["publishedAssets"]],
+                [
+                    dmg.name,
+                    dmg_checksum.name,
+                    archive.name,
+                    checksum.name,
+                    sbom_path.name,
+                ],
+            )
             self.assertEqual(sbom["spdxVersion"], "SPDX-2.3")
             self.assertEqual(sbom["dataLicense"], "CC0-1.0")
             self.assertEqual(sbom["creationInfo"]["created"], COMMIT_TIME)

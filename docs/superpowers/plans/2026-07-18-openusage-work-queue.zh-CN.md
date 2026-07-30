@@ -769,6 +769,13 @@ Swift 增至 257 项且发布构建通过；Kiro 已在同轮恢复实时 `ok`�
 尚未发生新的系统重启，因此不会替代 2026-07-29 已完成的 `0.4.4 (8)`
 真实重启验收，也不会把 0.6 RC 的重启后恢复标为通过。
 
+当前绿色 CI 制品的独立复核还发现，发行 manifest 虽能验证 ZIP、SBOM 与
+可执行文件，却遗漏了同批上传的 DMG 和 DMG checksum。该缺口已按
+RED → GREEN 修正：生成器现在显式接收 DMG，`publishedAssets` 固定覆盖
+ZIP、ZIP checksum、DMG、DMG checksum 与 SBOM 五项非自引用资产，并记录
+各自 SHA-256 与大小。重新生成的 `0.6.0 (9)` 本地候选五项值逐一匹配，
+ZIP/DMG 独立审计和 61 项发行契约测试继续通过。
+
 ---
 
 ## Q4：1.0 Canary 与稳定发布
