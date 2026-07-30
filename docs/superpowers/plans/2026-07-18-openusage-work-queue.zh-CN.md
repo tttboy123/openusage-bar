@@ -775,6 +775,9 @@ RED → GREEN 修正：生成器现在显式接收 DMG，`publishedAssets` 固�
 ZIP、ZIP checksum、DMG、DMG checksum 与 SBOM 五项非自引用资产，并记录
 各自 SHA-256 与大小。重新生成的 `0.6.0 (9)` 本地候选五项值逐一匹配，
 ZIP/DMG 独立审计和 61 项发行契约测试继续通过。
+修复提交 `aff722e` 的 required `verify` 运行 `30539659070` 在 9 分 10 秒
+内成功；下载实际上传 artifact 后再次确认远端 manifest 为 5 / 5、所有
+SHA-256 与大小匹配，ZIP 和 DMG 独立审计继续通过。
 
 ---
 
