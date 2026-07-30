@@ -332,6 +332,9 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   [#24](https://github.com/tttboy123/openusage-bar/issues/24#issuecomment-5132046748)。
   四个 Issue 均标记 `help wanted`；交接本身不是实机证据，因此仍保持 Open，
   也不改变 `fixture`、`upstream_declared` 或 `unverified` 状态。
+- Provider 能力声明审计 #18 已在其契约验收、#48 required CI 和 main push
+  CI 均通过后关闭；已进入 `main` 的 stacked Draft PR #35 同步关闭，避免把
+  已集成实现继续显示为待合并。#18 的关闭不代替上述四个真实账号门禁。
 
 **验收：**
 
@@ -673,6 +676,8 @@ conformance 命令与 Provider 请求表单继续保留在仓库中。
   该只读命令；重建并事务安装 `0.6.0 (9)` 后，`API → CLI → API` 三次读取
   均为 `dataRevision=47027`，移除唯一非语义字段 `generatedAt` 后完整 JSON
   相等。未知命令仍 fail closed，未新增写操作。
+- [x] 对应 Issue #30 已在来源 PR #45 的提交确认进入 `main`、#48 required
+  CI 与合并后 main CI 均通过后关闭；外部 Beta 和 Canary 仍由独立门禁承载。
 
 ### WQ-14：复核 Canary 入口并启动公开 Beta
 
@@ -771,6 +776,9 @@ conformance 命令与 Provider 请求表单继续保留在仓库中。
   child_process `38.133s`；全部预算通过且隐私扫描 0 项。成本集中在有界
   child process，仍未达到语言迁移门槛，也不构成向 Local API 暴露性能
   明细的授权。
+- [x] 对应 Issue #32 已在来源 PR #47 的提交确认进入 `main`、#48 required
+  CI 与合并后 main CI 均通过后关闭；后续语言迁移仍须新的预算失败证据与
+  独立 ADR。
 
 ### Checkpoint 0.6 RC
 
