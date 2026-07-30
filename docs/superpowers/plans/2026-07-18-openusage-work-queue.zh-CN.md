@@ -397,6 +397,22 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - 当前响应未提供可验证的重置时间，因此保持 `Reset unavailable`。
 - 失败或空的 direct enrichment 保留 auto 活动和 Last-good quota；连续失败
   使用 5 分钟起、最长 6 小时的指数退避。
+- 2026-07-30 集成候选的长期运行日志显示 direct enrichment 在原 40 秒
+  边界附近连续保留 Last-good 并退避；同机脱敏只读探测返回可用额度，
+  wall time 为 `38.41s`；50 秒候选在完整刷新中仍于 `52.46s` 被回收。
+  60 秒候选的冷启动后台刷新又在 `60.036s` 到达边界，而紧接着的安装包
+  前台全量刷新在 `62.90s` 完成并把 Cursor 恢复为实时 `ok`。最终回归测试
+  因此锁定至少 75 秒的 direct 边界，并将完整交互刷新硬上限同步为 160 秒；
+  `auto + direct + daily + 5s` 仍被总上限完整覆盖，失败选择
+  规则未改变。随后确认根因不是 Cursor 自身接口，而是 OpenUsage direct
+  同时轮询所有 Provider。独立 OpenUsage 工作树提交 `c63a47c` 增加可选的
+  `export --source direct --provider cursor`；相关 Go 包测试通过，本机只读
+  采集降至 `3.60s` 并只返回 1 条 Cursor `OK` 快照。OpenUsage Bar 用 3 秒
+  无凭证 help 探测该能力，支持时使用 15 秒精确采集，不支持时保留 75 秒
+  兼容 fallback，因此不依赖未发布特性也不会再次扫描无关 Provider。
+  最终安装包的完整 `--fresh` 实测为 `7.63s`，同轮 Cursor 与 Kiro 均恢复
+  实时 `ok`；Step Plan 继续保留 `invalid_response` 和 Last-good，没有被
+  写成零或伪成功。
 
 **Kiro 当前证据（2026-07-29）：**
 
@@ -716,7 +732,7 @@ SPDX SBOM、隐私扫描和隔离安装/升级/回滚/卸载；该未提交本�
 当前候选已增加“高级与修复 → 授权钥匙串访问”：前台逐项检查固定应用
 service、已配置账号及 Kiro 只读 service，单项最长 90 秒，凭证 stdout/stderr
 直接丢弃，UI 只显示授权、缺失和拒绝数量。后台边界仍为 5 秒 fail closed，
-不刷新或改写 Kiro 登录，不改变 Provider 配置。Python 全量增至 875 项且
+不刷新或改写 Kiro 登录，不改变 Provider 配置。Python 全量增至 879 项且
 发布构建通过；持久 ACL 授权与授权后的 Step Plan/Kiro 实机恢复仍需用户在
 系统提示中亲自确认，不能由自动化代签。
 

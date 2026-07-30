@@ -389,12 +389,21 @@ class OpenUsageAdapterTests(unittest.TestCase):
             ]
         )
 
-        result = OpenUsageAdapter(clock=lambda: NOW, runner=run).fetch()
+        result = OpenUsageAdapter(
+            clock=lambda: NOW,
+            runner=run,
+            provider_filter_supported=True,
+        ).fetch()
 
         cards = {card.provider_id: card for card in result.cards}
         self.assertEqual(cards["kiro_cli"].primary, "1 conversation, 1.3M tokens (est.)")
         self.assertEqual(cards["cursor"].primary, "100% remaining")
-        self.assertEqual([call.args[0][-1] for call in run.call_args_list], ["auto", "direct"])
+        self.assertEqual(run.call_args_list[0].args[0][-1], "auto")
+        self.assertEqual(
+            run.call_args_list[1].args[0][-4:],
+            ["--source", "direct", "--provider", "cursor"],
+        )
+        self.assertEqual(run.call_args_list[1].kwargs["timeout"], 15)
 
     def test_failed_direct_cursor_enrichment_keeps_auto_cursor(self):
         auto_cursor = snapshot("cursor", None)
@@ -406,11 +415,81 @@ class OpenUsageAdapterTests(unittest.TestCase):
             ]
         )
 
-        result = OpenUsageAdapter(clock=lambda: NOW, runner=run).fetch()
+        result = OpenUsageAdapter(
+            clock=lambda: NOW,
+            runner=run,
+            provider_filter_supported=True,
+        ).fetch()
 
         self.assertEqual(result.cards[0].provider_id, "cursor")
         self.assertEqual(result.cards[0].status, ProviderStatus.UNKNOWN)
-        self.assertEqual([call.args[0][-1] for call in run.call_args_list], ["auto", "direct"])
+        self.assertEqual(run.call_args_list[0].args[0][-1], "auto")
+        self.assertEqual(
+            run.call_args_list[1].args[0][-4:],
+            ["--source", "direct", "--provider", "cursor"],
+        )
+
+    def test_cursor_enrichment_without_provider_filter_uses_full_direct(self):
+        auto_cursor = snapshot("cursor", None)
+        auto_cursor["status"] = "UNKNOWN"
+        run = Mock(
+            side_effect=[
+                completed(envelope(auto_cursor)),
+                completed(envelope(cursor_snapshot({"remaining": 100, "used": 0}))),
+            ]
+        )
+
+        result = OpenUsageAdapter(
+            clock=lambda: NOW,
+            runner=run,
+            provider_filter_supported=False,
+        ).fetch()
+
+        self.assertEqual(result.cards[0].primary, "100% remaining")
+        self.assertEqual(
+            [call.args[0][-1] for call in run.call_args_list],
+            ["auto", "direct"],
+        )
+
+    def test_cursor_provider_filter_is_discovered_once_with_bounded_help(self):
+        auto_cursor = snapshot("cursor", None)
+        auto_cursor["status"] = "UNKNOWN"
+        run = Mock(
+            side_effect=[
+                completed(envelope(auto_cursor)),
+                completed("      --provider string   collect one provider"),
+                completed(envelope(cursor_snapshot({"remaining": 100, "used": 0}))),
+            ]
+        )
+        adapter = OpenUsageAdapter(clock=lambda: NOW, runner=run)
+
+        result = adapter.fetch()
+
+        self.assertEqual(result.cards[0].primary, "100% remaining")
+        self.assertEqual(run.call_args_list[1].args[0][1:], ["export", "--help"])
+        self.assertEqual(run.call_args_list[1].kwargs["timeout"], 3)
+        self.assertEqual(
+            run.call_args_list[2].args[0][-4:],
+            ["--source", "direct", "--provider", "cursor"],
+        )
+        self.assertTrue(adapter.provider_filter_supported)
+
+    def test_missing_provider_filter_help_falls_back_to_full_direct(self):
+        auto_cursor = snapshot("cursor", None)
+        auto_cursor["status"] = "UNKNOWN"
+        run = Mock(
+            side_effect=[
+                completed(envelope(auto_cursor)),
+                completed("export usage without the optional filter"),
+                completed(envelope(cursor_snapshot({"remaining": 100, "used": 0}))),
+            ]
+        )
+
+        result = OpenUsageAdapter(clock=lambda: NOW, runner=run).fetch()
+
+        self.assertEqual(result.cards[0].primary, "100% remaining")
+        self.assertEqual(run.call_args_list[2].args[0][-1], "direct")
+        self.assertNotIn("--provider", run.call_args_list[2].args[0])
 
     def test_failed_cursor_enrichment_backs_off_and_logs_only_safe_timing(self):
         auto_cursor = snapshot("cursor", None)
@@ -419,21 +498,29 @@ class OpenUsageAdapterTests(unittest.TestCase):
         sources = []
 
         def run(arguments, **_kwargs):
-            source = arguments[-1]
-            sources.append(source)
+            source = arguments[arguments.index("--source") + 1]
+            provider = (
+                arguments[arguments.index("--provider") + 1]
+                if "--provider" in arguments
+                else None
+            )
+            sources.append((source, provider))
             if source == "auto":
                 return completed(envelope(auto_cursor))
             monotonic[0] += 0.125
             return completed({}, returncode=1, stderr="private provider response")
 
         adapter = OpenUsageAdapter(
-            clock=lambda: NOW, runner=run, monotonic=lambda: monotonic[0]
+            clock=lambda: NOW,
+            runner=run,
+            monotonic=lambda: monotonic[0],
+            provider_filter_supported=True,
         )
         with self.assertLogs("openusage_bar.openusage_adapter", level="INFO") as logs:
             adapter.fetch()
             adapter.fetch()
 
-        self.assertEqual(sources, ["auto", "direct", "auto"])
+        self.assertEqual(sources, [("auto", None), ("direct", "cursor"), ("auto", None)])
         joined = "\n".join(logs.output)
         self.assertIn("provider=cursor", joined)
         self.assertIn("outcome=failed", joined)
@@ -444,11 +531,21 @@ class OpenUsageAdapterTests(unittest.TestCase):
         monotonic[0] += 300
         adapter.fetch()
         adapter.fetch()
-        self.assertEqual(sources, ["auto", "direct", "auto", "auto", "direct", "auto"])
+        self.assertEqual(
+            sources,
+            [
+                ("auto", None),
+                ("direct", "cursor"),
+                ("auto", None),
+                ("auto", None),
+                ("direct", "cursor"),
+                ("auto", None),
+            ],
+        )
 
         monotonic[0] += 600
         adapter.fetch()
-        self.assertEqual(sources[-2:], ["auto", "direct"])
+        self.assertEqual(sources[-2:], [("auto", None), ("direct", "cursor")])
 
     def test_empty_auto_falls_back_to_direct(self):
         run = Mock(

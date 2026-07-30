@@ -55,6 +55,11 @@ This project follows [Semantic Versioning](https://semver.org/).
   already-open Provider Settings window cannot keep executing the previous app
   image after the bundle has been replaced. Collector daemon arguments remain
   outside the exact process match.
+- Cursor enrichment detects OpenUsage's optional exact-provider export and
+  polls only Cursor when available; the local integration measured 3.60
+  seconds instead of timing out during an all-provider scan. Older OpenUsage
+  builds retain the bounded 75-second direct fallback, and the complete
+  interactive refresh envelope remains 160 seconds.
 - Codex local Token history no longer double-counts unchanged cumulative
   events, and parser-contract changes trigger one bounded historical backfill.
 - MiniMax regional sources, Cursor fallback, Kiro quota, and OpenAI

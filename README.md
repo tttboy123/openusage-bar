@@ -184,7 +184,11 @@ COLLECTOR="$APP/Contents/MacOS/OpenUsage Collector"
 "$COLLECTOR" doctor --format json --offline
 ```
 
-`--offline` 适合调度器低延迟读取。显式 `--fresh` 和菜单栏 Refresh 共用 90 秒交互尝试上限；超时不会把未知额度写成 0，而是继续提供 last-good ledger 并报告刷新不可用。
+`--offline` 适合调度器低延迟读取。显式 `--fresh` 和菜单栏 Refresh 共用
+160 秒交互尝试上限。支持精确 Provider 导出的 OpenUsage 会让 Cursor 使用
+15 秒的独立采集边界；旧版 OpenUsage 继续使用最长 75 秒的全量 direct
+fallback，完整 OpenUsage daily import 最长 60 秒。超时不会把未知额度写成
+0，而是继续提供 last-good ledger 并报告刷新不可用。
 
 ## Provider 支持
 

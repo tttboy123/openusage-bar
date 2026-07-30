@@ -37,6 +37,14 @@ NOW = datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc)
 
 
 class FrozenRefreshCommandTests(unittest.TestCase):
+    def test_cursor_direct_export_has_measured_runtime_margin(self):
+        # A sanitized standalone probe completed in 38.41 seconds, while the
+        # installed cold background refresh reached the 60-second boundary,
+        # while the immediately repeated foreground refresh succeeded. Keep
+        # another 25% of runtime margin so cold source contention does not turn
+        # a usable Cursor quota into a stale Last-good observation.
+        self.assertGreaterEqual(DIRECT_TIMEOUT_SECONDS, 75)
+
     def test_interactive_attempt_covers_slowest_export_fallback_and_one_daily_import(self):
         required_seconds = (
             AUTO_TIMEOUT_SECONDS

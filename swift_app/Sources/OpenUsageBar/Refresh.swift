@@ -3,7 +3,7 @@ import Foundation
 import UsageCore
 
 public struct RefreshCommand: Sendable, Hashable {
-    public static let interactiveTimeout: TimeInterval = 120
+    public static let interactiveTimeout: TimeInterval = 160
 
     public let executable: URL
     public let arguments: [String]

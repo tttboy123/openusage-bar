@@ -117,7 +117,10 @@ class BoundedProcessTests(unittest.TestCase):
                 start_new_session=True,
             )
             try:
-                result=run_bounded([str(helper)],timeout=2,text=True,encoding="utf-8")
+                # This validates CompletedProcess-compatible text output, not
+                # the timeout boundary. Leave enough room for process startup
+                # while the complete build runs the full suite under load.
+                result=run_bounded([str(helper)],timeout=5,text=True,encoding="utf-8")
                 self.assertEqual((result.returncode,result.stdout),(0,"ok\n"))
                 self.assertIsNone(unrelated.poll())
             finally:

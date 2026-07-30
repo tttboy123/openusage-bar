@@ -18,8 +18,11 @@ from .provider_catalog import catalog
 
 logger = logging.getLogger(__name__)
 AUTO_TIMEOUT_SECONDS = 12
-DIRECT_TIMEOUT_SECONDS = 40
+DIRECT_TIMEOUT_SECONDS = 75
+CURSOR_FILTERED_TIMEOUT_SECONDS = 15
+PROVIDER_FILTER_PROBE_TIMEOUT_SECONDS = 3
 MAX_EXPORT_BYTES = 16 * 1024 * 1024
+MAX_HELP_BYTES = 128 * 1024
 MAX_EXPORT_SNAPSHOTS = 4096
 MAX_EXPORT_STRING_LENGTH = 4096
 MAX_EXPORT_FIELDS = 256
@@ -223,12 +226,14 @@ class OpenUsageAdapter:
         environment: dict[str, str] | None = None,
         path_exists: Callable[[str], bool] | None = None,
         monotonic: Callable[[], float] | None = None,
+        provider_filter_supported: bool | None = None,
     ):
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.runner = runner
         self.environment = dict(environment if environment is not None else os.environ)
         self.path_exists = path_exists or os.path.isdir
         self.monotonic = monotonic or time.monotonic
+        self.provider_filter_supported = provider_filter_supported
         self.provider_backoff = ProviderRetryBackoff(self.monotonic)
 
     def _subprocess_environment(self) -> dict[str, str]:
@@ -301,10 +306,58 @@ class OpenUsageAdapter:
             )
         return Overview(cards)
 
-    def _export(self, source: str) -> Overview:
-        timeout = (
-            AUTO_TIMEOUT_SECONDS if source == "auto" else DIRECT_TIMEOUT_SECONDS
-        )
+    def _supports_provider_filter(self) -> bool:
+        if self.provider_filter_supported is not None:
+            return self.provider_filter_supported
+        try:
+            runner = self.runner or run_bounded
+            options: dict[str, Any] = {}
+            if self.runner is None:
+                options = {
+                    "stdout_limit": MAX_HELP_BYTES,
+                    "stderr_limit": 64 * 1024,
+                }
+            completed = runner(
+                [openusage_path(), "export", "--help"],
+                shell=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=PROVIDER_FILTER_PROBE_TIMEOUT_SECONDS,
+                env=self._subprocess_environment(),
+                **options,
+            )
+            self.provider_filter_supported = (
+                completed.returncode == 0
+                and isinstance(completed.stdout, str)
+                and "--provider" in completed.stdout
+            )
+        except Exception:
+            self.provider_filter_supported = False
+        return self.provider_filter_supported
+
+    def _export(self, source: str, provider: str | None = None) -> Overview:
+        if provider is not None:
+            timeout = CURSOR_FILTERED_TIMEOUT_SECONDS
+        else:
+            timeout = (
+                AUTO_TIMEOUT_SECONDS if source == "auto" else DIRECT_TIMEOUT_SECONDS
+            )
+        arguments = [
+            openusage_path(),
+            "export",
+            "--output",
+            "-",
+            "--format",
+            "json",
+            "--source",
+            source,
+        ]
+        if provider is not None:
+            arguments.extend(["--provider", provider])
         try:
             runner = self.runner or run_bounded
             options: dict[str, Any] = {}
@@ -314,16 +367,7 @@ class OpenUsageAdapter:
                     "stderr_limit": 64 * 1024,
                 }
             completed = runner(
-                [
-                    openusage_path(),
-                    "export",
-                    "--output",
-                    "-",
-                    "--format",
-                    "json",
-                    "--source",
-                    source,
-                ],
+                arguments,
                 shell=False,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -405,7 +449,10 @@ class OpenUsageAdapter:
 
         started = self.monotonic()
         try:
-            direct = self._export("direct")
+            direct = self._export(
+                "direct",
+                provider="cursor" if self._supports_provider_filter() else None,
+            )
         except OpenUsageExportError as error:
             delay = self.provider_backoff.record_failure("cursor")
             elapsed_ms = max(0, round((self.monotonic() - started) * 1000))
