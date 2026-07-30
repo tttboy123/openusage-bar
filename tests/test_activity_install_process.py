@@ -717,17 +717,21 @@ class ActivityInstallProcessTests(unittest.TestCase):
             finally:
                 self.run_helper(f'stop_exact_activity_processes "{executable}" 20 0.01')
 
-    def test_install_reopens_only_activity_on_success_and_rollback(self):
+    def test_install_restarts_visible_activity_and_settings_helpers(self):
         source = INSTALL.read_text(encoding="utf-8")
         helper = HELPER.read_text(encoding="utf-8")
 
         self.assertIn('source "$ROOT/scripts/activity_install_process.sh"', source)
         self.assertIn('ACTIVITY_EXECUTABLE="$TARGET/Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity"', source)
+        self.assertIn('SETTINGS_EXECUTABLE="$TARGET/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"', source)
         self.assertIn('ACTIVITY_WAS_RUNNING=1', source)
+        self.assertIn('SETTINGS_WAS_RUNNING=1', source)
         self.assertIn('stop_exact_activity_processes "$ACTIVITY_EXECUTABLE"', source)
+        self.assertIn('stop_exact_activity_processes "$SETTINGS_EXECUTABLE"', source)
         self.assertEqual(source.count('reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"'), 2)
+        self.assertEqual(source.count('reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE"'), 2)
         self.assertIn('clear_activity_for_runtime_rollback "$ACTIVITY_EXECUTABLE"', source)
-        self.assertNotIn("Provider Settings.app/Contents/MacOS", source)
+        self.assertIn('clear_activity_for_runtime_rollback "$SETTINGS_EXECUTABLE"', source)
         self.assertNotIn("pkill", source)
         self.assertNotIn("killall", source)
         self.assertNotIn("osascript", source)
@@ -740,24 +744,35 @@ class ActivityInstallProcessTests(unittest.TestCase):
         rollback = source.index("rollback()")
         rollback_end = source.index("trap rollback", rollback)
         rollback_source = source[rollback:rollback_end]
-        self.assertIn("if (( SWAPPED || FIRST_INSTALLED || ACTIVITY_STOPPED )); then", rollback_source)
+        self.assertIn(
+            "if (( SWAPPED || FIRST_INSTALLED || ACTIVITY_STOPPED || SETTINGS_STOPPED )); then",
+            rollback_source,
+        )
         rollback_clear = source.index('clear_activity_for_runtime_rollback "$ACTIVITY_EXECUTABLE"', rollback)
+        rollback_settings_clear = source.index('clear_activity_for_runtime_rollback "$SETTINGS_EXECUTABLE"', rollback)
         rollback_reopen = source.index('reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"', rollback)
+        rollback_settings_reopen = source.index('reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE"', rollback)
         rollback_restore = source.index("rollback_bundle_transaction", rollback)
         success_reopen = source.rindex('reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"')
+        success_settings_reopen = source.rindex('reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE"')
         installed_verify = source.index('codesign --verify --deep --strict "$TARGET"')
         install_swap = source.index('install_bundle_transaction "$ATOMIC_SWAP" "$TARGET" "$NEW"')
         post_swap_stop = source.index('stop_exact_activity_processes "$ACTIVITY_EXECUTABLE"', install_swap)
+        post_swap_settings_stop = source.index('stop_exact_activity_processes "$SETTINGS_EXECUTABLE"', install_swap)
         self.assertLess(rollback_clear, rollback_restore)
+        self.assertLess(rollback_settings_clear, rollback_restore)
         self.assertIn("if (( activity_runtime_cleared )); then", source[rollback:rollback_restore])
         self.assertLess(rollback_restore, rollback_reopen)
+        self.assertLess(rollback_restore, rollback_settings_reopen)
         self.assertIn(
             "if (( HAD_TARGET && ACTIVITY_STOPPED && activity_runtime_cleared && bundle_restored )); then",
             rollback_source,
         )
         self.assertIn('exit "$code"', rollback_source)
         self.assertLess(install_swap, post_swap_stop)
+        self.assertLess(install_swap, post_swap_settings_stop)
         self.assertLess(installed_verify, success_reopen)
+        self.assertLess(installed_verify, success_settings_reopen)
 
 
 if __name__ == "__main__":

@@ -51,6 +51,10 @@ This project follows [Semantic Versioning](https://semver.org/).
   flow for ad-hoc signed upgrades. It checks only fixed application-owned
   accounts, discards credential output, reports counts instead of values, and
   leaves the five-second headless fail-closed boundary unchanged.
+- Transactional upgrades now stop and reopen both visible helpers, so an
+  already-open Provider Settings window cannot keep executing the previous app
+  image after the bundle has been replaced. Collector daemon arguments remain
+  outside the exact process match.
 - Codex local Token history no longer double-counts unchanged cumulative
   events, and parser-contract changes trigger one bounded historical backfill.
 - MiniMax regional sources, Cursor fallback, Kiro quota, and OpenAI

@@ -176,7 +176,7 @@ clear_activity_for_runtime_rollback() {
   if stop_exact_activity_processes "$expected" "$attempts" "$delay" "$signaler"; then
     return 0
   fi
-  print -u2 "runtime rollback incomplete: Activity helper is still running; current bundle retained"
+  print -u2 "runtime rollback incomplete: visible helper is still running; current bundle retained"
   return 1
 }
 
