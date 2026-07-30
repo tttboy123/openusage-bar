@@ -368,8 +368,10 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   `invalid_response` 会掩盖真实失败类型。Step Plan 现将钥匙串、网络和响应解析失败分别
   记录为 `keychain_unavailable`、`network_error` 与 `invalid_response`；
   Provider Center 会把钥匙串失败标为需要处理的连接问题，并继续显示
-  Last-good。Kiro 同轮实时 `ok`，没有被连带标记为需要重配。最终修复包
-  未代替用户触发新的 Keychain ACL 授权，授权后的最终状态仍是外部门禁。
+  Last-good。最终修复包的两个 Helper 已与构建产物逐一核对 SHA-256；
+  新常驻采集再次记录 `keychain_unavailable`，原生 Provider Center 实测
+  显示“需要处理 / 当前额度需要有效连接”。Kiro 同轮实时 `ok`，没有被
+  连带标记为需要重配；用户授权后的恢复状态仍是外部门禁。
 - [x] 修复配置账号与 OpenUsage 自动发现实例使用同一 Provider ID 时的
   family 归属冲突：已配置连接优先拥有自身 source health，因此 Step Plan
   的钥匙串修复提示会进入可编辑的 StepFun Step Plan，而不是只读发现项。
