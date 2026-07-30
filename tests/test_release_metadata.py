@@ -68,6 +68,13 @@ class ReleaseMetadataTests(unittest.TestCase):
             f"Download OpenUsage-Bar-v{version}-macos-arm64.dmg.\n",
             encoding="utf-8",
         )
+        for readme in ("README.md", "README.en.md"):
+            (self.repo / readme).write_text(
+                f"<!-- openusage-release-version: {version} -->\n"
+                f"[Download](https://github.com/tttboy123/openusage-bar/releases/"
+                f"download/v{version}/OpenUsage-Bar-v{version}-macos-arm64.dmg)\n",
+                encoding="utf-8",
+            )
 
     def commit(self, message):
         subprocess.run(["git", "add", "."], cwd=self.repo, check=True)
@@ -107,6 +114,24 @@ class ReleaseMetadataTests(unittest.TestCase):
         (self.repo / "docs/release-quick-start.md").write_text(
             "OpenUsage Bar 0.3.0\n"
             "Download OpenUsage-Bar-v0.3.0-macos-arm64.dmg.\n",
+            encoding="utf-8",
+        )
+        self.assertNotEqual(self.run_verifier().returncode, 0)
+
+    def test_stale_chinese_readme_release_version_fails(self):
+        (self.repo / "README.md").write_text(
+            "<!-- openusage-release-version: 0.3.0 -->\n"
+            "[Download](https://github.com/tttboy123/openusage-bar/releases/"
+            "download/v0.3.0/OpenUsage-Bar-v0.3.0-macos-arm64.dmg)\n",
+            encoding="utf-8",
+        )
+        self.assertNotEqual(self.run_verifier().returncode, 0)
+
+    def test_stale_english_readme_download_version_fails(self):
+        (self.repo / "README.en.md").write_text(
+            "<!-- openusage-release-version: 0.4.0 -->\n"
+            "[Download](https://github.com/tttboy123/openusage-bar/releases/"
+            "download/v0.3.0/OpenUsage-Bar-v0.3.0-macos-arm64.dmg)\n",
             encoding="utf-8",
         )
         self.assertNotEqual(self.run_verifier().returncode, 0)
