@@ -583,7 +583,7 @@ public enum GeneratedProviderCatalog {
             sourceCapabilities: [
                 ProviderSourceCapability(sourceID: "kiro_keychain", sourceKind: "keychain", operatingSystems: [.macOS], stability: .stable, provenance: .providerLocal, factFamilies: [.detection], authority: .providerLocal, accountScope: .localProfile, modelScope: .aggregate, verification: .liveAccount),
                 ProviderSourceCapability(sourceID: "kiro_codewhisperer_api", sourceKind: "official_api", operatingSystems: [.macOS], stability: .stable, provenance: .providerOfficial, factFamilies: [.subscriptionCapacity], authority: .providerOfficial, accountScope: .localProfile, modelScope: .aggregate, verification: .liveAccount),
-                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
+                ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .liveAccount),
             ]
         ),
         "minimax": ProviderDisplayDescriptor(

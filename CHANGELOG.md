@@ -26,6 +26,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 - Local API v1 has an executable N-1 compatibility policy: additive fields,
   including `balances`, remain optional to older clients.
+- Kiro's OpenUsage-backed local Token activity is now marked as validated with
+  a live account after a bounded privacy-safe acceptance run. Its official AWS
+  subscription quota remains a separate fact and source.
 - Pre-release builds now run the same dependency audit and isolated install,
   upgrade, rollback, and uninstall gates as pull-request CI.
 - Updated the pinned GitHub Actions baseline to `actions/checkout@v7.0.1`,

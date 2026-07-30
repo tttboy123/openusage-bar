@@ -60,7 +60,11 @@ Connection-specific notes:
   Its billing-cycle credits, remaining capacity, plan label, and reset time
   replace the OpenUsage consumption card only after a complete successful
   response. Authentication, network, or parsing failure preserves OpenUsage
-  activity and cached last-good quota as stale data.
+  activity and cached last-good quota as stale data. On 2026-07-30, a bounded
+  offline acceptance run also returned non-empty per-model Kiro Token history
+  through the OpenUsage source. The run retained no Token values, paths,
+  account identity, prompts, responses, or raw JSON. This verifies only the
+  local Token-activity path; the AWS quota remains a separate official fact.
 - **StepFun Step Plan** supports China and International accounts, but a web
   session is never retried against the other region. Follow the
   [StepFun quick start](stepfun-quick-start.md) for the safe connection flow.

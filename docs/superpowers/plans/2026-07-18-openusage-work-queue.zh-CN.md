@@ -375,6 +375,11 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   `q.<region>.amazonaws.com`，恶意 hostname 注入会在网络前失败。
 - 认证、Keychain、网络、限流或解析失败不会输出 token；空结果不会覆盖
   OpenUsage 活动或 Last-good quota。
+- 2026-07-30 对当前本机 OpenUsage 做了有界、离线、无数值输出的 30 日覆盖
+  探测；`kiro_cli` 返回非空按日模型行，因此其第三方 OpenUsage
+  `token_activity` 来源从 `fixture` 提升为 `live_account`。探测未打印或保存
+  Token 数值、路径、账号、Prompt、Response 或原始 JSON；它不改变
+  `kiro_codewhisperer_api` 的独立官方订阅额度语义。
 
 **OpenAI Organization 当前证据（2026-07-29）：**
 

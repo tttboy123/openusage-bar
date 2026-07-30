@@ -285,7 +285,7 @@ class ProviderCatalogTests(unittest.TestCase):
             frozenset({"detection", "token_activity"}),
         )
         self.assertEqual(kiro_openusage.authority, "third_party")
-        self.assertEqual(kiro_openusage.verification, "fixture")
+        self.assertEqual(kiro_openusage.verification, "live_account")
 
         openai = self.catalog.require("openai")
         self.assertTrue(openai.supports_accounts)
