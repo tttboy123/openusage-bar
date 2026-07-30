@@ -19,7 +19,7 @@ body:
     id: version
     attributes:
       label: Product version and build
-      placeholder: 0.4.2 (6)
+      placeholder: 0.6.0 (9)
     validations:
       required: true
   - type: input
@@ -27,7 +27,7 @@ body:
     attributes:
       label: Previous version and build
       description: Record the published N-1 build used for the upgrade test.
-      placeholder: 0.4.1 (5)
+      placeholder: 0.4.4 (8)
     validations:
       required: true
   - type: input
@@ -82,7 +82,7 @@ body:
     attributes:
       label: Completed checks
       options:
-        - label: Checksum, manifest, SBOM, and attestation verified
+        - label: Packaged candidate verifier passed checksum, manifest, SBOM, and all six attestations
           required: true
         - label: Clean install and first trustworthy fact completed
           required: true

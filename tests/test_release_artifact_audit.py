@@ -58,6 +58,10 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
                 f"{ROOT_NAME}/scripts/verify_canary_surfaces.py",
                 'REPORT_SCHEMA = "openusage-canary-surfaces-1"',
             ),
+            (
+                f"{ROOT_NAME}/scripts/verify_canary_candidate.py",
+                'REPOSITORY = "tttboy123/openusage-bar"',
+            ),
             (f"{ROOT_NAME}/scripts/activity_schema.py", "EXPECTED_SCHEMA = {}"),
             (f"{ROOT_NAME}/scripts/install_app.sh", "#!/bin/zsh"),
             (f"{ROOT_NAME}/dist/OpenUsage Bar.app/Contents/Info.plist", "plist"),

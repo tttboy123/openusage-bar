@@ -32,6 +32,7 @@ cp \
   "$ROOT/scripts/rollback_app.sh" \
   "$ROOT/scripts/uninstall_app.sh" \
   "$ROOT/scripts/privacy_scan.py" \
+  "$ROOT/scripts/verify_canary_candidate.py" \
   "$ROOT/scripts/verify_canary_surfaces.py" \
   "$ROOT/scripts/verify_local_api.py" \
   "$STAGE/scripts/"

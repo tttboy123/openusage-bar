@@ -126,7 +126,7 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   Goal / Implementation / Acceptance / Verification / Dependencies /
   Guardrails / Source 七个结构全部存在，Open 状态、Milestone 与标签均未
   改变。Draft PR #48 的陈旧版本、测试与安装说明也已同步到
-  `0.6.0 (9)` / Python 883 / Swift 257，并补充 `0.6 RC` Milestone、
+  `0.6.0 (9)` / Python 891 / Swift 257，并补充 `0.6 RC` Milestone、
   `enhancement` 标签和不触发自动关闭的 Issue 证据映射。PR 正文不再
   硬编码易漂移的 Head SHA 或单次 CI 运行号；当前候选必须以 GitHub
   Checks 表面的 required `verify` 成功状态为准。
@@ -675,6 +675,17 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
   `visualMenu=pending_manual`。发行目录脚本在空 `PYTHONPATH` 下对真实安装
   返回 revision 47095，隐私扫描 0；这只完成 intake 工具准备，外部机器
   仍为 0 / 5，30 天时钟仍为 `not_started`。
+- [x] 继续审计发现 Canary 表单要求参与者确认 checksum、manifest、SBOM
+  和 attestation，却没有统一的可执行验证器。发行 ZIP 现携带
+  `verify_canary_candidate.py`：参与者先以 GitHub CLI 直接验证 ZIP，
+  再由受信脚本逐项核对五个 manifest 资产、两个 checksum、SPDX 2.3
+  产品身份，以及包含 manifest 在内的六个 GitHub attestation。仓库、
+  signer workflow、Tag ref、源提交与 GitHub-hosted runner 策略全部固定；
+  期望版本也必须显式匹配，缺失、哈希漂移、超时或错误响应均使用脱敏错误
+  fail closed。八项失败
+  注入、打包白名单、Issue Form 与文档契约测试通过；真实 0.6 ZIP 已确认
+  携带可执行脚本。当前未创建 Tag/Release，真实 attestation 查询失败是
+  正确结果，不启动 Canary 时钟。
 
 ### WQ-15：建立性能与轻量化决策门槛
 
@@ -726,7 +737,7 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 - [x] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
 
 2026-07-30 已建立唯一的 `integration/0.6-rc` 共存候选，并完成 Python
-883 项、Swift 257 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
+891 项、Swift 257 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
 集成时修复了 `balances` 被误设为 Local API v1 必填字段的兼容回归；冻结
 0.4.2 snapshot 与包含 additive 字段的当前 snapshot 均通过。候选不导入
 Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未完成门禁见
@@ -784,6 +795,13 @@ SHA-256 与大小匹配，ZIP 和 DMG 独立审计继续通过。
 现从指南中提取全部完整语义版本，并要求唯一版本与三套 Bundle、Python
 helper 和 CHANGELOG 一致；陈旧指南先由测试复现失败，再统一为 `0.6.0`
 转绿。Python 总数增至 883 项，后续版本升级若遗漏随包指南将直接阻断 CI。
+
+Canary intake 的后续审计发现供应链验收仍只能依靠人工勾选。候选现增加随
+ZIP 分发的 fail-closed 验证器，并明确先直接验证 ZIP 再执行解压脚本的可信
+启动顺序；manifest、SBOM、checksum、六个 attestation、仓库、workflow、
+Tag、提交和 runner 策略都进入同一验证边界。Python 总数增至 891 项，
+实际本地 ZIP/DMG 独立审计通过；当前没有 Tag/Release，因此没有伪造真实
+attestation 或提前启动外部 Canary。
 
 ---
 

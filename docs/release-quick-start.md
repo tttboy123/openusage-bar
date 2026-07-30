@@ -105,6 +105,25 @@ the same service entries.
 OpenUsage Bar sends no telemetry. A canary tester may explicitly create a
 redacted aggregate for a GitHub canary report:
 
+Before running any extracted script, verify the downloaded ZIP directly with
+GitHub CLI. Then the packaged candidate verifier checks the manifest, SBOM,
+checksums, every release asset and all attestations:
+
+```bash
+gh attestation verify OpenUsage-Bar-v0.6.0-macos-arm64.zip \
+  --repo tttboy123/openusage-bar \
+  --signer-workflow tttboy123/openusage-bar/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.6.0 \
+  --deny-self-hosted-runners
+shasum -a 256 -c OpenUsage-Bar-v0.6.0-macos-arm64.zip.sha256
+unzip OpenUsage-Bar-v0.6.0-macos-arm64.zip
+cd OpenUsage-Bar-v0.6.0-macos-arm64
+scripts/verify_canary_candidate.py --assets-dir .. --version 0.6.0
+```
+
+After installing the verified candidate, a tester may explicitly create a
+redacted aggregate:
+
 ```bash
 scripts/export_diagnostics.py --output /tmp/openusage-diagnostics.json
 scripts/privacy_scan.py /tmp/openusage-diagnostics.json

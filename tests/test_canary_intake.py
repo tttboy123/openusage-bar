@@ -50,6 +50,14 @@ class CanaryIntakeContractTests(unittest.TestCase):
         self.assertIn("compatibility-v1.md", protocol)
         self.assertIn("aggregate Balance state/quality/stale counts", protocol)
         self.assertIn("scripts/verify_canary_surfaces.py", protocol)
+        self.assertIn("scripts/verify_canary_candidate.py", protocol)
+        self.assertIn("--version 0.6.0", protocol)
+        self.assertIn("gh attestation verify", protocol)
+        self.assertIn("--signer-workflow", protocol)
+        self.assertRegex(
+            protocol,
+            r"verify the ZIP before executing\s+files extracted from it",
+        )
         self.assertIn("visualMenu", protocol)
         self.assertIn("pending_manual", protocol)
         self.assertIn("does not replace the visual menu-bar check", protocol)

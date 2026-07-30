@@ -264,6 +264,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("scripts/rollback_app.sh", package)
         self.assertIn("scripts/export_diagnostics.py", package)
         self.assertIn("scripts/verify_canary_surfaces.py", package)
+        self.assertIn("scripts/verify_canary_candidate.py", package)
         self.assertIn("openusage_bar/activity_schema.py", package)
         self.assertIn("docs/canary.md", package)
         self.assertIn("THIRD_PARTY_NOTICES.md", package)

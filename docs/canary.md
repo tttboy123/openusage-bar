@@ -47,6 +47,30 @@ Provider account name as that label.
 Record pass/fail and UTC date for each event:
 
 1. Verify the ZIP checksum, manifest, SBOM, and GitHub artifact attestation.
+   The first command is the trust bootstrap: verify the ZIP before executing
+   files extracted from it. Replace `0.6.0` with the candidate version:
+
+   ```bash
+   gh attestation verify OpenUsage-Bar-v0.6.0-macos-arm64.zip \
+     --repo tttboy123/openusage-bar \
+     --signer-workflow \
+       tttboy123/openusage-bar/.github/workflows/release.yml \
+     --source-ref refs/tags/v0.6.0 \
+     --deny-self-hosted-runners
+   shasum -a 256 -c OpenUsage-Bar-v0.6.0-macos-arm64.zip.sha256
+   unzip OpenUsage-Bar-v0.6.0-macos-arm64.zip
+   cd OpenUsage-Bar-v0.6.0-macos-arm64
+   scripts/verify_canary_candidate.py --assets-dir .. --version 0.6.0
+   ```
+
+   The packaged verifier requires the expected version and exactly one release
+   manifest, validates all
+   five published assets against its SHA-256 and size, checks both checksum
+   files and the SPDX 2.3 product identity, then verifies all six GitHub
+   attestations. It pins the repository, release workflow, tag ref, source
+   commit and GitHub-hosted runner policy. Missing GitHub CLI, missing assets,
+   malformed metadata, hash drift, timeout or any failed attestation is a hard
+   failure. It prints only the version and aggregate pass counts.
 2. Perform a clean install and observe the first trustworthy fact. `Unknown`
    is acceptable when the source explicitly reports why; numeric zero is not a
    substitute for missing data.
