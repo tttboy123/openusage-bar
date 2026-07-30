@@ -60,6 +60,10 @@ This project follows [Semantic Versioning](https://semver.org/).
   seconds instead of timing out during an all-provider scan. Older OpenUsage
   builds retain the bounded 75-second direct fallback, and the complete
   interactive refresh envelope remains 160 seconds.
+- OpenUsage compatibility health now recognizes the independently reviewed
+  `c63a47c` provider-filter development build after also verifying the pinned
+  base version and exact 35-provider catalog. Unknown development revisions
+  remain unsupported and fail closed.
 - Codex local Token history no longer double-counts unchanged cumulative
   events, and parser-contract changes trigger one bounded historical backfill.
 - MiniMax regional sources, Cursor fallback, Kiro quota, and OpenAI

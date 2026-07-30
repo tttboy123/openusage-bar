@@ -19,6 +19,15 @@ _PROVIDER_ROW = re.compile(rb"^  - ([A-Za-z0-9._-]+)\r?\n?$")
 _VERSION_LINE = re.compile(
     rb"^([0-9]+\.[0-9]+\.[0-9]+) \(([0-9a-f]{7,40})\) built [^\r\n]+\r?\n?$"
 )
+_DEVELOPMENT_VERSION_LINE = re.compile(
+    rb"^v([0-9]+\.[0-9]+\.[0-9]+)-([1-9][0-9]*)-g([0-9a-f]{7,40}) "
+    rb"\(([0-9a-f]{7,40})\) built [^\r\n]+\r?\n?$"
+)
+# OpenUsage Bar remains pinned to the canonical upstream revision. A development
+# build is accepted only when its exact commit was independently reviewed for a
+# narrowly scoped compatibility extension and the runtime provider set still
+# matches the canonical catalog.
+_AUDITED_DEVELOPMENT_REVISIONS = frozenset({"c63a47c"})
 _MAX_STREAM_BYTES = 64 * 1024
 _READ_CHUNK_BYTES = 4096
 _OUTCOMES = frozenset(
@@ -285,13 +294,19 @@ class OpenUsageCatalogDiscovery:
         version = self._command(["version"])
         if version.outcome != "ok":
             return self._diagnostic(version.outcome)
-        match = _VERSION_LINE.fullmatch(version.stdout)
-        if match is None:
-            return self._diagnostic("unsupported_openusage_version")
-        if (
-            match.group(1).decode("ascii") != catalog.upstream_version
-            or match.group(2).decode("ascii") != catalog.upstream_revision
-        ):
+        release_match = _VERSION_LINE.fullmatch(version.stdout)
+        development_match = _DEVELOPMENT_VERSION_LINE.fullmatch(version.stdout)
+        release_supported = release_match is not None and (
+            release_match.group(1).decode("ascii") == catalog.upstream_version
+            and release_match.group(2).decode("ascii") == catalog.upstream_revision
+        )
+        development_supported = development_match is not None and (
+            development_match.group(1).decode("ascii") == catalog.upstream_version
+            and development_match.group(3) == development_match.group(4)
+            and development_match.group(3).decode("ascii")
+            in _AUDITED_DEVELOPMENT_REVISIONS
+        )
+        if not release_supported and not development_supported:
             return self._diagnostic("unsupported_openusage_version")
         detected = self._command(["detect", "--all"])
         if detected.outcome != "ok":

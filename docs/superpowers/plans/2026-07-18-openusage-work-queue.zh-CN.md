@@ -413,6 +413,13 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   最终安装包的完整 `--fresh` 实测为 `7.63s`，同轮 Cursor 与 Kiro 均恢复
   实时 `ok`；Step Plan 继续保留 `invalid_response` 和 Last-good，没有被
   写成零或伪成功。
+- [x] 原生 Data Health 目视复核发现上述 `c63a47c` 自定义构建虽能正常采集，
+  却被精确 revision 门禁显示为“不支持此 OpenUsage 版本 / 0/35 Provider”。
+  修复按 RED → GREEN 只接受该独立审计提交，并继续要求 `0.23.0` 基线、
+  git describe revision 自洽和运行态 35 个 Provider 精确匹配；真实二进制
+  探测现为 35/35。候选重新安装并用同一发现逻辑更新真实账本健康记录后，
+  原生 Data Health 页面显示 `Ok / 兼容 / 已检测 35 / 35`。未知开发提交、
+  版本漂移和 Provider 集合漂移仍 fail closed。
 
 **Kiro 当前证据（2026-07-29）：**
 
@@ -732,7 +739,7 @@ SPDX SBOM、隐私扫描和隔离安装/升级/回滚/卸载；该未提交本�
 当前候选已增加“高级与修复 → 授权钥匙串访问”：前台逐项检查固定应用
 service、已配置账号及 Kiro 只读 service，单项最长 90 秒，凭证 stdout/stderr
 直接丢弃，UI 只显示授权、缺失和拒绝数量。后台边界仍为 5 秒 fail closed，
-不刷新或改写 Kiro 登录，不改变 Provider 配置。Python 全量增至 879 项且
+不刷新或改写 Kiro 登录，不改变 Provider 配置。Python 全量增至 880 项且
 发布构建通过；持久 ACL 授权与授权后的 Step Plan/Kiro 实机恢复仍需用户在
 系统提示中亲自确认，不能由自动化代签。
 
