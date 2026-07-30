@@ -276,6 +276,24 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
 - [ ] 其余 Provider 仍需按 Issue #19-#29 逐个补真实账号证据或降级为
   `unknown`/`unsupported`；本切片没有把 Fixture 冒充实账号验证。
 
+**2026-07-30 本机证据收敛审计：**
+
+- 对仍以 `fixture` 标记的 OpenUsage Token 来源执行了同一有界 30 日离线
+  探测，只输出 `nonempty`、`covered_empty` 或脱敏失败码，不输出或保存
+  Token 数值、路径、账号、Prompt、Response 或原始 JSON。
+- `kiro_cli` 是唯一返回非空按日模型行的候选，因此只有它的 OpenUsage
+  `token_activity` 验证等级提升为 `live_account`。该变更不影响独立的
+  AWS 官方订阅额度来源。
+- Alibaba Cloud、Amp、Codebuff、Copilot、Crush、Droid、Gemini CLI、
+  Goose、Kilo Code、Kimi CLI、Mux、Ollama、OpenAI、OpenRouter、
+  Perplexity、Pi、Qwen CLI、Roo Code、Z.AI 与 Zed 均为
+  `covered_empty`；Codex 与 MiniMax 的独立补充探测也为
+  `covered_empty`。空结果不提升验证等级、不写入零，也不覆盖主来源或
+  Last-good。
+- 当前机器没有可用于 GLM、Kimi/Qwen 官方账号验收或 OpenAI Organization
+  管理员验收的连接。剩余 `fixture`/`upstream_declared` 状态因此保持不变，
+  真实账号门禁继续由 Issue #19-#29 承载。
+
 **验收：**
 
 - [x] 搜索别名只参与发现，不再被误解成完整数据支持。
