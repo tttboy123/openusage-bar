@@ -128,6 +128,11 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   改变。Draft PR #48 的陈旧版本、测试与安装说明也已同步到
   `0.6.0 (9)` / Python 870 / Swift 255，并补充 `0.6 RC` Milestone、
   `enhancement` 标签和不触发自动关闭的 Issue 证据映射。
+- [x] 同轮复核发现作为集成来源证据的 Draft PR #36-#47 虽然全部
+  `CLEAN` 且 CI 成功，但没有 Milestone 或标签。#36-#44 现归入
+  `0.5 Data Trust`，#45-#47 归入 `0.6 RC`，12 个 PR 均增加
+  `enhancement`；逐项复核确认 Draft、分支、正文、标题、check 与合并状态
+  未改变。
 - [ ] `v*` Tag 与 release workflow 的联动只在下一次受控发布中验证，不创建会误触发 Release 的伪版本 Tag。Dependabot PR、Release 与外部 Canary 未在本轮合并、发布或协调。
 
 **验收：**
