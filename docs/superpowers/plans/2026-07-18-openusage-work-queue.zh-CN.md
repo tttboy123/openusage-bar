@@ -321,6 +321,17 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   管理员验收的连接。剩余 `fixture`/`upstream_declared` 状态因此保持不变，
   当前第一批 Provider 的真实账号门禁继续由开放的 Issue #19-#21 与 #24
   承载；未来新增 Provider 使用请求模板建立独立门禁。
+- 2026-07-30 已为剩余四个门禁发布公开、可执行且不要求泄露凭证的外部证据
+  交接：Codex 账号级对账见
+  [#19](https://github.com/tttboy123/openusage-bar/issues/19#issuecomment-5132045362)，
+  MiniMax 国内站/国际站见
+  [#20](https://github.com/tttboy123/openusage-bar/issues/20#issuecomment-5132045695)，
+  StepFun 国内站/国际站见
+  [#21](https://github.com/tttboy123/openusage-bar/issues/21#issuecomment-5132046277)，
+  OpenAI Organization 管理员账号见
+  [#24](https://github.com/tttboy123/openusage-bar/issues/24#issuecomment-5132046748)。
+  四个 Issue 均标记 `help wanted`；交接本身不是实机证据，因此仍保持 Open，
+  也不改变 `fixture`、`upstream_declared` 或 `unverified` 状态。
 
 **验收：**
 
