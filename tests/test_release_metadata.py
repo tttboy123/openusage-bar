@@ -34,6 +34,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.repo, check=True)
         (self.repo / "swift_app/Resources").mkdir(parents=True)
         (self.repo / "openusage_bar").mkdir()
+        (self.repo / "docs").mkdir(exist_ok=True)
         self.write_metadata("0.3.0", "3")
         self.commit("release 0.3.0")
         subprocess.run(["git", "tag", "v0.3.0"], cwd=self.repo, check=True)
@@ -61,6 +62,11 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
         (self.repo / "CHANGELOG.md").write_text(
             f"# Changelog\n\n## {version} - 2026-07-18\n", encoding="utf-8"
+        )
+        (self.repo / "docs/release-quick-start.md").write_text(
+            f"OpenUsage Bar {version}\n"
+            f"Download OpenUsage-Bar-v{version}-macos-arm64.dmg.\n",
+            encoding="utf-8",
         )
 
     def commit(self, message):
@@ -97,6 +103,14 @@ class ReleaseMetadataTests(unittest.TestCase):
         (self.repo / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
         self.assertNotEqual(self.run_verifier().returncode, 0)
 
+    def test_stale_release_guide_version_fails(self):
+        (self.repo / "docs/release-quick-start.md").write_text(
+            "OpenUsage Bar 0.3.0\n"
+            "Download OpenUsage-Bar-v0.3.0-macos-arm64.dmg.\n",
+            encoding="utf-8",
+        )
+        self.assertNotEqual(self.run_verifier().returncode, 0)
+
     def test_tag_not_reachable_from_main_fails(self):
         subprocess.run(
             ["git", "checkout", "-q", "--orphan", "release"], cwd=self.repo, check=True
@@ -125,7 +139,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             ["git", "rev-parse", "v0.4.0^{}"], cwd=self.repo,
             capture_output=True, text=True, check=True,
         ).stdout.strip()
-        (self.repo / "docs").mkdir()
+        (self.repo / "docs").mkdir(exist_ok=True)
         (self.repo / "docs/release.md").write_text("clarification\n", encoding="utf-8")
         self.commit("docs only")
         result = self.run_verifier(

@@ -126,7 +126,7 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   Goal / Implementation / Acceptance / Verification / Dependencies /
   Guardrails / Source 七个结构全部存在，Open 状态、Milestone 与标签均未
   改变。Draft PR #48 的陈旧版本、测试与安装说明也已同步到
-  `0.6.0 (9)` / Python 882 / Swift 257，并补充 `0.6 RC` Milestone、
+  `0.6.0 (9)` / Python 883 / Swift 257，并补充 `0.6 RC` Milestone、
   `enhancement` 标签和不触发自动关闭的 Issue 证据映射。PR 正文不再
   硬编码易漂移的 Head SHA 或单次 CI 运行号；当前候选必须以 GitHub
   Checks 表面的 required `verify` 成功状态为准。
@@ -726,7 +726,7 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 - [x] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
 
 2026-07-30 已建立唯一的 `integration/0.6-rc` 共存候选，并完成 Python
-882 项、Swift 257 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
+883 项、Swift 257 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
 集成时修复了 `balances` 被误设为 Local API v1 必填字段的兼容回归；冻结
 0.4.2 snapshot 与包含 additive 字段的当前 snapshot 均通过。候选不导入
 Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未完成门禁见
@@ -774,10 +774,16 @@ Swift 增至 257 项且发布构建通过；Kiro 已在同轮恢复实时 `ok`�
 RED → GREEN 修正：生成器现在显式接收 DMG，`publishedAssets` 固定覆盖
 ZIP、ZIP checksum、DMG、DMG checksum 与 SBOM 五项非自引用资产，并记录
 各自 SHA-256 与大小。重新生成的 `0.6.0 (9)` 本地候选五项值逐一匹配，
-ZIP/DMG 独立审计和 61 项发行契约测试继续通过。
+ZIP/DMG 独立审计和 62 项发行契约测试继续通过。
 修复提交 `aff722e` 的 required `verify` 运行 `30539659070` 在 9 分 10 秒
 内成功；下载实际上传 artifact 后再次确认远端 manifest 为 5 / 5、所有
 SHA-256 与大小匹配，ZIP 和 DMG 独立审计继续通过。
+
+同一远端 ZIP 内的 `release-quick-start.md` 仍硬编码 `v0.4.2`，会把
+0.6.0 候选用户引回旧下载页和旧 checksum 命令。发行 metadata verifier
+现从指南中提取全部完整语义版本，并要求唯一版本与三套 Bundle、Python
+helper 和 CHANGELOG 一致；陈旧指南先由测试复现失败，再统一为 `0.6.0`
+转绿。Python 总数增至 883 项，后续版本升级若遗漏随包指南将直接阻断 CI。
 
 ---
 

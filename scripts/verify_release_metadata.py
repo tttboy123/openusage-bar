@@ -16,9 +16,13 @@ PLISTS = (
     Path("swift_app/Resources/OpenUsageActivity-Info.plist"),
     Path("swift_app/Resources/OpenUsageProviderSettings-Info.plist"),
 )
+RELEASE_GUIDE = Path("docs/release-quick-start.md")
 VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 TAG_PATTERN = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+DOCUMENTED_VERSION_PATTERN = re.compile(
+    r"(?<![0-9.])v?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))(?![0-9.])"
+)
 
 
 class MetadataError(ValueError):
@@ -85,6 +89,13 @@ def _verify_changelog(root: Path, version: str) -> None:
         raise MetadataError("changelog")
 
 
+def _verify_release_guide(root: Path, version: str) -> None:
+    guide = (root / RELEASE_GUIDE).read_text("utf-8")
+    documented_versions = set(DOCUMENTED_VERSION_PATTERN.findall(guide))
+    if documented_versions != {version}:
+        raise MetadataError("release_guide")
+
+
 def _verify_build_history(root: Path, version: str, build: str) -> None:
     current_build = int(build)
     for tag in _git(root, "tag", "--list", "v*").splitlines():
@@ -142,6 +153,7 @@ def verify(root: Path, tag: str | None, expected_commit: str | None) -> tuple[st
     root = root.resolve()
     version, build = _current_metadata(root)
     _verify_changelog(root, version)
+    _verify_release_guide(root, version)
     _verify_build_history(root, version, build)
     if tag:
         _verify_tag(root, version, tag, expected_commit)
