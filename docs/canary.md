@@ -22,9 +22,18 @@ activation timestamp in the tracking issue. A green pull request, a local
 machine, an unreviewed report, or repository status alone cannot activate the
 clock.
 
-This protocol prepares the intake path but does not recruit testers, assert an
-external cohort, or start the public beta. Until a maintainer explicitly
-activates it, the clock state is `not_started`.
+This protocol alone does not recruit testers, assert an external cohort, or
+start the public beta. Publishing a candidate may open intake, but until a
+maintainer explicitly activates the timed cohort, the clock state is
+`not_started`.
+
+The current public intake uses the
+[v0.6.0 pre-release](https://github.com/tttboy123/openusage-bar/releases/tag/v0.6.0).
+Accepted-machine counts, configuration-class coverage, blocking incidents and
+the eventual UTC activation timestamp are recorded in
+[Canary tracking issue #33](https://github.com/tttboy123/openusage-bar/issues/33).
+Publishing the candidate opens intake; it does not by itself qualify a machine
+or start the clock.
 
 ## Required cohort
 

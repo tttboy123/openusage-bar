@@ -135,13 +135,18 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   `0.5 Data Trust`，#45-#47 归入 `0.6 RC`，12 个 PR 均增加
   `enhancement`；逐项复核确认 Draft、分支、正文、标题、check 与合并状态
   未改变。
-- [ ] `v*` Tag 与 release workflow 的联动只在下一次受控发布中验证，不创建会误触发 Release 的伪版本 Tag。Dependabot PR、Release 与外部 Canary 未在本轮合并、发布或协调。
+- [x] 获得专项授权后，PR #48 已改回 `main` 基线并由 required `verify`
+  保护合入；annotated Tag `v0.6.0` 固定指向 main 合并提交
+  `ec54f0c1ea202bb9b9424812bf5486145d82b2ba`。Pre-release workflow
+  `30546771069` 通过不可移动 Tag、依赖、完整历史凭证、构建、制品、发行
+  smoke 与 attestation 门禁后自动发布六个资产；受保护 Tag 未被更新或
+  删除。
 
 **验收：**
 
 - [x] GitHub 不再以“零 Issue”隐藏真实待办。
 - [x] 自动依赖更新不绕过构建、隐私、覆盖率和发布审计。
-- [ ] 受保护分支与 Tag 规则不破坏自动发布流程。
+- [x] 受保护分支与 Tag 规则不破坏自动发布流程。
 
 **验证：** GitHub ruleset 只读复查、PR required checks、从临时分支验证 release workflow。
 
@@ -684,8 +689,13 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
   期望版本也必须显式匹配，缺失、哈希漂移、超时或错误响应均使用脱敏错误
   fail closed。八项失败
   注入、打包白名单、Issue Form 与文档契约测试通过；真实 0.6 ZIP 已确认
-  携带可执行脚本。当前未创建 Tag/Release，真实 attestation 查询失败是
-  正确结果，不启动 Canary 时钟。
+  携带可执行脚本。发布前真实 attestation 查询失败是正确结果；受控发布
+  后，从公开 v0.6.0 Release 下载的同一验证器返回
+  `canary_candidate_verified version=0.6.0 assets=6 attestations=6`。
+- [x] v0.6.0 公开预发行已打开无遥测 intake。Release 页面明确链接 Canary
+  协议与表单；Issue #31 记录发布验证和参与说明，Issue #33 记录初始基线：
+  外部机器 0 / 5、配置类别 0 / 5、activation timestamp 为空、30 天时钟
+  `not_started`。发布候选不等于接受机器，也没有提前启动计时。
 
 ### WQ-15：建立性能与轻量化决策门槛
 
@@ -737,7 +747,7 @@ Provider Registry 或 SwiftUI，因此没有新增厂商特判。
 - [x] 0.6 RC 仍可在没有 Loom 的机器上独立工作。
 
 2026-07-30 已建立唯一的 `integration/0.6-rc` 共存候选，并完成 Python
-891 项、Swift 257 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
+893 项、Swift 257 项、生成文件漂移、隐私扫描、签名与 App bundle 构建。
 集成时修复了 `balances` 被误设为 Local API v1 必填字段的兼容回归；冻结
 0.4.2 snapshot 与包含 additive 字段的当前 snapshot 均通过。候选不导入
 Loom 运行时依赖，Python 仍是唯一账本写入者。完整范围与未完成门禁见
@@ -800,8 +810,16 @@ Canary intake 的后续审计发现供应链验收仍只能依靠人工勾选。
 ZIP 分发的 fail-closed 验证器，并明确先直接验证 ZIP 再执行解压脚本的可信
 启动顺序；manifest、SBOM、checksum、六个 attestation、仓库、workflow、
 Tag、提交和 runner 策略都进入同一验证边界。Python 总数增至 891 项，
-实际本地 ZIP/DMG 独立审计通过；当前没有 Tag/Release，因此没有伪造真实
-attestation 或提前启动外部 Canary。
+实际本地 ZIP/DMG 独立审计通过。专项授权后的 v0.6.0 Release workflow
+生成六项真实 attestation；从公开下载的六个资产通过随包验证器和下载包
+release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天时钟继续
+保持 `not_started`。
+
+公开发布后的入口一致性复核补上最后一项自动门禁：中英文 README 现在均
+声明唯一的机器可读发行版本，metadata verifier 同时校验其中每个正式 DMG
+下载路径的目录版本和文件名版本。陈旧中文版本与陈旧英文下载链接的测试
+先红后绿，Python 全量增至 893 项；这只保护后续版本，不改写已经发布的
+`v0.6.0` Tag 或资产。
 
 ---
 
@@ -823,6 +841,13 @@ attestation 或提前启动外部 Canary。
 **依赖：** Checkpoint 0.6 RC。
 
 **规模：** 30 个连续日历日；阻断事故会重置时钟。
+
+2026-07-30 已以 v0.6.0 公开预发行打开 opt-in intake，并在 Issue #33
+建立候选提交、Release workflow、六项 attestation、机器数、配置类别、
+activation timestamp 与阻断事故的初始基线。当前没有合格外部报告：
+机器 0 / 5、配置类别 0 / 5、activation timestamp 为空、时钟
+`not_started`。后续只能依据通过隐私审查的真实外部表单推进，仓库测试和
+本机 smoke 不计入五台机器。
 
 ### WQ-17：发布 1.0
 

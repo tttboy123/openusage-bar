@@ -1,3 +1,4 @@
+<!-- openusage-release-version: 0.6.0 -->
 <div align="center">
 
 # OpenUsage Bar
@@ -24,7 +25,14 @@ OpenUsage Bar is a local-first native macOS dashboard for AI subscriptions, API 
 
 <p align="center"><sub>Real SwiftUI interface rendered from an isolated synthetic ledger. No user ledger, Keychain data, or real quota was read.</sub></p>
 
-> Current development candidate: **0.6.0 RC**; the latest public pre-release remains **0.4.2**. Apple Silicon and macOS 15 or later are required. Developer ID notarization is not available yet; if macOS reports the app as damaged, remove the download quarantine from this app only as described below.
+> Current public pre-release: **0.6.0 RC**, for the opt-in, no-telemetry
+> external Canary. The qualifying external cohort remains **0 / 5** and the
+> 30-day clock is **`not_started`**; follow
+> [Canary tracking issue #33](https://github.com/tttboy123/openusage-bar/issues/33)
+> for current state. Apple Silicon and macOS 15 or later are required.
+> Developer ID notarization is not available yet; if macOS reports the app as
+> damaged, remove the download quarantine from this app only as described
+> below.
 
 ## What it does
 
@@ -46,7 +54,7 @@ flowchart LR
 
 ## Quick install
 
-[Download OpenUsage Bar v0.4.2 DMG for Apple Silicon](https://github.com/tttboy123/openusage-bar/releases/download/v0.4.2/OpenUsage-Bar-v0.4.2-macos-arm64.dmg)
+[Download OpenUsage Bar v0.6.0 DMG for Apple Silicon](https://github.com/tttboy123/openusage-bar/releases/download/v0.6.0/OpenUsage-Bar-v0.6.0-macos-arm64.dmg)
 
 1. Open the downloaded DMG.
 2. Drag **OpenUsage Bar** onto **Applications**.
@@ -126,7 +134,7 @@ HELPER="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/Ope
 
 OpenUsage Bar is an independent repository and release. OpenUsage.sh is an optional CLI data source consumed through validated JSON only; its Go internals, credentials, and release lifecycle are not embedded here.
 
-Version 0.4.2 includes the OpenUsage 0.23.0 provider catalog plus built-in enhancements for MiniMax, StepFun, Codex, Cursor, Kiro, OpenAI Organization, Generic HTTPS Provider, and Custom Daily Token Feed. See [Provider support](docs/provider-support.md).
+Version 0.6.0 includes the OpenUsage 0.23.0 provider catalog plus built-in enhancements for MiniMax, StepFun, Codex, Cursor, Kiro, OpenAI Organization, Generic HTTPS Provider, and Custom Daily Token Feed. See [Provider support](docs/provider-support.md).
 
 ## License
 
