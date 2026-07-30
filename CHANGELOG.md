@@ -47,6 +47,10 @@ This project follows [Semantic Versioning](https://semver.org/).
   boundary instead of waiting indefinitely for an interactive Security prompt.
   The private write helper accepts only Step Plan session updates over stdin
   and cannot read or return credentials.
+- Advanced and Repair now offers an explicit foreground Keychain authorization
+  flow for ad-hoc signed upgrades. It checks only fixed application-owned
+  accounts, discards credential output, reports counts instead of values, and
+  leaves the five-second headless fail-closed boundary unchanged.
 - Codex local Token history no longer double-counts unchanged cumulative
   events, and parser-contract changes trigger one bounded historical backfill.
 - MiniMax regional sources, Cursor fallback, Kiro quota, and OpenAI

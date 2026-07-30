@@ -7,8 +7,9 @@ import signal
 import subprocess
 import sys
 import time
+from enum import Enum
 from pathlib import Path
-from typing import BinaryIO, Protocol, Sequence
+from typing import BinaryIO, Callable, Protocol, Sequence
 
 from .bounded_process import BoundedProcessError, run_bounded
 
@@ -21,6 +22,12 @@ MAX_KEYCHAIN_PROTOCOL_BYTES = MAX_KEYCHAIN_VALUE_BYTES * 6 + 4_096
 
 class KeychainError(RuntimeError):
     """A sanitized Keychain failure that never contains secret material."""
+
+
+class KeychainAuthorizationState(str, Enum):
+    AUTHORIZED = "authorized"
+    MISSING = "missing"
+    DENIED = "denied"
 
 
 class KeychainAPI(Protocol):
@@ -106,6 +113,73 @@ class MacOSKeychain:
 
     def delete(self, account: str) -> None:
         self.api.delete(self._query(account))
+
+
+class InteractiveKeychainAuthorizer:
+    """Prompt for foreground Keychain access without exposing the value."""
+
+    def __init__(
+        self,
+        *,
+        timeout_seconds: int = 90,
+        security_executable: str = "/usr/bin/security",
+        runner: Callable = run_bounded,
+    ) -> None:
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, int)
+            or not 1 <= timeout_seconds <= 120
+        ):
+            raise ValueError(
+                "Interactive Keychain timeout must be between 1 and 120 seconds"
+            )
+        if (
+            not isinstance(security_executable, str)
+            or not security_executable.startswith("/")
+            or "\x00" in security_executable
+        ):
+            raise ValueError("Security executable must be an absolute path")
+        self.timeout_seconds = timeout_seconds
+        self.security_executable = security_executable
+        self.runner = runner
+
+    def authorize(
+        self,
+        *,
+        service: str,
+        account: str | None,
+    ) -> KeychainAuthorizationState:
+        if not _valid_keychain_identifier(service):
+            raise ValueError("Keychain service is invalid")
+        if account is not None and not _valid_account(account):
+            raise ValueError("Keychain account is invalid")
+        command = [
+            self.security_executable,
+            "find-generic-password",
+            "-s",
+            service,
+        ]
+        if account is not None:
+            command.extend(["-a", account])
+        command.append("-w")
+        try:
+            completed = self.runner(
+                command,
+                shell=False,
+                stdout=subprocess.DEVNULL,
+                stdout_limit=0,
+                stderr_limit=0,
+                stderr=subprocess.DEVNULL,
+                timeout=self.timeout_seconds,
+                env=_keychain_environment(),
+            )
+        except (BoundedProcessError, OSError, ValueError):
+            return KeychainAuthorizationState.DENIED
+        if completed.returncode == 0:
+            return KeychainAuthorizationState.AUTHORIZED
+        if completed.returncode == 44:
+            return KeychainAuthorizationState.MISSING
+        return KeychainAuthorizationState.DENIED
 
 
 class BoundedReadOnlyKeychain:
@@ -220,6 +294,14 @@ def _valid_account(account: object) -> bool:
         isinstance(account, str)
         and 0 < len(account.encode("utf-8")) <= 512
         and not any(character in account for character in "\x00\r\n")
+    )
+
+
+def _valid_keychain_identifier(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and 0 < len(value.encode("utf-8")) <= 512
+        and not any(character in value for character in "\x00\r\n")
     )
 
 

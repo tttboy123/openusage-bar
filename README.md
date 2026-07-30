@@ -25,7 +25,7 @@ OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Tok
 
 <p align="center"><sub>真实 SwiftUI 界面，使用隔离的合成账本生成。未读取用户账本、Keychain 或真实额度。</sub></p>
 
-> 当前版本：**0.4.2 预发布版**。支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple Developer ID 公证包；若 macOS 显示“已损坏”，按下方指引仅移除本 App 的下载隔离属性。
+> 当前开发候选：**0.6.0 RC**；最新公开预发布版仍为 **0.4.2**。支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple Developer ID 公证包；若 macOS 显示“已损坏”，按下方指引仅移除本 App 的下载隔离属性。
 
 ## 为什么需要它
 

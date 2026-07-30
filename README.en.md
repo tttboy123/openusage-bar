@@ -24,7 +24,7 @@ OpenUsage Bar is a local-first native macOS dashboard for AI subscriptions, API 
 
 <p align="center"><sub>Real SwiftUI interface rendered from an isolated synthetic ledger. No user ledger, Keychain data, or real quota was read.</sub></p>
 
-> Current version: **0.4.2 pre-release**. Apple Silicon and macOS 15 or later are required. Developer ID notarization is not available yet; if macOS reports the app as damaged, remove the download quarantine from this app only as described below.
+> Current development candidate: **0.6.0 RC**; the latest public pre-release remains **0.4.2**. Apple Silicon and macOS 15 or later are required. Developer ID notarization is not available yet; if macOS reports the app as damaged, remove the download quarantine from this app only as described below.
 
 ## What it does
 

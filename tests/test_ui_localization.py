@@ -56,6 +56,14 @@ class UILocalizationTests(unittest.TestCase):
             localized_ui_text("settings.provider_visibility", "en"),
             "Repair Visibility",
         )
+        self.assertEqual(
+            localized_ui_text("settings.authorize_keychain", "zh-Hans"),
+            "授权钥匙串访问",
+        )
+        self.assertEqual(
+            localized_ui_text("settings.authorize_keychain", "en"),
+            "Authorize Keychain Access",
+        )
 
     def test_legacy_step_plan_editor_is_absent_from_settings_ui(self):
         source = (ROOT / "openusage_bar/ui.py").read_text(encoding="utf-8")
@@ -71,6 +79,7 @@ class UILocalizationTests(unittest.TestCase):
         )[0]
         self.assertNotIn("addProvider:", window)
         self.assertIn("manageProviders:", window)
+        self.assertIn("authorizeKeychain:", window)
 
     def test_swift_apps_ship_complete_chinese_localization_resources(self):
         resources = ROOT / "swift_app/Resources"

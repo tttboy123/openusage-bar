@@ -22,8 +22,13 @@ from .cost_feed import DailyCostFeedCardAdapter
 from .daily_feed import DailyUsageFeedCardAdapter
 from .codex_subscription import CodexSubscriptionAdapter
 from .generic import GenericHTTPSAdapter
-from .keychain import MacOSKeychain
-from .kiro import KiroQuotaAdapter
+from .keychain import (
+    SERVICE,
+    InteractiveKeychainAuthorizer,
+    KeychainAuthorizationState,
+    MacOSKeychain,
+)
+from .kiro import KIRO_SOCIAL_SERVICE, KiroQuotaAdapter
 from .minimax import MiniMaxCodingPlanAdapter, minimax_endpoints_for_site
 from .moonshot import MoonshotBalanceAdapter
 from .models import Category, Overview, ProviderCard, ProviderStatus, canonical_category
@@ -68,6 +73,14 @@ _UI_TEXT = {
         ),
         "settings.add_provider": "Add Provider",
         "settings.provider_visibility": "Repair Visibility",
+        "settings.authorize_keychain": "Authorize Keychain Access",
+        "settings.authorize_keychain_help": (
+            "After an ad-hoc signed update, macOS may ask once per saved credential."
+        ),
+        "settings.authorizing_keychain": "Waiting for macOS Keychain approval…",
+        "settings.keychain_authorized": (
+            "Authorized {authorized} · missing {missing} · denied {denied}"
+        ),
         "settings.manage_title": "Manage Providers",
         "settings.manage_help": (
             "Choose which providers appear in the menu bar. Hidden providers keep "
@@ -106,6 +119,14 @@ _UI_TEXT = {
         ),
         "settings.add_provider": "添加 Provider",
         "settings.provider_visibility": "修复显示状态",
+        "settings.authorize_keychain": "授权钥匙串访问",
+        "settings.authorize_keychain_help": (
+            "本地签名版本升级后，macOS 可能会为每项已保存凭证请求一次授权。"
+        ),
+        "settings.authorizing_keychain": "正在等待 macOS 钥匙串授权…",
+        "settings.keychain_authorized": (
+            "已授权 {authorized} · 未找到 {missing} · 未允许 {denied}"
+        ),
         "settings.manage_title": "管理 Provider",
         "settings.manage_help": (
             "选择菜单栏中显示的 Provider。隐藏不会删除数据或凭证。"
@@ -161,6 +182,18 @@ class ProviderSection:
 class OperationResult:
     ok: bool
     message: str
+
+
+@dataclass(frozen=True)
+class KeychainAuthorizationSummary:
+    checked: int
+    authorized: int
+    missing: int
+    denied: int
+
+    @property
+    def ok(self) -> bool:
+        return self.denied == 0
 
 
 def configure_status_item(status_item, target, icon):
@@ -335,6 +368,37 @@ class ProviderController:
         self.store = store
         self.keychain = keychain
         self.resolver = resolver
+
+    def authorize_keychain_access(
+        self,
+        *,
+        authorizer: InteractiveKeychainAuthorizer | None = None,
+    ) -> KeychainAuthorizationSummary:
+        resolved = authorizer or InteractiveKeychainAuthorizer()
+        configs = self.store.load()
+        accounts = {
+            config.provider_id
+            for config in configs
+        }
+        for config in configs:
+            if isinstance(config, StepPlanConfig):
+                accounts.update({
+                    config.provider_id + STEP_PLAN_TOKEN_SUFFIX,
+                    config.provider_id + STEP_PLAN_WEBID_SUFFIX,
+                })
+        states = [
+            resolved.authorize(service=SERVICE, account=account)
+            for account in sorted(accounts)
+        ]
+        states.append(
+            resolved.authorize(service=KIRO_SOCIAL_SERVICE, account=None)
+        )
+        return KeychainAuthorizationSummary(
+            checked=len(states),
+            authorized=states.count(KeychainAuthorizationState.AUTHORIZED),
+            missing=states.count(KeychainAuthorizationState.MISSING),
+            denied=states.count(KeychainAuthorizationState.DENIED),
+        )
 
     def add_minimax(self, config: MiniMaxConfig, secret: str) -> OperationResult:
         if not secret.strip():
@@ -876,7 +940,7 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
         def _build_settings_window(self):
             style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
             self.settings_window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-                NSMakeRect(0, 0, 440, 210), style, NSBackingStoreBuffered, False
+                NSMakeRect(0, 0, 440, 270), style, NSBackingStoreBuffered, False
             )
             self.settings_window.setTitle_(self._text("settings.window_title"))
             self.settings_window.setDelegate_(self)
@@ -884,7 +948,7 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             content.addSubview_(
                 label(
                     self._text("settings.providers_title"),
-                    NSMakeRect(24, 160, 392, 24),
+                    NSMakeRect(24, 220, 392, 24),
                     16,
                     True,
                 )
@@ -892,18 +956,42 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
             content.addSubview_(
                 label(
                     self._text("settings.credentials_help"),
-                    NSMakeRect(24, 132, 392, 20),
+                    NSMakeRect(24, 192, 392, 20),
                     11,
                     False,
                     NSColor.secondaryLabelColor(),
                 )
             )
+            content.addSubview_(
+                label(
+                    self._text("settings.authorize_keychain_help"),
+                    NSMakeRect(24, 158, 392, 20),
+                    11,
+                    False,
+                    NSColor.secondaryLabelColor(),
+                )
+            )
+            self.settings_authorize = NSButton.buttonWithTitle_target_action_(
+                self._text("settings.authorize_keychain"),
+                self,
+                "authorizeKeychain:",
+            )
+            self.settings_authorize.setFrame_(NSMakeRect(24, 112, 190, 32))
+            content.addSubview_(self.settings_authorize)
             self.settings_manage = NSButton.buttonWithTitle_target_action_(
                 self._text("settings.provider_visibility"), self, "manageProviders:"
             )
-            self.settings_manage.setFrame_(NSMakeRect(146, 82, 148, 32))
+            self.settings_manage.setFrame_(NSMakeRect(238, 112, 178, 32))
             self.settings_manage.setEnabled_(False)
             content.addSubview_(self.settings_manage)
+            self.settings_authorization_status = label(
+                "",
+                NSMakeRect(24, 80, 392, 20),
+                11,
+                False,
+                NSColor.secondaryLabelColor(),
+            )
+            content.addSubview_(self.settings_authorization_status)
             self.settings_window.center()
             self.settings_window.makeKeyAndOrderFront_(None)
             NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
@@ -911,6 +999,33 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
         def _settings_refresh_worker(self):
             overview = self.aggregator.refresh()
             AppHelper.callAfter(self._apply_settings_overview, overview)
+
+        def authorizeKeychain_(self, _sender):
+            self.settings_authorize.setEnabled_(False)
+            self.settings_authorization_status.setStringValue_(
+                self._text("settings.authorizing_keychain")
+            )
+            threading.Thread(
+                target=self._authorize_keychain_worker,
+                daemon=True,
+            ).start()
+
+        def _authorize_keychain_worker(self):
+            try:
+                result = self.provider_controller.authorize_keychain_access()
+            except (OSError, ValueError):
+                result = KeychainAuthorizationSummary(0, 0, 0, 1)
+            AppHelper.callAfter(self._apply_keychain_authorization, result)
+
+        def _apply_keychain_authorization(self, result):
+            self.settings_authorize.setEnabled_(True)
+            self.settings_authorization_status.setStringValue_(
+                self._text("settings.keychain_authorized").format(
+                    authorized=result.authorized,
+                    missing=result.missing,
+                    denied=result.denied,
+                )
+            )
 
         def _apply_settings_overview(self, overview):
             self.all_overview = overview

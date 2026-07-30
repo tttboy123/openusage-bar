@@ -9,6 +9,8 @@ from openusage_bar.config import (
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
+from openusage_bar.keychain import KeychainAuthorizationState, SERVICE
+from openusage_bar.kiro import KIRO_SOCIAL_SERVICE
 from openusage_bar.step_plan import STEP_PLAN_TOKEN_SUFFIX, STEP_PLAN_WEBID_SUFFIX
 from openusage_bar.models import Category, Overview, ProviderCard, ProviderStatus
 from openusage_bar.ui import (
@@ -74,6 +76,81 @@ def daily_feed(endpoint="https://api.example.com/daily"):
 
 
 class UIModelTests(unittest.TestCase):
+    def test_foreground_keychain_authorization_checks_managed_and_kiro_items(self):
+        store = Mock()
+        store.load.return_value = [
+            MiniMaxConfig("minimax-work", "MiniMax"),
+            StepPlanConfig("step-work", "Step Plan"),
+            OpenAIOrganizationConfig("openai-work", "OpenAI Organization"),
+        ]
+        authorizer = Mock()
+        authorizer.authorize.side_effect = [
+            KeychainAuthorizationState.AUTHORIZED,
+            KeychainAuthorizationState.AUTHORIZED,
+            KeychainAuthorizationState.MISSING,
+            KeychainAuthorizationState.AUTHORIZED,
+            KeychainAuthorizationState.DENIED,
+            KeychainAuthorizationState.AUTHORIZED,
+        ]
+
+        result = ProviderController(
+            store, Mock()
+        ).authorize_keychain_access(authorizer=authorizer)
+
+        self.assertEqual(result.checked, 6)
+        self.assertEqual(result.authorized, 4)
+        self.assertEqual(result.missing, 1)
+        self.assertEqual(result.denied, 1)
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            authorizer.authorize.call_args_list,
+            [
+                unittest.mock.call(service=SERVICE, account="minimax-work"),
+                unittest.mock.call(service=SERVICE, account="openai-work"),
+                unittest.mock.call(service=SERVICE, account="step-work"),
+                unittest.mock.call(
+                    service=SERVICE,
+                    account="step-work.oasis-token",
+                ),
+                unittest.mock.call(
+                    service=SERVICE,
+                    account="step-work.oasis-webid",
+                ),
+                unittest.mock.call(
+                    service=KIRO_SOCIAL_SERVICE,
+                    account=None,
+                ),
+            ],
+        )
+
+    def test_foreground_keychain_authorization_deduplicates_accounts(self):
+        store = Mock()
+        store.load.return_value = [
+            MiniMaxConfig("shared", "MiniMax"),
+            StepPlanConfig("shared", "Step Plan"),
+        ]
+        authorizer = Mock()
+        authorizer.authorize.return_value = KeychainAuthorizationState.MISSING
+
+        result = ProviderController(
+            store, Mock()
+        ).authorize_keychain_access(authorizer=authorizer)
+
+        self.assertEqual(result.checked, 4)
+        accounts = [
+            call.kwargs["account"]
+            for call in authorizer.authorize.call_args_list
+        ]
+        self.assertEqual(
+            accounts,
+            [
+                "shared",
+                "shared.oasis-token",
+                "shared.oasis-webid",
+                None,
+            ],
+        )
+
     def test_openai_setup_requires_admin_key_and_persists_no_secret_in_config(self):
         store = Mock()
         store.load.return_value = []
