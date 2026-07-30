@@ -18,15 +18,29 @@ struct ProvidersPage: View {
         discoveredConnections.isEmpty ? data.providerInstances : discoveredConnections
     }
 
+    private var configuredFamilies: [String: String] {
+        Dictionary(uniqueKeysWithValues: configuredConnections.map {
+            ($0.providerID, $0.familyID)
+        })
+    }
+
+    private func sourceFamilyID(for providerID: String) -> String {
+        ProviderCenterPresentation.sourceFamilyID(
+            providerID: providerID,
+            configuredFamilies: configuredFamilies,
+            discoveredFamilyID: data.providerDescriptor(for: providerID).familyID
+        )
+    }
+
     private var allItems: [ProviderCenterItem] {
         let instances = Dictionary(grouping: providerInstances, by: \.familyID)
         let configured = Dictionary(grouping: configuredConnections, by: \.familyID)
         let observedFamilies = Set(data.availableProviderIDs.map {
-            data.providerDescriptor(for: $0).familyID
+            sourceFamilyID(for: $0)
         })
         let issues = Dictionary(grouping: data.health.sources.compactMap {
             source -> (String, ProviderSourceIssuePresentation)? in
-            let familyID = data.providerDescriptor(for: source.providerID).familyID
+            let familyID = sourceFamilyID(for: source.providerID)
             guard !ProviderCenterPresentation.isSystemIntegration(familyID) else { return nil }
             return (familyID, ProviderSourceIssuePresentation.make(from: source))
         }, by: { $0.0 }).mapValues { rows in rows.map { $0.1 } }
@@ -213,7 +227,7 @@ struct ProvidersPage: View {
 
     private func providerSources(for familyID: String) -> [SourceHealthItem] {
         data.health.sources.filter {
-            data.providerDescriptor(for: $0.providerID).familyID == familyID
+            sourceFamilyID(for: $0.providerID) == familyID
         }
     }
 
@@ -466,6 +480,22 @@ private struct ProviderConnectionDetail: View {
                     .font(.callout)
                     Divider()
                 }
+                if !capability.sourceStrategies.isEmpty {
+                    Text("Data Sources")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .padding(.top, 2)
+                    ForEach(
+                        Array(capability.sourceStrategies.enumerated()),
+                        id: \.offset
+                    ) { index, strategy in
+                        ProviderSourceStrategyRow(strategy: strategy)
+                        if index < capability.sourceStrategies.count - 1 {
+                            Divider()
+                        }
+                    }
+                }
             }
         }
     }
@@ -712,6 +742,10 @@ private struct ProviderConnectionDetail: View {
             return
         }
         let draft: ManagedConnectionDraft = switch connection.kind {
+        case "moonshot": .moonshot(
+            providerID: connection.providerID, name: connection.displayName,
+            site: connection.site ?? "china", replacementCredential: ""
+        )
         case "step_plan": .stepPlan(
             providerID: connection.providerID, name: connection.displayName,
             site: connection.site ?? "china", replacementCredential: "",
@@ -738,6 +772,7 @@ private struct ProviderConnectionDetail: View {
         ))
         default: .minimax(
             providerID: connection.providerID, name: connection.displayName,
+            site: connection.site ?? "china",
             replacementCredential: ""
         )
         }
@@ -831,6 +866,7 @@ private struct NativeProviderConnectionSheet: View {
         self.onSaved = onSaved
         let initialKind = switch descriptor.familyID {
         case "minimax": "minimax"
+        case "moonshot": "moonshot"
         case "step_plan": "step_plan"
         case "openai": "openai_organization"
         default: "generic"
@@ -859,12 +895,15 @@ private struct NativeProviderConnectionSheet: View {
                     Text("Quota API").tag("generic")
                     Text("Daily Usage Feed").tag("daily_usage_feed")
                     if descriptor.familyID == "minimax" { Text("MiniMax").tag("minimax") }
+                    if descriptor.familyID == "moonshot" {
+                        Text(AppLocalization.text("Kimi / Moonshot")).tag("moonshot")
+                    }
                     if descriptor.familyID == "step_plan" { Text("Step Plan").tag("step_plan") }
                     if descriptor.familyID == "openai" { Text("OpenAI Organization").tag("openai_organization") }
                 }
                 TextField("Connection ID", text: $providerID)
                 TextField("Account label", text: $name)
-                if kind == "step_plan" {
+                if ["minimax", "moonshot", "step_plan"].contains(kind) {
                     Picker("Site", selection: $site) {
                         Text("China").tag("china")
                         Text("International").tag("international")
@@ -961,7 +1000,12 @@ private struct NativeProviderConnectionSheet: View {
     private func makeDraft() -> ManagedConnectionDraft {
         switch kind {
         case "minimax": .minimax(
-            providerID: providerID, name: name, replacementCredential: credential
+            providerID: providerID, name: name, site: site,
+            replacementCredential: credential
+        )
+        case "moonshot": .moonshot(
+            providerID: providerID, name: name, site: site,
+            replacementCredential: credential
         )
         case "step_plan": .stepPlan(
             providerID: providerID, name: name, site: site,
@@ -993,6 +1037,61 @@ private struct NativeProviderConnectionSheet: View {
 
     private func emptyToNil(_ value: String) -> String? { value.isEmpty ? nil : value }
     private func clearSecrets() { credential = ""; session = "" }
+}
+
+private struct ProviderSourceStrategyRow: View {
+    let strategy: ProviderSourceStrategyPresentation
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            horizontalLayout
+                .fixedSize(horizontal: true, vertical: false)
+            verticalLayout
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var horizontalLayout: some View {
+        HStack(alignment: .top, spacing: 18) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(strategy.kindTitle)
+                    .font(.callout.weight(.medium))
+                Text(strategy.factSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 18)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(strategy.trustSummary)
+                    .font(.callout)
+                Text("\(strategy.scopeSummary) · \(strategy.platforms)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private var verticalLayout: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(strategy.kindTitle)
+                    .font(.callout.weight(.medium))
+                Spacer(minLength: 12)
+                Text(strategy.platforms)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(strategy.factSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(strategy.trustSummary)
+                .font(.callout)
+            Text(strategy.scopeSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
 }
 
 private struct ProviderDetailSection<Content: View>: View {

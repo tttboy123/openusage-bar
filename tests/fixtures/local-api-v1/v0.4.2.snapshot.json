@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0",
+  "dataRevision": 9,
+  "generatedAt": "2026-07-18T01:02:00Z",
+  "localDay": "2026-07-18",
+  "summary": {
+    "todayTokens": 42,
+    "modelCount": 1,
+    "coveredDayCount": 1
+  },
+  "quotaWindows": [],
+  "providers": [],
+  "sources": [],
+  "catalogRevision": "v0.4.2-fixture"
+}

@@ -94,6 +94,7 @@ class DailyUsageFeedImporterTests(unittest.TestCase):
             (200, 80, 20, 10, 310),
         )
         self.assertEqual((row.cost_amount, row.cost_currency, row.cost_basis), ("2.5", "CNY", "provider_reported"))
+        self.assertEqual(row.token_counting_convention, "components_disjoint")
         self.assertNotIn("must-not-be-stored", repr(result).lower())
         keychain.get.assert_called_once_with("glm-work")
         url, headers = client.get_json.call_args.args

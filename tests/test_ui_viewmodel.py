@@ -9,6 +9,8 @@ from openusage_bar.config import (
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
+from openusage_bar.keychain import KeychainAuthorizationState, SERVICE
+from openusage_bar.kiro import KIRO_SOCIAL_SERVICE
 from openusage_bar.step_plan import STEP_PLAN_TOKEN_SUFFIX, STEP_PLAN_WEBID_SUFFIX
 from openusage_bar.models import Category, Overview, ProviderCard, ProviderStatus
 from openusage_bar.ui import (
@@ -74,6 +76,81 @@ def daily_feed(endpoint="https://api.example.com/daily"):
 
 
 class UIModelTests(unittest.TestCase):
+    def test_foreground_keychain_authorization_checks_managed_and_kiro_items(self):
+        store = Mock()
+        store.load.return_value = [
+            MiniMaxConfig("minimax-work", "MiniMax"),
+            StepPlanConfig("step-work", "Step Plan"),
+            OpenAIOrganizationConfig("openai-work", "OpenAI Organization"),
+        ]
+        authorizer = Mock()
+        authorizer.authorize.side_effect = [
+            KeychainAuthorizationState.AUTHORIZED,
+            KeychainAuthorizationState.AUTHORIZED,
+            KeychainAuthorizationState.MISSING,
+            KeychainAuthorizationState.AUTHORIZED,
+            KeychainAuthorizationState.DENIED,
+            KeychainAuthorizationState.AUTHORIZED,
+        ]
+
+        result = ProviderController(
+            store, Mock()
+        ).authorize_keychain_access(authorizer=authorizer)
+
+        self.assertEqual(result.checked, 6)
+        self.assertEqual(result.authorized, 4)
+        self.assertEqual(result.missing, 1)
+        self.assertEqual(result.denied, 1)
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            authorizer.authorize.call_args_list,
+            [
+                unittest.mock.call(service=SERVICE, account="minimax-work"),
+                unittest.mock.call(service=SERVICE, account="openai-work"),
+                unittest.mock.call(service=SERVICE, account="step-work"),
+                unittest.mock.call(
+                    service=SERVICE,
+                    account="step-work.oasis-token",
+                ),
+                unittest.mock.call(
+                    service=SERVICE,
+                    account="step-work.oasis-webid",
+                ),
+                unittest.mock.call(
+                    service=KIRO_SOCIAL_SERVICE,
+                    account=None,
+                ),
+            ],
+        )
+
+    def test_foreground_keychain_authorization_deduplicates_accounts(self):
+        store = Mock()
+        store.load.return_value = [
+            MiniMaxConfig("shared", "MiniMax"),
+            StepPlanConfig("shared", "Step Plan"),
+        ]
+        authorizer = Mock()
+        authorizer.authorize.return_value = KeychainAuthorizationState.MISSING
+
+        result = ProviderController(
+            store, Mock()
+        ).authorize_keychain_access(authorizer=authorizer)
+
+        self.assertEqual(result.checked, 4)
+        accounts = [
+            call.kwargs["account"]
+            for call in authorizer.authorize.call_args_list
+        ]
+        self.assertEqual(
+            accounts,
+            [
+                "shared",
+                "shared.oasis-token",
+                "shared.oasis-webid",
+                None,
+            ],
+        )
+
     def test_openai_setup_requires_admin_key_and_persists_no_secret_in_config(self):
         store = Mock()
         store.load.return_value = []
@@ -243,14 +320,13 @@ class UIModelTests(unittest.TestCase):
         store = Mock()
         store.load.return_value = [config]
         default_client = Mock(name="default-client")
-        minimax_client = Mock(name="minimax-client")
         step_client = Mock(name="step-client")
         step_adapter = Mock(name="step-adapter")
 
         with (
             patch(
                 "openusage_bar.ui.BoundedHTTPClient",
-                side_effect=[default_client, minimax_client, step_client],
+                side_effect=[default_client, step_client],
             ) as client_factory,
             patch("openusage_bar.ui.OpenUsageAdapter", return_value=Mock()),
             patch("openusage_bar.ui.KiroQuotaAdapter", return_value=Mock()),
@@ -265,6 +341,40 @@ class UIModelTests(unittest.TestCase):
         )
         adapter_factory.assert_called_once_with(config, unittest.mock.ANY, step_client, unittest.mock.ANY)
         self.assertIn(step_adapter, aggregator.adapters)
+
+    def test_minimax_uses_a_site_locked_client_that_cannot_cross_regions(self):
+        config = MiniMaxConfig(
+            "minimax-global", "MiniMax Global", site="international"
+        )
+        store = Mock()
+        store.load.return_value = [config]
+        default_client = Mock(name="default-client")
+        minimax_client = Mock(name="minimax-client")
+        minimax_adapter = Mock(name="minimax-adapter")
+
+        with (
+            patch(
+                "openusage_bar.ui.BoundedHTTPClient",
+                side_effect=[default_client, minimax_client],
+            ) as client_factory,
+            patch("openusage_bar.ui.OpenUsageAdapter", return_value=Mock()),
+            patch("openusage_bar.ui.KiroQuotaAdapter", return_value=Mock()),
+            patch("openusage_bar.ui.CodexSubscriptionAdapter", return_value=Mock()),
+            patch(
+                "openusage_bar.ui.MiniMaxCodingPlanAdapter",
+                return_value=minimax_adapter,
+            ) as adapter_factory,
+        ):
+            aggregator = _build_aggregator(store, Mock())
+
+        client_factory.assert_any_call(
+            allowed_reserved_hosts={"www.minimax.io"},
+            allowed_redirect_hosts=set(),
+        )
+        adapter_factory.assert_called_once_with(
+            config, unittest.mock.ANY, minimax_client, unittest.mock.ANY
+        )
+        self.assertIn(minimax_adapter, aggregator.adapters)
 
     def test_visibility_drives_status_title_and_provider_count_together(self):
         status_button = Mock()

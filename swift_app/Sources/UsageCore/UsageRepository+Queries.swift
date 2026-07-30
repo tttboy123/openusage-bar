@@ -15,6 +15,9 @@ extension UsageRepository {
                     let account = try requiredText(statement, 2)
                     let model = try requiredText(statement, 3)
                     let source = try requiredText(statement, 16)
+                    let tokenCountingConvention = TokenCountingConvention(
+                        rawValue: try requiredText(statement, 17)
+                    ) ?? .unknown
                     guard Self.isStableID(source) else {
                         throw RepositoryError.corruptData
                     }
@@ -33,13 +36,49 @@ extension UsageRepository {
                         importedAt: try requiredText(statement, 14),
                         revision: try requiredInt64(statement, 15),
                         recordID: "daily:\(day.rawValue):\(provider):\(account):\(model)",
-                        sourceID: source
+                        sourceID: source,
+                        tokenCountingConvention: tokenCountingConvention
                     ))
                 case SQLITE_DONE: return rows
                 default: throw RepositoryError.corruptData
                 }
             }
         }
+    }
+
+    /// Returns a correlated, read-only expression only when the optional
+    /// rollback-compatible sidecar has the exact trusted shape. Old ledgers,
+    /// malformed sidecars, stale hashes, and unknown enum values all degrade to
+    /// `unknown` without making canonical usage facts unreadable.
+    func tokenCountingConventionExpression(_ database: OpaquePointer) throws -> String {
+        let signature = try queryColumnSignature(
+            database, table: "daily_token_conventions"
+        )
+        let expected: [SchemaColumn] = [
+            .required("day", "TEXT", primaryKey: 1),
+            .required("provider_id", "TEXT", primaryKey: 2),
+            .required("account_ref", "TEXT", defaultValue: "''", primaryKey: 3),
+            .required("model_id", "TEXT", primaryKey: 4),
+            .required("token_counting_convention", "TEXT"),
+            .required("daily_payload_hash", "TEXT"),
+        ]
+        guard signature == expected else { return "'unknown'" }
+        return """
+        COALESCE((
+          SELECT CASE
+            WHEN token_sidecar.token_counting_convention IN (
+              'input_includes_cache','components_disjoint','provider_reported','unknown'
+            ) THEN token_sidecar.token_counting_convention
+            ELSE 'unknown'
+          END
+          FROM daily_token_conventions AS token_sidecar
+          WHERE token_sidecar.day=usage.day
+            AND token_sidecar.provider_id=usage.provider_id
+            AND token_sidecar.account_ref=usage.account_ref
+            AND token_sidecar.model_id=usage.model_id
+            AND token_sidecar.daily_payload_hash=usage.payload_hash
+        ),'unknown')
+        """
     }
 
     func queryDailyCosts(

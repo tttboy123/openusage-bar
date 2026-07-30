@@ -9,6 +9,7 @@ from openusage_bar.config import (
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
+    MoonshotConfig,
     OpenAIOrganizationConfig,
     ProviderConfigStore,
     StepPlanConfig,
@@ -167,6 +168,28 @@ class ProviderConfigTests(unittest.TestCase):
 
             self.assertEqual(config.site, "china")
 
+    def test_legacy_minimax_without_site_migrates_to_china(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "providers.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "providers": [
+                            {
+                                "type": "minimax",
+                                "provider_id": "minimax-main",
+                                "name": "MiniMax",
+                            }
+                        ],
+                    }
+                )
+            )
+
+            config = ProviderConfigStore(path).load()[0]
+
+            self.assertEqual(config.site, "china")
+
     def test_rejects_unknown_step_plan_site(self):
         with tempfile.TemporaryDirectory() as directory:
             store = ProviderConfigStore(Path(directory) / "providers.json")
@@ -175,6 +198,41 @@ class ProviderConfigTests(unittest.TestCase):
                 store.save(
                     [StepPlanConfig("step-plan-main", "Step Plan", site="unknown")]
                 )
+
+    def test_rejects_unknown_minimax_site(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProviderConfigStore(Path(directory) / "providers.json")
+
+            with self.assertRaises(ValueError):
+                store.save(
+                    [MiniMaxConfig("minimax-main", "MiniMax", site="unknown")]
+                )
+
+    def test_moonshot_sites_round_trip_without_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "providers.json"
+            store = ProviderConfigStore(path)
+            configs = [
+                MoonshotConfig(
+                    "moonshot-cn", "Kimi China", site="china", account_ref="cn"
+                ),
+                MoonshotConfig(
+                    "moonshot-global",
+                    "Kimi International",
+                    site="international",
+                    account_ref="global",
+                ),
+            ]
+
+            store.save(configs)
+
+            self.assertEqual(store.load(), configs)
+            payload = path.read_text()
+            self.assertNotIn("api_key", payload.lower())
+            with self.assertRaises(ValueError):
+                store.save([
+                    MoonshotConfig("moonshot-bad", "Kimi", site="unknown")
+                ])
 
     def test_serialization_omits_secrets_and_uses_private_mode(self):
         with tempfile.TemporaryDirectory() as directory:

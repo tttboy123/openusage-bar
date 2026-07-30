@@ -68,6 +68,32 @@ class SettingsEntrypointTests(unittest.TestCase):
         self.assertEqual(payload["schemaVersion"], "1.0")
         self.assertEqual(payload["providers"], [])
 
+    def test_real_packaging_entry_script_serves_snapshot_json_offline(self):
+        with tempfile.TemporaryDirectory() as home:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "openusage_settings.py",
+                    "snapshot",
+                    "--format",
+                    "json",
+                    "--offline",
+                ],
+                shell=False,
+                check=False,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "HOME": home},
+                timeout=10,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stderr, "")
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["schemaVersion"], "1.0")
+        self.assertEqual(payload["dataRevision"], 0)
+        self.assertIsNone(payload["summary"]["todayTokens"])
+
     def test_unknown_arguments_fail_without_opening_settings(self):
         with patch.object(sys, "argv", ["openusage_settings.py", "--unexpected"]), patch(
             "openusage_bar.ui.run_provider_settings"
@@ -89,6 +115,18 @@ class SettingsEntrypointTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 0)
         mutate.assert_called_once_with(sys.stdin, sys.stdout)
+
+    def test_private_keychain_operation_is_dispatched_without_opening_appkit(self):
+        with patch.object(
+            sys, "argv", ["openusage_settings.py", "__keychain-write"]
+        ), patch(
+            "openusage_bar.keychain.run_native_keychain_write", return_value=0
+        ) as operation, patch.dict(sys.modules, {"openusage_bar.ui": None}):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path("openusage_settings.py", run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 0)
+        operation.assert_called_once_with(sys.stdin.buffer, sys.stdout.buffer)
 
 
 if __name__ == "__main__":

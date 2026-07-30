@@ -216,14 +216,18 @@ class OpenAIOrganizationImporter:
                         raise _InvalidResponse("invalid usage result")
                     input_tokens = self._token(raw.get("input_tokens"))
                     output_tokens = self._token(raw.get("output_tokens"))
-                    cached_tokens = self._token(raw.get("input_cached_tokens"))
-                    if cached_tokens > input_tokens:
-                        raise _InvalidResponse("cached input exceeds input")
+                    cached_tokens = self._token(raw.get("input_cached_tokens", 0))
+                    cache_write_tokens = self._token(
+                        raw.get("input_cache_write_tokens", 0)
+                    )
+                    if cached_tokens + cache_write_tokens > input_tokens:
+                        raise _InvalidResponse("cache input exceeds input")
                     model = self._model(raw.get("model"))
-                    aggregate = totals.setdefault((day, model), [0, 0, 0])
+                    aggregate = totals.setdefault((day, model), [0, 0, 0, 0])
                     aggregate[0] += input_tokens
                     aggregate[1] += output_tokens
                     aggregate[2] += cached_tokens
+                    aggregate[3] += cache_write_tokens
                     if any(value > 9_223_372_036_854_775_807 for value in aggregate):
                         raise _InvalidResponse("token sum overflow")
         rows = [
@@ -235,7 +239,7 @@ class OpenAIOrganizationImporter:
                 input_tokens=values[0],
                 output_tokens=values[1],
                 cache_read_tokens=values[2],
-                cache_creation_tokens=0,
+                cache_creation_tokens=values[3],
                 reasoning_tokens=None,
                 total_tokens=values[0] + values[1],
                 cost_amount=None,
@@ -243,6 +247,7 @@ class OpenAIOrganizationImporter:
                 cost_basis=None,
                 quality="direct",
                 imported_at=imported_at,
+                token_counting_convention="input_includes_cache",
             )
             for (day, model), values in sorted(totals.items())
         ]

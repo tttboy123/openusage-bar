@@ -1,5 +1,13 @@
 # OpenUsage Bar Release and 1.0 Readiness Implementation Plan
 
+> **Status (2026-07-19): Implemented and CI/pre-release verified; live
+> verification pending.** Release metadata, dependency/artifact audits,
+> manifest/SBOM/provenance, DMG packaging, diagnostics, and isolated
+> install/upgrade/rollback gates pass on `main@9cd134a`. GitHub ruleset evidence
+> and the 30-day external canary remain pending; 1.0 is not complete. Track the
+> remaining gates in the [roadmap](../../../ROADMAP.md). Historical checkboxes
+> below are preserved as authored.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the current source-ready pre-release into a repeatable, auditable, source-first open-source release with safe installation, upgrade, rollback, and external canary evidence.

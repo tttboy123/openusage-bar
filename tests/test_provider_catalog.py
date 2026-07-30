@@ -5,10 +5,15 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 from openusage_bar.provider_catalog import (
+    ACCOUNT_SCOPES,
     CREDENTIAL_TYPES,
     METRIC_FAMILIES,
+    MODEL_SCOPES,
     PROVIDER_CATEGORIES,
+    SOURCE_AUTHORITIES,
+    SOURCE_FACT_FAMILIES,
     SOURCE_KINDS,
+    SOURCE_VERIFICATIONS,
     ProviderCatalog,
     load_provider_catalog,
 )
@@ -117,8 +122,8 @@ class ProviderCatalogTests(unittest.TestCase):
             "opencode": {"subscription_quota", "token_activity", "billing"},
             "gemini_cli": {"subscription_quota", "token_activity"},
             "kiro_cli": {"subscription_quota", "token_activity"},
-            "minimax": {"subscription_quota"},
-            "step_plan": {"subscription_quota", "billing"},
+            "minimax": {"subscription_quota", "token_activity"},
+            "step_plan": {"subscription_quota"},
             "ollama": {"token_activity"},
         }
         for family_id in {
@@ -193,6 +198,8 @@ class ProviderCatalogTests(unittest.TestCase):
         source_fields = {
             "source_id", "kind", "timeout_seconds", "freshness_seconds",
             "credential_type", "operating_systems", "stability", "provenance",
+            "fact_families", "authority", "account_scope", "model_scope",
+            "verification",
         }
         for family in payload["families"]:
             with self.subTest(family=family["id"]):
@@ -211,14 +218,146 @@ class ProviderCatalogTests(unittest.TestCase):
                     )
                     self.assertEqual(set(source), expected)
 
+    def test_source_evidence_metadata_is_explicit_and_conservative(self):
+        codex_local, codex_openusage = self.catalog.require("codex").sources
+        self.assertEqual(
+            codex_local.fact_families,
+            frozenset({"detection", "subscription_capacity", "token_activity"}),
+        )
+        self.assertEqual(codex_local.authority, "provider_local")
+        self.assertEqual(codex_local.account_scope, "local_profile")
+        self.assertEqual(codex_local.model_scope, "mixed")
+        self.assertEqual(codex_local.verification, "live_account")
+
+        self.assertEqual(
+            codex_openusage.fact_families,
+            frozenset({"detection", "token_activity"}),
+        )
+        self.assertEqual(codex_openusage.authority, "third_party")
+        self.assertEqual(codex_openusage.verification, "fixture")
+
+        cursor_openusage = self.catalog.require("cursor").sources[0]
+        self.assertEqual(
+            cursor_openusage.fact_families,
+            frozenset(
+                {
+                    "api_spend",
+                    "detection",
+                    "subscription_capacity",
+                    "token_activity",
+                }
+            ),
+        )
+        self.assertEqual(cursor_openusage.timeout_seconds, 40)
+        self.assertEqual(cursor_openusage.authority, "third_party")
+        self.assertEqual(cursor_openusage.account_scope, "local_profile")
+        self.assertEqual(cursor_openusage.model_scope, "mixed")
+        self.assertEqual(cursor_openusage.verification, "live_account")
+        cursor_capabilities = self.catalog.require("cursor").capabilities
+        self.assertEqual(cursor_capabilities.quota_windows.state, "supported")
+        self.assertEqual(
+            cursor_capabilities.quota_windows.values,
+            ("billing_cycle",),
+        )
+        self.assertEqual(cursor_capabilities.reset_timestamps, "unknown")
+
+        kiro_keychain, kiro_quota, kiro_openusage = self.catalog.require(
+            "kiro_cli"
+        ).sources
+        self.assertEqual(kiro_keychain.fact_families, frozenset({"detection"}))
+        self.assertEqual(kiro_keychain.kind, "keychain")
+        self.assertEqual(kiro_keychain.timeout_seconds, 5)
+        self.assertEqual(kiro_keychain.authority, "provider_local")
+        self.assertEqual(kiro_keychain.verification, "live_account")
+
+        self.assertEqual(
+            kiro_quota.fact_families,
+            frozenset({"subscription_capacity"}),
+        )
+        self.assertEqual(kiro_quota.kind, "official_api")
+        self.assertEqual(kiro_quota.authority, "provider_official")
+        self.assertEqual(kiro_quota.account_scope, "local_profile")
+        self.assertEqual(kiro_quota.model_scope, "aggregate")
+        self.assertEqual(kiro_quota.verification, "live_account")
+
+        self.assertEqual(
+            kiro_openusage.fact_families,
+            frozenset({"detection", "token_activity"}),
+        )
+        self.assertEqual(kiro_openusage.authority, "third_party")
+        self.assertEqual(kiro_openusage.verification, "live_account")
+
+        openai = self.catalog.require("openai")
+        self.assertTrue(openai.supports_accounts)
+        openai_admin, openai_openusage = openai.sources
+        self.assertEqual(
+            openai_admin.fact_families,
+            frozenset({"api_spend", "detection", "token_activity"}),
+        )
+        self.assertEqual(openai_admin.kind, "official_api")
+        self.assertEqual(openai_admin.authority, "provider_official")
+        self.assertEqual(openai_admin.account_scope, "organization")
+        self.assertEqual(openai_admin.model_scope, "per_model")
+        self.assertEqual(openai_admin.verification, "fixture")
+        self.assertEqual(
+            openai_openusage.fact_families,
+            frozenset({"detection", "token_activity"}),
+        )
+        self.assertEqual(openai_openusage.authority, "third_party")
+        self.assertEqual(openai_openusage.verification, "fixture")
+
+        minimax, minimax_billing = self.catalog.require("minimax").sources[:2]
+        self.assertEqual(
+            minimax.fact_families,
+            frozenset({"detection", "subscription_capacity"}),
+        )
+        self.assertEqual(minimax.authority, "provider_official")
+        self.assertEqual(minimax.account_scope, "configured_account")
+        self.assertEqual(minimax.model_scope, "mixed")
+        self.assertEqual(minimax.verification, "live_account")
+        self.assertEqual(
+            minimax_billing.fact_families,
+            frozenset({"token_activity"}),
+        )
+        self.assertEqual(minimax_billing.stability, "experimental")
+        self.assertEqual(minimax_billing.model_scope, "per_model")
+        self.assertEqual(minimax_billing.verification, "live_account")
+
+        for family_id in ("claude_code", "opencode", "hermes", "openclaw"):
+            family = self.catalog.require(family_id)
+            source = family.sources[0]
+            with self.subTest(family=family_id):
+                self.assertEqual(family.capabilities.quota_windows.state, "unknown")
+                self.assertEqual(family.capabilities.quota_windows.values, ())
+                self.assertEqual(source.source_id, "openusage")
+                self.assertEqual(
+                    source.fact_families,
+                    frozenset({"api_spend", "detection", "token_activity"}),
+                )
+                self.assertEqual(source.authority, "third_party")
+                self.assertEqual(source.account_scope, "local_profile")
+                self.assertEqual(source.model_scope, "per_model")
+                self.assertEqual(source.verification, "live_account")
+
+        for family in self.catalog.families:
+            for source in family.sources:
+                with self.subTest(family=family.family_id, source=source.source_id):
+                    self.assertTrue(source.fact_families)
+                    self.assertTrue(source.fact_families <= SOURCE_FACT_FAMILIES)
+                    self.assertIn(source.authority, SOURCE_AUTHORITIES)
+                    self.assertIn(source.account_scope, ACCOUNT_SCOPES)
+                    self.assertIn(source.model_scope, MODEL_SCOPES)
+                    self.assertIn(source.verification, SOURCE_VERIFICATIONS)
+
     def test_all_37_families_encode_only_conservative_known_capabilities(self):
         quota_windows = {
             "codex": ["five_hour", "weekly"],
+            "cursor": ["billing_cycle"],
             "kiro_cli": ["billing_cycle"],
             "minimax": ["five_hour", "weekly"],
             "step_plan": ["five_hour", "weekly"],
         }
-        reset_providers = set(quota_windows)
+        reset_providers = {"codex", "kiro_cli", "minimax", "step_plan"}
         credit_providers = {"kiro_cli", "step_plan"}
 
         self.assertEqual(len(self.catalog.families), 37)
@@ -250,7 +389,12 @@ class ProviderCatalogTests(unittest.TestCase):
                     "supported" if family.family_id in credit_providers else "unknown"
                 )
                 self.assertEqual(capabilities.credits, credit_state)
-                self.assertEqual(capabilities.balance, credit_state)
+                self.assertEqual(
+                    capabilities.balance,
+                    "supported"
+                    if family.family_id == "moonshot"
+                    else credit_state,
+                )
                 self.assertEqual(
                     capabilities.cost,
                     "supported" if family.family_id == "openai" else "unknown",
@@ -266,6 +410,11 @@ class ProviderCatalogTests(unittest.TestCase):
             "kiro_keychain": ("stable", "provider_local"),
             "kiro_codewhisperer_api": ("stable", "provider_official"),
             "minimax_builtin_api": ("stable", "openusage_bar_builtin"),
+            "minimax_china_billing_web": (
+                "experimental",
+                "openusage_bar_builtin",
+            ),
+            "moonshot_official_api": ("stable", "provider_official"),
             "step_plan_browser_session": ("experimental", "user_session"),
             "step_plan_official_api": ("stable", "provider_official"),
         }
@@ -358,6 +507,27 @@ class ProviderCatalogTests(unittest.TestCase):
             ),
             "missing stability": lambda value: source(value).pop("stability"),
             "missing provenance": lambda value: source(value).pop("provenance"),
+            "missing fact families": lambda value: source(value).pop(
+                "fact_families"
+            ),
+            "empty fact families": lambda value: source(value).update(
+                {"fact_families": []}
+            ),
+            "invalid fact family": lambda value: source(value).update(
+                {"fact_families": ["telemetry"]}
+            ),
+            "invalid authority": lambda value: source(value).update(
+                {"authority": "trusted"}
+            ),
+            "invalid account scope": lambda value: source(value).update(
+                {"account_scope": "email"}
+            ),
+            "invalid model scope": lambda value: source(value).update(
+                {"model_scope": "all"}
+            ),
+            "invalid verification": lambda value: source(value).update(
+                {"verification": "probably"}
+            ),
             "unknown source field": lambda value: source(value).update(
                 {"future": "value"}
             ),
@@ -386,6 +556,79 @@ class ProviderCatalogTests(unittest.TestCase):
                 mutate(candidate)
                 with self.assertRaises(ValueError):
                     self._load_payload(candidate)
+
+    def test_source_fact_evidence_must_match_supported_capabilities(self):
+        payload = self._capability_payload()
+
+        def family(value, family_id):
+            return next(item for item in value["families"] if item["id"] == family_id)
+
+        mutations = {
+            "supported token history without token source": lambda value: [
+                source.update({
+                    "fact_families": [
+                        fact for fact in source["fact_families"]
+                        if fact != "token_activity"
+                    ]
+                })
+                for source in family(value, "codex")["sources"]
+            ],
+            "supported quota without capacity source": lambda value: [
+                source.update({
+                    "fact_families": [
+                        fact for fact in source["fact_families"]
+                        if fact != "subscription_capacity"
+                    ]
+                })
+                for source in family(value, "codex")["sources"]
+            ],
+            "api spend without cost capability": lambda value: family(
+                value, "codex"
+            )["sources"][0].update({
+                "fact_families": [
+                    "api_spend",
+                    *family(value, "codex")["sources"][0]["fact_families"],
+                ]
+            }),
+            "supported billing without api spend source": lambda value: [
+                source.update({
+                    "fact_families": [
+                        fact for fact in source["fact_families"]
+                        if fact != "api_spend"
+                    ]
+                })
+                for source in family(value, "alibaba_cloud")["sources"]
+            ],
+            "token source without token capability": lambda value: family(
+                value, "anthropic"
+            )["sources"][0].update({
+                "fact_families": ["detection", "token_activity"]
+            }),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(case=label):
+                candidate = json.loads(json.dumps(payload))
+                mutate(candidate)
+                with self.assertRaisesRegex(ValueError, "fact evidence"):
+                    self._load_payload(candidate)
+
+    def test_supported_billing_or_cost_requires_api_spend_source_evidence(self):
+        for family in self.catalog.families:
+            capabilities = family.capabilities
+            spend_supported = (
+                capabilities.billing == "supported"
+                or capabilities.cost == "supported"
+            )
+            declared_facts = {
+                fact
+                for source in family.sources
+                for fact in source.fact_families
+            }
+            with self.subTest(family=family.family_id):
+                self.assertEqual(
+                    "api_spend" in declared_facts,
+                    spend_supported,
+                )
 
     def test_catalog_container_cannot_diverge_from_its_lookup_index(self):
         original_ids = self.catalog.family_ids
@@ -463,7 +706,11 @@ class ProviderCatalogTests(unittest.TestCase):
         )
         self.assertEqual(
             [source.source_id for source in self.catalog.require("minimax").sources],
-            ["minimax_builtin_api", "openusage"],
+            [
+                "minimax_builtin_api",
+                "minimax_china_billing_web",
+                "openusage",
+            ],
         )
         self.assertEqual(
             [source.source_id for source in self.catalog.require("openai").sources],
@@ -480,19 +727,28 @@ class ProviderCatalogTests(unittest.TestCase):
             "kiro_cli": [
                 "kiro_keychain", "kiro_codewhisperer_api", "openusage"
             ],
-            "minimax": ["minimax_builtin_api", "openusage"],
+            "minimax": [
+                "minimax_builtin_api",
+                "minimax_china_billing_web",
+                "openusage",
+            ],
+            "moonshot": ["moonshot_official_api", "openusage"],
             "openai": ["openai_admin_api", "openusage"],
             "step_plan": [
                 "step_plan_browser_session", "step_plan_official_api"
             ],
         }
-        for family_id in EXPECTED_UPSTREAM - {"codex", "kiro_cli", "openai"}:
+        for family_id in EXPECTED_UPSTREAM - {
+            "codex", "kiro_cli", "moonshot", "openai"
+        }:
             special[family_id] = ["openusage"]
         expected_scopes = {
             ("openai", "openai_admin_api"): "openai_admin_api_key",
             ("kiro_cli", "kiro_keychain"): "kiro",
             ("kiro_cli", "kiro_codewhisperer_api"): "kiro",
             ("minimax", "minimax_builtin_api"): "minimax",
+            ("minimax", "minimax_china_billing_web"): "minimax",
+            ("moonshot", "moonshot_official_api"): "moonshot_api_key",
             ("step_plan", "step_plan_browser_session"): "step_plan_session",
             ("step_plan", "step_plan_official_api"): "step_plan_api_key",
         }
@@ -537,6 +793,11 @@ class ProviderCatalogTests(unittest.TestCase):
                     "operating_systems": ["macos"],
                     "stability": "stable",
                     "provenance": "provider_official",
+                    "fact_families": ["detection"],
+                    "authority": "provider_official",
+                    "account_scope": "configured_account",
+                    "model_scope": "aggregate",
+                    "verification": "unverified",
                 },
             ),
             "scope added to codex local log": lambda value: family(
@@ -763,6 +1024,11 @@ class ProviderCatalogTests(unittest.TestCase):
             "kiro_keychain": ("stable", "provider_local"),
             "kiro_codewhisperer_api": ("stable", "provider_official"),
             "minimax_builtin_api": ("stable", "openusage_bar_builtin"),
+            "minimax_china_billing_web": (
+                "experimental",
+                "openusage_bar_builtin",
+            ),
+            "moonshot_official_api": ("stable", "provider_official"),
             "step_plan_browser_session": ("experimental", "user_session"),
             "step_plan_official_api": ("stable", "provider_official"),
         }
@@ -794,7 +1060,9 @@ class ProviderCatalogTests(unittest.TestCase):
                     else "unknown"
                 ),
                 "credits": credit_state,
-                "balance": credit_state,
+                "balance": (
+                    "supported" if family["id"] == "moonshot" else credit_state
+                ),
                 "cost": "supported" if family["id"] == "openai" else "unknown",
                 "rate_limits": "unknown",
                 "service_status": "unknown",

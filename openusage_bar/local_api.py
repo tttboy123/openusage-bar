@@ -262,6 +262,7 @@ class LocalAPIRouter:
         "/v1/snapshot",
         "/v1/capabilities",
         "/v1/providers", "/v1/capacity", "/v1/activity/daily",
+        "/v1/balances",
         "/v1/costs/daily",
         "/v1/quotas/history",
         "/v1/sources/status", "/v1/changes",
@@ -404,6 +405,7 @@ class LocalAPIRouter:
             "/v1/capabilities": (),
             "/v1/providers": ("providerIds",),
             "/v1/capacity": ("limit",),
+            "/v1/balances": ("limit",),
             "/v1/activity/daily": ("from", "to", "providerIds", "modelIds"),
             "/v1/costs/daily": ("from", "to", "providerIds", "currencies"),
             "/v1/quotas/history": ("providerId", "accountRef", "from", "to", "limit"),
@@ -437,6 +439,11 @@ class LocalAPIRouter:
             if route == "/v1/capacity":
                 limit = _integer(params["limit"], "limit", minimum=1, maximum=MAX_LIMIT) if "limit" in params else None
                 return to_wire(self.query.capacity(limit))
+            if route == "/v1/balances":
+                limit = _integer(
+                    params["limit"], "limit", minimum=1, maximum=MAX_LIMIT
+                ) if "limit" in params else None
+                return to_wire(self.query.balances(limit))
             if route == "/v1/activity/daily":
                 if "from" not in params or "to" not in params:
                     raise _error(HTTPStatus.BAD_REQUEST, "missing_parameter", "Required parameter is missing.")
@@ -548,6 +555,13 @@ class LocalAPIRouter:
                         ),
                         "stability": source.stability.value,
                         "provenance": source.provenance.value,
+                        "factFamilies": sorted(
+                            value.value for value in source.fact_families
+                        ),
+                        "authority": source.authority.value,
+                        "accountScope": source.account_scope.value,
+                        "modelScope": source.model_scope.value,
+                        "verification": source.verification.value,
                     } for source in item.sources],
                 } for item in descriptors]
                 return {

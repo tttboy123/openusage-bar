@@ -7,6 +7,7 @@ from openusage_bar.config import (
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
+    MoonshotConfig,
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
@@ -26,7 +27,16 @@ class ProviderMutationCommandTests(unittest.TestCase):
 
     def test_v2_creates_each_managed_connection_without_returning_secrets(self):
         cases = [
-            ("minimax", "minimax-work", {"name": "MiniMax Work"}),
+            (
+                "minimax",
+                "minimax-work",
+                {"name": "MiniMax Work", "site": "international"},
+            ),
+            (
+                "moonshot",
+                "moonshot-work",
+                {"name": "Kimi Work", "site": "china"},
+            ),
             ("step_plan", "step-cn", {"name": "Step CN", "site": "china"}),
             ("openai_organization", "openai", {"name": "OpenAI Org"}),
             ("generic", "glm-work", {
@@ -69,6 +79,61 @@ class ProviderMutationCommandTests(unittest.TestCase):
                 keychain.set.assert_any_call(provider_id, secret)
                 self.assertEqual(store.save.call_count, 1)
 
+    def test_v2_creates_moonshot_connection_with_public_site_only(self):
+        store = Mock()
+        store.load.return_value = []
+        keychain = Mock()
+        output = io.StringIO()
+        secret = "moonshot-private-key"
+
+        run_provider_mutation(
+            self.request_v2(
+                action="create_connection",
+                provider_id="moonshot-global",
+                kind="moonshot",
+                configuration={"name": "Kimi Global", "site": "international"},
+                credentials={"primary": secret, "session": ""},
+            ),
+            output,
+            store=store,
+            keychain=keychain,
+        )
+
+        response = json.loads(output.getvalue())
+        self.assertTrue(response["ok"], response)
+        self.assertNotIn(secret, output.getvalue())
+        saved = store.save.call_args.args[0][0]
+        self.assertEqual(
+            saved,
+            MoonshotConfig(
+                "moonshot-global", "Kimi Global", site="international"
+            ),
+        )
+        keychain.set.assert_called_once_with("moonshot-global", secret)
+
+    def test_v2_rejects_invalid_moonshot_site_without_writes(self):
+        store = Mock()
+        store.load.return_value = []
+        keychain = Mock()
+        output = io.StringIO()
+
+        run_provider_mutation(
+            self.request_v2(
+                action="create_connection",
+                provider_id="moonshot-work",
+                kind="moonshot",
+                configuration={"name": "Kimi", "site": "unknown"},
+                credentials={"primary": "private", "session": ""},
+            ),
+            output,
+            store=store,
+            keychain=keychain,
+        )
+
+        self.assertFalse(json.loads(output.getvalue())["ok"])
+        store.save.assert_not_called()
+        keychain.set.assert_not_called()
+
     def test_v2_rejects_duplicate_wrong_site_and_unknown_fields(self):
         existing = MiniMaxConfig("minimax-work", "MiniMax")
         for configuration in (
@@ -90,6 +155,38 @@ class ProviderMutationCommandTests(unittest.TestCase):
                 )
                 self.assertFalse(json.loads(output.getvalue())["ok"])
                 store.save.assert_not_called()
+
+    def test_v2_persists_minimax_site_and_rejects_unknown_region(self):
+        for site, expected_ok in (
+            ("china", True),
+            ("international", True),
+            ("moon", False),
+        ):
+            with self.subTest(site=site):
+                store = Mock()
+                store.load.return_value = []
+                output = io.StringIO()
+                run_provider_mutation(
+                    self.request_v2(
+                        action="create_connection",
+                        provider_id=f"minimax-{site}",
+                        kind="minimax",
+                        configuration={"name": "MiniMax", "site": site},
+                        credentials={"primary": "private", "session": ""},
+                    ),
+                    output,
+                    store=store,
+                    keychain=Mock(),
+                )
+
+                self.assertEqual(
+                    json.loads(output.getvalue())["ok"], expected_ok
+                )
+                if expected_ok:
+                    saved = store.save.call_args.args[0]
+                    self.assertEqual(saved[0].site, site)
+                else:
+                    store.save.assert_not_called()
 
     def test_v2_remove_restores_all_step_plan_credentials_when_config_save_fails(self):
         existing = StepPlanConfig("step-work", "Step", site="international")

@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "providers": [
+    {
+      "provider_id": "example-usage",
+      "name": "Example Daily Usage",
+      "family_id": "example",
+      "endpoint": "https://api.example.invalid/v1/usage",
+      "method": "GET",
+      "header_name": "Authorization",
+      "auth_prefix": "Bearer ",
+      "items_path": "data.items",
+      "date_path": "day",
+      "model_path": "model",
+      "input_tokens_path": "input_tokens",
+      "output_tokens_path": "output_tokens",
+      "total_tokens_path": "total_tokens",
+      "cache_read_tokens_path": "cache_read_tokens",
+      "cache_creation_tokens_path": null,
+      "reasoning_tokens_path": null,
+      "cost_amount_path": null,
+      "cost_currency": null,
+      "timestamp_format": "date",
+      "timezone": "UTC",
+      "pagination": "page",
+      "page_parameter": "page",
+      "limit_parameter": "limit",
+      "cursor_parameter": "cursor",
+      "next_cursor_path": null,
+      "page_size": 100,
+      "since_parameter": "from",
+      "until_parameter": "to",
+      "request_body": null,
+      "type": "daily_usage_feed",
+      "account_ref": "fixture-a"
+    }
+  ]
+}

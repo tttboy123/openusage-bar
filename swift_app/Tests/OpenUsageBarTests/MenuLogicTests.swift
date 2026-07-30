@@ -302,7 +302,7 @@ struct MenuLogicTests {
         #expect(!joined.contains("token"))
         #expect(!joined.contains("cookie"))
         #expect(!joined.contains("key"))
-        #expect(RefreshCommand.interactiveTimeout == 120)
+        #expect(RefreshCommand.interactiveTimeout == 160)
         #expect(command.timeout == RefreshCommand.interactiveTimeout)
     }
 
@@ -361,7 +361,9 @@ struct MenuLogicTests {
             "COOKIE": "must-not-pass", "ARBITRARY_PRIVATE_VALUE": "must-not-pass",
         ]
         let command = RefreshCommand(
-            executable: executableURL, arguments: [resultURL.path], timeout: 2
+            // This test validates the child boundary, not timeout behavior.
+            // Leave scheduling margin for a fully parallel Swift test run.
+            executable: executableURL, arguments: [resultURL.path], timeout: 5
         )
 
         #expect(RefreshRunner(environment: environment).run(command) == .succeeded)

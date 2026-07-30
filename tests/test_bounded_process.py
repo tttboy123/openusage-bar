@@ -117,12 +117,42 @@ class BoundedProcessTests(unittest.TestCase):
                 start_new_session=True,
             )
             try:
-                result=run_bounded([str(helper)],timeout=2,text=True,encoding="utf-8")
+                # This validates CompletedProcess-compatible text output, not
+                # the timeout boundary. Leave enough room for process startup
+                # while the complete build runs the full suite under load.
+                result=run_bounded([str(helper)],timeout=5,text=True,encoding="utf-8")
                 self.assertEqual((result.returncode,result.stdout),(0,"ok\n"))
                 self.assertIsNone(unrelated.poll())
             finally:
                 unrelated.kill()
                 unrelated.wait()
+
+    def test_private_input_is_delivered_without_appearing_in_argv(self):
+        from openusage_bar.bounded_process import run_bounded
+        with tempfile.TemporaryDirectory() as directory:
+            helper = self.helper(
+                Path(directory),
+                "import json,sys\n"
+                "payload=sys.stdin.buffer.read()\n"
+                "sys.stdout.write(json.dumps({"
+                "'argv':sys.argv[1:],'size':len(payload),'value':payload.decode()"
+                "}))\n",
+            )
+            secret = b"private-session-value"
+
+            result = run_bounded(
+                [str(helper), "keychain-operation"],
+                timeout=2,
+                input_data=secret,
+                text=True,
+                encoding="utf-8",
+            )
+
+        payload = __import__("json").loads(result.stdout)
+        self.assertEqual(payload["argv"], ["keychain-operation"])
+        self.assertEqual(payload["size"], len(secret))
+        self.assertEqual(payload["value"], secret.decode())
+        self.assertNotIn(secret.decode(), " ".join(result.args))
 
     def test_production_callers_do_not_use_unbounded_run(self):
         root=Path(__file__).resolve().parents[1]/"openusage_bar"

@@ -1,0 +1,104 @@
+name: Provider support request / Provider 接入请求
+description: Propose a trustworthy Provider data source or volunteer to implement one.
+title: "[Provider]: "
+labels: [enhancement, help wanted]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        OpenUsage Bar prefers an existing OpenUsage integration, then an official read-only API, then a documented custom feed. It does not accept credentials, raw Provider payloads, prompts, responses, direct account identity, or fragile browser scraping without a separate security review.
+
+        OpenUsage Bar 优先复用 OpenUsage，其次使用官方只读 API，再使用有文档的自定义 Feed。请勿提交密钥、Cookie、原始厂商响应、Prompt、Response 或直接账号身份。
+
+        Contributors should start with the Provider Adapter Kit in `docs/provider-adapter-kit.md` and submit synthetic fixtures only. / 贡献者请从 `docs/provider-adapter-kit.md` 的 Provider Adapter Kit 开始，只提交合成 Fixture。
+  - type: input
+    id: provider
+    attributes:
+      label: Provider or client / 厂商或客户端
+      placeholder: GLM, Kimi, Qwen, Claude Code, OpenCode...
+    validations:
+      required: true
+  - type: dropdown
+    id: region
+    attributes:
+      label: Region / 区域
+      options:
+        - China / 中国站
+        - International / 国际站
+        - Both with separate endpoints / 国内与国际站点分离
+        - Local client only / 仅本地客户端
+        - Unknown / 尚不确定
+    validations:
+      required: true
+  - type: dropdown
+    id: primary-fact
+    attributes:
+      label: Primary fact requested / 主要数据类型
+      options:
+        - Daily token activity / 每日 Token 活动
+        - Subscription capacity and reset / 订阅余量与重置
+        - API spend or billed cost / API 消耗或账单费用
+        - Local client detection only / 仅本地客户端发现
+        - Multiple fact families / 多种数据类型
+    validations:
+      required: true
+  - type: dropdown
+    id: source-type
+    attributes:
+      label: Best known source / 已知最佳来源
+      options:
+        - Existing OpenUsage output / 现有 OpenUsage 输出
+        - Official read-only API / 官方只读 API
+        - Official local logs or CLI / 官方本地日志或 CLI
+        - Documented custom feed / 有文档的自定义 Feed
+        - No trustworthy source found / 尚未找到可信来源
+    validations:
+      required: true
+  - type: input
+    id: source-url
+    attributes:
+      label: Public documentation or repository / 公开文档或仓库
+      description: Link only to public documentation or source code. Do not paste a private endpoint containing credentials.
+      placeholder: https://...
+  - type: textarea
+    id: semantics
+    attributes:
+      label: Data semantics / 数据语义
+      description: Describe scope, units, windows, reset behavior, pagination, regions, and known delay. State what Unknown and zero mean.
+      placeholder: |
+        Scope:
+        Units:
+        Window and reset:
+        Pagination:
+        Reporting delay:
+        Unknown versus covered zero:
+    validations:
+      required: true
+  - type: textarea
+    id: authentication
+    attributes:
+      label: Authentication and privacy / 认证与隐私
+      description: Name only the credential type and minimum read-only scope. Never paste the credential itself.
+      placeholder: API key with usage:read; local Keychain item owned by the upstream client; no credential required...
+    validations:
+      required: true
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Contribution intent / 参与意愿
+      options:
+        - I can implement and test it / 我可以实现并测试
+        - I can provide redacted fixtures / 我可以提供脱敏 Fixture
+        - I can perform live validation / 我可以进行真实账号验证
+        - Request only / 仅提出需求
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation / 安全确认
+      options:
+        - label: I included no credentials, cookies, account identity, prompts, responses, or raw private payloads. / 我没有提交任何凭证、Cookie、账号身份、Prompt、Response 或原始私有响应。
+          required: true
+        - label: I understand that unsupported facts must remain Unknown rather than zero. / 我理解不支持或缺失的数据必须保持 Unknown，不能显示为零。
+          required: true

@@ -183,6 +183,26 @@ struct ActivityAppLogicTests {
         #expect(!section.contains("Button(\"Open Provider Settings\""))
     }
 
+    @Test("Provider source evidence adapts to compact detail widths")
+    func providerSourceEvidenceUsesAdaptiveLayout() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/OpenUsageActivity/ProviderCenterViews.swift"),
+            encoding: .utf8
+        )
+        let row = try #require(source.range(of: "private struct ProviderSourceStrategyRow"))
+        let nextView = try #require(source.range(
+            of: "private struct ProviderDetailSection",
+            range: row.lowerBound..<source.endIndex
+        ))
+        let section = String(source[row.lowerBound..<nextView.lowerBound])
+
+        #expect(section.contains("ViewThatFits(in: .horizontal)"))
+        #expect(section.contains("horizontalLayout"))
+        #expect(section.contains("verticalLayout"))
+    }
+
     @Test("Configured connections remain editable before a successful collection")
     func configuredProviderConnections() throws {
         let directory = FileManager.default.temporaryDirectory
@@ -194,6 +214,8 @@ struct ActivityAppLogicTests {
         {
           "version": 2,
           "providers": [
+            {"provider_id":"minimax-global","name":"Global","type":"minimax","site":"international"},
+            {"provider_id":"moonshot-main","name":"Kimi Main","type":"moonshot","site":"international"},
             {"provider_id":"step-plan-main","name":"Main","type":"step_plan","site":"china"},
             {"provider_id":"feed-zai","name":"ZAI Feed","type":"daily_usage_feed","family_id":"zai","endpoint":"https://example.com"},
             {"provider_id":"cost-openai","name":"OpenAI Cost","type":"daily_cost_feed","family_id":"openai","endpoint":"https://example.com"}
@@ -203,17 +225,27 @@ struct ActivityAppLogicTests {
 
         let connections = try ProviderConnectionSummaryStore(url: url).load()
 
-        #expect(connections.map(\.providerID) == ["step-plan-main", "feed-zai", "cost-openai"])
-        #expect(connections[0].familyID == "step_plan")
-        #expect(connections[0].site == "china")
-        #expect(connections[0].isStepPlan)
+        #expect(connections.map(\.providerID) == [
+            "minimax-global", "moonshot-main", "step-plan-main", "feed-zai",
+            "cost-openai",
+        ])
+        #expect(connections[0].familyID == "minimax")
+        #expect(connections[0].site == "international")
         #expect(connections[0].isManaged)
-        #expect(connections[1].familyID == "zai")
-        #expect(!connections[1].isStepPlan)
+        #expect(connections[1].familyID == "moonshot")
+        #expect(connections[1].site == "international")
         #expect(connections[1].isManaged)
         #expect(connections[1].credentialLabel == "Replacement API key")
-        #expect(connections[2].familyID == "openai")
-        #expect(connections[2].kind == "daily_cost_feed")
+        #expect(connections[2].familyID == "step_plan")
+        #expect(connections[2].site == "china")
+        #expect(connections[2].isStepPlan)
+        #expect(connections[2].isManaged)
+        #expect(connections[3].familyID == "zai")
+        #expect(!connections[3].isStepPlan)
+        #expect(connections[3].isManaged)
+        #expect(connections[3].credentialLabel == "Replacement API key")
+        #expect(connections[4].familyID == "openai")
+        #expect(connections[4].kind == "daily_cost_feed")
     }
 
     @Test("Stale background loads cannot publish over a newer filter")
@@ -413,8 +445,9 @@ struct ActivityAppLogicTests {
         #expect(metrics.contains("Input Tokens"))
         #expect(metrics.contains("Output Tokens"))
         #expect(metrics.contains("Cache Read"))
-        #expect(metrics.contains("Cache Write"))
-        #expect(metrics.contains("Cache reads are included in Input Tokens"))
+        #expect(metrics.contains("Cache Creation"))
+        #expect(metrics.contains("Reasoning"))
+        #expect(metrics.contains("countingConventionDescription"))
         #expect(!metrics.contains("Longest Task"))
     }
 
@@ -424,15 +457,20 @@ struct ActivityAppLogicTests {
             totalTokens: 100, observedTokens: 100,
             observedBreakdown: TokenBreakdown(
                 totalTokens: 100, inputTokens: 70, outputTokens: 30,
-                cacheReadTokens: 20, cacheCreationTokens: 5
+                cacheReadTokens: 20, cacheCreationTokens: 5,
+                reasoningTokens: 8, countingConvention: .inputIncludesCache
             ),
             isComplete: true, peak: PeakUsage(day: try LocalDay("2026-07-18"), tokens: 100),
             activeDays: 1, currentStreak: 1, longestStreak: 1
         ))
         #expect(complete.tokenMetrics.map(\.label) == [
-            "Total Tokens", "Input Tokens", "Output Tokens", "Cache Read", "Cache Write",
+            "Total Tokens", "Input Tokens", "Output Tokens", "Cache Read", "Cache Creation",
+            "Reasoning",
         ])
-        #expect(complete.tokenMetrics.map(\.value) == ["100", "70", "30", "20", "5"])
+        #expect(complete.tokenMetrics.map(\.value) == [
+            "100", "70", "30", "20", "5", "8",
+        ])
+        #expect(complete.countingConventionDescription.contains("inclusive-input"))
         #expect(complete.activityMetrics.map(\.label) == [
             "Peak Day", "Active Days", "Current Streak", "Longest Streak",
         ])

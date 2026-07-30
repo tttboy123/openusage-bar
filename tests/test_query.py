@@ -127,6 +127,24 @@ class QueryServiceTests(unittest.TestCase):
             {"schemaVersion", "dataRevision", "generatedAt", "todayTokens", "modelCount", "coveredDayCount"},
         )
 
+    def test_summary_and_snapshot_distinguish_missing_from_covered_zero(self):
+        missing_summary = self.query.summary(date(2026, 7, 14))
+        missing_snapshot = self.query.resource_snapshot(date(2026, 7, 14))
+
+        self.assertIsNone(missing_summary.today_tokens)
+        self.assertIsNone(missing_snapshot.summary.today_tokens)
+        self.assertEqual(missing_summary.covered_day_count, 0)
+        self.assertEqual(missing_snapshot.summary.covered_day_count, 0)
+
+        self.store.replace_daily_usage("codex", "2026-07-14", [])
+        covered_summary = self.query.summary(date(2026, 7, 14))
+        covered_snapshot = self.query.resource_snapshot(date(2026, 7, 14))
+
+        self.assertEqual(covered_summary.today_tokens, 0)
+        self.assertEqual(covered_snapshot.summary.today_tokens, 0)
+        self.assertEqual(covered_summary.covered_day_count, 1)
+        self.assertEqual(covered_snapshot.summary.covered_day_count, 1)
+
     def test_two_account_connections_remain_isolated_across_public_facts(self):
         for provider_id, account_ref, tokens, amount, ratio in (
             ("openai-personal", "personal", 120, "1.20", 0.8),
@@ -188,6 +206,27 @@ class QueryServiceTests(unittest.TestCase):
         )
         self.assertTrue(any("openai-work" in row.record_id for row in changes.records))
         self.assertTrue(any("openai-personal" in row.record_id for row in changes.records))
+
+    def test_activity_exposes_token_counting_convention_on_wire(self):
+        row = DailyUsageRow(
+            **(
+                usage().__dict__
+                | {"token_counting_convention": "components_disjoint"}
+            )
+        )
+        self.store.replace_daily_usage("codex", row.day, [row])
+
+        result = self.query.activity(date(2026, 7, 14), date(2026, 7, 14))
+        wire = to_wire(result)
+
+        self.assertEqual(
+            result.rows[0].token_counting_convention,
+            "components_disjoint",
+        )
+        self.assertEqual(
+            wire["rows"][0]["tokenCountingConvention"],
+            "components_disjoint",
+        )
 
     def test_capacity_selects_most_urgent_window_per_account_and_sorts_zero_before_null(self):
         self.store.record_quota(quota("minimax.weekly", "minimax", 0.7, quota_name="Weekly"))
@@ -579,7 +618,7 @@ class QueryServiceTests(unittest.TestCase):
         self.assertEqual(result.catalog_revision, "3059f1b")
         self.assertEqual(set(wire), {
             "schemaVersion", "dataRevision", "generatedAt", "localDay",
-            "summary", "quotaWindows", "providers", "sources",
+            "summary", "balances", "quotaWindows", "providers", "sources",
             "catalogRevision",
         })
 

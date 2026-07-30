@@ -52,12 +52,20 @@ struct ProviderCatalogTests {
                 let operatingSystems: [String]
                 let stability: String
                 let provenance: String
+                let factFamilies: [String]
+                let authority: String
+                let accountScope: String
+                let modelScope: String
+                let verification: String
 
                 enum CodingKeys: String, CodingKey {
-                    case kind, stability, provenance
+                    case kind, stability, provenance, authority, verification
                     case sourceID = "source_id"
                     case credentialType = "credential_type"
                     case operatingSystems = "operating_systems"
+                    case factFamilies = "fact_families"
+                    case accountScope = "account_scope"
+                    case modelScope = "model_scope"
                 }
             }
 
@@ -107,7 +115,9 @@ struct ProviderCatalogTests {
             let expectedCredentials = Set(family.sources.map {
                 $0.credentialType == "provider_owned" ? "none" : $0.credentialType
             })
-            let expectedIdentitySources = Set(family.sources.map {
+            let expectedIdentitySources = Set(family.sources.filter {
+                $0.factFamilies.contains("detection")
+            }.map {
                 ProviderIdentitySource(credentialSource: $0.sourceID, sourceKind: $0.kind)
             })
             let expectedSources = try family.sources.map { source in
@@ -118,7 +128,14 @@ struct ProviderCatalogTests {
                         try #require(ProviderSourceOperatingSystem(rawValue: $0))
                     }),
                     stability: try #require(ProviderSourceStability(rawValue: source.stability)),
-                    provenance: try #require(ProviderSourceProvenance(rawValue: source.provenance))
+                    provenance: try #require(ProviderSourceProvenance(rawValue: source.provenance)),
+                    factFamilies: Set(try source.factFamilies.map {
+                        try #require(ProviderSourceFactFamily(rawValue: $0))
+                    }),
+                    authority: try #require(ProviderSourceAuthority(rawValue: source.authority)),
+                    accountScope: try #require(ProviderSourceAccountScope(rawValue: source.accountScope)),
+                    modelScope: try #require(ProviderSourceModelScope(rawValue: source.modelScope)),
+                    verification: try #require(ProviderSourceVerification(rawValue: source.verification))
                 )
             }
             let capabilities = family.capabilities
@@ -189,6 +206,22 @@ struct ProviderCatalogTests {
             "openusage_upstream", "openusage_bar_builtin", "provider_official",
             "provider_local", "user_session",
         ])
+        #expect(Set(ProviderSourceFactFamily.allCases.map(\.rawValue)) == [
+            "detection", "token_activity", "subscription_capacity",
+            "api_balance", "api_spend",
+        ])
+        #expect(Set(ProviderSourceAuthority.allCases.map(\.rawValue)) == [
+            "provider_official", "provider_local", "third_party", "user_supplied", "unknown",
+        ])
+        #expect(Set(ProviderSourceAccountScope.allCases.map(\.rawValue)) == [
+            "local_profile", "configured_account", "organization", "provider", "unknown",
+        ])
+        #expect(Set(ProviderSourceModelScope.allCases.map(\.rawValue)) == [
+            "per_model", "aggregate", "mixed", "unknown",
+        ])
+        #expect(Set(ProviderSourceVerification.allCases.map(\.rawValue)) == [
+            "live_account", "fixture", "upstream_declared", "unverified",
+        ])
     }
 
     @Test("Known families expose conservative capability and source facts")
@@ -207,13 +240,18 @@ struct ProviderCatalogTests {
         let stepPlan = try #require(GeneratedProviderCatalog.families["step_plan"])
         #expect(stepPlan.regions == ["cn", "international"])
         #expect(stepPlan.supportsAccounts)
-        #expect(stepPlan.capabilityProfile.billing == .supported)
+        #expect(stepPlan.capabilityProfile.billing == .unknown)
         #expect(stepPlan.sourceCapabilities.first == ProviderSourceCapability(
             sourceID: "step_plan_browser_session",
             sourceKind: "browser_session",
             operatingSystems: [.macOS],
             stability: .experimental,
-            provenance: .userSession
+            provenance: .userSession,
+            factFamilies: [.detection, .subscriptionCapacity],
+            authority: .providerOfficial,
+            accountScope: .configuredAccount,
+            modelScope: .aggregate,
+            verification: .liveAccount
         ))
 
         let openAI = try #require(GeneratedProviderCatalog.families["openai"])
@@ -226,7 +264,12 @@ struct ProviderCatalogTests {
             sourceKind: "official_api",
             operatingSystems: [.macOS],
             stability: .stable,
-            provenance: .providerOfficial
+            provenance: .providerOfficial,
+            factFamilies: [.apiSpend, .detection, .tokenActivity],
+            authority: .providerOfficial,
+            accountScope: .organization,
+            modelScope: .perModel,
+            verification: .fixture
         ))
     }
 
@@ -278,7 +321,12 @@ struct ProviderCatalogTests {
             sourceKind: "openusage",
             operatingSystems: [.macOS],
             stability: .pinned,
-            provenance: .openUsageUpstream
+            provenance: .openUsageUpstream,
+            factFamilies: [.detection],
+            authority: .thirdParty,
+            accountScope: .localProfile,
+            modelScope: .unknown,
+            verification: .unverified
         )])
     }
 
@@ -329,7 +377,12 @@ struct ProviderCatalogTests {
             sourceKind: "openusage",
             operatingSystems: [.macOS],
             stability: .pinned,
-            provenance: .openUsageUpstream
+            provenance: .openUsageUpstream,
+            factFamilies: [.detection],
+            authority: .thirdParty,
+            accountScope: .localProfile,
+            modelScope: .unknown,
+            verification: .unverified
         )])
     }
 

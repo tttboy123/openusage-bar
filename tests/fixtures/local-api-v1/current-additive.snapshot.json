@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0",
+  "dataRevision": 84,
+  "generatedAt": "2026-07-29T18:30:00Z",
+  "localDay": "2026-07-29",
+  "summary": {
+    "todayTokens": 1024,
+    "modelCount": 2,
+    "coveredDayCount": 1,
+    "futureSummaryFact": "ignored"
+  },
+  "quotaWindows": [],
+  "providers": [],
+  "sources": [],
+  "catalogRevision": "compatibility-fixture",
+  "balances": [],
+  "futureEnvelope": {
+    "enabled": true
+  }
+}

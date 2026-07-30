@@ -1,0 +1,185 @@
+{
+  "budgets": [
+    {
+      "comparison": "maximum",
+      "metric": "appBytes",
+      "observed": 50066395,
+      "status": "pass",
+      "threshold": 78643200
+    },
+    {
+      "comparison": "maximum",
+      "metric": "residentCpuPercentP95",
+      "observed": 0.001,
+      "status": "pass",
+      "threshold": 1.0
+    },
+    {
+      "comparison": "maximum",
+      "metric": "residentWakeupsPerSecondP95",
+      "observed": 2.298,
+      "status": "pass",
+      "threshold": 5.0
+    },
+    {
+      "comparison": "maximum",
+      "metric": "residentFootprintBytesPeak",
+      "observed": 81217216,
+      "status": "pass",
+      "threshold": 104857600
+    },
+    {
+      "comparison": "maximum",
+      "metric": "activityFootprintBytesPeak",
+      "observed": 99730392,
+      "status": "pass",
+      "threshold": 125829120
+    },
+    {
+      "comparison": "maximum",
+      "metric": "refreshDurationSecondsP95",
+      "observed": 41.49,
+      "status": "pass",
+      "threshold": 90.0
+    }
+  ],
+  "capturedAt": "2026-07-29T19:32:46.716114+00:00",
+  "idle": {
+    "rounds": [
+      {
+        "roles": [
+          {
+            "cpuPercent": 0.001,
+            "footprintBytes": 23626640,
+            "quality": "measured",
+            "role": "status",
+            "wakeupsPerSecond": 0.1
+          },
+          {
+            "cpuPercent": 0.0,
+            "footprintBytes": 57590576,
+            "quality": "measured",
+            "role": "collector",
+            "wakeupsPerSecond": 2.099
+          },
+          {
+            "cpuPercent": 0.001,
+            "footprintBytes": 85607384,
+            "quality": "measured",
+            "role": "activity",
+            "wakeupsPerSecond": 1.399
+          }
+        ],
+        "round": 1
+      },
+      {
+        "roles": [
+          {
+            "cpuPercent": 0.001,
+            "footprintBytes": 23626640,
+            "quality": "measured",
+            "role": "status",
+            "wakeupsPerSecond": 0.2
+          },
+          {
+            "cpuPercent": 0.0,
+            "footprintBytes": 57590576,
+            "quality": "measured",
+            "role": "collector",
+            "wakeupsPerSecond": 2.098
+          },
+          {
+            "cpuPercent": 0.005,
+            "footprintBytes": 99714008,
+            "quality": "measured",
+            "role": "activity",
+            "wakeupsPerSecond": 0.699
+          }
+        ],
+        "round": 2
+      },
+      {
+        "roles": [
+          {
+            "cpuPercent": 0.001,
+            "footprintBytes": 23577488,
+            "quality": "measured",
+            "role": "status",
+            "wakeupsPerSecond": 0.2
+          },
+          {
+            "cpuPercent": 0.0,
+            "footprintBytes": 57590576,
+            "quality": "measured",
+            "role": "collector",
+            "wakeupsPerSecond": 1.998
+          },
+          {
+            "cpuPercent": 0.001,
+            "footprintBytes": 99730392,
+            "quality": "measured",
+            "role": "activity",
+            "wakeupsPerSecond": 0.499
+          }
+        ],
+        "round": 3
+      }
+    ],
+    "summary": {
+      "activityCpuPercentP95": 0.005,
+      "activityFootprintBytesPeak": 99730392,
+      "activitySampleCount": 3,
+      "activityWakeupsPerSecondP95": 1.399,
+      "residentCpuPercentMedian": 0.001,
+      "residentCpuPercentP95": 0.001,
+      "residentFootprintBytesPeak": 81217216,
+      "residentSampleCount": 3,
+      "residentWakeupsPerSecondP95": 2.298
+    }
+  },
+  "privacy": {
+    "containsLocalPaths": false,
+    "containsProcessIdentifiers": false,
+    "containsProviderIdentity": false,
+    "containsProviderPayloads": false
+  },
+  "product": {
+    "appBytes": 50066395,
+    "architecture": "arm64",
+    "build": "8",
+    "macOS": "26.5.2",
+    "version": "0.4.4"
+  },
+  "refresh": {
+    "perSourceTiming": "not_observable",
+    "rounds": [
+      {
+        "durationSeconds": 41.49,
+        "exitCode": 0,
+        "round": 1,
+        "status": "success"
+      },
+      {
+        "durationSeconds": 40.562,
+        "exitCode": 0,
+        "round": 2,
+        "status": "success"
+      },
+      {
+        "durationSeconds": 40.497,
+        "exitCode": 0,
+        "round": 3,
+        "status": "success"
+      }
+    ],
+    "scope": "all-configured-sources",
+    "summary": {
+      "durationSecondsMedian": 40.562,
+      "durationSecondsP95": 41.49,
+      "failureCount": 0,
+      "sampleCount": 3,
+      "timeoutCount": 0
+    }
+  },
+  "schemaVersion": 1
+}

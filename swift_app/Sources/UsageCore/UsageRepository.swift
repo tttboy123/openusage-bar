@@ -163,6 +163,7 @@ public final class UsageRepository {
 
         return try withReadTransaction { database in
             let version = try scalarInt64(database, sql: "PRAGMA user_version")
+            let tokenCountingConvention = try tokenCountingConventionExpression(database)
             var clauses = ["day>=?", "day<=?"]
             var bindings = [start.rawValue, end.rawValue]
             if !providerIDs.isEmpty {
@@ -179,8 +180,9 @@ public final class UsageRepository {
                 SELECT day,provider_id,account_ref,model_id,input_tokens,output_tokens,
                   cache_read_tokens,cache_creation_tokens,reasoning_tokens,total_tokens,
                   cost_amount,cost_currency,cost_basis,quality,imported_at,revision,
-                  \(version >= 3 ? "source_id" : "'legacy'")
-                FROM daily_model_usage WHERE \(clauses.joined(separator: " AND "))
+                  \(version >= 3 ? "source_id" : "'legacy'"),
+                  \(tokenCountingConvention)
+                FROM daily_model_usage AS usage WHERE \(clauses.joined(separator: " AND "))
                 ORDER BY day,provider_id,account_ref,model_id
                 """,
                 bindings: bindings

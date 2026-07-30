@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "providers": [
+    {
+      "provider_id": "example-quota",
+      "name": "Example Quota",
+      "endpoint": "https://api.example.invalid/v1/quota",
+      "header_name": "Authorization",
+      "auth_prefix": "Bearer ",
+      "primary_path": "data.remaining",
+      "remaining_percent_path": "data.remaining_percent",
+      "reset_path": "data.resets_at",
+      "detail_path": "data.plan",
+      "type": "generic",
+      "account_ref": "fixture-a",
+      "family_id": "example",
+      "quota_window": "subscription",
+      "quota_name": "Subscription",
+      "unit": "percent"
+    }
+  ]
+}

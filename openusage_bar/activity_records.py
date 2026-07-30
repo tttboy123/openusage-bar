@@ -13,6 +13,14 @@ from .provider_catalog import PROVIDER_CATEGORIES, SOURCE_KINDS
 
 
 _PROVIDER_INSTANCE_SOURCE_KINDS = SOURCE_KINDS | frozenset({"generic_https"})
+TOKEN_COUNTING_CONVENTIONS = frozenset(
+    {
+        "input_includes_cache",
+        "components_disjoint",
+        "provider_reported",
+        "unknown",
+    }
+)
 _PRIVATE_LABEL_EMAIL = re.compile(
     r"[A-Z0-9._%+-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?", re.IGNORECASE
 )
@@ -145,6 +153,7 @@ class DailyUsageRow:
     quality: str
     imported_at: str | None = None
     account_ref: str = ""
+    token_counting_convention: str = "unknown"
 
     def __post_init__(self) -> None:
         validate_day(self.day)
@@ -161,6 +170,35 @@ class DailyUsageRow:
         ):
             validate_nonnegative_integer(field, getattr(self, field))
         validate_nonnegative_integer("reasoning_tokens", self.reasoning_tokens, nullable=True)
+        if self.token_counting_convention not in TOKEN_COUNTING_CONVENTIONS:
+            raise ValueError("token_counting_convention must be a canonical convention")
+        if self.token_counting_convention == "input_includes_cache":
+            if self.cache_read_tokens + self.cache_creation_tokens > self.input_tokens:
+                raise ValueError(
+                    "cache token components exceed input_tokens for token_counting_convention"
+                )
+            expected_total = self.input_tokens + self.output_tokens
+        elif self.token_counting_convention == "components_disjoint":
+            known_component_total = (
+                self.input_tokens
+                + self.output_tokens
+                + self.cache_read_tokens
+                + self.cache_creation_tokens
+            )
+            if self.reasoning_tokens is None:
+                if self.total_tokens < known_component_total:
+                    raise ValueError(
+                        "total_tokens is lower than known token components"
+                    )
+                expected_total = None
+            else:
+                expected_total = known_component_total + self.reasoning_tokens
+        else:
+            expected_total = None
+        if expected_total is not None and self.total_tokens != expected_total:
+            raise ValueError(
+                "total_tokens does not match token_counting_convention"
+            )
         object.__setattr__(self, "cost_amount", canonical_decimal(self.cost_amount, "cost_amount"))
         if self.cost_currency is not None:
             validate_id("cost_currency", self.cost_currency)
@@ -326,6 +364,54 @@ class QuotaState(QuotaObservation):
 
 
 @dataclass(frozen=True)
+class BalanceObservation:
+    record_id: str
+    observed_at: str
+    provider_id: str
+    currency: str
+    available: str | None
+    voucher: str | None
+    cash: str | None
+    state: str
+    quality: str
+    stale: bool
+    account_ref: str = ""
+    source_id: str = "current.balance"
+
+    def __post_init__(self) -> None:
+        validate_id("record_id", self.record_id)
+        validate_id("provider_id", self.provider_id)
+        if self.account_ref:
+            validate_id("account_ref", self.account_ref)
+        validate_id("source_id", self.source_id)
+        validate_id("currency", self.currency)
+        if self.currency != self.currency.upper() or not 3 <= len(self.currency) <= 8:
+            raise ValueError("currency must be an uppercase currency identifier")
+        validate_id("state", self.state)
+        validate_id("quality", self.quality)
+        object.__setattr__(
+            self, "observed_at", canonical_timestamp(self.observed_at, "observed_at")
+        )
+        for field in ("available", "voucher", "cash"):
+            value = canonical_decimal(getattr(self, field), field)
+            if value is not None and Decimal(value) < 0:
+                raise ValueError(f"{field} must be a nonnegative finite decimal value")
+            object.__setattr__(self, field, value)
+        if self.state == "unknown" and any(
+            value is not None for value in (self.available, self.voucher, self.cash)
+        ):
+            raise ValueError("unknown balance facts must not carry numeric values")
+        if not isinstance(self.stale, bool):
+            raise ValueError("stale must be boolean")
+
+
+@dataclass(frozen=True)
+class BalanceState(BalanceObservation):
+    revision: int = 1
+    payload_hash: str = ""
+
+
+@dataclass(frozen=True)
 class QuotaSnapshot:
     snapshot_id: int
     record_id: str
@@ -391,6 +477,15 @@ class QuotaStateSnapshot:
 
 
 @dataclass(frozen=True)
+class BalanceStateSnapshot:
+    rows: tuple[BalanceState, ...]
+    cursor: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "rows", tuple(self.rows))
+
+
+@dataclass(frozen=True)
 class ProviderInstanceSnapshot:
     rows: tuple[ProviderInstance, ...]
     cursor: int
@@ -428,11 +523,13 @@ class ResourceStateSnapshot:
     today_tokens: int
     model_count: int
     covered_day_count: int
+    balance_states: tuple[BalanceState, ...]
     quota_states: tuple[QuotaState, ...]
     provider_instances: tuple[ProviderInstance, ...]
     source_statuses: tuple[SourceStatus, ...]
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "balance_states", tuple(self.balance_states))
         object.__setattr__(self, "quota_states", tuple(self.quota_states))
         object.__setattr__(self, "provider_instances", tuple(self.provider_instances))
         object.__setattr__(self, "source_statuses", tuple(self.source_statuses))

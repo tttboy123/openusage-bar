@@ -9,6 +9,8 @@ DIST="$ROOT/dist"
 APP="$DIST/OpenUsage Bar.app"
 ACTIVITY_APP="$APP/Contents/Helpers/OpenUsage Activity.app"
 SETTINGS_APP="$APP/Contents/Helpers/OpenUsage Provider Settings.app"
+STATUS_RUNTIME="$APP/Contents/MacOS/OpenUsage Bar.runtime"
+COLLECTOR_LAUNCHER="$APP/Contents/MacOS/OpenUsage Collector"
 RESOURCES="$SWIFT_PACKAGE/Resources"
 ATOMIC_SWAP="$APP/Contents/Resources/atomic-swap"
 SWIFT_MIN_LINE_COVERAGE=80
@@ -23,6 +25,7 @@ CODESIGN_IDENTITY=${OPENUSAGE_CODESIGN_IDENTITY:--}
 
 cd "$ROOT"
 "$PYTHON" scripts/release_secret_scan.py
+"$PYTHON" scripts/verify_action_pins.py
 CATALOG_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-provider-catalog.XXXXXX")
 LOCAL_API_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-local-api-schema.XXXXXX")
 ACTIVITY_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-activity-schema.XXXXXX")
@@ -97,8 +100,11 @@ mkdir -p \
   "$ROOT/scripts/atomic_swap.c" -o "$ATOMIC_SWAP"
 chmod 755 "$ATOMIC_SWAP"
 cp "$RESOURCES/OpenUsageBar-Info.plist" "$APP/Contents/Info.plist"
-cp "$SWIFT_PACKAGE/.build/release/OpenUsageBar" "$APP/Contents/MacOS/OpenUsage Bar"
-chmod 755 "$APP/Contents/MacOS/OpenUsage Bar"
+cp "$SWIFT_PACKAGE/.build/release/OpenUsageBar" "$STATUS_RUNTIME"
+/usr/bin/clang -Wall -Wextra -Werror -mmacosx-version-min=15.0 \
+  "$ROOT/scripts/clean_env_launcher.c" -o "$APP/Contents/MacOS/OpenUsage Bar"
+cp "$APP/Contents/MacOS/OpenUsage Bar" "$COLLECTOR_LAUNCHER"
+chmod 755 "$APP/Contents/MacOS/OpenUsage Bar" "$STATUS_RUNTIME" "$COLLECTOR_LAUNCHER"
 
 mkdir -p "$ACTIVITY_APP/Contents/MacOS"
 cp "$RESOURCES/OpenUsageActivity-Info.plist" "$ACTIVITY_APP/Contents/Info.plist"
@@ -169,5 +175,7 @@ codesign --verify --deep --strict "$APP"
 ! plutil -extract LSUIElement raw "$ACTIVITY_APP/Contents/Info.plist" >/dev/null 2>&1
 ! plutil -extract LSUIElement raw "$SETTINGS_APP/Contents/Info.plist" >/dev/null 2>&1
 otool -L "$APP/Contents/MacOS/OpenUsage Bar" >/dev/null
+otool -L "$STATUS_RUNTIME" >/dev/null
+otool -L "$COLLECTOR_LAUNCHER" >/dev/null
 otool -L "$ACTIVITY_APP/Contents/MacOS/OpenUsage Activity" >/dev/null
 print "built $APP"

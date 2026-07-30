@@ -11,11 +11,13 @@ struct AutomationLogicTests {
             schemaVersion: "1.0", dataRevision: 42,
             generatedAt: "2026-07-18T02:00:00Z", localDay: "2026-07-18",
             todayTokens: 123, modelCount: 3, coveredDayCount: 1,
+            balances: [],
             quotaWindowCount: 4, providerCount: 5, sourceCount: 6
         )
         let preview = AutomationPresentation.snapshotPreview(snapshot)
         #expect(preview.contains(#""dataRevision" : 42"#))
         #expect(preview.contains(#""providerCount" : 5"#))
+        #expect(preview.contains(#""balanceCount" : 0"#))
         #expect(!preview.lowercased().contains("account"))
         #expect(!preview.lowercased().contains("credential"))
         #expect(!preview.lowercased().contains("token\""))

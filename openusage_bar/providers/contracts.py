@@ -5,7 +5,12 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
 
-from ..activity_store import DailyCostRow, DailyUsageRow, QuotaObservation
+from ..activity_records import (
+    BalanceObservation,
+    DailyCostRow,
+    DailyUsageRow,
+    QuotaObservation,
+)
 from ..models import Overview, ProviderCard
 
 
@@ -38,6 +43,12 @@ class CostAdapter(Protocol):
     account_ref: str
 
     def fetch_costs(self, since: date, until: date) -> "CostImportResult": ...
+
+
+class BalanceAdapter(Protocol):
+    source_id: str
+
+    def fetch(self) -> Overview | ProviderCard: ...
 
 
 _ERROR_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -111,20 +122,50 @@ class QuotaFetchFailure:
         return False
 
 
+@dataclass(frozen=True)
+class BalanceFetchSuccess:
+    observations: tuple[BalanceObservation, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "observations", tuple(self.observations))
+        if not self.observations:
+            raise ValueError("Balance success requires at least one observation")
+
+    @property
+    def ok(self) -> bool:
+        return True
+
+
+@dataclass(frozen=True)
+class BalanceFetchFailure:
+    error_code: str
+
+    def __post_init__(self) -> None:
+        if _ERROR_CODE.fullmatch(self.error_code) is None:
+            raise ValueError("Balance failure requires a sanitized error code")
+
+    @property
+    def ok(self) -> bool:
+        return False
+
+
 UsageImportResult = UsageImportSuccess | ImportFailure
 CostImportResult = CostImportSuccess | ImportFailure
 QuotaFetchResult = QuotaFetchSuccess | QuotaFetchFailure
+BalanceFetchResult = BalanceFetchSuccess | BalanceFetchFailure
 
 
 @dataclass(frozen=True)
 class ProviderBinding:
     provider_id: str
     family_id: str
+    balance_sources: tuple[BalanceAdapter, ...] = ()
     quota_sources: tuple[QuotaAdapter | LegacyCardAdapter, ...] = ()
     usage_sources: tuple[UsageAdapter, ...] = ()
     cost_sources: tuple[CostAdapter, ...] = ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "balance_sources", tuple(self.balance_sources))
         object.__setattr__(self, "quota_sources", tuple(self.quota_sources))
         object.__setattr__(self, "usage_sources", tuple(self.usage_sources))
         object.__setattr__(self, "cost_sources", tuple(self.cost_sources))

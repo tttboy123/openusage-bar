@@ -6,6 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from openusage_bar.config import (
+    DailyCostFeedConfig,
+    DailyUsageFeedConfig,
+    GenericProviderConfig,
+    ID_PATTERN,
+    ProviderConfigStore,
+)
+
 
 REQUIRED_CASES = frozenset({
     "success",
@@ -23,6 +31,22 @@ REQUIRED_CASES = frozenset({
     "secret_non_disclosure",
     "unknown_not_zero",
 })
+EXPECTED_OUTCOMES = {
+    "success": "fact",
+    "empty_result": "covered_empty",
+    "authentication_expiry": "auth_failure",
+    "rate_limit": "rate_limited",
+    "timeout": "temporarily_unavailable",
+    "malformed_response": "invalid_response",
+    "oversized_response": "response_too_large",
+    "pagination_loop": "invalid_response",
+    "partial_coverage": "partial",
+    "last_good_preservation": "stale_last_good",
+    "source_priority": "one_effective_source",
+    "multi_account_isolation": "isolated",
+    "secret_non_disclosure": "redacted",
+    "unknown_not_zero": "missing",
+}
 
 _FORBIDDEN_KEYS = frozenset({
     "cookie", "cookies", "set_cookie", "prompt", "prompts", "response",
@@ -49,6 +73,12 @@ class ProviderFixture:
     fake_account_refs: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ProviderAdapterBundle:
+    fixture: ProviderFixture
+    configs: tuple[object, ...]
+
+
 def _walk(value: Any) -> Iterable[tuple[str | None, Any]]:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -69,43 +99,111 @@ def _validate_redacted(value: Any) -> None:
                 raise ValueError("provider fixture contains credential or identity material")
 
 
+def load_provider_fixture(path: Path) -> ProviderFixture:
+    if not path.is_file() or path.stat().st_size > 64 * 1024:
+        raise ValueError("provider fixture is unavailable or oversized")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or raw.get("schema_version") != 1:
+        raise ValueError("provider fixture schema is unsupported")
+    _validate_redacted(raw)
+    cases = frozenset(raw.get("cases", ()))
+    if cases != REQUIRED_CASES:
+        raise ValueError("provider fixture does not cover the conformance matrix")
+    if raw.get("unknown_value", "missing") is not None:
+        raise ValueError("unknown facts must be represented by null, never zero")
+    accounts = tuple(raw.get("fake_account_refs", ()))
+    if len(accounts) < 2 or len(accounts) != len(set(accounts)):
+        raise ValueError("provider fixture must prove isolated synthetic accounts")
+    fixture_id = raw.get("fixture_id")
+    if (
+        not isinstance(fixture_id, str)
+        or len(fixture_id) > 64
+        or ID_PATTERN.fullmatch(fixture_id) is None
+    ):
+        raise ValueError("provider fixture identity is invalid")
+    fixture = ProviderFixture(
+        fixture_id=fixture_id,
+        families=frozenset(raw.get("families", ())),
+        runtime_sources=frozenset(raw.get("runtime_sources", ())),
+        catalog_source_ids=frozenset(raw.get("catalog_source_ids", ())),
+        catalog_provenances=frozenset(raw.get("catalog_provenances", ())),
+        cases=cases,
+        unknown_value=None,
+        fake_account_refs=accounts,
+    )
+    if fixture.fixture_id != path.parent.name:
+        raise ValueError("provider fixture identity must match its directory")
+    return fixture
+
+
 def load_provider_fixtures(root: Path) -> tuple[ProviderFixture, ...]:
     manifests = sorted(root.glob("*/manifest.json"))
     if not manifests:
         raise ValueError("provider conformance fixtures are unavailable")
-    fixtures: list[ProviderFixture] = []
-    for path in manifests:
-        if path.stat().st_size > 64 * 1024:
-            raise ValueError("provider fixture is oversized")
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict) or raw.get("schema_version") != 1:
-            raise ValueError("provider fixture schema is unsupported")
-        _validate_redacted(raw)
-        cases = frozenset(raw.get("cases", ()))
-        if cases != REQUIRED_CASES:
-            raise ValueError("provider fixture does not cover the conformance matrix")
-        if raw.get("unknown_value", "missing") is not None:
-            raise ValueError("unknown facts must be represented by null, never zero")
-        accounts = tuple(raw.get("fake_account_refs", ()))
-        if len(accounts) < 2 or len(accounts) != len(set(accounts)):
-            raise ValueError("provider fixture must prove isolated synthetic accounts")
-        fixture = ProviderFixture(
-            fixture_id=str(raw["fixture_id"]),
-            families=frozenset(raw.get("families", ())),
-            runtime_sources=frozenset(raw.get("runtime_sources", ())),
-            catalog_source_ids=frozenset(raw.get("catalog_source_ids", ())),
-            catalog_provenances=frozenset(raw.get("catalog_provenances", ())),
-            cases=cases,
-            unknown_value=None,
-            fake_account_refs=accounts,
-        )
-        if fixture.fixture_id != path.parent.name:
-            raise ValueError("provider fixture identity must match its directory")
-        fixtures.append(fixture)
+    fixtures = [load_provider_fixture(path) for path in manifests]
     ids = [fixture.fixture_id for fixture in fixtures]
     if len(ids) != len(set(ids)):
         raise ValueError("provider fixture identities must be unique")
     return tuple(fixtures)
+
+
+def load_provider_adapter_bundle(root: Path) -> ProviderAdapterBundle:
+    fixture = load_provider_fixture(root / "manifest.json")
+    conformance_path = root / "fixtures" / "conformance.json"
+    if not conformance_path.is_file() or conformance_path.stat().st_size > 64 * 1024:
+        raise ValueError("provider conformance example is unavailable or oversized")
+    conformance = json.loads(conformance_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(conformance, dict)
+        or conformance.get("schema_version") != 1
+        or conformance.get("unknown_value", "missing") is not None
+    ):
+        raise ValueError("provider conformance example schema is unsupported")
+    _validate_redacted(conformance)
+    cases = conformance.get("cases")
+    if not isinstance(cases, dict) or set(cases) != REQUIRED_CASES:
+        raise ValueError("provider conformance example does not cover the conformance matrix")
+    for name, expected in EXPECTED_OUTCOMES.items():
+        if cases.get(name) != {"expected": expected}:
+            raise ValueError("provider conformance example has an invalid outcome")
+    if tuple(conformance.get("fake_account_refs", ())) != fixture.fake_account_refs:
+        raise ValueError("provider conformance example account scopes do not match")
+
+    templates = (
+        ("quota.providers.json", GenericProviderConfig),
+        ("daily-usage.providers.json", DailyUsageFeedConfig),
+        ("daily-cost.providers.json", DailyCostFeedConfig),
+    )
+    configs: list[object] = []
+    for filename, expected_type in templates:
+        path = root / filename
+        if not path.is_file():
+            raise ValueError("provider bundle requires three declarative templates")
+        loaded = ProviderConfigStore(path).load()
+        if len(loaded) != 1 or type(loaded[0]) is not expected_type:
+            raise ValueError("provider bundle template kind is invalid")
+        configs.append(loaded[0])
+    provider_ids = [getattr(config, "provider_id", None) for config in configs]
+    if len(provider_ids) != len(set(provider_ids)):
+        raise ValueError("provider bundle template IDs must be unique")
+    expected_sources = frozenset({
+        "generic.quota",
+        "custom.daily_feed",
+        "custom.cost_feed",
+    })
+    if fixture.runtime_sources != expected_sources:
+        raise ValueError("provider bundle sources must use the declarative adapters")
+    built_in_fixtures = load_provider_fixtures(
+        Path(__file__).parent / "fixtures" / "providers"
+    )
+    covered_sources = frozenset(
+        source
+        for built_in_fixture in built_in_fixtures
+        for source in built_in_fixture.runtime_sources
+    )
+    if not expected_sources <= covered_sources:
+        raise ValueError("provider bundle sources lack runtime conformance evidence")
+    return ProviderAdapterBundle(fixture, tuple(configs))
 
 
 def source_identifier(source: object, family: str) -> str:
@@ -121,6 +219,7 @@ def runtime_inventory(bindings: Iterable[object]) -> tuple[tuple[str, str, str],
     rows: list[tuple[str, str, str]] = []
     for binding in bindings:
         for fact, attribute in (
+            ("balance", "balance_sources"),
             ("quota", "quota_sources"),
             ("usage", "usage_sources"),
             ("cost", "cost_sources"),

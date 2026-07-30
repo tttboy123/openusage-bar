@@ -125,25 +125,78 @@ public enum ProviderSourceProvenance: String, CaseIterable, Sendable, Hashable {
     case userSession = "user_session"
 }
 
+public enum ProviderSourceFactFamily: String, CaseIterable, Sendable, Hashable {
+    case detection
+    case tokenActivity = "token_activity"
+    case subscriptionCapacity = "subscription_capacity"
+    case apiBalance = "api_balance"
+    case apiSpend = "api_spend"
+}
+
+public enum ProviderSourceAuthority: String, CaseIterable, Sendable, Hashable {
+    case providerOfficial = "provider_official"
+    case providerLocal = "provider_local"
+    case thirdParty = "third_party"
+    case userSupplied = "user_supplied"
+    case unknown
+}
+
+public enum ProviderSourceAccountScope: String, CaseIterable, Sendable, Hashable {
+    case localProfile = "local_profile"
+    case configuredAccount = "configured_account"
+    case organization
+    case provider
+    case unknown
+}
+
+public enum ProviderSourceModelScope: String, CaseIterable, Sendable, Hashable {
+    case perModel = "per_model"
+    case aggregate
+    case mixed
+    case unknown
+}
+
+public enum ProviderSourceVerification: String, CaseIterable, Sendable, Hashable {
+    case liveAccount = "live_account"
+    case fixture
+    case upstreamDeclared = "upstream_declared"
+    case unverified
+}
+
 public struct ProviderSourceCapability: Sendable, Hashable {
     public let sourceID: String
     public let sourceKind: String
     public let operatingSystems: Set<ProviderSourceOperatingSystem>
     public let stability: ProviderSourceStability
     public let provenance: ProviderSourceProvenance
+    public let factFamilies: Set<ProviderSourceFactFamily>
+    public let authority: ProviderSourceAuthority
+    public let accountScope: ProviderSourceAccountScope
+    public let modelScope: ProviderSourceModelScope
+    public let verification: ProviderSourceVerification
 
     public init(
         sourceID: String,
         sourceKind: String,
         operatingSystems: Set<ProviderSourceOperatingSystem>,
         stability: ProviderSourceStability,
-        provenance: ProviderSourceProvenance
+        provenance: ProviderSourceProvenance,
+        factFamilies: Set<ProviderSourceFactFamily> = [],
+        authority: ProviderSourceAuthority = .unknown,
+        accountScope: ProviderSourceAccountScope = .unknown,
+        modelScope: ProviderSourceModelScope = .unknown,
+        verification: ProviderSourceVerification = .unverified
     ) {
         self.sourceID = sourceID
         self.sourceKind = sourceKind
         self.operatingSystems = operatingSystems
         self.stability = stability
         self.provenance = provenance
+        self.factFamilies = factFamilies
+        self.authority = authority
+        self.accountScope = accountScope
+        self.modelScope = modelScope
+        self.verification = verification
     }
 
     public static let openUsageFallback = ProviderSourceCapability(
@@ -151,6 +204,11 @@ public struct ProviderSourceCapability: Sendable, Hashable {
         sourceKind: "openusage",
         operatingSystems: [.macOS],
         stability: .pinned,
-        provenance: .openUsageUpstream
+        provenance: .openUsageUpstream,
+        factFamilies: [.detection],
+        authority: .thirdParty,
+        accountScope: .localProfile,
+        modelScope: .unknown,
+        verification: .unverified
     )
 }

@@ -3,12 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 
+from ..codex_daily import CodexLocalDailyImporter
 from ..codex_subscription import CodexSubscriptionAdapter
 from ..config import (
     DailyCostFeedConfig,
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
+    MoonshotConfig,
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
@@ -17,7 +19,12 @@ from ..daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
 from ..daily_history import OpenUsageDailyImporter
 from ..generic import GenericHTTPSAdapter
 from ..kiro import KiroQuotaAdapter
-from ..minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
+from ..minimax import (
+    MiniMaxBillingImporter,
+    MiniMaxCodingPlanAdapter,
+    minimax_endpoints_for_site,
+)
+from ..moonshot import MoonshotBalanceAdapter
 from ..network import BoundedHTTPClient
 from ..openai_organization import (
     OpenAIOrganizationCardAdapter,
@@ -29,12 +36,24 @@ from .contracts import ProviderBinding
 from .registry import AdapterRegistry
 
 
-def _quota_source(source: object, source_id: str, priority: int) -> object:
+def _performance_source(source: object, source_class: str) -> object:
+    if source_class not in {"network", "local_file", "child_process"}:
+        raise ValueError("invalid performance source class")
+    source.performance_source_class = source_class
+    return source
+
+
+def _quota_source(
+    source: object,
+    source_id: str,
+    priority: int,
+    source_class: str = "network",
+) -> object:
     # Existing adapters are intentionally left behavior-compatible in Task 1;
     # registry metadata makes their cross-Provider merge order explicit.
     source.source_id = source_id
     source.source_priority = priority
-    return source
+    return _performance_source(source, source_class)
 
 
 def default_registry(
@@ -45,19 +64,17 @@ def default_registry(
     registry = AdapterRegistry()
     generic_client = BoundedHTTPClient()
     daily_feed_client = BoundedHTTPClient(allowed_redirect_hosts=set())
-    minimax_client = BoundedHTTPClient(
-        allowed_reserved_hosts={"www.minimaxi.com"},
-        allowed_redirect_hosts=set(),
-    )
     openai_client = BoundedHTTPClient(allowed_redirect_hosts=set())
-    step_plan_keychain: object | None = None
+    moonshot_client = BoundedHTTPClient(allowed_redirect_hosts=set())
 
     registry.register_global(lambda: ProviderBinding(
         provider_id="openusage", family_id="openusage",
         quota_sources=(_quota_source(
-            OpenUsageAdapter(clock), "openusage.cards", 10
+            OpenUsageAdapter(clock), "openusage.cards", 10, "child_process"
         ),),
-        usage_sources=(OpenUsageDailyImporter(clock=clock),),
+        usage_sources=(_performance_source(
+            OpenUsageDailyImporter(clock=clock), "child_process"
+        ),),
     ))
     registry.register_global(lambda: ProviderBinding(
         provider_id="kiro_cli", family_id="kiro_cli",
@@ -68,22 +85,43 @@ def default_registry(
     registry.register_global(lambda: ProviderBinding(
         provider_id="codex", family_id="codex",
         quota_sources=(_quota_source(
-            CodexSubscriptionAdapter(clock=clock), "codex.local_rate_limits", 20
+            CodexSubscriptionAdapter(clock=clock),
+            "codex.local_rate_limits",
+            20,
+            "local_file",
+        ),),
+        usage_sources=(_performance_source(
+            CodexLocalDailyImporter(clock=clock), "local_file"
         ),),
     ))
 
     def minimax(config: MiniMaxConfig) -> ProviderBinding:
-        importer = MiniMaxBillingImporter(config, keychain, minimax_client, clock)
+        endpoints = minimax_endpoints_for_site(config.site)
+        client = BoundedHTTPClient(
+            allowed_reserved_hosts={endpoints.host},
+            allowed_redirect_hosts=set(),
+        )
+        usage_sources = (
+            (_performance_source(
+                MiniMaxBillingImporter(config, keychain, client, clock),
+                "network",
+            ),)
+            if endpoints.billing is not None
+            else ()
+        )
         return ProviderBinding(
             provider_id=config.provider_id, family_id="minimax",
             quota_sources=(_quota_source(MiniMaxCodingPlanAdapter(
-                config, keychain, minimax_client, clock
+                config, keychain, client, clock
             ), "minimax.coding_plan", 20),),
-            usage_sources=(importer,),
+            usage_sources=usage_sources,
         )
 
     def openai(config: OpenAIOrganizationConfig) -> ProviderBinding:
-        importer = OpenAIOrganizationImporter(config, keychain, openai_client, clock)
+        importer = _performance_source(
+            OpenAIOrganizationImporter(config, keychain, openai_client, clock),
+            "network",
+        )
         return ProviderBinding(
             provider_id=config.provider_id, family_id="openai",
             quota_sources=(_quota_source(
@@ -93,8 +131,27 @@ def default_registry(
             usage_sources=(importer,), cost_sources=(importer,),
         )
 
+    def moonshot(config: MoonshotConfig) -> ProviderBinding:
+        return ProviderBinding(
+            provider_id=config.provider_id,
+            family_id="moonshot",
+            balance_sources=(
+                _performance_source(
+                    MoonshotBalanceAdapter(
+                        config, keychain, moonshot_client, clock
+                    ),
+                    "network",
+                ),
+            ),
+        )
+
     def daily_feed(config: DailyUsageFeedConfig) -> ProviderBinding:
-        importer = DailyUsageFeedImporter(config, keychain, daily_feed_client, clock)
+        importer = _performance_source(
+            DailyUsageFeedImporter(
+                config, keychain, daily_feed_client, clock
+            ),
+            "network",
+        )
         return ProviderBinding(
             provider_id=config.provider_id, family_id=config.family_id,
             quota_sources=(_quota_source(
@@ -105,8 +162,11 @@ def default_registry(
         )
 
     def cost_feed(config: DailyCostFeedConfig) -> ProviderBinding:
-        importer = DailyCostFeedImporter(
-            config, keychain, daily_feed_client, clock
+        importer = _performance_source(
+            DailyCostFeedImporter(
+                config, keychain, daily_feed_client, clock
+            ),
+            "network",
         )
         return ProviderBinding(
             provider_id=config.provider_id, family_id=config.family_id,
@@ -118,15 +178,6 @@ def default_registry(
         )
 
     def step_plan(config: StepPlanConfig) -> ProviderBinding:
-        nonlocal step_plan_keychain
-        if step_plan_keychain is None:
-            try:
-                # Resolve lazily so unavailable Security/PyObjC support keeps the
-                # established read-only fallback and remains test-injectable.
-                from ..keychain import MacOSKeychain
-                step_plan_keychain = MacOSKeychain()
-            except (ImportError, OSError, RuntimeError):
-                step_plan_keychain = keychain
         endpoints = endpoints_for_site(config.site)
         client = BoundedHTTPClient(
             allowed_reserved_hosts={endpoints.api_host, endpoints.platform_host},
@@ -135,7 +186,7 @@ def default_registry(
         return ProviderBinding(
             provider_id=config.provider_id, family_id="step_plan",
             quota_sources=(_quota_source(StepPlanAdapter(
-                config, step_plan_keychain, client, clock
+                config, keychain, client, clock
             ), "step_plan.quota", 20),),
         )
 
@@ -149,6 +200,7 @@ def default_registry(
         )
 
     registry.register_config(MiniMaxConfig, minimax)
+    registry.register_config(MoonshotConfig, moonshot)
     registry.register_config(OpenAIOrganizationConfig, openai)
     registry.register_config(DailyUsageFeedConfig, daily_feed)
     registry.register_config(DailyCostFeedConfig, cost_feed)

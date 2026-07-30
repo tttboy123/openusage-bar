@@ -23,13 +23,18 @@ from openusage_bar.activity_store import (
     QuotaObservation,
 )
 from openusage_bar.capabilities import (
+    AccountScope,
     CapabilityState,
+    ModelScope,
     OperatingSystem,
     ProviderRegistry,
     QuotaWindow,
     QuotaWindowCapability,
+    SourceAuthority,
+    SourceFactFamily,
     SourceProvenance,
     SourceStability,
+    SourceVerification,
     registry,
 )
 from openusage_bar.local_api import create_tcp_server, create_unix_server
@@ -211,6 +216,19 @@ class UnixLocalAPITests(unittest.TestCase):
                 self.assertEqual(headers["x-content-type-options"], "nosniff")
                 self.assertNotIn("access-control-allow-origin", headers)
 
+    def test_missing_today_is_null_on_summary_and_snapshot_routes(self):
+        for target, value_path in (
+            ("/v1/summary?today=2026-07-15", ("todayTokens",)),
+            ("/v1/snapshot?today=2026-07-15", ("summary", "todayTokens")),
+        ):
+            with self.subTest(target=target):
+                status, _, body = self.request(target)
+                self.assertEqual(status, 200)
+                value = json.loads(body)
+                for key in value_path:
+                    value = value[key]
+                self.assertIsNone(value)
+
     def test_machine_schema_route_serves_the_committed_draft(self):
         status, _, body = self.request("/v1/schema.json")
         payload = json.loads(body)
@@ -240,6 +258,17 @@ class UnixLocalAPITests(unittest.TestCase):
 
         self.assertEqual((status, code, stderr.getvalue()), (200, 0, ""))
         self.assertEqual(json.loads(body), json.loads(stdout.getvalue()))
+
+    def test_activity_route_exposes_token_counting_convention(self):
+        status, _, body = self.request(
+            "/v1/activity/daily?from=2026-07-14&to=2026-07-14"
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            json.loads(body)["rows"][0]["tokenCountingConvention"],
+            "unknown",
+        )
 
     def test_costs_route_filters_provider_and_currency_and_rejects_bad_parameters(self):
         status, _, body = self.request(
@@ -296,7 +325,8 @@ class UnixLocalAPITests(unittest.TestCase):
                 self.assertEqual(set(source), {
                     "sourceId", "kind", "timeoutSeconds", "freshnessSeconds",
                     "credentialType", "requiresCredential", "operatingSystems",
-                    "stability", "provenance",
+                    "stability", "provenance", "factFamilies", "authority",
+                    "accountScope", "modelScope", "verification",
                 })
         lowered = json.dumps(payload, ensure_ascii=False).lower()
         for localized in ("正常", "错误", "未配置", "过期"):
@@ -331,7 +361,7 @@ class UnixLocalAPITests(unittest.TestCase):
             providers["kiro_cli"]["capabilities"]["credits"], "supported"
         )
         self.assertEqual(
-            providers["step_plan"]["capabilities"]["billing"], "supported"
+            providers["step_plan"]["capabilities"]["billing"], "unknown"
         )
         self.assertEqual(
             providers["step_plan"]["sources"][0], {
@@ -344,6 +374,11 @@ class UnixLocalAPITests(unittest.TestCase):
                 "operatingSystems": ["macos"],
                 "stability": "experimental",
                 "provenance": "user_session",
+                "factFamilies": ["detection", "subscription_capacity"],
+                "authority": "provider_official",
+                "accountScope": "configured_account",
+                "modelScope": "aggregate",
+                "verification": "live_account",
             },
         )
         openusage = providers["codex"]["sources"][1]
@@ -451,6 +486,11 @@ class UnixLocalAPITests(unittest.TestCase):
             }),
             "stability": SourceStability.STABLE,
             "provenance": SourceProvenance.PROVIDER_OFFICIAL,
+            "fact_families": frozenset({SourceFactFamily.DETECTION}),
+            "authority": SourceAuthority.UNKNOWN,
+            "account_scope": AccountScope.UNKNOWN,
+            "model_scope": ModelScope.UNKNOWN,
+            "verification": SourceVerification.UNVERIFIED,
         }
         for field, changed in source_mutations.items():
             mutations.append((
@@ -878,6 +918,16 @@ class DeadlineTests(unittest.TestCase):
                 request_deadline=0.12,
             )
             thread = start(server)
+            expired = threading.Event()
+            original_expire = server._expire_request
+
+            def mark_expired(request):
+                try:
+                    original_expire(request)
+                finally:
+                    expired.set()
+
+            server._expire_request = mark_expired
             slow = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             slow.connect(str(path))
 
@@ -891,7 +941,14 @@ class DeadlineTests(unittest.TestCase):
 
             dripper = threading.Thread(target=drip)
             dripper.start()
-            time.sleep(0.25)
+            self.assertTrue(expired.wait(2))
+            deadline = time.monotonic() + 2
+            while (
+                server.active_deadline_count != 0
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+            self.assertEqual(server.active_deadline_count, 0)
             status, _, _ = unix_request(path, "/v1/health")
             self.assertEqual(status, 200)
             dripper.join(1)

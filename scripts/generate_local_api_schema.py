@@ -35,6 +35,36 @@ def envelope(properties: dict[str, object], required: list[str]) -> dict[str, ob
     )
 
 
+def summary_contract(schema: dict[str, object]) -> dict[str, object]:
+    schema["allOf"] = [
+        {
+            "if": {
+                "properties": {"todayTokens": {"type": "null"}},
+                "required": ["todayTokens"],
+            },
+            "then": {
+                "properties": {
+                    "modelCount": {"const": 0},
+                    "coveredDayCount": {"const": 0},
+                }
+            },
+            "else": {
+                "if": {
+                    "properties": {"modelCount": {"const": 0}},
+                    "required": ["modelCount"],
+                },
+                "then": {
+                    "properties": {
+                        "todayTokens": {"const": 0},
+                        "coveredDayCount": {"minimum": 1},
+                    }
+                },
+            },
+        }
+    ]
+    return schema
+
+
 def render_schema() -> dict[str, object]:
     applies_to = closed(
         {
@@ -94,6 +124,43 @@ def render_schema() -> dict[str, object]:
             for name in ("used", "quotaLimit", "remaining", "remainingRatio")
         }},
     }]
+    balance = closed(
+        {
+            "recordId": {"type": "string"},
+            "providerId": {"type": "string"},
+            "accountRef": nullable("string"),
+            "currency": {"type": "string"},
+            "available": nullable("string"),
+            "voucher": nullable("string"),
+            "cash": nullable("string"),
+            "observedAt": {"type": "string", "format": "date-time"},
+            "freshnessSeconds": {"type": "integer", "minimum": 0},
+            "state": {"type": "string"},
+            "quality": {"type": "string"},
+            "stale": {"type": "boolean"},
+            "revision": {"type": "integer", "minimum": 1},
+            "sourceId": {"type": "string"},
+        },
+        [
+            "recordId", "providerId", "accountRef", "currency", "available",
+            "voucher", "cash", "observedAt", "freshnessSeconds", "state",
+            "quality", "stale", "revision", "sourceId",
+        ],
+    )
+    balance["allOf"] = [{
+        "if": {
+            "properties": {"state": {"const": "unknown"}},
+            "required": ["state"],
+        },
+        "then": {"properties": {
+            name: {"type": "null"}
+            for name in ("available", "voucher", "cash")
+        }},
+    }]
+    balances = envelope(
+        {"balances": {"type": "array", "items": balance}},
+        ["balances"],
+    )
     provider = closed(
         {
             "providerId": {"type": "string"}, "familyId": {"type": "string"},
@@ -113,23 +180,83 @@ def render_schema() -> dict[str, object]:
         },
         ["providerId", "sourceId", "state", "lastAttemptAt", "lastSuccessAt", "staleAt", "errorCode"],
     )
+    summary_properties = {
+        "todayTokens": {"type": ["integer", "null"], "minimum": 0},
+        "modelCount": {"type": "integer", "minimum": 0},
+        "coveredDayCount": {"type": "integer", "minimum": 0},
+    }
+    summary_required = ["todayTokens", "modelCount", "coveredDayCount"]
+    summary = summary_contract(envelope(summary_properties, summary_required))
     snapshot = envelope(
         {
             "localDay": {"type": "string", "format": "date"},
-            "summary": closed(
-                {
-                    "todayTokens": {"type": "integer", "minimum": 0},
-                    "modelCount": {"type": "integer", "minimum": 0},
-                    "coveredDayCount": {"type": "integer", "minimum": 0},
-                },
-                ["todayTokens", "modelCount", "coveredDayCount"],
+            "summary": summary_contract(
+                closed(dict(summary_properties), list(summary_required))
             ),
+            "balances": {"type": "array", "items": balance},
             "quotaWindows": {"type": "array", "items": quota},
             "providers": {"type": "array", "items": provider},
             "sources": {"type": "array", "items": source},
             "catalogRevision": {"type": "string"},
         },
-        ["localDay", "summary", "quotaWindows", "providers", "sources", "catalogRevision"],
+        [
+            "localDay", "summary", "quotaWindows", "providers",
+            "sources", "catalogRevision",
+        ],
+    )
+    activity_row = closed(
+        {
+            "day": {"type": "string", "format": "date"},
+            "providerId": {"type": "string"},
+            "accountRef": nullable("string"),
+            "modelId": {"type": "string"},
+            "inputTokens": {"type": "integer", "minimum": 0},
+            "outputTokens": {"type": "integer", "minimum": 0},
+            "cacheReadTokens": {"type": "integer", "minimum": 0},
+            "cacheCreationTokens": {"type": "integer", "minimum": 0},
+            "reasoningTokens": nullable("integer"),
+            "totalTokens": {"type": "integer", "minimum": 0},
+            "tokenCountingConvention": {
+                "enum": [
+                    "input_includes_cache",
+                    "components_disjoint",
+                    "provider_reported",
+                    "unknown",
+                ]
+            },
+            "costAmount": nullable("string"),
+            "costCurrency": nullable("string"),
+            "costBasis": nullable("string"),
+            "quality": {"type": "string"},
+            "importedAt": {"type": "string", "format": "date-time"},
+            "revision": {"type": "integer", "minimum": 1},
+            "recordId": {"type": "string"},
+            "sourceId": {"type": "string"},
+        },
+        [
+            "day", "providerId", "accountRef", "modelId", "inputTokens",
+            "outputTokens", "cacheReadTokens", "cacheCreationTokens",
+            "reasoningTokens", "totalTokens", "tokenCountingConvention",
+            "costAmount", "costCurrency", "costBasis", "quality",
+            "importedAt", "revision", "recordId", "sourceId",
+        ],
+    )
+    activity_coverage = closed(
+        {
+            "day": {"type": "string", "format": "date"},
+            "providerId": {"type": "string"},
+            "accountRef": nullable("string"),
+            "covered": {"type": "boolean"},
+            "sourceId": nullable("string"),
+        },
+        ["day", "providerId", "accountRef", "covered", "sourceId"],
+    )
+    activity = envelope(
+        {
+            "rows": {"type": "array", "items": activity_row},
+            "coverage": {"type": "array", "items": activity_coverage},
+        },
+        ["rows", "coverage"],
     )
     change = closed(
         {
@@ -161,7 +288,7 @@ def render_schema() -> dict[str, object]:
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://openusage.bar/schemas/local-api-v1.schema.json",
         "title": "OpenUsage Bar Local API v1",
-        "oneOf": [snapshot, changes, error],
+        "oneOf": [summary, snapshot, balances, activity, changes, error],
     }
 
 

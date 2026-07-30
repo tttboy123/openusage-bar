@@ -5,7 +5,7 @@ compatibility rules separate from the repository implementation makes them
 auditable without importing the store's mutation logic.
 """
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 DAILY_ACTIVITY_SOURCE_ID = "openusage.daily"
 PUBLIC_CHANGE_TYPES = frozenset(
     {
@@ -13,6 +13,7 @@ PUBLIC_CHANGE_TYPES = frozenset(
         "daily_cost_coverage",
         "daily_coverage",
         "daily_usage",
+        "balance",
         "ledger_schema",
         "provider_instance",
         "quota",
@@ -22,6 +23,22 @@ PUBLIC_CHANGE_TYPES = frozenset(
 )
 
 EXPECTED_SCHEMA = {
+    "balance_state": (
+        ("record_id", "TEXT", 0, None, 1),
+        ("observed_at", "TEXT", 1, None, 0),
+        ("provider_id", "TEXT", 1, None, 0),
+        ("account_ref", "TEXT", 1, "''", 0),
+        ("currency", "TEXT", 1, None, 0),
+        ("available", "TEXT", 0, None, 0),
+        ("voucher", "TEXT", 0, None, 0),
+        ("cash", "TEXT", 0, None, 0),
+        ("state", "TEXT", 1, None, 0),
+        ("quality", "TEXT", 1, None, 0),
+        ("stale", "INTEGER", 1, None, 0),
+        ("revision", "INTEGER", 1, None, 0),
+        ("payload_hash", "TEXT", 1, None, 0),
+        ("source_id", "TEXT", 1, "'current.balance'", 0),
+    ),
     "daily_costs": (
         ("day", "TEXT", 1, None, 1),
         ("provider_id", "TEXT", 1, None, 2),
@@ -60,6 +77,14 @@ EXPECTED_SCHEMA = {
         ("revision", "INTEGER", 1, None, 0),
         ("payload_hash", "TEXT", 1, None, 0),
         ("source_id", "TEXT", 1, "'legacy'", 0),
+    ),
+    "daily_token_conventions": (
+        ("day", "TEXT", 1, None, 1),
+        ("provider_id", "TEXT", 1, None, 2),
+        ("account_ref", "TEXT", 1, "''", 3),
+        ("model_id", "TEXT", 1, None, 4),
+        ("token_counting_convention", "TEXT", 1, None, 0),
+        ("daily_payload_hash", "TEXT", 1, None, 0),
     ),
     "daily_coverage": (
         ("day", "TEXT", 1, None, 1),

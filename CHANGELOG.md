@@ -4,25 +4,124 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.6.0 - 2026-07-30
+
+### Added
+
+- Provider capability evidence now records fact families, source authority,
+  account and model scope, and whether validation used a live account, fixture,
+  or upstream declaration.
+- Moonshot/Kimi official account balances are available as a distinct Balance
+  fact and are never presented as subscription capacity.
+- A standalone Provider Adapter Kit includes declarative quota, daily Token,
+  and daily cost templates plus a reusable conformance command.
+- No-telemetry Canary diagnostics include aggregate Balance health and public
+  capability evidence without exporting amounts, account references, Provider
+  instances, or source identifiers.
+- A privacy-safe Canary surface verifier proves that the installed CLI and
+  Local API expose the same revision and source-health facts while leaving
+  menu-bar visibility as an explicit manual check.
+
 ### Changed
 
-- OpenUsage daily scans now allow 60 seconds so large local histories are not
-  discarded by the previous 30-second process timeout.
-- Providers with an official daily usage adapter now select the official result
-  first and atomically fall back to OpenUsage only when the official source
-  fails. Fallback rows are marked with source `openusage.daily` and quality
-  `fallback`; the two sources are never added together.
-- Codex daily Token history again uses the shared OpenUsage collector as its
-  primary source, while its local rate-limit adapter remains responsible only
-  for subscription capacity.
+- Local API v1 has an executable N-1 compatibility policy: additive fields,
+  including `balances`, remain optional to older clients.
+- Kiro's OpenUsage-backed local Token activity is now marked as validated with
+  a live account after a bounded privacy-safe acceptance run. Its official AWS
+  subscription quota remains a separate fact and source.
+- Pre-release builds now run the same dependency audit and isolated install,
+  upgrade, rollback, and uninstall gates as pull-request CI.
+- Updated the pinned GitHub Actions baseline to `actions/checkout@v7.0.1`,
+  `actions/setup-python@v7.0.0`, and `actions/upload-artifact@v7.0.1`, with
+  every workflow reference still bound to an approved immutable commit.
+- Local and GitHub builds now verify every official GitHub Action against a
+  committed pin manifest, requiring both an immutable 40-character commit SHA
+  and its exact human-readable release tag.
 
 ### Fixed
 
-- Empty or failed OpenUsage scans no longer replace a last-good range with
-  covered zero usage. Source health records `empty_result` or the sanitized
-  failure while preserving the prior rows and coverage.
-- Daily activity details now expose each day's raw source IDs, quality IDs, and
-  collection time in the chart tooltip and accessibility summary.
+- The packaged collector now accepts the documented read-only `snapshot`
+  command, so CLI and Local API consumers can retrieve the same revisioned
+  resource snapshot from an installed app.
+- Headless Step Plan refreshes now use a bounded, killable read-only Keychain
+  boundary instead of waiting indefinitely for an interactive Security prompt.
+  The private write helper accepts only Step Plan session updates over stdin
+  and cannot read or return credentials.
+- Advanced and Repair now offers an explicit foreground Keychain authorization
+  flow for ad-hoc signed upgrades. It checks only fixed application-owned
+  accounts, discards credential output, reports counts instead of values, and
+  leaves the five-second headless fail-closed boundary unchanged.
+- Transactional upgrades now stop and reopen both visible helpers, so an
+  already-open Provider Settings window cannot keep executing the previous app
+  image after the bundle has been replaced. Collector daemon arguments remain
+  outside the exact process match.
+- Cursor enrichment detects OpenUsage's optional exact-provider export and
+  polls only Cursor when available; the local integration measured 3.60
+  seconds instead of timing out during an all-provider scan. Older OpenUsage
+  builds retain the bounded 75-second direct fallback, and the complete
+  interactive refresh envelope remains 160 seconds.
+- OpenUsage compatibility health now recognizes the independently reviewed
+  `c63a47c` provider-filter development build after also verifying the pinned
+  base version and exact 35-provider catalog. Unknown development revisions
+  remain unsupported and fail closed.
+- Step Plan source health now distinguishes Keychain access and network
+  failures from invalid upstream responses. Provider Center treats Keychain
+  failures as connection actions and keeps the last-good quota visible.
+- Provider Center now assigns source health to an explicitly configured
+  connection before a colliding OpenUsage-discovered Provider identity, so
+  repair actions remain attached to the editable account.
+- Codex local Token history no longer double-counts unchanged cumulative
+  events, and parser-contract changes trigger one bounded historical backfill.
+- MiniMax regional sources, Cursor fallback, Kiro quota, and OpenAI
+  Organization usage/cost pagination preserve independent fact health,
+  Last-good data, and account scope instead of combining or replacing facts.
+- Supported Billing or Cost capabilities must have a matching `api_spend`
+  source fact, preventing capability declarations from drifting away from
+  runtime evidence.
+
+## 0.4.4 - 2026-07-19
+
+### Changed
+
+- The menu-bar login item and background collector now cross a signed native
+  `execve` boundary that rebuilds a minimal non-secret environment before any
+  long-lived Swift or Python runtime starts.
+
+### Fixed
+
+- Provider-shaped variables present in the user launchd context are no longer
+  inherited by resident OpenUsage Bar processes; global launchd state is never
+  modified and credentials continue to be read only from Keychain.
+- A day with neither model rows nor explicit coverage remains unavailable in
+  the local API and menu bar instead of being rendered as zero Token usage.
+
+## 0.4.3 - 2026-07-19
+
+### Added
+
+- An explicit Token-counting convention shared by Python, SQLite, CLI, Local
+  API, and Swift, with rollback-compatible sidecar storage for existing
+  schema-v5 ledgers.
+- Opt-in diagnostics v2 for bounded daily reconciliation, including source
+  totals, component counters, coverage, quality, freshness, and conservative
+  duplicate-row evidence.
+
+### Changed
+
+- Usage Details presents Total, Input, Output, Cache Read, Cache Creation, and
+  Reasoning independently and explains whether cache is inclusive, disjoint,
+  provider-reported, mixed, or unknown.
+- Reconciliation exports keep observed subtotals separate from complete totals
+  and use per-export account pseudonyms.
+
+### Fixed
+
+- Old app versions can still read and roll back a ledger after the new Token
+  convention metadata has been written.
+- Provider mutation helpers no longer inherit unrelated parent-process secret
+  environment variables.
+- Partial or missing coverage is no longer representable as a trustworthy
+  complete aggregate total in diagnostics.
 
 ## 0.4.2 - 2026-07-18
 
@@ -82,12 +181,26 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- OpenUsage daily scans now allow 60 seconds so large local histories are not
+  discarded by the previous 30-second process timeout.
+- Providers with an official daily usage adapter now select the official result
+  first and atomically fall back to OpenUsage only when the official source
+  fails. Fallback rows are marked with source `openusage.daily` and quality
+  `fallback`; the two sources are never added together.
+- Codex daily Token history again uses the shared OpenUsage collector as its
+  primary source, while its local rate-limit adapter remains responsible only
+  for subscription capacity.
 - All app and helper bundles now share release version 0.4.0 and build 4.
 - Release metadata is verified against immutable tags, build history, and the
   CHANGELOG; GitHub Actions are pinned to full official commit SHAs.
 
 ### Fixed
 
+- Empty or failed OpenUsage scans no longer replace a last-good range with
+  covered zero usage. Source health records `empty_result` or the sanitized
+  failure while preserving the prior rows and coverage.
+- Daily activity details now expose each day's raw source IDs, quality IDs, and
+  collection time in the chart tooltip and accessibility summary.
 - Installation now prefers the standard Finder `/Applications` directory,
   falls back to `~/Applications` when necessary, preserves that location for
   updates, rollback, and uninstall, and reveals the installed app in Finder.

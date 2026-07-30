@@ -44,6 +44,8 @@ def table_contract(version: int) -> dict[str, tuple[tuple[str, str, int, str | N
     }
     if version >= 2:
         names |= {"daily_costs", "daily_cost_coverage"}
+    if version >= 6:
+        names.add("balance_state")
     result = {name: EXPECTED_SCHEMA[name] for name in sorted(names)}
     if version < 3:
         result["daily_model_usage"] = LEGACY_SOURCE_SCHEMAS["daily_model_usage"]

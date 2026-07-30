@@ -321,6 +321,7 @@ class DailyUsageFeedImporter:
                 cost_basis=None if value["cost"] is None else "provider_reported",
                 quality="direct",
                 imported_at=imported_at,
+                token_counting_convention="components_disjoint",
             )
             for (day, model), value in sorted(totals.items())
         )

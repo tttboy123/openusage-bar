@@ -23,6 +23,7 @@ from openusage_bar.daily_history import (
 )
 from openusage_bar.codex_attribution import CodexAttributionResolver
 from openusage_bar.models import Category, Overview, ProviderCard, ProviderStatus
+from openusage_bar.performance_timing import RefreshTimingRecorder
 from openusage_bar.openusage_adapter import CURSOR_CLI_DIRECTORIES, OpenUsageAdapter
 from openusage_bar.openai_organization import (
     CostImportSuccess,
@@ -181,6 +182,38 @@ class OpenUsageDailyImporterTests(unittest.TestCase):
             "payload": {"model": model},
         }
 
+    def test_local_client_unknown_rows_remain_scoped_to_their_provider(self):
+        payload = daily_payload(
+            {
+                "key": "2026-07-02",
+                "model_breakdown": [
+                    {
+                        "key": "(unknown)",
+                        "input_tokens": 1,
+                        "output_tokens": 2,
+                        "cache_read_tokens": 3,
+                        "cache_creation_tokens": 4,
+                        "reasoning_tokens": None,
+                        "total_tokens": 10,
+                        "cost_usd": None,
+                    },
+                ],
+            }
+        )
+
+        for provider_id in ("claude_code", "opencode", "hermes", "openclaw"):
+            with self.subTest(provider=provider_id):
+                result = OpenUsageDailyImporter(
+                    runner=Mock(return_value=completed(payload)),
+                    clock=lambda: NOW,
+                ).fetch(provider_id, SINCE, UNTIL)
+
+                self.assertTrue(result.ok)
+                self.assertEqual(len(result.rows), 1)
+                self.assertEqual(result.rows[0].provider_id, provider_id)
+                self.assertEqual(result.rows[0].model_id, "unknown")
+                self.assertEqual(result.rows[0].total_tokens, 10)
+
     def test_codex_unknown_moves_only_with_single_model_session_evidence(self):
         unknown_day = day_payload()
         unknown_day["model_breakdown"] = [
@@ -254,7 +287,8 @@ class OpenUsageDailyImporterTests(unittest.TestCase):
 
     def test_reused_openusage_local_client_slices_preserve_no_data(self):
         for provider_id in (
-            "claude_code", "opencode", "kimi_cli", "gemini_cli", "qwen_cli"
+            "claude_code", "opencode", "hermes", "openclaw",
+            "kimi_cli", "gemini_cli", "qwen_cli",
         ):
             with self.subTest(provider_id=provider_id):
                 importer = OpenUsageDailyImporter(
@@ -440,6 +474,7 @@ class OpenUsageDailyImporterTests(unittest.TestCase):
         self.assertIsNone(row.cost_currency)
         self.assertIsNone(row.cost_basis)
         self.assertEqual(row.quality, "derived")
+        self.assertEqual(row.token_counting_convention, "components_disjoint")
 
     def test_captured_openusage_023_fixture_canonicalizes_and_merges_unknown(self):
         payload = json.loads(
@@ -473,6 +508,18 @@ class OpenUsageDailyImporterTests(unittest.TestCase):
         self.assertIsNone(unknown.cost_amount)
         self.assertIsNone(unknown.cost_currency)
         self.assertIsNone(unknown.cost_basis)
+        self.assertEqual(
+            unknown.token_counting_convention,
+            "provider_reported",
+        )
+        self.assertEqual(
+            {
+                row.token_counting_convention
+                for model_id, row in rows.items()
+                if model_id != "unknown"
+            },
+            {"components_disjoint"},
+        )
         self.assertEqual(sum(row.total_tokens for row in rows.values()), 525)
 
     def test_unknown_merge_sums_nullable_values_only_when_both_are_known(self):
@@ -955,6 +1002,78 @@ class ActivityCollectorTests(unittest.TestCase):
         )
         openusage.fetch.assert_not_called()
         official.fetch_costs.assert_not_called()
+
+    def test_changed_usage_contract_forces_one_year_reimport(self):
+        store = Mock()
+        store.has_source_success.return_value = True
+        store.source_contract_revision.return_value = 1
+        official = Mock()
+        official.account_ref = ""
+        official.usage_source_id = "codex.local_sessions"
+        official.cost_source_id = None
+        official.history_contract_revision = 2
+        official.fetch_usage.return_value = UsageImportSuccess(
+            date(2025, 7, 15),
+            date(2026, 7, 14),
+            (model_row(day="2026-07-14"),),
+        )
+
+        ActivityCollector(
+            store,
+            Mock(),
+            official_importers={"codex": official},
+            clock=lambda: NOW,
+        ).refresh(Overview([]))
+
+        official.fetch_usage.assert_called_once_with(
+            date(2025, 7, 15), date(2026, 7, 14)
+        )
+        store.commit_usage_import_success.assert_called_once_with(
+            "codex",
+            "codex.local_sessions",
+            date(2025, 7, 15),
+            date(2026, 7, 14),
+            official.fetch_usage.return_value.rows,
+            NOW,
+            account_ref="",
+            contract_revision=2,
+        )
+
+    def test_current_usage_contract_keeps_seven_day_incremental_window(self):
+        store = Mock()
+        store.has_source_success.return_value = True
+        store.source_contract_revision.return_value = 2
+        official = Mock()
+        official.account_ref = ""
+        official.usage_source_id = "codex.local_sessions"
+        official.cost_source_id = None
+        official.history_contract_revision = 2
+        official.fetch_usage.return_value = UsageImportSuccess(
+            date(2026, 7, 8),
+            date(2026, 7, 14),
+            (model_row(day="2026-07-14"),),
+        )
+
+        ActivityCollector(
+            store,
+            Mock(),
+            official_importers={"codex": official},
+            clock=lambda: NOW,
+        ).refresh(Overview([]))
+
+        official.fetch_usage.assert_called_once_with(
+            date(2026, 7, 8), date(2026, 7, 14)
+        )
+        store.commit_usage_import_success.assert_called_once_with(
+            "codex",
+            "codex.local_sessions",
+            date(2026, 7, 8),
+            date(2026, 7, 14),
+            official.fetch_usage.return_value.rows,
+            NOW,
+            account_ref="",
+            contract_revision=2,
+        )
 
     def test_official_importer_rejects_rows_from_another_account_scope(self):
         store = Mock()
@@ -1853,6 +1972,43 @@ class ActivityStoreCollectorIntegrationTests(unittest.TestCase):
                 self.assertEqual(
                     current.last_attempt_at, "2026-07-14T02:00:00.000000Z"
                 )
+
+    def test_openusage_import_records_child_process_timing_without_provider_id(self):
+        ticks = iter((8.0, 8.625))
+        recorder = RefreshTimingRecorder(monotonic=lambda: next(ticks))
+        store = Mock()
+        store.has_daily_history.return_value = True
+        importer = Mock()
+        importer.performance_source_class = "child_process"
+        importer.fetch.return_value = DailyImportResult(
+            True, (model_row(day="2026-07-14"),)
+        )
+
+        ActivityCollector(
+            store,
+            importer,
+            clock=lambda: NOW,
+            timing_recorder=recorder,
+        ).refresh(Overview([card("private-provider")]))
+
+        payload = recorder.snapshot()
+        self.assertEqual(
+            payload["classes"][0],
+            {
+                "sourceClass": "child_process",
+                "sampleCount": 1,
+                "durationSecondsTotal": 0.625,
+                "durationSecondsMax": 0.625,
+                "outcomes": {
+                    "success": 1,
+                    "backoff": 0,
+                    "timeout": 0,
+                    "unavailable": 0,
+                    "failed": 0,
+                },
+            },
+        )
+        self.assertNotIn("private-provider", json.dumps(payload))
 
 
 if __name__ == "__main__":

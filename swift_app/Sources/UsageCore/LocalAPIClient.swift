@@ -24,6 +24,23 @@ public struct LocalAPISchema: Sendable, Hashable {
     public let routes: [String]
 }
 
+public struct LocalAPIBalance: Sendable, Hashable {
+    public let recordID: String
+    public let providerID: String
+    public let accountRef: String?
+    public let currency: String
+    public let available: String?
+    public let voucher: String?
+    public let cash: String?
+    public let observedAt: String
+    public let freshnessSeconds: Int
+    public let state: String
+    public let quality: String
+    public let stale: Bool
+    public let revision: Int64
+    public let sourceID: String
+}
+
 public struct LocalAPIResourceSnapshot: Sendable, Hashable {
     public let schemaVersion: String
     public let dataRevision: UInt64
@@ -32,9 +49,18 @@ public struct LocalAPIResourceSnapshot: Sendable, Hashable {
     public let todayTokens: Int64?
     public let modelCount: Int
     public let coveredDayCount: Int
+    public let balances: [LocalAPIBalance]
     public let quotaWindowCount: Int
     public let providerCount: Int
     public let sourceCount: Int
+}
+
+public struct LocalAPIDailyActivity: Sendable, Hashable {
+    public let schemaVersion: String
+    public let dataRevision: UInt64
+    public let generatedAt: String
+    public let records: [DailyUsage]
+    public let coverage: [CoverageDay]
 }
 
 public protocol LocalAPIReading: Sendable {
@@ -103,19 +129,122 @@ public struct LocalAPIClient: LocalAPIReading, Sendable {
         let data = try await fetch(target)
         let wire = try decode(SnapshotWire.self, from: data)
         try requireSchema(wire.schemaVersion)
+        let summaryIsValid: Bool
+        if let todayTokens = wire.todayTokens {
+            summaryIsValid = todayTokens >= 0 && (
+                wire.modelCount > 0 ||
+                    (todayTokens == 0 && wire.coveredDayCount > 0)
+            )
+        } else {
+            summaryIsValid = wire.modelCount == 0 && wire.coveredDayCount == 0
+        }
         guard wire.modelCount >= 0, wire.coveredDayCount >= 0,
-              wire.todayTokens.map({ $0 >= 0 }) ?? true,
+              summaryIsValid,
+              wire.balances.count <= 10_000,
               wire.quotaWindows.count <= 10_000,
               wire.providers.count <= 10_000,
               wire.sources.count <= 10_000
         else { throw LocalAPIClientError.invalidResponse }
+        let balances = try wire.balances.map { item -> LocalAPIBalance in
+            let decimalValues = [item.available, item.voucher, item.cash]
+            guard Self.safeText(item.recordID, maximumBytes: 512),
+                  Self.safeText(item.providerID, maximumBytes: 128),
+                  item.accountRef.map({
+                      Self.safeText($0, maximumBytes: 256, allowEmpty: true)
+                  }) ?? true,
+                  Self.safeText(item.currency, maximumBytes: 16),
+                  item.currency == item.currency.uppercased(),
+                  decimalValues.allSatisfy({ value in
+                      value.map(Self.safeNonnegativeDecimal) ?? true
+                  }),
+                  Self.safeText(item.observedAt, maximumBytes: 64),
+                  item.freshnessSeconds >= 0,
+                  Self.safeText(item.state, maximumBytes: 128),
+                  Self.safeText(item.quality, maximumBytes: 128),
+                  item.revision > 0,
+                  Self.safeText(item.sourceID, maximumBytes: 128),
+                  item.state != "unknown" || decimalValues.allSatisfy({ $0 == nil })
+            else { throw LocalAPIClientError.invalidResponse }
+            return LocalAPIBalance(
+                recordID: item.recordID, providerID: item.providerID,
+                accountRef: item.accountRef, currency: item.currency,
+                available: item.available, voucher: item.voucher, cash: item.cash,
+                observedAt: item.observedAt,
+                freshnessSeconds: item.freshnessSeconds,
+                state: item.state, quality: item.quality, stale: item.stale,
+                revision: item.revision, sourceID: item.sourceID
+            )
+        }
         return LocalAPIResourceSnapshot(
             schemaVersion: wire.schemaVersion, dataRevision: wire.dataRevision,
             generatedAt: wire.generatedAt, localDay: wire.localDay,
             todayTokens: wire.todayTokens, modelCount: wire.modelCount,
             coveredDayCount: wire.coveredDayCount,
+            balances: balances,
             quotaWindowCount: wire.quotaWindows.count,
             providerCount: wire.providers.count, sourceCount: wire.sources.count
+        )
+    }
+
+    public func dailyActivity(from start: String, to end: String) async throws -> LocalAPIDailyActivity {
+        guard let startDay = LocalDay(rawValue: start),
+              let endDay = LocalDay(rawValue: end),
+              startDay <= endDay,
+              let startDate = startDay.utcDate,
+              let endDate = endDay.utcDate,
+              let distance = Calendar.utc.dateComponents(
+                [.day], from: startDate, to: endDate
+              ).day,
+              distance + 1 <= 731
+        else { throw LocalAPIClientError.invalidResponse }
+
+        let data = try await fetch("/v1/activity/daily?from=\(start)&to=\(end)")
+        let wire = try decode(ActivityWire.self, from: data)
+        try requireSchema(wire.schemaVersion)
+        guard wire.rows.count <= 10_000, wire.coverage.count <= 100_000 else {
+            throw LocalAPIClientError.invalidResponse
+        }
+        let records = try wire.rows.map { row -> DailyUsage in
+            guard let day = LocalDay(rawValue: row.day),
+                  row.inputTokens >= 0, row.outputTokens >= 0,
+                  row.cacheReadTokens >= 0, row.cacheCreationTokens >= 0,
+                  row.reasoningTokens.map({ $0 >= 0 }) ?? true,
+                  row.totalTokens >= 0, row.revision > 0,
+                  Self.safeText(row.providerID, maximumBytes: 128),
+                  Self.safeText(row.accountRef ?? "", maximumBytes: 256, allowEmpty: true),
+                  Self.safeText(row.modelID, maximumBytes: 256),
+                  Self.safeText(row.quality, maximumBytes: 128),
+                  Self.safeText(row.importedAt, maximumBytes: 64),
+                  Self.safeText(row.recordID, maximumBytes: 512),
+                  Self.safeText(row.sourceID, maximumBytes: 128)
+            else { throw LocalAPIClientError.invalidResponse }
+            return DailyUsage(
+                day: day, providerID: row.providerID, accountRef: row.accountRef ?? "",
+                modelID: row.modelID, inputTokens: row.inputTokens,
+                outputTokens: row.outputTokens, cacheReadTokens: row.cacheReadTokens,
+                cacheCreationTokens: row.cacheCreationTokens,
+                reasoningTokens: row.reasoningTokens, totalTokens: row.totalTokens,
+                costAmount: row.costAmount, costCurrency: row.costCurrency,
+                costBasis: row.costBasis, quality: row.quality,
+                importedAt: row.importedAt, revision: row.revision,
+                recordID: row.recordID, sourceID: row.sourceID,
+                tokenCountingConvention: row.tokenCountingConvention
+            )
+        }
+        let coverage = try wire.coverage.map { item -> CoverageDay in
+            guard let day = LocalDay(rawValue: item.day),
+                  Self.safeText(item.providerID, maximumBytes: 128),
+                  Self.safeText(item.accountRef ?? "", maximumBytes: 256, allowEmpty: true),
+                  item.sourceID.map({ Self.safeText($0, maximumBytes: 128) }) ?? true
+            else { throw LocalAPIClientError.invalidResponse }
+            return CoverageDay(
+                day: day, providerID: item.providerID, accountRef: item.accountRef ?? "",
+                isCovered: item.covered, sourceID: item.sourceID
+            )
+        }
+        return LocalAPIDailyActivity(
+            schemaVersion: wire.schemaVersion, dataRevision: wire.dataRevision,
+            generatedAt: wire.generatedAt, records: records, coverage: coverage
         )
     }
 
@@ -138,6 +267,24 @@ public struct LocalAPIClient: LocalAPIReading, Sendable {
 
     private func requireSchema(_ value: String) throws {
         guard value == "1.0" else { throw LocalAPIClientError.schemaMismatch }
+    }
+
+    private static func safeText(
+        _ value: String, maximumBytes: Int, allowEmpty: Bool = false
+    ) -> Bool {
+        (allowEmpty || !value.isEmpty)
+            && value.utf8.count <= maximumBytes
+            && value.unicodeScalars.allSatisfy { scalar in
+                scalar.value >= 0x20 && scalar.value != 0x7f
+            }
+    }
+
+    private static func safeNonnegativeDecimal(_ value: String) -> Bool {
+        value.utf8.count <= 128
+            && value.range(
+                of: #"^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$"#,
+                options: .regularExpression
+            ) != nil
     }
 }
 
@@ -163,17 +310,143 @@ private struct SnapshotWire: Decodable {
         let coveredDayCount: Int
     }
     struct Item: Decodable {}
+    struct Balance: Decodable {
+        let recordID: String
+        let providerID: String
+        let accountRef: String?
+        let currency: String
+        let available: String?
+        let voucher: String?
+        let cash: String?
+        let observedAt: String
+        let freshnessSeconds: Int
+        let state: String
+        let quality: String
+        let stale: Bool
+        let revision: Int64
+        let sourceID: String
+
+        enum CodingKeys: String, CodingKey {
+            case accountRef, currency, available, voucher, cash, observedAt
+            case freshnessSeconds, state, quality, stale, revision
+            case recordID = "recordId"
+            case providerID = "providerId"
+            case sourceID = "sourceId"
+        }
+    }
     let schemaVersion: String
     let dataRevision: UInt64
     let generatedAt: String
     let localDay: String
     let summary: Summary
+    let balances: [Balance]
     let quotaWindows: [Item]
     let providers: [Item]
     let sources: [Item]
     var todayTokens: Int64? { summary.todayTokens }
     var modelCount: Int { summary.modelCount }
     var coveredDayCount: Int { summary.coveredDayCount }
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, dataRevision, generatedAt, localDay, summary
+        case balances, quotaWindows, providers, sources
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(String.self, forKey: .schemaVersion)
+        dataRevision = try values.decode(UInt64.self, forKey: .dataRevision)
+        generatedAt = try values.decode(String.self, forKey: .generatedAt)
+        localDay = try values.decode(String.self, forKey: .localDay)
+        summary = try values.decode(Summary.self, forKey: .summary)
+        balances = try values.decodeIfPresent([Balance].self, forKey: .balances) ?? []
+        quotaWindows = try values.decode([Item].self, forKey: .quotaWindows)
+        providers = try values.decode([Item].self, forKey: .providers)
+        sources = try values.decode([Item].self, forKey: .sources)
+    }
+}
+
+private struct ActivityWire: Decodable {
+    struct Row: Decodable {
+        let day: String
+        let providerID: String
+        let accountRef: String?
+        let modelID: String
+        let inputTokens: Int64
+        let outputTokens: Int64
+        let cacheReadTokens: Int64
+        let cacheCreationTokens: Int64
+        let reasoningTokens: Int64?
+        let totalTokens: Int64
+        let costAmount: String?
+        let costCurrency: String?
+        let costBasis: String?
+        let quality: String
+        let importedAt: String
+        let revision: Int64
+        let recordID: String
+        let sourceID: String
+        let tokenCountingConvention: TokenCountingConvention
+
+        enum CodingKeys: String, CodingKey {
+            case day
+            case providerID = "providerId"
+            case accountRef
+            case modelID = "modelId"
+            case inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens
+            case reasoningTokens, totalTokens, costAmount, costCurrency, costBasis
+            case quality, importedAt, revision
+            case recordID = "recordId"
+            case sourceID = "sourceId"
+            case tokenCountingConvention
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            day = try values.decode(String.self, forKey: .day)
+            providerID = try values.decode(String.self, forKey: .providerID)
+            accountRef = try values.decodeIfPresent(String.self, forKey: .accountRef)
+            modelID = try values.decode(String.self, forKey: .modelID)
+            inputTokens = try values.decode(Int64.self, forKey: .inputTokens)
+            outputTokens = try values.decode(Int64.self, forKey: .outputTokens)
+            cacheReadTokens = try values.decode(Int64.self, forKey: .cacheReadTokens)
+            cacheCreationTokens = try values.decode(Int64.self, forKey: .cacheCreationTokens)
+            reasoningTokens = try values.decodeIfPresent(Int64.self, forKey: .reasoningTokens)
+            totalTokens = try values.decode(Int64.self, forKey: .totalTokens)
+            costAmount = try values.decodeIfPresent(String.self, forKey: .costAmount)
+            costCurrency = try values.decodeIfPresent(String.self, forKey: .costCurrency)
+            costBasis = try values.decodeIfPresent(String.self, forKey: .costBasis)
+            quality = try values.decode(String.self, forKey: .quality)
+            importedAt = try values.decode(String.self, forKey: .importedAt)
+            revision = try values.decode(Int64.self, forKey: .revision)
+            recordID = try values.decode(String.self, forKey: .recordID)
+            sourceID = try values.decode(String.self, forKey: .sourceID)
+            tokenCountingConvention = try values.decodeIfPresent(
+                TokenCountingConvention.self, forKey: .tokenCountingConvention
+            ) ?? .unknown
+        }
+    }
+
+    struct Coverage: Decodable {
+        let day: String
+        let providerID: String
+        let accountRef: String?
+        let covered: Bool
+        let sourceID: String?
+
+        enum CodingKeys: String, CodingKey {
+            case day
+            case providerID = "providerId"
+            case accountRef, covered
+            case sourceID = "sourceId"
+        }
+    }
+
+    let schemaVersion: String
+    let dataRevision: UInt64
+    let generatedAt: String
+    let rows: [Row]
+    let coverage: [Coverage]
 }
 
 private struct UnixHTTPTransport: Sendable {

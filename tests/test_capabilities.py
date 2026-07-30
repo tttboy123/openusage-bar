@@ -2,9 +2,11 @@ import unittest
 from dataclasses import FrozenInstanceError, replace
 
 from openusage_bar.capabilities import (
+    AccountScope,
     CapabilityState,
     CredentialType,
     MetricFamily,
+    ModelScope,
     ObservationState,
     OperatingSystem,
     ProviderDescriptor,
@@ -13,9 +15,12 @@ from openusage_bar.capabilities import (
     QuotaWindow,
     QuotaWindowCapability,
     SourceCapability,
+    SourceAuthority,
+    SourceFactFamily,
     SourceKind,
     SourceProvenance,
     SourceStability,
+    SourceVerification,
     registry,
     state_from_card,
 )
@@ -87,17 +92,28 @@ class ProviderCapabilityTests(unittest.TestCase):
 
         self.assertEqual(
             descriptor.metric_families,
-            frozenset({MetricFamily.SUBSCRIPTION_QUOTA}),
+            frozenset({
+                MetricFamily.SUBSCRIPTION_QUOTA,
+                MetricFamily.TOKEN_ACTIVITY,
+            }),
         )
         self.assertEqual(descriptor.regions, frozenset({"cn", "international"}))
         self.assertEqual(
             [source.kind for source in descriptor.sources],
-            [SourceKind.BUILTIN_API, SourceKind.OPENUSAGE],
+            [
+                SourceKind.BUILTIN_API,
+                SourceKind.BUILTIN_API,
+                SourceKind.OPENUSAGE,
+            ],
         )
         self.assertEqual(descriptor.category, "subscription")
         self.assertEqual(
             [source.credential_type for source in descriptor.sources],
-            [CredentialType.API_KEY, CredentialType.PROVIDER_OWNED],
+            [
+                CredentialType.API_KEY,
+                CredentialType.API_KEY,
+                CredentialType.PROVIDER_OWNED,
+            ],
         )
         self.assertEqual(
             descriptor.capabilities.quota_windows.values,
@@ -124,9 +140,27 @@ class ProviderCapabilityTests(unittest.TestCase):
         self.assertIs(
             codex.sources[0].provenance, SourceProvenance.PROVIDER_LOCAL
         )
+        self.assertEqual(
+            codex.sources[0].fact_families,
+            frozenset({
+                SourceFactFamily.DETECTION,
+                SourceFactFamily.SUBSCRIPTION_CAPACITY,
+                SourceFactFamily.TOKEN_ACTIVITY,
+            }),
+        )
+        self.assertIs(codex.sources[0].authority, SourceAuthority.PROVIDER_LOCAL)
+        self.assertIs(codex.sources[0].account_scope, AccountScope.LOCAL_PROFILE)
+        self.assertIs(codex.sources[0].model_scope, ModelScope.MIXED)
+        self.assertIs(
+            codex.sources[0].verification, SourceVerification.LIVE_ACCOUNT
+        )
         self.assertIs(codex.sources[1].stability, SourceStability.PINNED)
         self.assertIs(
             codex.sources[1].provenance, SourceProvenance.OPENUSAGE_UPSTREAM
+        )
+        self.assertIs(codex.sources[1].authority, SourceAuthority.THIRD_PARTY)
+        self.assertIs(
+            codex.sources[1].verification, SourceVerification.FIXTURE
         )
 
     def test_unknown_provider_gets_dynamic_openusage_descriptor(self):
@@ -181,6 +215,7 @@ class ProviderCapabilityTests(unittest.TestCase):
     def test_openai_declares_official_organization_usage_and_costs(self):
         descriptor = registry.require("openai")
 
+        self.assertTrue(descriptor.supports_accounts)
         self.assertEqual(
             descriptor.metric_families,
             frozenset({MetricFamily.TOKEN_ACTIVITY, MetricFamily.BILLING}),
@@ -209,9 +244,7 @@ class ProviderCapabilityTests(unittest.TestCase):
         self.assertEqual(descriptor.regions, frozenset({"cn", "international"}))
         self.assertEqual(
             descriptor.metric_families,
-            frozenset(
-                {MetricFamily.SUBSCRIPTION_QUOTA, MetricFamily.BILLING}
-            ),
+            frozenset({MetricFamily.SUBSCRIPTION_QUOTA}),
         )
         self.assertEqual(
             [source.kind for source in descriptor.sources],

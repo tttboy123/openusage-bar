@@ -42,6 +42,7 @@ class BundleConfigTests(unittest.TestCase):
 
     def test_all_three_bundles_share_the_canonical_version(self):
         expected = (APP_VERSION, BUILD_VERSION)
+        self.assertEqual(expected, ("0.6.0", "9"))
         self.assertEqual(
             (info_plist()["CFBundleShortVersionString"], info_plist()["CFBundleVersion"]),
             expected,
@@ -58,7 +59,7 @@ class BundleConfigTests(unittest.TestCase):
         self.assertEqual(
             payload["ProgramArguments"],
             [
-                f"{APP_BUNDLE_PATH}/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings",
+                f"{APP_BUNDLE_PATH}/Contents/MacOS/OpenUsage Collector",
                 "daemon", "--interval", "300", "--api-socket",
                 "~/.local/state/openusage-bar/openusage.sock",
             ],

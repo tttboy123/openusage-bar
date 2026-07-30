@@ -6,12 +6,14 @@ from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 from openusage_bar.aggregator import BoundedReadOnlyKeychain, build_headless_refresher
+from openusage_bar.codex_daily import CodexLocalDailyImporter
 from openusage_bar.codex_subscription import CodexSubscriptionAdapter
 from openusage_bar.config import (
     DailyCostFeedConfig,
     DailyUsageFeedConfig,
     GenericProviderConfig,
     MiniMaxConfig,
+    MoonshotConfig,
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
@@ -21,11 +23,13 @@ from openusage_bar.daily_history import OpenUsageDailyImporter
 from openusage_bar.generic import GenericHTTPSAdapter
 from openusage_bar.kiro import KiroQuotaAdapter
 from openusage_bar.minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
+from openusage_bar.moonshot import MoonshotBalanceAdapter
 from openusage_bar.openai_organization import (
     OpenAIOrganizationCardAdapter,
     OpenAIOrganizationImporter,
 )
 from openusage_bar.openusage_adapter import OpenUsageAdapter
+from openusage_bar.performance_timing import RefreshTimingRecorder
 from openusage_bar.providers.builtins import default_registry
 from openusage_bar.providers.contracts import ProviderBinding
 from openusage_bar.providers.registry import AdapterRegistry, UnknownProviderConfig
@@ -44,6 +48,9 @@ class AdapterRegistryTests(unittest.TestCase):
     def configs(self):
         return [
             MiniMaxConfig("minimax-work", "MiniMax Work"),
+            MoonshotConfig(
+                "moonshot-work", "Kimi Work", site="china", account_ref="work"
+            ),
             OpenAIOrganizationConfig("openai", "OpenAI Org"),
             DailyUsageFeedConfig(
                 provider_id="glm-work", name="GLM Work", family_id="zai",
@@ -80,11 +87,14 @@ class AdapterRegistryTests(unittest.TestCase):
         expected = {
             "openusage": ((OpenUsageAdapter,), (OpenUsageDailyImporter,), ()),
             "kiro_cli": ((KiroQuotaAdapter,), (), ()),
-            "codex": ((CodexSubscriptionAdapter,), (), ()),
+            "codex": (
+                (CodexSubscriptionAdapter,), (CodexLocalDailyImporter,), (),
+            ),
             "cost-work": ((DailyCostFeedCardAdapter,), (), (DailyCostFeedImporter,)),
             "minimax-work": (
                 (MiniMaxCodingPlanAdapter,), (MiniMaxBillingImporter,), (),
             ),
+            "moonshot-work": ((), (), ()),
             "openai": (
                 (OpenAIOrganizationCardAdapter,),
                 (OpenAIOrganizationImporter,),
@@ -102,6 +112,10 @@ class AdapterRegistryTests(unittest.TestCase):
             self.assertEqual(tuple(map(type, binding.quota_sources)), groups[0])
             self.assertEqual(tuple(map(type, binding.usage_sources)), groups[1])
             self.assertEqual(tuple(map(type, binding.cost_sources)), groups[2])
+        self.assertEqual(
+            tuple(map(type, bindings["moonshot-work"].balance_sources)),
+            (MoonshotBalanceAdapter,),
+        )
         self.assertIs(
             bindings["openai"].usage_sources[0],
             bindings["openai"].cost_sources[0],
@@ -110,6 +124,63 @@ class AdapterRegistryTests(unittest.TestCase):
             bindings["minimax-work"].quota_sources[0].client,
             bindings["minimax-work"].usage_sources[0].client,
         )
+
+    def test_minimax_sites_use_isolated_clients_and_only_verified_usage_sources(self):
+        bindings = {
+            binding.provider_id: binding
+            for binding in self.registry().build(
+                [
+                    MiniMaxConfig(
+                        "minimax-cn", "MiniMax China", site="china"
+                    ),
+                    MiniMaxConfig(
+                        "minimax-global",
+                        "MiniMax Global",
+                        site="international",
+                    ),
+                ]
+            )
+        }
+
+        china = bindings["minimax-cn"]
+        international = bindings["minimax-global"]
+        self.assertEqual(
+            tuple(map(type, china.usage_sources)),
+            (MiniMaxBillingImporter,),
+        )
+        self.assertEqual(international.usage_sources, ())
+        self.assertIsNot(
+            china.quota_sources[0].client,
+            international.quota_sources[0].client,
+        )
+        self.assertEqual(
+            china.quota_sources[0].client.allowed_reserved_hosts,
+            frozenset({"www.minimaxi.com"}),
+        )
+        self.assertEqual(
+            international.quota_sources[0].client.allowed_reserved_hosts,
+            frozenset({"www.minimax.io"}),
+        )
+        self.assertEqual(
+            china.quota_sources[0].client.allowed_redirect_hosts,
+            frozenset(),
+        )
+        self.assertEqual(
+            international.quota_sources[0].client.allowed_redirect_hosts,
+            frozenset(),
+        )
+
+    def test_step_plan_reuses_the_shared_bounded_read_only_keychain(self):
+        keychain = BoundedReadOnlyKeychain()
+        binding = next(
+            item
+            for item in default_registry(
+                clock=lambda: NOW, keychain=keychain
+            ).build([StepPlanConfig("step-work", "Step Plan")])
+            if item.provider_id == "step-work"
+        )
+
+        self.assertIs(binding.quota_sources[0].keychain, keychain)
 
     def test_config_order_does_not_change_stable_bindings(self):
         forward = self.registry().build(self.configs())
@@ -150,6 +221,74 @@ class AdapterRegistryTests(unittest.TestCase):
         self.assertIs(runtime_types[0], OpenUsageAdapter)
         self.assertGreater(runtime_types.index(CodexSubscriptionAdapter), 0)
         self.assertGreater(runtime_types.index(KiroQuotaAdapter), 0)
+
+    def test_builtin_sources_declare_privacy_safe_performance_classes(self):
+        bindings = {
+            binding.provider_id: binding
+            for binding in self.registry().build(self.configs())
+        }
+
+        self.assertEqual(
+            bindings["openusage"].quota_sources[0].performance_source_class,
+            "child_process",
+        )
+        self.assertEqual(
+            bindings["openusage"].usage_sources[0].performance_source_class,
+            "child_process",
+        )
+        self.assertEqual(
+            bindings["codex"].quota_sources[0].performance_source_class,
+            "local_file",
+        )
+        self.assertEqual(
+            bindings["codex"].usage_sources[0].performance_source_class,
+            "local_file",
+        )
+        for provider_id in (
+            "kiro_cli",
+            "minimax-work",
+            "moonshot-work",
+            "openai",
+            "glm-work",
+            "cost-work",
+            "step-work",
+            "generic-work",
+        ):
+            binding = bindings[provider_id]
+            sources = (
+                *binding.balance_sources,
+                *binding.quota_sources,
+                *binding.usage_sources,
+                *binding.cost_sources,
+            )
+            self.assertTrue(sources)
+            self.assertTrue(
+                all(
+                    source.performance_source_class == "network"
+                    for source in sources
+                )
+            )
+
+    def test_headless_refresher_shares_one_timing_recorder(self):
+        recorder = RefreshTimingRecorder()
+        with patch(
+            "openusage_bar.config.ProviderConfigStore.load", return_value=[]
+        ):
+            refresher = build_headless_refresher(
+                Mock(), timing_recorder=recorder
+            )
+
+        self.assertIs(refresher.timing_recorder, recorder)
+        self.assertIs(refresher.aggregator.timing_recorder, recorder)
+        self.assertIs(refresher.collector.timing_recorder, recorder)
+        self.assertEqual(
+            refresher.performance_timing_snapshot(),
+            {
+                "schemaVersion": 1,
+                "scope": "source-class",
+                "classes": [],
+            },
+        )
 
     def test_duplicate_source_ids_and_provider_ids_are_rejected(self):
         class Source:

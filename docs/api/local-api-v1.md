@@ -4,6 +4,11 @@ This is a read-only, single-version API for local schedulers and native clients.
 It uses HTTP/1.1 over a user-only Unix domain socket by default. TCP is an
 explicit IPv4-loopback opt-in and always requires bearer authentication.
 
+The published additive/deprecation/breaking rules, N-1 test contract, and
+version upgrade procedure are frozen in the
+[Local API v1 compatibility policy](compatibility-v1.md). Consumers must
+ignore unknown v1 fields and retain the missing-versus-zero semantics below.
+
 ## Response contract
 
 Successful responses are UTF-8 JSON and preserve the canonical `QueryService`
@@ -23,7 +28,7 @@ The remaining fields are the same fields emitted by the existing collector CLI:
 | `GET /v1/schema` | none | `routes`, `errorShape` |
 | `GET /v1/schema.json` | none | committed Draft 2020-12 contract under `schema` |
 | `GET /schema` | none | Compatibility alias of `/v1/schema` |
-| `GET /v1/summary` | optional `today=YYYY-MM-DD` | `todayTokens`, `modelCount`, `coveredDayCount` |
+| `GET /v1/summary` | optional `today=YYYY-MM-DD` | `todayTokens` (`integer | null`), `modelCount`, `coveredDayCount` |
 | `GET /v1/snapshot` | optional `today=YYYY-MM-DD` | one-revision resource view: `localDay`, `summary`, every `quotaWindow`, `providers`, `sources`, `catalogRevision` |
 | `GET /v1/capabilities` | none | `providers`, sorted by `familyId`; nested sources retain declared priority |
 | `GET /v1/providers` | optional comma-separated `providerIds` | observed/configured provider instances, sorted by `providerId` |
@@ -33,6 +38,31 @@ The remaining fields are the same fields emitted by the existing collector CLI:
 | `GET /v1/quotas/history` | optional `providerId`, `accountRef`, `limit`; `from` and `to` must be supplied together | `snapshots`; newest selected page returned in chronological order |
 | `GET /v1/sources/status` | none | `sources`, canonical provider/source order |
 | `GET /v1/changes` | optional `after` (default 0), `limit` (default 100) | `records`, `nextCursor`, `hasMore`; an ahead cursor is invalid |
+
+Daily activity rows preserve the `totalTokens` value reported by the selected
+source. Consumers must not recompute or replace it from the component counters.
+Each row declares `tokenCountingConvention` so a reader can interpret the
+components without counting cache Tokens twice:
+
+| Convention | Meaning |
+|---|---|
+| `input_includes_cache` | Cache reads and cache creation are classifications inside `inputTokens`, and reasoning is a classification inside `outputTokens`; the source total is `inputTokens + outputTokens`. |
+| `components_disjoint` | Input, output, cache read, cache creation, and a known reasoning value are disjoint components of the source total. |
+| `provider_reported` | The source reports a trusted total, but the available component counters may not add up to it. |
+| `unknown` | The source did not declare a provable relationship between Total and the component counters. |
+
+`reasoningTokens` remains nullable because some sources do not expose it.
+`sourceId`, `quality`, `importedAt`, and the matching coverage row describe the
+provenance and completeness of each fact. A covered day with no rows is a known
+zero. `covered=false` is missing coverage, not a numeric zero; a selection that
+mixes covered and missing scopes is partial and must not be presented as a
+complete total.
+
+The compact summary follows the same rule. `todayTokens: null` means there are
+no model rows and no coverage facts for that day. A known, covered zero is
+`todayTokens: 0` with `coveredDayCount > 0`. The combination
+`todayTokens=0`, `modelCount=0`, `coveredDayCount=0` violates the contract and
+must be rejected by health probes rather than displayed as real usage.
 
 Unknown or repeated query parameters, malformed percent escapes, controls,
 noncanonical dates, unstable identifiers, oversized ranges, and out-of-range
@@ -50,6 +80,16 @@ offline CLI equivalent is:
 ```bash
 openusage-bar snapshot --today 2026-07-18 --format json --offline
 ```
+
+A bounded, standard-library Unix socket example is available from a source
+checkout:
+
+```bash
+python3 examples/local_api_v1_client.py
+```
+
+It prints only an allowlisted snapshot summary and is an integration example,
+not an application-specific SDK.
 
 Incremental consumers must process a complete `/v1/changes` page before
 persisting `nextCursor`, and continue while `hasMore` is true. They must ignore
@@ -85,7 +125,8 @@ The `capabilities` object has these exact fields:
 | `serviceStatus` | capability state | Provider service-status data |
 
 A capability state is one of `supported`, `unsupported`, or `unknown`.
-`supported` is a conservative declaration backed by a known source;
+`supported` means the adapter contract has a known source; it does not by
+itself claim that the source has been exercised with a real account.
 `unsupported` means the capability is known not to be available; `unknown`
 means OpenUsage Bar has no reliable declaration. `unknown` is not equivalent
 to `unsupported` and must not be presented as a vendor limitation. In
@@ -103,24 +144,42 @@ Each source retains the existing `sourceId`, `kind`, `timeoutSeconds`,
 | `operatingSystems` | string array | `macos`, `windows`, `linux` |
 | `stability` | string | `stable`, `experimental`, `pinned`, `opaque` |
 | `provenance` | string | `openusage_upstream`, `openusage_bar_builtin`, `provider_official`, `provider_local`, `user_session` |
+| `factFamilies` | string array | `detection`, `token_activity`, `subscription_capacity`, `api_balance`, `api_spend` |
+| `authority` | string | `provider_official`, `provider_local`, `third_party`, `user_supplied`, `unknown` |
+| `accountScope` | string | `local_profile`, `configured_account`, `organization`, `provider`, `unknown` |
+| `modelScope` | string | `per_model`, `aggregate`, `mixed`, `unknown` |
+| `verification` | string | `live_account`, `fixture`, `upstream_declared`, `unverified` |
 
 All sources in the current catalog are macOS-only, so their
 `operatingSystems` value is currently `["macos"]`; the enum is intentionally
 extensible to the declared Windows and Linux values. Source array order is the
 catalog's declared priority. Credential scopes, credential/account values,
 local paths, tokens, and raw provider data are never serialized.
+`verification=live_account` means that adapter path has passed a sanitized
+real-account acceptance run; it is not a statement that the current user's
+connection is healthy. Runtime health remains available from
+`/v1/sources/status`. `fixture`, `upstream_declared`, and `unverified` remain
+visibly weaker evidence and must not be promoted to real-account support by UI
+or consumers.
+
+`api_spend` covers both Provider-reported billed cost and OpenUsage price-table
+estimates. Consumers must use each cost record's `costBasis`, `quality`, and
+source metadata rather than treating every `api_spend` source as an official
+invoice.
 
 `/v1/providers` is the dynamic instance ledger. It exposes only
 `providerId`, `familyId`, `displayName`, `category`, `credentialSource`,
 `sourceKind`, `observedAt`, and `revision`. The equivalent offline CLI command
 is logically `openusage-bar providers --format json`. The app does not install
-a global executable; the real signed command path is:
+a global executable. Prefer the private local API; for an offline CLI snapshot,
+use the signed collector launcher so it rebuilds the same minimal non-secret
+environment as the resident service:
 
 ```bash
 APP="/Applications/OpenUsage Bar.app"
 [[ -d "$APP" ]] || APP="$HOME/Applications/OpenUsage Bar.app"
-HELPER="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
-"$HELPER" providers --format json --offline
+COLLECTOR="$APP/Contents/MacOS/OpenUsage Collector"
+"$COLLECTOR" providers --format json --offline
 ```
 
 From a source checkout, use `.build-venv/bin/python openusage_settings.py

@@ -48,7 +48,7 @@ class ResultEnvelope:
 
 @dataclass(frozen=True)
 class SummaryResult(ResultEnvelope):
-    today_tokens: int
+    today_tokens: int | None
     model_count: int
     covered_day_count: int
 
@@ -101,6 +101,32 @@ class CapacityResult(ResultEnvelope):
 
 
 @dataclass(frozen=True)
+class BalanceItem:
+    record_id: str
+    provider_id: str
+    account_ref: str | None
+    currency: str
+    available: str | None
+    voucher: str | None
+    cash: str | None
+    observed_at: str
+    freshness_seconds: int
+    state: str
+    quality: str
+    stale: bool
+    revision: int
+    source_id: str
+
+
+@dataclass(frozen=True)
+class BalancesResult(ResultEnvelope):
+    balances: tuple[BalanceItem, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "balances", tuple(self.balances))
+
+
+@dataclass(frozen=True)
 class ActivityRow:
     day: str
     provider_id: str
@@ -112,6 +138,7 @@ class ActivityRow:
     cache_creation_tokens: int
     reasoning_tokens: int | None
     total_tokens: int
+    token_counting_convention: str
     cost_amount: str | None
     cost_currency: str | None
     cost_basis: str | None
@@ -261,7 +288,7 @@ class ChangePage(ResultEnvelope):
 
 @dataclass(frozen=True)
 class SnapshotSummary:
-    today_tokens: int
+    today_tokens: int | None
     model_count: int
     covered_day_count: int
 
@@ -270,12 +297,14 @@ class SnapshotSummary:
 class ResourceSnapshotResult(ResultEnvelope):
     local_day: str
     summary: SnapshotSummary
+    balances: tuple[BalanceItem, ...]
     quota_windows: tuple[CapacityProvider, ...]
     providers: tuple[ProviderInstanceItem, ...]
     sources: tuple[SourceStatusItem, ...]
     catalog_revision: str
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "balances", tuple(self.balances))
         object.__setattr__(self, "quota_windows", tuple(self.quota_windows))
         object.__setattr__(self, "providers", tuple(self.providers))
         object.__setattr__(self, "sources", tuple(self.sources))
@@ -302,6 +331,14 @@ def _valid_limit(value: int | None, *, default: int | None = None) -> int | None
     return value
 
 
+def _observed_token_total(
+    total_tokens: int, model_count: int, covered_day_count: int
+) -> int | None:
+    if model_count == 0 and covered_day_count == 0:
+        return None
+    return total_tokens
+
+
 class QueryService:
     def __init__(self, store: ActivityStore, *, clock: Callable[[], datetime] | None = None) -> None:
         self.store = store
@@ -317,7 +354,12 @@ class QueryService:
         summary = self.store.summary(current_day, current_day)
         _, generated = self._generated()
         return SummaryResult(
-            SCHEMA_VERSION, summary.cursor, generated, summary.total_tokens,
+            SCHEMA_VERSION,
+            summary.cursor,
+            generated,
+            _observed_token_total(
+                summary.total_tokens, summary.model_count, summary.covered_day_count
+            ),
             summary.model_count, summary.covered_day_count,
         )
 
@@ -353,6 +395,28 @@ class QueryService:
         )
 
     @staticmethod
+    def _balance_item(state: Any, generated_dt: datetime) -> BalanceItem:
+        observed = datetime.fromisoformat(state.observed_at.replace("Z", "+00:00"))
+        return BalanceItem(
+            record_id=state.record_id,
+            provider_id=state.provider_id,
+            account_ref=state.account_ref or None,
+            currency=state.currency,
+            available=state.available,
+            voucher=state.voucher,
+            cash=state.cash,
+            observed_at=state.observed_at,
+            freshness_seconds=max(
+                0, int((generated_dt - observed).total_seconds())
+            ),
+            state=state.state,
+            quality=state.quality,
+            stale=state.stale,
+            revision=state.revision,
+            source_id=state.source_id,
+        )
+
+    @staticmethod
     def _provider_instance_item(row: Any) -> ProviderInstanceItem:
         return ProviderInstanceItem(
             provider_id=row.provider_id,
@@ -384,9 +448,17 @@ class QueryService:
             generated_at=generated,
             local_day=snapshot.local_day,
             summary=SnapshotSummary(
-                snapshot.today_tokens,
+                _observed_token_total(
+                    snapshot.today_tokens,
+                    snapshot.model_count,
+                    snapshot.covered_day_count,
+                ),
                 snapshot.model_count,
                 snapshot.covered_day_count,
+            ),
+            balances=tuple(
+                self._balance_item(state, generated_dt)
+                for state in snapshot.balance_states
             ),
             quota_windows=tuple(
                 self._capacity_provider(state, generated_dt)
@@ -401,6 +473,23 @@ class QueryService:
                 for row in snapshot.source_statuses
             ),
             catalog_revision=catalog.upstream_revision,
+        )
+
+    def balances(self, limit: int | None = None) -> BalancesResult:
+        selected_limit = _valid_limit(limit)
+        snapshot = self.store.snapshot_balance_states()
+        generated_dt, generated = self._generated()
+        rows = list(snapshot.rows)
+        rows.sort(key=lambda state: (
+            state.provider_id, state.account_ref, state.currency, state.record_id
+        ))
+        if selected_limit is not None:
+            rows = rows[:selected_limit]
+        return BalancesResult(
+            SCHEMA_VERSION,
+            snapshot.cursor,
+            generated,
+            tuple(self._balance_item(state, generated_dt) for state in rows),
         )
 
     def capacity(self, limit: int | None = None) -> CapacityResult:
@@ -451,6 +540,7 @@ class QueryService:
             model_id=row.model_id, input_tokens=row.input_tokens, output_tokens=row.output_tokens,
             cache_read_tokens=row.cache_read_tokens, cache_creation_tokens=row.cache_creation_tokens,
             reasoning_tokens=row.reasoning_tokens, total_tokens=row.total_tokens,
+            token_counting_convention=row.token_counting_convention,
             cost_amount=row.cost_amount, cost_currency=row.cost_currency, cost_basis=row.cost_basis,
             quality=row.quality, imported_at=row.imported_at or "", revision=row.revision,
             record_id=row.record_id, source_id=row.source_id,

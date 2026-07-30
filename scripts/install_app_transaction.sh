@@ -24,7 +24,7 @@ verify_local_api_contract() {
         case "$route" in
           health) [[ $(print -rn -- "$payload" | plutil -extract health.ok raw - 2>/dev/null) == true ]] || healthy=0 ;;
           schema) [[ $(print -rn -- "$payload" | plutil -type routes - 2>/dev/null) == array ]] || healthy=0 ;;
-          summary) print -rn -- "$payload" | plutil -extract todayTokens raw - >/dev/null 2>&1 || healthy=0 ;;
+          summary) validate_summary_contract "$payload" || healthy=0 ;;
         esac
         (( healthy )) || break
       done
@@ -33,6 +33,31 @@ verify_local_api_contract() {
     sleep 0.2
   done
   return 1
+}
+
+validate_summary_contract() {
+  local payload=$1
+  local token_type today_tokens model_count covered_day_count
+  model_count=$(print -rn -- "$payload" | plutil -extract modelCount raw - 2>/dev/null) || return 1
+  covered_day_count=$(print -rn -- "$payload" | plutil -extract coveredDayCount raw - 2>/dev/null) || return 1
+  token_type=$(print -rn -- "$payload" | plutil -type todayTokens - 2>/dev/null) || return 1
+  [[ "$model_count" == <-> && "$covered_day_count" == <-> ]] || return 1
+
+  case "$token_type" in
+    '(any)'|null)
+      [[ "$model_count" == 0 && "$covered_day_count" == 0 ]]
+      ;;
+    integer)
+      today_tokens=$(print -rn -- "$payload" | plutil -extract todayTokens raw - 2>/dev/null) || return 1
+      [[ "$today_tokens" == <-> ]] || return 1
+      if [[ "$model_count" == 0 ]]; then
+        [[ "$today_tokens" == 0 && "$covered_day_count" != 0 ]]
+      else
+        return 0
+      fi
+      ;;
+    *) return 1 ;;
+  esac
 }
 
 bundle_metadata_value() {

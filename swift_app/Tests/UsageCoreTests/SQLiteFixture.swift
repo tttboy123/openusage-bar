@@ -37,6 +37,9 @@ final class SQLiteFixture {
         if userVersion >= 5 {
             try execute(handle, Self.quotaScopeSchema)
         }
+        if userVersion >= 6 {
+            try execute(handle, Self.balanceSchema)
+        }
         try execute(handle, "PRAGMA user_version=\(userVersion)")
         try execute(handle, malformedToken ? Self.malformedRows : Self.rows)
         if userVersion >= 2 {
@@ -146,6 +149,16 @@ final class SQLiteFixture {
       ADD COLUMN applies_to_kind TEXT NOT NULL DEFAULT 'account';
     ALTER TABLE quota_snapshots
       ADD COLUMN applies_to_model_ids TEXT NOT NULL DEFAULT '[]';
+    """
+
+    private static let balanceSchema = """
+    CREATE TABLE balance_state(
+      record_id TEXT PRIMARY KEY, observed_at TEXT NOT NULL,
+      provider_id TEXT NOT NULL, account_ref TEXT NOT NULL DEFAULT '',
+      currency TEXT NOT NULL, available TEXT, voucher TEXT, cash TEXT,
+      state TEXT NOT NULL, quality TEXT NOT NULL, stale INTEGER NOT NULL,
+      revision INTEGER NOT NULL, payload_hash TEXT NOT NULL,
+      source_id TEXT NOT NULL DEFAULT 'current.balance');
     """
 
     private static let costRows = """

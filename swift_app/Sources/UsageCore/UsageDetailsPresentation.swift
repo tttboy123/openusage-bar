@@ -105,19 +105,26 @@ public struct DailyChartDay: Identifiable, Sendable, Hashable {
             ? "" : AppLocalization.format("Source %@", sourceIDs.joined(separator: ", "))
         let qualities = qualityIDs.isEmpty
             ? "" : AppLocalization.format("Quality %@", qualityIDs.joined(separator: ", "))
-        let breakdown = hasObservedBreakdown ? [
+        var breakdown = hasObservedBreakdown ? [
             AppLocalization.format("Input %@", TokenText.compact(observedBreakdown.inputTokens)),
             AppLocalization.format("Output %@", TokenText.compact(observedBreakdown.outputTokens)),
             AppLocalization.format(
                 "Cache Read %@", TokenText.compact(observedBreakdown.cacheReadTokens)
             ),
             AppLocalization.format(
-                "Cache Write %@", TokenText.compact(observedBreakdown.cacheCreationTokens)
+                "Cache Creation %@", TokenText.compact(observedBreakdown.cacheCreationTokens)
             ),
         ] : []
+        if let reasoningTokens = observedBreakdown.reasoningTokens {
+            breakdown.append(AppLocalization.format(
+                "Reasoning %@", TokenText.compact(reasoningTokens)
+            ))
+        }
         return [
             day.rawValue, AppLocalization.format("%@ Tokens", total),
             breakdown.joined(separator: ", "), models, quality.displayName,
+            hasObservedBreakdown
+                ? observedBreakdown.countingConvention.accessibilityDescription : "",
             sources, qualities, collected,
         ]
             .filter { !$0.isEmpty }.joined(separator: ", ")

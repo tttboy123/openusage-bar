@@ -9,6 +9,7 @@ struct ProviderCenterPresentationTests {
     func mutationV2Envelopes() throws {
         let draft = ManagedConnectionDraft.minimax(
             providerID: "minimax-work", name: "MiniMax Work",
+            site: "international",
             replacementCredential: "private-key"
         )
         let create = try mutationObject(draft.request(action: .createConnection))
@@ -16,6 +17,7 @@ struct ProviderCenterPresentationTests {
         #expect(create["action"] as? String == "create_connection")
         #expect(create["kind"] as? String == "minimax")
         #expect((create["configuration"] as? [String: Any])?["name"] as? String == "MiniMax Work")
+        #expect((create["configuration"] as? [String: Any])?["site"] as? String == "international")
         #expect((create["credentialMaterial"] as? [String: Any])?["primary"] as? String == "private-key")
 
         let remove = try mutationObject(draft.request(action: .removeConnection))
@@ -33,13 +35,15 @@ struct ProviderCenterPresentationTests {
 
         let missingCredential = ManagedConnectionDraft.minimax(
             providerID: "minimax-work", name: "MiniMax",
+            site: "china",
             replacementCredential: ""
         )
         #expect(missingCredential.validation(action: .createConnection) == .missingCredential)
         #expect(missingCredential.validation(action: .updateConnection) == nil)
 
         let missingProvider = ManagedConnectionDraft.minimax(
-            providerID: "  ", name: "MiniMax", replacementCredential: "key"
+            providerID: "  ", name: "MiniMax", site: "china",
+            replacementCredential: "key"
         )
         #expect(missingProvider.validation(action: .createConnection) == .missingProviderID)
 
@@ -48,6 +52,18 @@ struct ProviderCenterPresentationTests {
             replacementCredential: "key", replacementSession: ""
         )
         #expect(invalidSite.validation(action: .createConnection) == .invalidSite)
+
+        let invalidMiniMaxSite = ManagedConnectionDraft.minimax(
+            providerID: "minimax-work", name: "MiniMax", site: "elsewhere",
+            replacementCredential: "key"
+        )
+        #expect(invalidMiniMaxSite.validation(action: .createConnection) == .invalidSite)
+
+        let invalidMoonshotSite = ManagedConnectionDraft.moonshot(
+            providerID: "moonshot-work", name: "Kimi", site: "elsewhere",
+            replacementCredential: "key"
+        )
+        #expect(invalidMoonshotSite.validation(action: .createConnection) == .invalidSite)
 
         let sessionOnly = ManagedConnectionDraft.stepPlan(
             providerID: "step-work", name: "Step Plan", site: "china",
@@ -58,6 +74,10 @@ struct ProviderCenterPresentationTests {
 
     @Test("Every managed Provider draft serializes its public configuration")
     func allManagedDraftEnvelopes() throws {
+        let moonshot = ManagedConnectionDraft.moonshot(
+            providerID: "moonshot-work", name: "Kimi Work", site: "china",
+            replacementCredential: "moonshot-key"
+        )
         let step = ManagedConnectionDraft.stepPlan(
             providerID: "step-work", name: "Step Work", site: "international",
             replacementCredential: "api-key", replacementSession: "web-session"
@@ -83,6 +103,19 @@ struct ProviderCenterPresentationTests {
             totalTokensPath: "$.total", sinceParameter: "since",
             untilParameter: "until", replacementCredential: "usage-key"
         ))
+
+        let moonshotObject = try mutationObject(
+            moonshot.request(action: .createConnection)
+        )
+        #expect(moonshotObject["kind"] as? String == "moonshot")
+        #expect(
+            (moonshotObject["configuration"] as? [String: Any])?["site"] as? String
+                == "china"
+        )
+        #expect(
+            (moonshotObject["credentialMaterial"] as? [String: Any])?["primary"]
+                as? String == "moonshot-key"
+        )
 
         let stepObject = try mutationObject(step.request(action: .createConnection))
         #expect(stepObject["kind"] as? String == "step_plan")
@@ -111,6 +144,7 @@ struct ProviderCenterPresentationTests {
         #expect(!ProviderCenterPresentation.canMutate(kind: "codex"))
         #expect(!ProviderCenterPresentation.canMutate(kind: "cursor"))
         #expect(ProviderCenterPresentation.canMutate(kind: "minimax"))
+        #expect(ProviderCenterPresentation.canMutate(kind: "moonshot"))
         #expect(ProviderCenterPresentation.canMutate(kind: "daily_usage_feed"))
     }
     @Test("Browse categories separate cloud services from API providers")
@@ -181,6 +215,41 @@ struct ProviderCenterPresentationTests {
             descriptor: try descriptor("openclaw"), instanceCount: 0,
             observed: true, issues: [issue(errorCode: "auth_required")]
         ).status == .attention)
+    }
+
+    @Test("Keychain failures require repair and use the quota label")
+    func keychainIssuesRequireRepair() throws {
+        let keychain = issue(
+            sourceID: "step_plan.quota",
+            effectiveState: "temporarily_unavailable",
+            errorCode: "keychain_unavailable"
+        )
+        let item = ProviderCenterItem(
+            descriptor: try descriptor("step_plan"),
+            instanceCount: 1,
+            observed: true,
+            issues: [keychain]
+        )
+
+        #expect(keychain.requiresUserAction)
+        #expect(keychain.message == "Current quota needs a valid connection.")
+        #expect(item.status == .attention)
+        #expect(item.connectionIssues == [keychain])
+        #expect(item.secondaryIssues.isEmpty)
+    }
+
+    @Test("Configured connection identity wins over a colliding discovered family")
+    func configuredConnectionOwnsSourceHealth() {
+        #expect(ProviderCenterPresentation.sourceFamilyID(
+            providerID: "step-plan-main",
+            configuredFamilies: ["step-plan-main": "step_plan"],
+            discoveredFamilyID: "step_plan_main"
+        ) == "step_plan")
+        #expect(ProviderCenterPresentation.sourceFamilyID(
+            providerID: "cursor",
+            configuredFamilies: ["step-plan-main": "step_plan"],
+            discoveredFamilyID: "cursor"
+        ) == "cursor")
     }
 
     @Test("Secondary source failures keep a connected Provider healthy")

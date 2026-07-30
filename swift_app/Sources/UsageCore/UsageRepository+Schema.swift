@@ -4,7 +4,7 @@ import SQLite3
 extension UsageRepository {
     func validateSchema(_ database: OpaquePointer) throws {
         let version = try scalarInt64(database, sql: "PRAGMA user_version")
-        guard (1...5).contains(version) else { throw RepositoryError.incompatibleSchema }
+        guard (1...6).contains(version) else { throw RepositoryError.incompatibleSchema }
         let expected = GeneratedActivitySchema.expectedTables(version: version)
         for (table, signature) in expected {
             let actual = try queryColumnSignature(database, table: table)

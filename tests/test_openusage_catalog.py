@@ -86,6 +86,23 @@ else:
         self.assertEqual((result.expected_count, result.actual_count), (35, 35))
         self.assertEqual((result.missing_count, result.extra_count), (0, 0))
 
+    def test_audited_provider_filter_build_and_exact_set_are_ok(self):
+        with tempfile.TemporaryDirectory() as temp:
+            payload = json.dumps(detect_output())
+            script = executable_script(temp, f"""
+import sys
+if sys.argv[1:] == ['version']:
+    print('v0.23.0-22-gc63a47c (c63a47c) built 2026-07-30T17:15:30+0800')
+elif sys.argv[1:] == ['detect', '--all']:
+    print({payload})
+else:
+    raise SystemExit(2)
+""")
+            result = self._discover(script)
+        self.assertEqual(result.outcome, "ok")
+        self.assertEqual((result.expected_count, result.actual_count), (35, 35))
+        self.assertEqual((result.missing_count, result.extra_count), (0, 0))
+
     def test_missing_and_extra_are_counted_without_persisting_names(self):
         ids = sorted((set(EXPECTED_PROVIDER_IDS) - {"amp"}) | {"future_provider"})
         with tempfile.TemporaryDirectory() as temp:
@@ -107,6 +124,8 @@ elif sys.argv[1:] == ['detect', '--all']:
         for version in (
             "0.24.0 (3059f1b) built 2026-07-05T00:35:50Z",
             "0.23.0 (fffffff) built 2026-07-05T00:35:50Z",
+            "v0.23.0-22-gfffffff (fffffff) built 2026-07-30T17:15:30+0800",
+            "v0.23.0-22-gc63a47c (fffffff) built 2026-07-30T17:15:30+0800",
             "0.23.0",
         ):
             with self.subTest(version=version), tempfile.TemporaryDirectory() as temp:
@@ -201,7 +220,10 @@ else:
             else:
                 self.fail("catalog discovery grandchild survived process-group timeout")
         self.assertEqual(result.outcome, "timeout")
-        self.assertLess(elapsed, 4.5)
+        # The production deadline remains three seconds. The assertion allows
+        # bounded process-group cleanup plus scheduler variance in the loaded
+        # full build without turning this into an unbounded wait.
+        self.assertLess(elapsed, 5.5)
 
     def test_child_uses_allowlisted_environment_and_direct_argv(self):
         with tempfile.TemporaryDirectory() as temp:

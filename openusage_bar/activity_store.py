@@ -13,6 +13,9 @@ from typing import Any, Iterable
 
 from .provider_catalog import catalog
 from .activity_records import (
+    BalanceObservation,
+    BalanceState,
+    BalanceStateSnapshot,
     ChangeRecord,
     ChangeSnapshot,
     DailyCostRecord,
@@ -32,6 +35,7 @@ from .activity_records import (
     ResourceStateSnapshot,
     SourceStatus,
     SourceStatusSnapshot,
+    TOKEN_COUNTING_CONVENTIONS,
     UsageSummary,
     canonical_timestamp as _timestamp,
     validate_day as _validate_day,
@@ -55,6 +59,20 @@ def _hash(payload_json: str) -> str:
     return hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
 
 
+_DAILY_USAGE_SELECT = (
+    "SELECT usage.*,"
+    "convention.token_counting_convention AS bound_token_counting_convention,"
+    "convention.daily_payload_hash AS bound_daily_payload_hash "
+    "FROM daily_model_usage AS usage LEFT JOIN daily_token_conventions AS convention "
+    "ON convention.day=usage.day "
+    "AND convention.provider_id=usage.provider_id "
+    "AND convention.account_ref=usage.account_ref "
+    "AND convention.model_id=usage.model_id "
+)
+
+_MAX_SOURCE_CONTRACT_REVISION = 2_147_483_647
+
+
 class ActivityStore:
     def __init__(self, path: str | Path) -> None:
         self.path = str(path)
@@ -75,7 +93,7 @@ class ActivityStore:
                     )
                 self._validate_existing_schema(
                     require_all=version in {3, SCHEMA_VERSION},
-                    optional_missing=frozenset(),
+                    optional_missing=frozenset({"daily_token_conventions"}),
                     allow_legacy_source_columns=version < SCHEMA_VERSION,
                 )
                 self._migrate_source_provenance()
@@ -121,7 +139,9 @@ class ActivityStore:
             )
             legacy = _LEGACY_SOURCE_SCHEMAS.get(table)
             if actual != _EXPECTED_SCHEMA[table] and not (
-                allow_legacy_source_columns and legacy is not None and actual == legacy
+                allow_legacy_source_columns
+                and legacy is not None
+                and actual == legacy
             ):
                 raise RuntimeError(
                     f"incompatible schema for {table}: table signature does not match"
@@ -302,6 +322,13 @@ class ActivityStore:
 
     def _initialize_schema(self) -> None:
         schema = """
+        CREATE TABLE IF NOT EXISTS balance_state(
+            record_id TEXT PRIMARY KEY, observed_at TEXT NOT NULL,
+            provider_id TEXT NOT NULL, account_ref TEXT NOT NULL DEFAULT '',
+            currency TEXT NOT NULL, available TEXT, voucher TEXT, cash TEXT,
+            state TEXT NOT NULL, quality TEXT NOT NULL, stale INTEGER NOT NULL,
+            revision INTEGER NOT NULL, payload_hash TEXT NOT NULL,
+            source_id TEXT NOT NULL DEFAULT 'current.balance');
         CREATE TABLE IF NOT EXISTS daily_costs(
             day TEXT NOT NULL, provider_id TEXT NOT NULL, account_ref TEXT NOT NULL DEFAULT '',
             cost_kind TEXT NOT NULL, currency TEXT NOT NULL, amount TEXT NOT NULL,
@@ -322,6 +349,12 @@ class ActivityStore:
             cost_currency TEXT, cost_basis TEXT, quality TEXT NOT NULL, imported_at TEXT NOT NULL,
             revision INTEGER NOT NULL, payload_hash TEXT NOT NULL,
             source_id TEXT NOT NULL DEFAULT 'legacy',
+            PRIMARY KEY(day,provider_id,account_ref,model_id));
+        CREATE TABLE IF NOT EXISTS daily_token_conventions(
+            day TEXT NOT NULL, provider_id TEXT NOT NULL,
+            account_ref TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL,
+            token_counting_convention TEXT NOT NULL,
+            daily_payload_hash TEXT NOT NULL,
             PRIMARY KEY(day,provider_id,account_ref,model_id));
         CREATE TABLE IF NOT EXISTS daily_coverage(
             day TEXT NOT NULL, provider_id TEXT NOT NULL, account_ref TEXT NOT NULL DEFAULT '',
@@ -938,6 +971,11 @@ class ActivityStore:
                 "DELETE FROM daily_model_usage WHERE day=? AND provider_id=? AND account_ref=? AND model_id=?",
                 (day, provider_id, account_ref, model_id),
             )
+            self._connection.execute(
+                "DELETE FROM daily_token_conventions "
+                "WHERE day=? AND provider_id=? AND account_ref=? AND model_id=?",
+                (day, provider_id, account_ref, model_id),
+            )
             self._append_change(
                 "daily_usage",
                 record_id,
@@ -957,7 +995,11 @@ class ActivityStore:
             item = incoming[model_id]
             payload_json, payload_hash = self._daily_payload(item, source_id)
             old = existing.get(model_id)
-            if old is not None and old["payload_hash"] == payload_hash:
+            if (
+                old is not None
+                and old["payload_hash"] == payload_hash
+                and self._daily_token_convention_matches(item, payload_hash)
+            ):
                 continue
             record_id = self._daily_record_id(day, provider_id, account_ref, model_id)
             revision = self._next_revision_locked("daily_usage", record_id)
@@ -985,6 +1027,7 @@ class ActivityStore:
                 f"INSERT OR REPLACE INTO daily_model_usage({columns}) VALUES({','.join('?' for _ in values)})",
                 values,
             )
+            self._upsert_daily_token_convention(item, payload_hash)
             self._append_change(
                 "daily_usage",
                 record_id,
@@ -1022,6 +1065,41 @@ class ActivityStore:
                 payload_json,
                 _hash(payload_json),
             )
+
+    def _upsert_daily_token_convention(
+        self, item: DailyUsageRow, payload_hash: str
+    ) -> None:
+        self._connection.execute(
+            "INSERT OR REPLACE INTO daily_token_conventions("
+            "day,provider_id,account_ref,model_id,"
+            "token_counting_convention,daily_payload_hash"
+            ") VALUES(?,?,?,?,?,?)",
+            (
+                item.day,
+                item.provider_id,
+                item.account_ref,
+                item.model_id,
+                item.token_counting_convention,
+                payload_hash,
+            ),
+        )
+
+    def _daily_token_convention_matches(
+        self, item: DailyUsageRow, payload_hash: str
+    ) -> bool:
+        return self._connection.execute(
+            "SELECT 1 FROM daily_token_conventions "
+            "WHERE day=? AND provider_id=? AND account_ref=? AND model_id=? "
+            "AND token_counting_convention=? AND daily_payload_hash=?",
+            (
+                item.day,
+                item.provider_id,
+                item.account_ref,
+                item.model_id,
+                item.token_counting_convention,
+                payload_hash,
+            ),
+        ).fetchone() is not None
 
     def has_daily_history(self, provider_id: str, account_ref: str = "") -> bool:
         _validate_id("provider_id", provider_id)
@@ -1090,6 +1168,30 @@ class ActivityStore:
                 (provider_id, source_id),
             ).fetchone() is not None
 
+    @staticmethod
+    def _source_contract_key(provider_id: str, source_id: str) -> str:
+        return f"source_contract:{provider_id}:{source_id}"
+
+    def source_contract_revision(
+        self, provider_id: str, source_id: str
+    ) -> int | None:
+        _validate_id("provider_id", provider_id)
+        _validate_id("source_id", source_id)
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT value FROM ledger_meta WHERE key=?",
+                (self._source_contract_key(provider_id, source_id),),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            revision = int(str(row["value"]))
+        except (TypeError, ValueError) as error:
+            raise RuntimeError("invalid source contract revision") from error
+        if not 1 <= revision <= _MAX_SOURCE_CONTRACT_REVISION:
+            raise RuntimeError("invalid source contract revision")
+        return revision
+
     def commit_usage_import_success(
         self,
         provider_id: str,
@@ -1101,11 +1203,17 @@ class ActivityStore:
         *,
         account_ref: str = "",
         freshness_seconds: int = 300,
+        contract_revision: int | None = None,
     ) -> bool:
         _validate_id("provider_id", provider_id)
         _validate_id("source_id", source_id)
         if account_ref:
             _validate_id("account_ref", account_ref)
+        if contract_revision is not None and (
+            type(contract_revision) is not int
+            or not 1 <= contract_revision <= _MAX_SOURCE_CONTRACT_REVISION
+        ):
+            raise ValueError("contract_revision must be a positive bounded integer")
         if not isinstance(attempted_at, datetime) or attempted_at.tzinfo is None:
             raise ValueError("attempted_at must include a timezone")
         if since > until:
@@ -1136,6 +1244,15 @@ class ActivityStore:
             self._record_source_success_locked(
                 provider_id, source_id, attempted_at, freshness_seconds
             )
+            if contract_revision is not None:
+                self._connection.execute(
+                    "INSERT INTO ledger_meta(key,value) VALUES(?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (
+                        self._source_contract_key(provider_id, source_id),
+                        str(contract_revision),
+                    ),
+                )
         return True
 
     def commit_cost_import_success(
@@ -1198,6 +1315,14 @@ class ActivityStore:
     @staticmethod
     def _row_to_daily(row: sqlite3.Row, *, stored: bool) -> DailyUsageRow | DailyUsageRecord:
         values = dict(row)
+        convention = values.pop("bound_token_counting_convention", None)
+        convention_hash = values.pop("bound_daily_payload_hash", None)
+        values["token_counting_convention"] = (
+            str(convention)
+            if convention in TOKEN_COUNTING_CONVENTIONS
+            and convention_hash == values["payload_hash"]
+            else "unknown"
+        )
         if stored:
             values["record_id"] = ActivityStore._daily_record_id(
                 values["day"], values["provider_id"], values["account_ref"], values["model_id"]
@@ -1213,7 +1338,9 @@ class ActivityStore:
         _validate_day(end_day)
         with self._lock:
             rows = self._connection.execute(
-                "SELECT * FROM daily_model_usage WHERE day BETWEEN ? AND ? ORDER BY day,provider_id,account_ref,model_id",
+                _DAILY_USAGE_SELECT
+                + "WHERE usage.day BETWEEN ? AND ? "
+                "ORDER BY usage.day,usage.provider_id,usage.account_ref,usage.model_id",
                 (start_day, end_day),
             ).fetchall()
             return [self._row_to_daily(row, stored=False) for row in rows]  # type: ignore[misc]
@@ -1236,7 +1363,9 @@ class ActivityStore:
             self._connection.execute("BEGIN DEFERRED")
             try:
                 rows = self._connection.execute(
-                    "SELECT * FROM daily_model_usage WHERE day BETWEEN ? AND ? ORDER BY day,provider_id,account_ref,model_id",
+                    _DAILY_USAGE_SELECT
+                    + "WHERE usage.day BETWEEN ? AND ? "
+                    "ORDER BY usage.day,usage.provider_id,usage.account_ref,usage.model_id",
                     (start_day, end_day),
                 ).fetchall()
                 coverage = self._connection.execute(
@@ -1279,6 +1408,133 @@ class ActivityStore:
         payload.pop("observed_at")
         payload_json = _json(payload)
         return payload_json, _hash(payload_json)
+
+    @staticmethod
+    def _balance_semantic_payload(
+        observation: BalanceObservation,
+    ) -> tuple[str, str]:
+        payload = asdict(observation)
+        payload.pop("observed_at")
+        payload_json = _json(payload)
+        return payload_json, _hash(payload_json)
+
+    def record_balance(self, observation: BalanceObservation) -> BalanceState:
+        payload_json, payload_hash = self._balance_semantic_payload(observation)
+        with self._write_transaction():
+            old = self._connection.execute(
+                "SELECT * FROM balance_state WHERE record_id=?",
+                (observation.record_id,),
+            ).fetchone()
+            if old is not None and observation.observed_at < str(old["observed_at"]):
+                return self._balance_state_by_id_locked(observation.record_id)
+            changed = old is None or old["payload_hash"] != payload_hash
+            revision = (
+                1 if old is None else int(old["revision"]) + (1 if changed else 0)
+            )
+            values = asdict(observation)
+            columns = list(values) + ["revision", "payload_hash"]
+            self._connection.execute(
+                f"INSERT OR REPLACE INTO balance_state({','.join(columns)}) "
+                f"VALUES({','.join('?' for _ in columns)})",
+                tuple(values.values()) + (revision, payload_hash),
+            )
+            if changed:
+                self._append_change(
+                    "balance",
+                    observation.record_id,
+                    revision,
+                    "insert" if old is None else "update",
+                    observation.observed_at,
+                    payload_json,
+                    payload_hash,
+                )
+            return self._balance_state_by_id_locked(observation.record_id)
+
+    @staticmethod
+    def _row_to_balance_state(row: sqlite3.Row) -> BalanceState:
+        values = dict(row)
+        values["stale"] = bool(values["stale"])
+        return BalanceState(**values)
+
+    def _balance_state_by_id_locked(self, record_id: str) -> BalanceState:
+        row = self._connection.execute(
+            "SELECT * FROM balance_state WHERE record_id=?", (record_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(record_id)
+        return self._row_to_balance_state(row)
+
+    def balance_states(self) -> list[BalanceState]:
+        with self._lock:
+            return list(self._resource_balance_states_locked())
+
+    def mark_balance_source_stale(
+        self,
+        provider_id: str,
+        source_id: str,
+        attempted_at: datetime,
+    ) -> int:
+        _validate_id("provider_id", provider_id)
+        _validate_id("source_id", source_id)
+        changed_at = _timestamp(attempted_at.isoformat(), "attempted_at")
+        changed = 0
+        with self._write_transaction():
+            rows = self._connection.execute(
+                "SELECT * FROM balance_state "
+                "WHERE provider_id=? AND source_id=? AND stale=0 "
+                "ORDER BY record_id",
+                (provider_id, source_id),
+            ).fetchall()
+            for row in rows:
+                state = self._row_to_balance_state(row)
+                observation = BalanceObservation(
+                    record_id=state.record_id,
+                    observed_at=state.observed_at,
+                    provider_id=state.provider_id,
+                    account_ref=state.account_ref,
+                    currency=state.currency,
+                    available=state.available,
+                    voucher=state.voucher,
+                    cash=state.cash,
+                    state=state.state,
+                    quality=state.quality,
+                    stale=True,
+                    source_id=state.source_id,
+                )
+                payload_json, payload_hash = self._balance_semantic_payload(
+                    observation
+                )
+                revision = state.revision + 1
+                self._connection.execute(
+                    "UPDATE balance_state "
+                    "SET stale=1,revision=?,payload_hash=? WHERE record_id=?",
+                    (revision, payload_hash, state.record_id),
+                )
+                self._append_change(
+                    "balance",
+                    state.record_id,
+                    revision,
+                    "update",
+                    changed_at,
+                    payload_json,
+                    payload_hash,
+                )
+                changed += 1
+        return changed
+
+    def _resource_balance_states_locked(self) -> tuple[BalanceState, ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM balance_state "
+            "ORDER BY provider_id,account_ref,currency,record_id"
+        ).fetchall()
+        return tuple(self._row_to_balance_state(row) for row in rows)
+
+    def snapshot_balance_states(self) -> BalanceStateSnapshot:
+        with self._read_snapshot():
+            return BalanceStateSnapshot(
+                self._resource_balance_states_locked(),
+                self._current_change_seq_locked(),
+            )
 
     @staticmethod
     def _quota_snapshot_payload(observation: QuotaObservation) -> tuple[str, str]:
@@ -1721,6 +1977,7 @@ class ActivityStore:
                 "SELECT COUNT(*) FROM daily_coverage WHERE day=?",
                 (local_day,),
             ).fetchone()[0]
+            balance_states = self._resource_balance_states_locked()
             quota_states = self._resource_quota_states_locked()
             provider_instances = self._resource_provider_instances_locked()
             source_statuses = self._resource_source_statuses_locked()
@@ -1731,6 +1988,7 @@ class ActivityStore:
                 today_tokens=int(total),
                 model_count=int(count),
                 covered_day_count=int(covered),
+                balance_states=balance_states,
                 quota_states=quota_states,
                 provider_instances=provider_instances,
                 source_statuses=source_statuses,
@@ -1843,6 +2101,7 @@ class ActivityStore:
                     "delete", changed_at, None, _hash("null"),
                 )
             self._connection.execute("DELETE FROM daily_model_usage WHERE day<?", (day_cutoff,))
+            self._connection.execute("DELETE FROM daily_token_conventions WHERE day<?", (day_cutoff,))
             self._connection.execute("DELETE FROM daily_coverage WHERE day<?", (day_cutoff,))
             self._connection.execute("DELETE FROM daily_costs WHERE day<?", (day_cutoff,))
             self._connection.execute("DELETE FROM daily_cost_coverage WHERE day<?", (day_cutoff,))

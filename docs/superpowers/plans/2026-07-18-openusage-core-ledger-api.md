@@ -1,5 +1,12 @@
 # OpenUsage Bar Core Ledger and API Implementation Plan
 
+> **Status (2026-07-19): Implemented and CI verified; live verification
+> pending.** The repository contract and automated cross-language gates pass on
+> `main@9cd134a`; compatibility evidence from real external Local API consumers
+> is still pending. Track the remaining gate in the
+> [roadmap](../../../ROADMAP.md). Historical checkboxes below are preserved as
+> authored.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the local ledger a complete revisioned fact source and expose one coherent resource snapshot to native clients and optional generic local consumers.
@@ -194,7 +201,7 @@ The snapshot must contain one cursor and all facts needed by native surfaces and
 class ResourceStateSnapshot:
     local_day: str
     cursor: int
-    today_tokens: int
+    today_tokens: int | None
     model_count: int
     covered_day_count: int
     quota_states: tuple[QuotaState, ...]
@@ -224,7 +231,7 @@ Add these wire dataclasses to `query.py`:
 ```python
 @dataclass(frozen=True)
 class SnapshotSummary:
-    today_tokens: int
+    today_tokens: int | None
     model_count: int
     covered_day_count: int
 

@@ -89,7 +89,7 @@ def _portable_swift_dependencies(value: object, root: Path) -> object:
 
 
 def generate(
-    *, root: Path, app: Path, archive: Path, requirements: Path,
+    *, root: Path, app: Path, archive: Path, dmg: Path, requirements: Path,
     swift_dependencies: dict[str, object], commit: str, commit_time: str,
     manifest_path: Path, sbom_path: Path,
 ) -> None:
@@ -104,7 +104,14 @@ def generate(
     dependencies = _requirements(requirements)
     executables = _executables(app)
     checksum = Path(f"{archive}.sha256")
-    if not archive.is_file() or not checksum.is_file() or not executables:
+    dmg_checksum = Path(f"{dmg}.sha256")
+    if (
+        not archive.is_file()
+        or not checksum.is_file()
+        or not dmg.is_file()
+        or not dmg_checksum.is_file()
+        or not executables
+    ):
         raise ManifestError("artifact")
 
     app_spdx = "SPDXRef-Package-OpenUsage-Bar"
@@ -146,6 +153,12 @@ def generate(
     }
     sbom_path.write_bytes(_json_bytes(sbom))
     assets = [
+        {"name": dmg.name, "sha256": _sha256(dmg), "size": dmg.stat().st_size},
+        {
+            "name": dmg_checksum.name,
+            "sha256": _sha256(dmg_checksum),
+            "size": dmg_checksum.stat().st_size,
+        },
         {"name": archive.name, "sha256": _sha256(archive), "size": archive.stat().st_size},
         {"name": checksum.name, "sha256": _sha256(checksum), "size": checksum.stat().st_size},
         {"name": sbom_path.name, "sha256": _sha256(sbom_path), "size": sbom_path.stat().st_size},
@@ -170,6 +183,7 @@ def main(arguments: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", type=Path, required=True)
     parser.add_argument("--archive", type=Path, required=True)
+    parser.add_argument("--dmg", type=Path, required=True)
     parser.add_argument("--requirements", type=Path, required=True)
     parser.add_argument("--swift-package", type=Path)
     parser.add_argument("--swift-dependencies", type=Path)
@@ -198,7 +212,7 @@ def main(arguments: list[str]) -> int:
         if not isinstance(swift, dict):
             raise ManifestError("swift")
         generate(
-            root=root, app=parsed.app, archive=parsed.archive,
+            root=root, app=parsed.app, archive=parsed.archive, dmg=parsed.dmg,
             requirements=parsed.requirements, swift_dependencies=swift,
             commit=commit, commit_time=commit_time,
             manifest_path=parsed.output, sbom_path=parsed.sbom_output,

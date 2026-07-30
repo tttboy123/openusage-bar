@@ -307,7 +307,59 @@ struct UsageDetailsTests {
         #expect(payload.accessibilitySummary.contains("Input 100"))
         #expect(payload.accessibilitySummary.contains("Output 20"))
         #expect(payload.accessibilitySummary.contains("Cache Read 80"))
-        #expect(payload.accessibilitySummary.contains("Cache Write 4"))
+        #expect(payload.accessibilitySummary.contains("Cache Creation 4"))
+    }
+
+    @Test("Daily chart preserves source totals reasoning and token counting semantics")
+    func dailyChartTokenCountingConvention() throws {
+        let inclusive = DailyUsage(
+            day: day("2026-07-02"), providerID: "codex", accountRef: "",
+            modelID: "gpt-5.6-sol", inputTokens: 100, outputTokens: 20,
+            cacheReadTokens: 80, cacheCreationTokens: 0, reasoningTokens: 7,
+            totalTokens: 120, costAmount: nil, costCurrency: nil, costBasis: nil,
+            quality: "exact", importedAt: "2026-07-14T09:00:00Z", revision: 1,
+            recordID: "inclusive", sourceID: "codex.local_sessions",
+            tokenCountingConvention: .inputIncludesCache
+        )
+        let disjoint = DailyUsage(
+            day: day("2026-07-02"), providerID: "openusage", accountRef: "",
+            modelID: "claude-sonnet-4.5", inputTokens: 10, outputTokens: 3,
+            cacheReadTokens: 4, cacheCreationTokens: 2, reasoningTokens: 1,
+            totalTokens: 20, costAmount: nil, costCurrency: nil, costBasis: nil,
+            quality: "exact", importedAt: "2026-07-14T09:00:00Z", revision: 1,
+            recordID: "disjoint", sourceID: "openusage.daily",
+            tokenCountingConvention: .componentsDisjoint
+        )
+        let model = UsageDetailsAggregator.make(
+            from: ActivityDataset(
+                records: [inclusive, disjoint],
+                coverage: [coverage("2026-07-02"), coverage("2026-07-02", provider: "openusage")],
+                knownScopes: [
+                    ProviderScope(providerID: "codex", accountRef: ""),
+                    ProviderScope(providerID: "openusage", accountRef: ""),
+                ], revision: 1
+            ),
+            metricRange: day("2026-07-02")...day("2026-07-02")
+        )
+        let payload = try #require(model.chartDays.last)
+
+        #expect(payload.observedBreakdown.totalTokens == 140)
+        #expect(payload.observedBreakdown.reasoningTokens == 8)
+        #expect(payload.observedBreakdown.countingConvention == .mixed)
+        #expect(payload.accessibilitySummary.contains("Reasoning 8"))
+        #expect(payload.accessibilitySummary.contains("multiple Token counting conventions"))
+
+        let unknown = TokenBreakdown(records: [inclusive, DailyUsage(
+            day: day("2026-07-02"), providerID: "legacy", accountRef: "",
+            modelID: "legacy", inputTokens: 1, outputTokens: 1,
+            cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: nil,
+            totalTokens: 99, costAmount: nil, costCurrency: nil, costBasis: nil,
+            quality: "legacy", importedAt: "2026-07-14T09:00:00Z", revision: 1,
+            recordID: "legacy"
+        )])
+        #expect(unknown.totalTokens == 219)
+        #expect(unknown.reasoningTokens == nil)
+        #expect(unknown.countingConvention == .unknown)
     }
 
     @Test("Chart day exposes selected source quality and collection time")

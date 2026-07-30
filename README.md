@@ -13,7 +13,7 @@
 ![Local First](https://img.shields.io/badge/Local--First-Keychain%20%2B%20SQLite-111111?style=flat-square)
 ![License](https://img.shields.io/badge/License-Apache--2.0-111111?style=flat-square)
 
-[English](README.en.md) | [本地 API](docs/api/local-api-v1.md) | [Provider 支持](docs/provider-support.md) | [安装指南](docs/release-quick-start.md)
+[English](README.en.md) | [路线图](ROADMAP.md) | [本地 API](docs/api/local-api-v1.md) | [Provider 支持](docs/provider-support.md) | [性能预算](docs/performance.md) | [安装指南](docs/release-quick-start.md)
 
 </div>
 
@@ -25,7 +25,7 @@ OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Tok
 
 <p align="center"><sub>真实 SwiftUI 界面，使用隔离的合成账本生成。未读取用户账本、Keychain 或真实额度。</sub></p>
 
-> 当前版本：**0.4.2 预发布版**。支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple Developer ID 公证包；若 macOS 显示“已损坏”，按下方指引仅移除本 App 的下载隔离属性。
+> 当前开发候选：**0.6.0 RC**；最新公开预发布版仍为 **0.4.2**。支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple Developer ID 公证包；若 macOS 显示“已损坏”，按下方指引仅移除本 App 的下载隔离属性。
 
 ## 为什么需要它
 
@@ -60,7 +60,7 @@ flowchart LR
 | 能力 | 说明 |
 | --- | --- |
 | 菜单栏总览 | Today Token、最紧急 Capacity、刷新状态和详情入口 |
-| Usage Details | Overview、Activity、Capacity、API Spend、Local Tools、Providers、Data Health |
+| Usage Details | Activity、Capacity、API Spend、Local Tools、Providers、Data Health |
 | 每日 Token 活动 | 日、周、月、年维度聚合；支持每日总量、模型堆叠趋势和年度方格热力图 |
 | Provider Center | 添加、编辑、隐藏、恢复 Provider；支持多账号；凭证只写入 Keychain |
 | 订阅额度 | Codex、Cursor、Kiro、MiniMax、StepFun 等可用时显示真实剩余容量 |
@@ -152,7 +152,9 @@ OpenUsage Bar.app
 ```text
 GET /v1/health
 GET /v1/schema
+GET /v1/schema.json
 GET /v1/summary
+GET /v1/snapshot
 GET /v1/capabilities
 GET /v1/providers
 GET /v1/providers?providerIds=codex,minimax-primary
@@ -164,19 +166,29 @@ GET /v1/sources/status
 GET /v1/changes?after=0&limit=100
 ```
 
-也可以直接调用签名 helper 输出 JSON：
+`/v1/capabilities` 不只返回“是否有代码适配器”，还会按数据源声明
+Detection、Token Activity、Subscription Capacity、API Spend、权威程度、
+账号/模型作用域，以及 `live_account`、`fixture`、`upstream_declared` 或
+`unverified` 验证等级。当前连接是否健康仍以 `/v1/sources/status` 为准；
+两者不能混为一谈。
+
+也可以通过签名的采集器启动器输出 JSON；它会先重建最小非秘密环境：
 
 ```bash
 APP="/Applications/OpenUsage Bar.app"
 [[ -d "$APP" ]] || APP="$HOME/Applications/OpenUsage Bar.app"
-HELPER="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
-"$HELPER" status --format json --offline
-"$HELPER" providers --format json --offline
-"$HELPER" usage --from 2026-07-01 --to 2026-07-14 --format jsonl --offline
-"$HELPER" doctor --format json --offline
+COLLECTOR="$APP/Contents/MacOS/OpenUsage Collector"
+"$COLLECTOR" status --format json --offline
+"$COLLECTOR" providers --format json --offline
+"$COLLECTOR" usage --from 2026-07-01 --to 2026-07-14 --format jsonl --offline
+"$COLLECTOR" doctor --format json --offline
 ```
 
-`--offline` 适合调度器低延迟读取。显式 `--fresh` 和菜单栏 Refresh 共用 90 秒交互尝试上限；超时不会把未知额度写成 0，而是继续提供 last-good ledger 并报告刷新不可用。
+`--offline` 适合调度器低延迟读取。显式 `--fresh` 和菜单栏 Refresh 共用
+160 秒交互尝试上限。支持精确 Provider 导出的 OpenUsage 会让 Cursor 使用
+15 秒的独立采集边界；旧版 OpenUsage 继续使用最长 75 秒的全量 direct
+fallback，完整 OpenUsage daily import 最长 60 秒。超时不会把未知额度写成
+0，而是继续提供 last-good ledger 并报告刷新不可用。
 
 ## Provider 支持
 
@@ -184,7 +196,8 @@ OpenUsage Bar 是独立仓库和独立发布。OpenUsage.sh 是可选数据源�
 
 - OpenUsage 0.23.0 catalog：覆盖 35 个上游 family。
 - 内置增强：MiniMax、StepFun、Codex、Cursor、Kiro、OpenAI Organization、Generic HTTPS Provider、Custom Daily Token Feed。
-- MiniMax：订阅额度与延迟 billing feed 分离，当前日缺失不会显示为实时 0。
+- MiniMax：中国站与国际站账号严格隔离，订阅额度与中国站实验性延迟
+  billing feed 分离；国际站未验证的历史用量和当前日缺失都不会显示为 0。
 - StepFun：支持中国站和国际站多账号。
 - Generic HTTPS Provider：校验 endpoint、redirect、响应大小和 JSON path。
 - Daily Token Feed：支持 range-aware HTTPS JSON、字段映射、分页和 Keychain 鉴权。

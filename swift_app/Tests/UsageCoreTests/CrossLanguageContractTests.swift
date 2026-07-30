@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Python and Swift ledger contract")
 struct CrossLanguageContractTests {
-    @Test("Python-produced version five quota scope is read identically by Swift")
+    @Test("Python-produced quota and Token facts are read identically by Swift")
     func pythonLedgerMatchesSwiftFacts() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -41,10 +41,17 @@ struct CrossLanguageContractTests {
         let quota = try #require(repository.capacity(limit: nil).first)
         let provider = try #require(repository.providerInstances().first)
         let health = try repository.sourceHealth()
+        let activity = try repository.activity(
+            from: LocalDay("2026-07-18"), to: LocalDay("2026-07-18")
+        )
         let expectedSummary = try #require(expected["summary"] as? [String: Any])
         let expectedQuota = try #require((expected["quotaWindows"] as? [[String: Any]])?.first)
         let expectedProvider = try #require((expected["providers"] as? [[String: Any]])?.first)
         let expectedSource = try #require((expected["sources"] as? [[String: Any]])?.first)
+        let expectedActivity = try #require(expected["activity"] as? [String: Any])
+        let expectedActivityRow = try #require(
+            (expectedActivity["rows"] as? [[String: Any]])?.first
+        )
         let revision = try repository.dataRevision()
 
         #expect(revision == Int64(expected["dataRevision"] as! Int))
@@ -62,5 +69,19 @@ struct CrossLanguageContractTests {
         #expect(health.sources.first?.providerID == expectedSource["providerId"] as? String)
         #expect(health.sources.first?.state == expectedSource["state"] as? String)
         #expect(health.revision == Int64(expected["dataRevision"] as! Int))
+        let activityRow = try #require(activity.records.first)
+        #expect(activityRow.inputTokens == Int64(expectedActivityRow["inputTokens"] as! Int))
+        #expect(activityRow.outputTokens == Int64(expectedActivityRow["outputTokens"] as! Int))
+        #expect(activityRow.cacheReadTokens
+            == Int64(expectedActivityRow["cacheReadTokens"] as! Int))
+        #expect(activityRow.cacheCreationTokens
+            == Int64(expectedActivityRow["cacheCreationTokens"] as! Int))
+        #expect(activityRow.reasoningTokens
+            == Int64(expectedActivityRow["reasoningTokens"] as! Int))
+        #expect(activityRow.totalTokens == Int64(expectedActivityRow["totalTokens"] as! Int))
+        #expect(activityRow.sourceID == expectedActivityRow["sourceId"] as? String)
+        #expect(activityRow.quality == expectedActivityRow["quality"] as? String)
+        #expect(activityRow.tokenCountingConvention.rawValue
+            == expectedActivityRow["tokenCountingConvention"] as? String)
     }
 }

@@ -32,11 +32,18 @@ from .openusage_catalog import (
     OpenUsageCatalogDiscovery,
 )
 from .providers.contracts import (
+    BalanceFetchFailure,
+    BalanceFetchSuccess,
     CostImportSuccess,
     ImportFailure,
     QuotaFetchFailure,
     QuotaFetchSuccess,
     UsageImportSuccess,
+)
+from .performance_timing import (
+    RefreshTimingRecorder,
+    measure_source_call,
+    source_class_for,
 )
 from .openai_organization import COST_SOURCE_ID, USAGE_SOURCE_ID
 
@@ -47,6 +54,7 @@ MAX_DAILY_DAYS = 5000
 MAX_DAILY_MODELS_PER_DAY = 4096
 MAX_DAILY_FIELDS = 64
 MAX_DAILY_LABEL_LENGTH = 4096
+MAX_HISTORY_CONTRACT_REVISION = 2_147_483_647
 DAILY_SOURCE_ID = DAILY_ACTIVITY_SOURCE_ID
 _AUTHORITATIVE_QUALITIES = frozenset({"direct", "authoritative"})
 OPENUSAGE_CATALOG_PROVIDER_ID = "openusage_catalog"
@@ -206,23 +214,49 @@ class OpenUsageDailyImporter:
             reasoning_tokens = (first.reasoning_tokens or 0) + (
                 second.reasoning_tokens or 0
             )
+        input_tokens = first.input_tokens + second.input_tokens
+        output_tokens = first.output_tokens + second.output_tokens
+        cache_read_tokens = first.cache_read_tokens + second.cache_read_tokens
+        cache_creation_tokens = (
+            first.cache_creation_tokens + second.cache_creation_tokens
+        )
+        total_tokens = first.total_tokens + second.total_tokens
+        token_counting_convention = (
+            first.token_counting_convention
+            if first.token_counting_convention
+            == second.token_counting_convention
+            else "provider_reported"
+        )
+        if token_counting_convention == "input_includes_cache":
+            expected_total = input_tokens + output_tokens
+        elif token_counting_convention == "components_disjoint":
+            expected_total = (
+                input_tokens
+                + output_tokens
+                + cache_read_tokens
+                + cache_creation_tokens
+                + (reasoning_tokens or 0)
+            )
+        else:
+            expected_total = total_tokens
+        if total_tokens != expected_total:
+            token_counting_convention = "provider_reported"
         return DailyUsageRow(
             day=first.day,
             provider_id=first.provider_id,
             model_id=first.model_id,
-            input_tokens=first.input_tokens + second.input_tokens,
-            output_tokens=first.output_tokens + second.output_tokens,
-            cache_read_tokens=first.cache_read_tokens + second.cache_read_tokens,
-            cache_creation_tokens=(
-                first.cache_creation_tokens + second.cache_creation_tokens
-            ),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             reasoning_tokens=reasoning_tokens,
-            total_tokens=first.total_tokens + second.total_tokens,
+            total_tokens=total_tokens,
             cost_amount=cost_amount,
             cost_currency="USD" if cost_amount is not None else None,
             cost_basis="price_table_estimated" if cost_amount is not None else None,
             quality=first.quality if first.quality == second.quality else "derived",
             imported_at=first.imported_at,
+            token_counting_convention=token_counting_convention,
         )
 
     def _parse(
@@ -321,6 +355,7 @@ class OpenUsageDailyImporter:
                         cost_basis=None if cost is None else "price_table_estimated",
                         quality=quality,
                         imported_at=imported_at,
+                        token_counting_convention="components_disjoint",
                     )
                 if identity in parsed:
                     if model_id != "unknown":
@@ -425,6 +460,7 @@ class ActivityCollector:
         official_importers: Mapping[str, Any] | None = None,
         clock: Callable[[], datetime] | None = None,
         local_timezone=None,
+        timing_recorder: RefreshTimingRecorder | None = None,
     ) -> None:
         self.store = store
         self.importer = importer
@@ -433,6 +469,7 @@ class ActivityCollector:
         self.local_timezone = (
             local_timezone or datetime.now().astimezone().tzinfo or timezone.utc
         )
+        self.timing_recorder = timing_recorder
         self._lock = threading.Lock()
 
     @staticmethod
@@ -461,6 +498,21 @@ class ActivityCollector:
         if isinstance(candidate, str) and candidate and len(candidate) <= 128:
             return candidate
         return fallback
+
+    @staticmethod
+    def _history_contract_revision(importer: Any) -> int | None:
+        missing = object()
+        candidate = vars(importer).get("history_contract_revision", missing)
+        if candidate is missing:
+            candidate = getattr(
+                type(importer), "history_contract_revision", missing
+            )
+        if (
+            type(candidate) is int
+            and 1 <= candidate <= MAX_HISTORY_CONTRACT_REVISION
+        ):
+            return candidate
+        return None
 
     @staticmethod
     def _account_ref(importer: Any) -> str:
@@ -550,7 +602,11 @@ class ActivityCollector:
             has_cost_history = True
         cost_since = today - timedelta(days=6 if has_cost_history else 364)
         try:
-            official_cost = importer.fetch_costs(cost_since, today)
+            official_cost = measure_source_call(
+                self.timing_recorder,
+                source_class_for(importer, "network"),
+                lambda: importer.fetch_costs(cost_since, today),
+            )
         except Exception:
             official_cost = ImportFailure("import_failed")
         if isinstance(official_cost, CostImportSuccess):
@@ -793,6 +849,49 @@ class ActivityCollector:
         except Exception:
             pass
 
+    def _refresh_balance_sources(
+        self,
+        attempted_at: datetime,
+        balance_results: tuple[tuple[str, str, object], ...],
+    ) -> None:
+        def mark_stale(provider_id: str, source_id: str) -> None:
+            try:
+                self.store.mark_balance_source_stale(
+                    provider_id, source_id, attempted_at
+                )
+            except Exception:
+                pass
+
+        for provider_id, source_id, result in balance_results:
+            if isinstance(result, BalanceFetchSuccess):
+                try:
+                    if any(
+                        observation.provider_id != provider_id
+                        or observation.source_id != source_id
+                        for observation in result.observations
+                    ):
+                        raise ValueError("balance result scope mismatch")
+                    for observation in result.observations:
+                        self.store.record_balance(observation)
+                    self.store.record_source_success(
+                        provider_id, source_id, attempted_at
+                    )
+                except Exception:
+                    mark_stale(provider_id, source_id)
+                    self._safe_source_failure(
+                        provider_id, "persistence_failed", attempted_at, source_id
+                    )
+            elif isinstance(result, BalanceFetchFailure):
+                mark_stale(provider_id, source_id)
+                self._safe_source_failure(
+                    provider_id, result.error_code, attempted_at, source_id
+                )
+            else:
+                mark_stale(provider_id, source_id)
+                self._safe_source_failure(
+                    provider_id, "invalid_import_result", attempted_at, source_id
+                )
+
     def _refresh_usage_sources(
         self,
         overview: Overview,
@@ -843,11 +942,29 @@ class ActivityCollector:
                         )
                     except Exception:
                         had_official_usage = True
+                    history_contract_revision = (
+                        self._history_contract_revision(official)
+                    )
+                    if history_contract_revision is not None:
+                        try:
+                            stored_contract_revision = (
+                                self.store.source_contract_revision(
+                                    provider_id, usage_source_id
+                                )
+                            )
+                        except Exception:
+                            stored_contract_revision = None
+                        if stored_contract_revision != history_contract_revision:
+                            had_official_usage = False
                     usage_since = today - timedelta(
                         days=6 if had_official_usage else 364
                     )
                     try:
-                        official_usage = official.fetch_usage(usage_since, today)
+                        official_usage = measure_source_call(
+                            self.timing_recorder,
+                            source_class_for(official, "network"),
+                            lambda: official.fetch_usage(usage_since, today),
+                        )
                     except Exception:
                         official_usage = ImportFailure("import_failed")
                     if isinstance(official_usage, UsageImportSuccess):
@@ -866,11 +983,18 @@ class ActivityCollector:
                             )
                         else:
                             try:
+                                commit_options: dict[str, Any] = {
+                                    "account_ref": account_ref,
+                                }
+                                if history_contract_revision is not None:
+                                    commit_options["contract_revision"] = (
+                                        history_contract_revision
+                                    )
                                 self.store.commit_usage_import_success(
                                     provider_id, usage_source_id,
                                     official_usage.since, official_usage.until,
                                     official_usage.rows, attempted_at,
-                                    account_ref=account_ref,
+                                    **commit_options,
                                 )
                                 use_openusage_fallback = False
                             except Exception:
@@ -909,7 +1033,13 @@ class ActivityCollector:
                     if self.store.has_daily_history(provider_id, account_ref)
                     else 364
                 )
-                result = self.importer.fetch(openusage_provider_id, since, today)
+                result = measure_source_call(
+                    self.timing_recorder,
+                    source_class_for(self.importer, "child_process"),
+                    lambda: self.importer.fetch(
+                        openusage_provider_id, since, today
+                    ),
+                )
             except Exception:
                 self._safe_openusage_failure(
                     provider_id, "import_failed", attempted_at, account_ref
@@ -979,6 +1109,7 @@ class ActivityCollector:
         self,
         overview: Overview,
         *,
+        balance_results: tuple[tuple[str, str, object], ...] = (),
         quota_results: tuple[tuple[str, str, object], ...] = (),
     ) -> bool:
         if not self._lock.acquire(blocking=False):
@@ -989,6 +1120,7 @@ class ActivityCollector:
             today = current.astimezone(self.local_timezone).date()
             provider_ids = self._provider_ids(overview, self.official_importers)
             self._publish_provider_instances(overview, attempted_at)
+            self._refresh_balance_sources(attempted_at, balance_results)
             self._refresh_quota_sources(overview, attempted_at, quota_results)
             self._refresh_usage_sources(
                 overview, provider_ids, today, attempted_at

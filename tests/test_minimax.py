@@ -9,6 +9,7 @@ from openusage_bar.minimax import (
     MiniMaxBillingImporter,
     MiniMaxCodingPlanAdapter,
     MiniMaxParseError,
+    minimax_endpoints_for_site,
     parse_minimax_quota_observations,
 )
 from openusage_bar.models import ProviderStatus
@@ -97,6 +98,7 @@ class MiniMaxBillingImporterTests(unittest.TestCase):
         self.assertEqual(first.model_id, "MiniMax-M2.5")
         self.assertEqual((first.input_tokens, first.output_tokens, first.total_tokens), (110, 45, 155))
         self.assertEqual(first.quality, "direct")
+        self.assertEqual(first.token_counting_convention, "input_includes_cache")
         self.assertNotIn("must-not-be-stored", repr(result).lower())
         second = next(row for row in result.rows if row.day == "2026-07-16" and row.model_id != "MiniMax-M2.5")
         self.assertRegex(second.model_id, r"^minimax-m3-coding-[0-9a-f]{12}$")
@@ -185,8 +187,49 @@ class MiniMaxBillingImporterTests(unittest.TestCase):
         self.assertIsNone(importer.cost_source_id)
         self.assertFalse(hasattr(importer, "fetch_costs"))
 
+    def test_international_site_has_no_unverified_billing_feed(self):
+        keychain = Mock()
+        client = Mock()
+        importer = MiniMaxBillingImporter(
+            MiniMaxConfig(
+                "minimax-global", "MiniMax Global", site="international"
+            ),
+            keychain,
+            client,
+            lambda: BILLING_NOW,
+        )
+
+        result = importer.fetch_usage(
+            date(2026, 7, 1), date(2026, 7, 16)
+        )
+
+        self.assertIsInstance(result, ImportFailure)
+        self.assertEqual(result.error_code, "not_available_yet")
+        keychain.get.assert_not_called()
+        client.get_json.assert_not_called()
+
 
 class MiniMaxAdapterTests(unittest.TestCase):
+    def test_site_endpoints_never_mix_china_and_international_hosts(self):
+        china = minimax_endpoints_for_site("china")
+        international = minimax_endpoints_for_site("international")
+
+        self.assertEqual(china.host, "www.minimaxi.com")
+        self.assertEqual(
+            china.quota, "https://www.minimaxi.com/v1/token_plan/remains"
+        )
+        self.assertEqual(
+            china.billing, "https://www.minimaxi.com/account/amount"
+        )
+        self.assertEqual(international.host, "www.minimax.io")
+        self.assertEqual(
+            international.quota,
+            "https://www.minimax.io/v1/token_plan/remains",
+        )
+        self.assertIsNone(international.billing)
+        with self.assertRaises(MiniMaxParseError):
+            minimax_endpoints_for_site("unknown")
+
     def test_emits_subscription_and_model_specific_quota_windows(self):
         payload = {
             "model_remains": [
@@ -244,6 +287,40 @@ class MiniMaxAdapterTests(unittest.TestCase):
         self.assertEqual(card.source_kind, "builtin_api")
         client.get_json.assert_called_once_with(
             "https://www.minimaxi.com/v1/token_plan/remains",
+            {
+                "Authorization": "Bearer subscription-key",
+                "Content-Type": "application/json",
+            },
+        )
+
+    def test_fetch_uses_international_token_plan_endpoint_without_cross_retry(self):
+        keychain = Mock()
+        keychain.get.return_value = "subscription-key"
+        client = Mock()
+        client.get_json.return_value = {
+            "model_remains": [
+                {
+                    "current_interval_total_count": 100,
+                    "current_interval_usage_count": 75,
+                }
+            ],
+            "base_resp": {"status_code": 0},
+        }
+        adapter = MiniMaxCodingPlanAdapter(
+            MiniMaxConfig(
+                "m-global", "MiniMax Global", site="international"
+            ),
+            keychain,
+            client,
+            lambda: NOW,
+        )
+
+        card = adapter.fetch()
+
+        self.assertEqual(card.status, ProviderStatus.OK)
+        self.assertIn("International", card.source)
+        client.get_json.assert_called_once_with(
+            "https://www.minimax.io/v1/token_plan/remains",
             {
                 "Authorization": "Bearer subscription-key",
                 "Content-Type": "application/json",

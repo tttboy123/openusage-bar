@@ -39,6 +39,24 @@ activity_process_matches() {
   [[ -z "$started" || "$current" == "$started" ]]
 }
 
+activity_process_bundle_identifier() {
+  local pid=$1
+  local inspector=${OPENUSAGE_LSAPPINFO:-/usr/bin/lsappinfo}
+  local output pattern='"CFBundleIdentifier"="([^"]+)"'
+  [[ "$pid" == <-> ]] || return 1
+  output=$("$inspector" info -only bundleid -pid "$pid" 2>/dev/null) || return 1
+  [[ "$output" =~ $pattern ]] || return 1
+  print -r -- "$match[1]"
+}
+
+activity_process_bundle_matches() {
+  local pid=$1
+  local expected=$2
+  local observed
+  observed=$(activity_process_bundle_identifier "$pid") || return 1
+  [[ "$observed" == "$expected" ]]
+}
+
 activity_exact_processes() {
   local expected=$1
   local snapshot pid weekday month day clock year command
@@ -80,7 +98,10 @@ signal_exact_activity_pid() {
   local started=$3
   local signal=$4
   local signaler=${5:-/bin/kill}
+  local expected_bundle_identifier=${6:-}
   activity_process_matches "$pid" "$expected" "$started" || return 0
+  [[ -z "$expected_bundle_identifier" ]] || \
+    activity_process_bundle_matches "$pid" "$expected_bundle_identifier" || return 0
   if "$signaler" "-$signal" "$pid" 2>/dev/null; then
     ACTIVITY_STOP_SIGNALLED=1
     return 0
@@ -94,17 +115,26 @@ stop_exact_activity_processes() {
   local attempts=${2:-50}
   local delay=${3:-0.1}
   local signaler=${4:-/bin/kill}
+  local expected_bundle_identifier=${5:-}
   local term_rounds=$(( attempts / 2 ))
   local empty_rounds=0
   local attempt entry pid started signal snapshot tab=$'\t'
-  local -a processes
+  local -a processes relevant
   ACTIVITY_STOP_MATCHED=0
   ACTIVITY_STOP_SIGNALLED=0
 
   for (( attempt = 1; attempt <= attempts; attempt++ )); do
     snapshot=$(activity_exact_processes "$expected") || return 1
     processes=(${(f)snapshot})
-    if (( ${#processes} == 0 )); then
+    relevant=()
+    for entry in "$processes[@]"; do
+      pid=${entry%%${tab}*}
+      if [[ -z "$expected_bundle_identifier" ]] || \
+        activity_process_bundle_matches "$pid" "$expected_bundle_identifier"; then
+        relevant+=("$entry")
+      fi
+    done
+    if (( ${#relevant} == 0 )); then
       empty_rounds=$(( empty_rounds + 1 ))
       if (( empty_rounds >= 2 )); then
         return 0
@@ -116,10 +146,11 @@ stop_exact_activity_processes() {
       if (( attempt > term_rounds )); then
         signal=KILL
       fi
-      for entry in "$processes[@]"; do
+      for entry in "$relevant[@]"; do
         pid=${entry%%${tab}*}
         started=${entry#*${tab}}
-        signal_exact_activity_pid "$expected" "$pid" "$started" "$signal" "$signaler" || true
+        signal_exact_activity_pid "$expected" "$pid" "$started" "$signal" \
+          "$signaler" "$expected_bundle_identifier" || true
       done
     fi
     sleep "$delay"
@@ -127,7 +158,14 @@ stop_exact_activity_processes() {
 
   snapshot=$(activity_exact_processes "$expected") || return 1
   processes=(${(f)snapshot})
-  (( ${#processes} == 0 ))
+  for entry in "$processes[@]"; do
+    pid=${entry%%${tab}*}
+    if [[ -z "$expected_bundle_identifier" ]] || \
+      activity_process_bundle_matches "$pid" "$expected_bundle_identifier"; then
+      return 1
+    fi
+  done
+  return 0
 }
 
 clear_activity_for_runtime_rollback() {
@@ -138,7 +176,7 @@ clear_activity_for_runtime_rollback() {
   if stop_exact_activity_processes "$expected" "$attempts" "$delay" "$signaler"; then
     return 0
   fi
-  print -u2 "runtime rollback incomplete: Activity helper is still running; current bundle retained"
+  print -u2 "runtime rollback incomplete: visible helper is still running; current bundle retained"
   return 1
 }
 

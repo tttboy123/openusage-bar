@@ -15,10 +15,13 @@ from pathlib import Path, PurePosixPath
 
 ARCHIVE_PATTERN = re.compile(r"^OpenUsage-Bar-v(\d+\.\d+\.\d+)-macos-arm64\.zip$")
 ALLOWED_SCRIPTS = frozenset({
+    "activity_schema.py",
     "activity_install_process.sh", "install_app.sh",
     "install_location.sh", "install_app_transaction.sh", "rollback_app.sh",
     "uninstall_app.sh",
-    "export_diagnostics.py", "privacy_scan.py", "verify_local_api.py",
+    "export_diagnostics.py", "privacy_scan.py", "verify_canary_surfaces.py",
+    "verify_canary_candidate.py",
+    "verify_local_api.py",
 })
 SENSITIVE_NAMES = frozenset({
     ".env", "providers.json", "activity.sqlite3", "activity.sqlite3-wal",

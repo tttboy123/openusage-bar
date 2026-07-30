@@ -2,135 +2,27 @@ from __future__ import annotations
 
 import json
 import os
-import selectors
-import signal
-import subprocess
 import tempfile
 import threading
-import time
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
-from .keychain import KeychainError
+from .keychain import (
+    BoundedMacOSKeychain,
+    BoundedReadOnlyKeychain,
+    KeychainError,
+)
 from .models import Category, Overview, ProviderCard, ProviderStatus, canonical_category
+from .performance_timing import (
+    RefreshTimingRecorder,
+    measure_source_call,
+    source_class_for,
+)
 
 
 DEFAULT_CACHE_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "cards.json"
-KEYCHAIN_SERVICE = "com.lune.openusage-menubar"
-MAX_KEYCHAIN_VALUE_BYTES = 64 * 1024
-
-
-class BoundedReadOnlyKeychain:
-    """Read headless credentials without an unbounded Security-framework prompt."""
-
-    def __init__(
-        self,
-        timeout_seconds: int = 5,
-        security_executable: str = "/usr/bin/security",
-    ) -> None:
-        if (
-            isinstance(timeout_seconds, bool)
-            or not isinstance(timeout_seconds, int)
-            or not 1 <= timeout_seconds <= 30
-        ):
-            raise ValueError("Keychain timeout must be between 1 and 30 seconds")
-        if not security_executable.startswith("/") or "\x00" in security_executable:
-            raise ValueError("Security executable must be an absolute path")
-        self.timeout_seconds = timeout_seconds
-        self.security_executable = security_executable
-        self.last_read_bytes = 0
-        self.last_process_alive = False
-
-    @staticmethod
-    def _kill_and_reap(process: subprocess.Popen[bytes]) -> None:
-        if process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                try:
-                    process.kill()
-                except OSError:
-                    pass
-        try:
-            process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            try:
-                process.kill()
-            except OSError:
-                pass
-            process.wait()
-
-    def get(self, account: str) -> str | None:
-        if not account or any(character in account for character in "\x00\r\n"):
-            return None
-        environment = {"PATH": "/usr/bin:/bin"}
-        for name in ("HOME", "USER", "LOGNAME", "TMPDIR"):
-            value = os.environ.get(name)
-            if value and "\x00" not in value:
-                environment[name] = value
-        process: subprocess.Popen[bytes] | None = None
-        output = bytearray()
-        try:
-            process = subprocess.Popen(
-                [
-                    self.security_executable, "find-generic-password",
-                    "-s", KEYCHAIN_SERVICE, "-a", account, "-w",
-                ],
-                shell=False,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                env=environment,
-                start_new_session=True,
-            )
-            assert process.stdout is not None
-            deadline = time.monotonic() + self.timeout_seconds
-            with selectors.DefaultSelector() as selector:
-                selector.register(process.stdout, selectors.EVENT_READ)
-                while True:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0 or not selector.select(remaining):
-                        self._kill_and_reap(process)
-                        return None
-                    chunk = os.read(
-                        process.stdout.fileno(),
-                        min(8192, MAX_KEYCHAIN_VALUE_BYTES + 1 - len(output)),
-                    )
-                    if not chunk:
-                        break
-                    output.extend(chunk)
-                    self.last_read_bytes = len(output)
-                    if len(output) > MAX_KEYCHAIN_VALUE_BYTES:
-                        self._kill_and_reap(process)
-                        return None
-            remaining = max(0.0, deadline - time.monotonic())
-            try:
-                returncode = process.wait(timeout=remaining)
-            except subprocess.TimeoutExpired:
-                self._kill_and_reap(process)
-                return None
-        except (OSError, ValueError):
-            if process is not None:
-                self._kill_and_reap(process)
-            return None
-        finally:
-            self.last_process_alive = bool(process is not None and process.poll() is None)
-            if process is not None and process.stdout is not None:
-                process.stdout.close()
-        if returncode != 0:
-            return None
-        try:
-            value = bytes(output).decode("utf-8").rstrip("\r\n")
-        except UnicodeDecodeError:
-            return None
-        return value or None
-
-    def set(self, _account: str, _secret: str) -> None:
-        raise KeychainError("Headless Keychain access is read-only")
-
-
 class Adapter(Protocol):
     def fetch(self) -> Overview | ProviderCard: ...
 
@@ -230,10 +122,18 @@ class CardCache:
 
 
 class Aggregator:
-    def __init__(self, adapters: list[Adapter], cache: CardCache, clock=None) -> None:
+    def __init__(
+        self,
+        adapters: list[Adapter],
+        cache: CardCache,
+        clock=None,
+        *,
+        timing_recorder: RefreshTimingRecorder | None = None,
+    ) -> None:
         self.adapters = adapters
         self.cache = cache
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.timing_recorder = timing_recorder
         self._refresh_lock = threading.Lock()
 
     def refresh(self) -> Overview:
@@ -244,7 +144,11 @@ class Aggregator:
             fresh: list[ProviderCard] = []
             for adapter in self.adapters:
                 try:
-                    result = adapter.fetch()
+                    result = measure_source_call(
+                        self.timing_recorder,
+                        source_class_for(adapter, "network"),
+                        adapter.fetch,
+                    )
                 except Exception:
                     continue
                 cards = result.cards if isinstance(result, Overview) else [result]
@@ -346,13 +250,16 @@ class LedgerRefresher:
     """Headless bridge from provider cards into the canonical activity ledger."""
 
     def __init__(
-        self, aggregator, collector, quota_sources=(), *,
+        self, aggregator, collector, quota_sources=(), balance_sources=(), *,
         eager_usage_provider_ids=(),
+        timing_recorder: RefreshTimingRecorder | None = None,
     ) -> None:
         self.aggregator = aggregator
         self.collector = collector
         self.quota_sources = tuple(quota_sources)
+        self.balance_sources = tuple(balance_sources)
         self.eager_usage_provider_ids = tuple(eager_usage_provider_ids)
+        self.timing_recorder = timing_recorder
 
     def refresh(self) -> None:
         if self.eager_usage_provider_ids:
@@ -366,17 +273,39 @@ class LedgerRefresher:
             for provider_id, source_id, adapter in self.quota_sources
             if (result := getattr(adapter, "last_quota_result", None)) is not None
         )
-        self.collector.refresh(overview, quota_results=results)
+        balance_results = tuple(
+            (provider_id, source_id, result)
+            for provider_id, source_id, adapter in self.balance_sources
+            if (result := getattr(adapter, "last_balance_result", None)) is not None
+        )
+        self.collector.refresh(
+            overview,
+            balance_results=balance_results,
+            quota_results=results,
+        )
+
+    def performance_timing_snapshot(self) -> dict:
+        if self.timing_recorder is None:
+            return {
+                "schemaVersion": 1,
+                "scope": "source-class",
+                "classes": [],
+            }
+        return self.timing_recorder.snapshot()
 
 
-def build_headless_refresher(activity_store):
+def build_headless_refresher(
+    activity_store,
+    *,
+    timing_recorder: RefreshTimingRecorder | None = None,
+):
     """Build the production collector without importing the AppKit UI module."""
     from .config import ProviderConfigStore
     from .daily_history import ActivityCollector
     from .providers.builtins import default_registry
 
     clock = lambda: datetime.now(timezone.utc)
-    keychain = BoundedReadOnlyKeychain()
+    keychain = BoundedMacOSKeychain()
     config_store = ProviderConfigStore()
     try:
         configs = config_store.load()
@@ -391,7 +320,8 @@ def build_headless_refresher(activity_store):
             type(adapter).__qualname__,
             adapter,
         )
-        for binding in bindings for adapter in binding.quota_sources
+        for binding in bindings
+        for adapter in (*binding.quota_sources, *binding.balance_sources)
     )]
     openusage_importer = next(
         source
@@ -411,12 +341,18 @@ def build_headless_refresher(activity_store):
             )
         if sources:
             official_importers[binding.provider_id] = next(iter(sources.values()))
-    aggregator = Aggregator(adapters, CardCache(), clock)
+    aggregator = Aggregator(
+        adapters,
+        CardCache(),
+        clock,
+        timing_recorder=timing_recorder,
+    )
     collector = ActivityCollector(
         activity_store,
         openusage_importer,
         official_importers=official_importers,
         clock=clock,
+        timing_recorder=timing_recorder,
     )
     quota_sources = tuple(
         (
@@ -427,6 +363,14 @@ def build_headless_refresher(activity_store):
         for binding in bindings for adapter in binding.quota_sources
         if hasattr(adapter, "last_quota_result")
     )
+    balance_sources = tuple(
+        (
+            binding.provider_id,
+            getattr(adapter, "source_id", type(adapter).__name__),
+            adapter,
+        )
+        for binding in bindings for adapter in binding.balance_sources
+    )
     eager_usage_provider_ids = tuple(sorted(
         {"codex"} | {
             provider_id
@@ -435,6 +379,7 @@ def build_headless_refresher(activity_store):
         }
     ))
     return LedgerRefresher(
-        aggregator, collector, quota_sources,
+        aggregator, collector, quota_sources, balance_sources,
         eager_usage_provider_ids=eager_usage_provider_ids,
+        timing_recorder=timing_recorder,
     )

@@ -90,6 +90,14 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn(direct, source)
         self.assertLess(source.index(direct), source.index(traced))
 
+    def test_build_verifies_action_pin_manifest_before_python_suite(self):
+        source = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
+        verifier = '"$PYTHON" scripts/verify_action_pins.py'
+        suite = '"$PYTHON" -m unittest discover -s tests -v'
+
+        self.assertIn(verifier, source)
+        self.assertLess(source.index(verifier), source.index(suite))
+
     def test_build_rejects_a_stale_generated_swift_provider_catalog(self):
         source = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
         generated = ROOT / "swift_app/Sources/UsageCore/GeneratedProviderCatalog.swift"
@@ -159,10 +167,18 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertEqual(status["ProgramArguments"][0], "__APP__/Contents/MacOS/OpenUsage Bar")
         self.assertEqual(status["ProgramArguments"][-1], "--background")
         self.assertEqual(collector["Label"], "com.lune.openusagebar.collector")
-        self.assertTrue(collector["ProgramArguments"][0].startswith("__APP__/"))
+        self.assertEqual(
+            collector["ProgramArguments"][0],
+            "__APP__/Contents/MacOS/OpenUsage Collector",
+        )
         self.assertIn("daemon", collector["ProgramArguments"])
         self.assertIn("--api-socket", collector["ProgramArguments"])
         self.assertNotEqual(status["ProgramArguments"][0], collector["ProgramArguments"][0])
+
+        build = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
+        self.assertIn("scripts/clean_env_launcher.c", build)
+        self.assertIn('OpenUsage Bar.runtime', build)
+        self.assertIn('OpenUsage Collector', build)
 
     def test_app_embeds_a_service_management_collector(self):
         resources = ROOT / "swift_app/Resources"
@@ -172,11 +188,11 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertEqual(collector["Label"], "com.lune.openusagebar.collector")
         self.assertEqual(
             collector["BundleProgram"],
-            "Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings",
+            "Contents/MacOS/OpenUsage Collector",
         )
         self.assertEqual(
             collector["ProgramArguments"],
-            ["OpenUsage Provider Settings", "daemon", "--interval", "300"],
+            ["OpenUsage Collector", "daemon", "--interval", "300"],
         )
         self.assertNotIn("StandardOutPath", collector)
         self.assertNotIn("StandardErrorPath", collector)
@@ -247,6 +263,9 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("scripts/uninstall_app.sh", package)
         self.assertIn("scripts/rollback_app.sh", package)
         self.assertIn("scripts/export_diagnostics.py", package)
+        self.assertIn("scripts/verify_canary_surfaces.py", package)
+        self.assertIn("scripts/verify_canary_candidate.py", package)
+        self.assertIn("openusage_bar/activity_schema.py", package)
         self.assertIn("docs/canary.md", package)
         self.assertIn("THIRD_PARTY_NOTICES.md", package)
         self.assertIn("shasum -a 256", package)
@@ -261,11 +280,19 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn('hdiutil create', package)
         self.assertIn('Applications', package)
         self.assertIn('.dmg', package)
+        self.assertIn('--dmg "$DMG"', package)
         self.assertIn('OpenUsage-Bar-*.dmg', workflow)
         self.assertIn('OpenUsage-Bar-*.dmg.sha256', workflow)
         self.assertIn('hdiutil attach -readonly -nobrowse', audit)
         self.assertIn('Applications', audit)
         self.assertIn('codesign --verify --deep --strict', audit)
+        self.assertIn('Contents/MacOS/OpenUsage Bar.runtime', audit)
+        self.assertIn('Contents/MacOS/OpenUsage Collector', audit)
+        self.assertIn('OpenUsage Provider Settings.app/Contents/MacOS', audit)
+        self.assertIn('STATUS_LAUNCHER=', audit)
+        self.assertIn('"$STATUS_LAUNCHER" "$STATUS_RUNTIME"', audit)
+        self.assertIn('codesign --display', audit)
+        self.assertIn('otool -L', audit)
         self.assertIn('dmg-install-readme.txt', package)
         self.assertIn('Installation Guide.txt', audit)
         self.assertIn(
@@ -275,6 +302,15 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn('不要全局关闭 Gatekeeper', guide)
         self.assertIn('scripts/release_dmg_audit.sh', ci)
         self.assertIn('scripts/release_dmg_audit.sh', workflow)
+
+    def test_ci_and_release_run_the_same_dependency_and_install_gates(self):
+        for workflow_name in ("ci.yml", "release.yml"):
+            workflow = (
+                ROOT / ".github" / "workflows" / workflow_name
+            ).read_text(encoding="utf-8")
+            with self.subTest(workflow=workflow_name):
+                self.assertIn("scripts/audit_dependencies.sh", workflow)
+                self.assertIn("scripts/release_smoke.sh", workflow)
 
     def test_atomic_swap_helper_exchanges_two_directories_without_a_missing_target_window(self):
         helper = ROOT / "scripts/atomic_swap.c"

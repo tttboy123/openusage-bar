@@ -51,6 +51,7 @@ enum AutomationPresentation {
                 "modelCount": snapshot.modelCount,
                 "coveredDayCount": snapshot.coveredDayCount,
             ],
+            "balanceCount": snapshot.balances.count,
             "quotaWindowCount": snapshot.quotaWindowCount,
             "providerCount": snapshot.providerCount,
             "sourceCount": snapshot.sourceCount,

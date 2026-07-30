@@ -21,6 +21,16 @@ class MiniMaxConfig:
     name: str
     type: str = "minimax"
     account_ref: str = ""
+    site: str = "china"
+
+
+@dataclass(frozen=True)
+class MoonshotConfig:
+    provider_id: str
+    name: str
+    type: str = "moonshot"
+    site: str = "china"
+    account_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -126,6 +136,7 @@ class GenericProviderConfig:
 
 ProviderConfig = (
     MiniMaxConfig
+    | MoonshotConfig
     | StepPlanConfig
     | OpenAIOrganizationConfig
     | DailyUsageFeedConfig
@@ -162,11 +173,13 @@ def _validate_config(config: ProviderConfig) -> None:
             raise ValueError("Account ref must use the stable identifier grammar")
         if config.account_ref.casefold() == config.name.strip().casefold():
             raise ValueError("Account ref must not copy the provider display name")
-    if isinstance(config, StepPlanConfig) and config.site not in {
+    if isinstance(
+        config, (MiniMaxConfig, MoonshotConfig, StepPlanConfig)
+    ) and config.site not in {
         "china",
         "international",
     }:
-        raise ValueError("StepFun site must be china or international")
+        raise ValueError("Provider site must be china or international")
     if isinstance(config, GenericProviderConfig):
         if config.family_id and ID_PATTERN.fullmatch(config.family_id) is None:
             raise ValueError("Generic quota family ID is invalid")
@@ -351,6 +364,8 @@ class ProviderConfigStore:
             kind = raw.get("type")
             if kind == "minimax":
                 config: ProviderConfig = MiniMaxConfig(**raw)
+            elif kind == "moonshot":
+                config = MoonshotConfig(**raw)
             elif kind == "step_plan":
                 config = StepPlanConfig(**raw)
             elif kind == "openai_organization":

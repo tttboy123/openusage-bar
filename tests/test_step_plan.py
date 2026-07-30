@@ -356,8 +356,9 @@ class StepPlanAdapterTests(unittest.TestCase):
         card = adapter.fetch()
 
         self.assertEqual(card.status, ProviderStatus.ERROR)
-        self.assertEqual(card.detail, "Step Plan refresh failed")
-        self.assertEqual(card.last_error, "Step Plan refresh failed")
+        self.assertEqual(card.detail, "Step Plan credential unavailable")
+        self.assertEqual(card.last_error, "Step Plan credential unavailable")
+        self.assertEqual(adapter.last_quota_result.error_code, "keychain_unavailable")
         self.assertEqual(calls["quota"], 1)
         serialized = f"{card.detail} {card.last_error}"
         self.assertNotIn("old-access", serialized)
@@ -429,6 +430,50 @@ class StepPlanAdapterTests(unittest.TestCase):
         self.assertEqual(card.status, ProviderStatus.AUTH)
         self.assertEqual(card.detail, "Credential rejected")
         self.assertNotIn("step-plan-key", card.detail)
+
+    def test_keychain_failure_is_typed_separately_from_invalid_response(self):
+        keychain = Mock()
+        keychain.get.side_effect = KeychainError("sensitive keychain detail")
+        client = Mock()
+        adapter = StepPlanAdapter(
+            StepPlanConfig("step-plan-main", "Step Plan"),
+            keychain,
+            client,
+            lambda: NOW,
+        )
+
+        card = adapter.fetch()
+
+        self.assertEqual(card.status, ProviderStatus.ERROR)
+        self.assertEqual(adapter.last_quota_result.error_code, "keychain_unavailable")
+        self.assertEqual(card.detail, "Step Plan credential unavailable")
+        self.assertNotIn("sensitive", f"{card.detail} {card.last_error}")
+        client.get_json.assert_not_called()
+        client.post_json.assert_not_called()
+
+    def test_network_failure_is_typed_separately_from_invalid_response(self):
+        from openusage_bar.network import NetworkError
+
+        keychain = Mock()
+        keychain.get.side_effect = lambda account: {
+            "step-plan-main" + STEP_PLAN_TOKEN_SUFFIX: "access...refresh",
+            "step-plan-main" + STEP_PLAN_WEBID_SUFFIX: "web-id",
+        }.get(account)
+        client = Mock()
+        client.post_json.side_effect = NetworkError("sensitive network detail")
+        adapter = StepPlanAdapter(
+            StepPlanConfig("step-plan-main", "Step Plan"),
+            keychain,
+            client,
+            lambda: NOW,
+        )
+
+        card = adapter.fetch()
+
+        self.assertEqual(card.status, ProviderStatus.ERROR)
+        self.assertEqual(adapter.last_quota_result.error_code, "network_error")
+        self.assertEqual(card.detail, "Step Plan network unavailable")
+        self.assertNotIn("sensitive", f"{card.detail} {card.last_error}")
 
 
 if __name__ == "__main__":

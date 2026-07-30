@@ -1,3 +1,6 @@
+import os
+import plistlib
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -10,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "scripts/activity_install_process.sh"
 INSTALL = ROOT / "scripts/install_app.sh"
+UNINSTALL = ROOT / "scripts/uninstall_app.sh"
 
 
 class ActivityInstallProcessTests(unittest.TestCase):
@@ -106,6 +110,23 @@ class ActivityInstallProcessTests(unittest.TestCase):
             time.sleep(0.005)
         self.assertTrue(marker.exists(), "fixture process did not become ready")
 
+    def build_lsappinfo(
+        self, root: Path, bundle_identifiers: dict[int, str]
+    ) -> Path:
+        executable = root / "lsappinfo"
+        cases = "\n".join(
+            f'  *"-pid {pid}"*) printf \'"CFBundleIdentifier"="{bundle_id}"\\n\';;'
+            for pid, bundle_id in bundle_identifiers.items()
+        )
+        executable.write_text(
+            "#!/bin/sh\ncase \"$*\" in\n"
+            + cases
+            + "\n  *) exit 1;;\nesac\n",
+            encoding="utf-8",
+        )
+        executable.chmod(0o755)
+        return executable
+
     def test_stop_matches_only_the_exact_full_activity_command(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -136,6 +157,193 @@ class ActivityInstallProcessTests(unittest.TestCase):
                     if process.poll() is None:
                         process.kill()
                     process.wait(timeout=2)
+
+    def test_uninstall_stops_exact_activity_before_removing_bundle(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            app = root / "Applications/OpenUsage Bar.app"
+            target = self.build_process(
+                app,
+                "Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity",
+            )
+            with (app / "Contents/Info.plist").open("wb") as handle:
+                plistlib.dump(
+                    {"CFBundleIdentifier": "com.lune.openusagebar"}, handle
+                )
+            process = subprocess.Popen([str(target), "--route", "health"])
+            try:
+                self.wait_for_command(process, f"{target} --route health")
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "HOME": str(root / "home"),
+                        "OPENUSAGE_INSTALL_DIR": str(app.parent),
+                        "OPENUSAGE_SYSTEM_APPLICATIONS_DIR": str(app.parent),
+                        "OPENUSAGE_STATE_DIR": str(root / "home/state"),
+                        "OPENUSAGE_LAUNCHCTL": "/usr/bin/true",
+                    }
+                )
+                result = subprocess.run(
+                    [str(UNINSTALL)],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                process.wait(timeout=2)
+                self.assertFalse(app.exists())
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=2)
+
+    def test_uninstall_with_explicit_install_dir_is_strictly_scoped(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            home = root / "home"
+            scoped_app = root / "scoped/OpenUsage Bar.app"
+            system_app = root / "system/OpenUsage Bar.app"
+            user_app = home / "Applications/OpenUsage Bar.app"
+            for app in (scoped_app, system_app, user_app):
+                (app / "Contents").mkdir(parents=True)
+                with (app / "Contents/Info.plist").open("wb") as handle:
+                    plistlib.dump(
+                        {"CFBundleIdentifier": "com.lune.openusagebar"}, handle
+                    )
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "HOME": str(home),
+                    "OPENUSAGE_INSTALL_DIR": str(scoped_app.parent),
+                    "OPENUSAGE_SYSTEM_APPLICATIONS_DIR": str(system_app.parent),
+                    "OPENUSAGE_STATE_DIR": str(home / "state"),
+                    "OPENUSAGE_LAUNCHCTL": "/usr/bin/true",
+                }
+            )
+            result = subprocess.run(
+                [str(UNINSTALL)],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(scoped_app.exists())
+            self.assertTrue(system_app.exists())
+            self.assertTrue(user_app.exists())
+
+    def test_uninstall_stops_stale_user_activity_when_system_app_is_target(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            home = root / "home"
+            system_app = root / "system-applications/OpenUsage Bar.app"
+            (system_app / "Contents").mkdir(parents=True)
+            with (system_app / "Contents/Info.plist").open("wb") as handle:
+                plistlib.dump(
+                    {"CFBundleIdentifier": "com.lune.openusagebar"}, handle
+                )
+            stale_target = self.build_process(
+                home / "Applications/OpenUsage Bar.app",
+                "Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity",
+            )
+            with (
+                home / "Applications/OpenUsage Bar.app/Contents/Info.plist"
+            ).open("wb") as handle:
+                plistlib.dump(
+                    {"CFBundleIdentifier": "com.lune.openusagebar"}, handle
+                )
+            stale_process = subprocess.Popen(
+                [str(stale_target), "--route", "providers"]
+            )
+            try:
+                self.wait_for_command(
+                    stale_process, f"{stale_target} --route providers"
+                )
+                lsappinfo = self.build_lsappinfo(
+                    root, {stale_process.pid: "com.lune.openusagebar.activity"}
+                )
+                shutil.rmtree(home / "Applications/OpenUsage Bar.app")
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "HOME": str(home),
+                        "OPENUSAGE_SYSTEM_APPLICATIONS_DIR": str(system_app.parent),
+                        "OPENUSAGE_STATE_DIR": str(home / "state"),
+                        "OPENUSAGE_LAUNCHCTL": "/usr/bin/true",
+                        "OPENUSAGE_LSAPPINFO": str(lsappinfo),
+                    }
+                )
+                result = subprocess.run(
+                    [str(UNINSTALL)],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                stale_process.wait(timeout=2)
+                self.assertFalse(system_app.exists())
+                self.assertFalse(
+                    (home / "Applications/OpenUsage Bar.app").exists()
+                )
+            finally:
+                if stale_process.poll() is None:
+                    stale_process.kill()
+                stale_process.wait(timeout=2)
+
+    def test_uninstall_preserves_same_name_alternate_with_wrong_bundle_id(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            home = root / "home"
+            system_app = root / "system-applications/OpenUsage Bar.app"
+            (system_app / "Contents").mkdir(parents=True)
+            with (system_app / "Contents/Info.plist").open("wb") as handle:
+                plistlib.dump(
+                    {"CFBundleIdentifier": "com.lune.openusagebar"}, handle
+                )
+            alternate = home / "Applications/OpenUsage Bar.app"
+            alternate_target = self.build_process(
+                alternate,
+                "Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity",
+            )
+            with (alternate / "Contents/Info.plist").open("wb") as handle:
+                plistlib.dump({"CFBundleIdentifier": "example.not-openusage"}, handle)
+            alternate_process = subprocess.Popen(
+                [str(alternate_target), "--route", "health"]
+            )
+            try:
+                self.wait_for_command(
+                    alternate_process, f"{alternate_target} --route health"
+                )
+                lsappinfo = self.build_lsappinfo(
+                    root, {alternate_process.pid: "example.not-openusage.activity"}
+                )
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "HOME": str(home),
+                        "OPENUSAGE_SYSTEM_APPLICATIONS_DIR": str(system_app.parent),
+                        "OPENUSAGE_STATE_DIR": str(home / "state"),
+                        "OPENUSAGE_LAUNCHCTL": "/usr/bin/true",
+                        "OPENUSAGE_LSAPPINFO": str(lsappinfo),
+                    }
+                )
+                result = subprocess.run(
+                    [str(UNINSTALL)],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(system_app.exists())
+                self.assertTrue(alternate.exists())
+                self.assertIsNone(alternate_process.poll())
+            finally:
+                if alternate_process.poll() is None:
+                    alternate_process.kill()
+                alternate_process.wait(timeout=2)
 
     def test_stop_accepts_only_supported_activity_route_arguments(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -509,17 +717,21 @@ class ActivityInstallProcessTests(unittest.TestCase):
             finally:
                 self.run_helper(f'stop_exact_activity_processes "{executable}" 20 0.01')
 
-    def test_install_reopens_only_activity_on_success_and_rollback(self):
+    def test_install_restarts_visible_activity_and_settings_helpers(self):
         source = INSTALL.read_text(encoding="utf-8")
         helper = HELPER.read_text(encoding="utf-8")
 
         self.assertIn('source "$ROOT/scripts/activity_install_process.sh"', source)
         self.assertIn('ACTIVITY_EXECUTABLE="$TARGET/Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity"', source)
+        self.assertIn('SETTINGS_EXECUTABLE="$TARGET/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"', source)
         self.assertIn('ACTIVITY_WAS_RUNNING=1', source)
+        self.assertIn('SETTINGS_WAS_RUNNING=1', source)
         self.assertIn('stop_exact_activity_processes "$ACTIVITY_EXECUTABLE"', source)
+        self.assertIn('stop_exact_activity_processes "$SETTINGS_EXECUTABLE"', source)
         self.assertEqual(source.count('reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"'), 2)
+        self.assertEqual(source.count('reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE"'), 2)
         self.assertIn('clear_activity_for_runtime_rollback "$ACTIVITY_EXECUTABLE"', source)
-        self.assertNotIn("Provider Settings.app/Contents/MacOS", source)
+        self.assertIn('clear_activity_for_runtime_rollback "$SETTINGS_EXECUTABLE"', source)
         self.assertNotIn("pkill", source)
         self.assertNotIn("killall", source)
         self.assertNotIn("osascript", source)
@@ -532,24 +744,35 @@ class ActivityInstallProcessTests(unittest.TestCase):
         rollback = source.index("rollback()")
         rollback_end = source.index("trap rollback", rollback)
         rollback_source = source[rollback:rollback_end]
-        self.assertIn("if (( SWAPPED || FIRST_INSTALLED || ACTIVITY_STOPPED )); then", rollback_source)
+        self.assertIn(
+            "if (( SWAPPED || FIRST_INSTALLED || ACTIVITY_STOPPED || SETTINGS_STOPPED )); then",
+            rollback_source,
+        )
         rollback_clear = source.index('clear_activity_for_runtime_rollback "$ACTIVITY_EXECUTABLE"', rollback)
+        rollback_settings_clear = source.index('clear_activity_for_runtime_rollback "$SETTINGS_EXECUTABLE"', rollback)
         rollback_reopen = source.index('reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"', rollback)
+        rollback_settings_reopen = source.index('reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE"', rollback)
         rollback_restore = source.index("rollback_bundle_transaction", rollback)
         success_reopen = source.rindex('reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"')
+        success_settings_reopen = source.rindex('reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE"')
         installed_verify = source.index('codesign --verify --deep --strict "$TARGET"')
         install_swap = source.index('install_bundle_transaction "$ATOMIC_SWAP" "$TARGET" "$NEW"')
         post_swap_stop = source.index('stop_exact_activity_processes "$ACTIVITY_EXECUTABLE"', install_swap)
+        post_swap_settings_stop = source.index('stop_exact_activity_processes "$SETTINGS_EXECUTABLE"', install_swap)
         self.assertLess(rollback_clear, rollback_restore)
+        self.assertLess(rollback_settings_clear, rollback_restore)
         self.assertIn("if (( activity_runtime_cleared )); then", source[rollback:rollback_restore])
         self.assertLess(rollback_restore, rollback_reopen)
+        self.assertLess(rollback_restore, rollback_settings_reopen)
         self.assertIn(
             "if (( HAD_TARGET && ACTIVITY_STOPPED && activity_runtime_cleared && bundle_restored )); then",
             rollback_source,
         )
         self.assertIn('exit "$code"', rollback_source)
         self.assertLess(install_swap, post_swap_stop)
+        self.assertLess(install_swap, post_swap_settings_stop)
         self.assertLess(installed_verify, success_reopen)
+        self.assertLess(installed_verify, success_settings_reopen)
 
 
 if __name__ == "__main__":

@@ -5,8 +5,8 @@ APP_NAME = "OpenUsage Provider Settings"
 APP_BUNDLE_PATH = "/Applications/OpenUsage Bar.app"
 BUNDLE_ID = "com.lune.openusagebar.settings"
 LAUNCH_AGENT_LABEL = "com.lune.openusagebar.collector"
-APP_VERSION = "0.4.2"
-BUILD_VERSION = "6"
+APP_VERSION = "0.6.0"
+BUILD_VERSION = "9"
 
 
 def info_plist() -> dict[str, object]:
@@ -25,7 +25,7 @@ def launch_agent_payload(stdout_path: str, stderr_path: str) -> dict[str, object
     return {
         "Label": LAUNCH_AGENT_LABEL,
         "ProgramArguments": [
-            f"{APP_BUNDLE_PATH}/Contents/Helpers/{APP_NAME}.app/Contents/MacOS/{APP_NAME}",
+            f"{APP_BUNDLE_PATH}/Contents/MacOS/OpenUsage Collector",
             "daemon", "--interval", "300", "--api-socket",
             "~/.local/state/openusage-bar/openusage.sock",
         ],

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "cases": {
+    "success": {"expected": "fact"},
+    "empty_result": {"expected": "covered_empty"},
+    "authentication_expiry": {"expected": "auth_failure"},
+    "rate_limit": {"expected": "rate_limited"},
+    "timeout": {"expected": "temporarily_unavailable"},
+    "malformed_response": {"expected": "invalid_response"},
+    "oversized_response": {"expected": "response_too_large"},
+    "pagination_loop": {"expected": "invalid_response"},
+    "partial_coverage": {"expected": "partial"},
+    "last_good_preservation": {"expected": "stale_last_good"},
+    "source_priority": {"expected": "one_effective_source"},
+    "multi_account_isolation": {"expected": "isolated"},
+    "secret_non_disclosure": {"expected": "redacted"},
+    "unknown_not_zero": {"expected": "missing"}
+  },
+  "unknown_value": null,
+  "fake_account_refs": ["fixture-a", "fixture-b"]
+}

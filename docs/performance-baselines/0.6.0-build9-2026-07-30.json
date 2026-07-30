@@ -1,0 +1,363 @@
+{
+  "budgets": [
+    {
+      "comparison": "maximum",
+      "metric": "appBytes",
+      "observed": 50466702,
+      "status": "pass",
+      "threshold": 78643200
+    },
+    {
+      "comparison": "maximum",
+      "metric": "residentCpuPercentP95",
+      "observed": 0.001,
+      "status": "pass",
+      "threshold": 1.0
+    },
+    {
+      "comparison": "maximum",
+      "metric": "residentWakeupsPerSecondP95",
+      "observed": 2.2,
+      "status": "pass",
+      "threshold": 5.0
+    },
+    {
+      "comparison": "maximum",
+      "metric": "residentFootprintBytesPeak",
+      "observed": 52872680,
+      "status": "pass",
+      "threshold": 104857600
+    },
+    {
+      "comparison": "maximum",
+      "metric": "activityFootprintBytesPeak",
+      "observed": 102499336,
+      "status": "pass",
+      "threshold": 125829120
+    },
+    {
+      "comparison": "maximum",
+      "metric": "refreshDurationSecondsP95",
+      "observed": 52.044,
+      "status": "pass",
+      "threshold": 90.0
+    }
+  ],
+  "capturedAt": "2026-07-29T23:19:15.740375+00:00",
+  "idle": {
+    "rounds": [
+      {
+        "roles": [
+          {
+            "cpuPercent": 0.001,
+            "footprintBytes": 15811400,
+            "quality": "measured",
+            "role": "status",
+            "wakeupsPerSecond": 0.2
+          },
+          {
+            "cpuPercent": 0.0,
+            "footprintBytes": 37012128,
+            "quality": "measured",
+            "role": "collector",
+            "wakeupsPerSecond": 1.998
+          },
+          {
+            "cpuPercent": 0.0,
+            "footprintBytes": 102499336,
+            "quality": "measured",
+            "role": "activity",
+            "wakeupsPerSecond": 0.4
+          }
+        ],
+        "round": 1
+      },
+      {
+        "roles": [
+          {
+            "cpuPercent": 0.001,
+            "footprintBytes": 15860552,
+            "quality": "measured",
+            "role": "status",
+            "wakeupsPerSecond": 0.1
+          },
+          {
+            "cpuPercent": 0.0,
+            "footprintBytes": 37012128,
+            "quality": "measured",
+            "role": "collector",
+            "wakeupsPerSecond": 2.1
+          },
+          {
+            "cpuPercent": 0.0,
+            "footprintBytes": 102499336,
+            "quality": "measured",
+            "role": "activity",
+            "wakeupsPerSecond": 0.3
+          }
+        ],
+        "round": 2
+      },
+      {
+        "roles": [
+          {
+            "cpuPercent": 0.001,
+            "footprintBytes": 15860552,
+            "quality": "measured",
+            "role": "status",
+            "wakeupsPerSecond": 0.2
+          },
+          {
+            "cpuPercent": 0.0,
+            "footprintBytes": 37012128,
+            "quality": "measured",
+            "role": "collector",
+            "wakeupsPerSecond": 1.999
+          },
+          {
+            "cpuPercent": 0.0,
+            "footprintBytes": 102499336,
+            "quality": "measured",
+            "role": "activity",
+            "wakeupsPerSecond": 0.4
+          }
+        ],
+        "round": 3
+      }
+    ],
+    "summary": {
+      "activityCpuPercentP95": 0.0,
+      "activityFootprintBytesPeak": 102499336,
+      "activitySampleCount": 3,
+      "activityWakeupsPerSecondP95": 0.4,
+      "residentCpuPercentMedian": 0.001,
+      "residentCpuPercentP95": 0.001,
+      "residentFootprintBytesPeak": 52872680,
+      "residentSampleCount": 3,
+      "residentWakeupsPerSecondP95": 2.2
+    }
+  },
+  "privacy": {
+    "containsLocalPaths": false,
+    "containsProcessIdentifiers": false,
+    "containsProviderIdentity": false,
+    "containsProviderPayloads": false
+  },
+  "product": {
+    "appBytes": 50466702,
+    "architecture": "arm64",
+    "build": "9",
+    "macOS": "26.5.2",
+    "version": "0.6.0"
+  },
+  "refresh": {
+    "perSourceTiming": {
+      "classes": [
+        {
+          "durationSecondsMax": 10.048,
+          "durationSecondsTotal": 37.034,
+          "outcomes": {
+            "backoff": 0,
+            "failed": 0,
+            "success": 3,
+            "timeout": 0,
+            "unavailable": 9
+          },
+          "sampleCount": 12,
+          "sourceClass": "network"
+        },
+        {
+          "durationSecondsMax": 0.15,
+          "durationSecondsTotal": 0.573,
+          "outcomes": {
+            "backoff": 0,
+            "failed": 0,
+            "success": 6,
+            "timeout": 0,
+            "unavailable": 3
+          },
+          "sampleCount": 9,
+          "sourceClass": "local_file"
+        },
+        {
+          "durationSecondsMax": 38.133,
+          "durationSecondsTotal": 116.2,
+          "outcomes": {
+            "backoff": 0,
+            "failed": 0,
+            "success": 21,
+            "timeout": 0,
+            "unavailable": 3
+          },
+          "sampleCount": 24,
+          "sourceClass": "child_process"
+        }
+      ],
+      "scope": "source-class"
+    },
+    "rounds": [
+      {
+        "durationSeconds": 52.044,
+        "exitCode": 0,
+        "round": 1,
+        "sourceClassTiming": {
+          "classes": [
+            {
+              "durationSecondsMax": 10.048,
+              "durationSecondsTotal": 12.423,
+              "outcomes": {
+                "backoff": 0,
+                "failed": 0,
+                "success": 1,
+                "timeout": 0,
+                "unavailable": 3
+              },
+              "sampleCount": 4,
+              "sourceClass": "network"
+            },
+            {
+              "durationSecondsMax": 0.15,
+              "durationSecondsTotal": 0.28,
+              "outcomes": {
+                "backoff": 0,
+                "failed": 0,
+                "success": 2,
+                "timeout": 0,
+                "unavailable": 1
+              },
+              "sampleCount": 3,
+              "sourceClass": "local_file"
+            },
+            {
+              "durationSecondsMax": 38.133,
+              "durationSecondsTotal": 39.0,
+              "outcomes": {
+                "backoff": 0,
+                "failed": 0,
+                "success": 7,
+                "timeout": 0,
+                "unavailable": 1
+              },
+              "sampleCount": 8,
+              "sourceClass": "child_process"
+            }
+          ],
+          "schemaVersion": 1,
+          "scope": "source-class"
+        },
+        "status": "success"
+      },
+      {
+        "durationSeconds": 51.258,
+        "exitCode": 0,
+        "round": 2,
+        "sourceClassTiming": {
+          "classes": [
+            {
+              "durationSecondsMax": 10.044,
+              "durationSecondsTotal": 12.291,
+              "outcomes": {
+                "backoff": 0,
+                "failed": 0,
+                "success": 1,
+                "timeout": 0,
+                "unavailable": 3
+              },
+              "sampleCount": 4,
+              "sourceClass": "network"
+            },
+            {
+              "durationSecondsMax": 0.083,
+              "durationSecondsTotal": 0.15,
+              "outcomes": {
+                "backoff": 0,
+                "failed": 0,
+                "success": 2,
+                "timeout": 0,
+                "unavailable": 1
+              },
+              "sampleCount": 3,
+              "sourceClass": "local_file"
+            },
+            {
+              "durationSecondsMax": 37.638,
+              "durationSecondsTotal": 38.473,
+              "outcomes": {
+                "backoff": 0,
+                "failed": 0,
+                "success": 7,
+                "timeout": 0,
+                "unavailable": 1
+              },
+              "sampleCount": 8,
+              "sourceClass": "child_process"
+            }
+          ],
+          "schemaVersion": 1,
+          "scope": "source-class"
+        },
+        "status": "success"
+      },
+      {
+        "durationSeconds": 51.493,
+        "exitCode": 0,
+        "round": 3,
+        "sourceClassTiming": {
+          "classes": [
+            {
+              "durationSecondsMax": 10.039,
+              "durationSecondsTotal": 12.32,
+              "outcomes": {
+                "backoff": 0,
+                "failed": 0,
+                "success": 1,
+                "timeout": 0,
+                "unavailable": 3
+              },
+              "sampleCount": 4,
+              "sourceClass": "network"
+            },
+            {
+              "durationSecondsMax": 0.076,
+              "durationSecondsTotal": 0.143,
+              "outcomes": {
+                "backoff": 0,
+                "failed": 0,
+                "success": 2,
+                "timeout": 0,
+                "unavailable": 1
+              },
+              "sampleCount": 3,
+              "sourceClass": "local_file"
+            },
+            {
+              "durationSecondsMax": 37.874,
+              "durationSecondsTotal": 38.727,
+              "outcomes": {
+                "backoff": 0,
+                "failed": 0,
+                "success": 7,
+                "timeout": 0,
+                "unavailable": 1
+              },
+              "sampleCount": 8,
+              "sourceClass": "child_process"
+            }
+          ],
+          "schemaVersion": 1,
+          "scope": "source-class"
+        },
+        "status": "success"
+      }
+    ],
+    "scope": "all-configured-sources",
+    "summary": {
+      "durationSecondsMedian": 51.493,
+      "durationSecondsP95": 52.044,
+      "failureCount": 0,
+      "sampleCount": 3,
+      "timeoutCount": 0
+    }
+  },
+  "schemaVersion": 1
+}

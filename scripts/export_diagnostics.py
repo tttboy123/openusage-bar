@@ -12,26 +12,77 @@ import re
 import socket
 import tempfile
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any, Callable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 API_SCHEMA = "1.0"
 DIAGNOSTIC_SCHEMA = "openusage-diagnostics-1"
+RECONCILIATION_SCHEMA = "openusage-diagnostics-2"
+MAX_ACTIVITY_RANGE_DAYS = 731
 IDENTIFIER = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+SOURCE_ERROR_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+SAFE_SOURCE_ERROR_CODES = frozenset({
+    "AMBIGUOUS_FALLBACK_SCOPE",
+    "AUTH_EXPIRED",
+    "AUTH_FAILED",
+    "AUTH_REJECTED",
+    "AUTH_REQUIRED",
+    "AUTHENTICATION_REQUIRED",
+    "COMMAND_FAILED",
+    "EMPTY_RESULT",
+    "IMPORT_FAILED",
+    "IMPORT_IN_PROGRESS",
+    "INTERNAL_ERROR",
+    "INVALID_DETECT_OUTPUT",
+    "INVALID_ENVELOPE",
+    "INVALID_IMPORT_RESULT",
+    "INVALID_IMPORT_ROWS",
+    "INVALID_IMPORT_SCOPE",
+    "INVALID_JSON",
+    "INVALID_OBSERVATION_TIME",
+    "INVALID_PAYLOAD",
+    "INVALID_REQUEST",
+    "INVALID_RESPONSE",
+    "KEYCHAIN_UNAVAILABLE",
+    "NETWORK_ERROR",
+    "NOT_AVAILABLE_YET",
+    "NOT_CHECKED",
+    "NOT_COLLECTED",
+    "NOT_CONFIGURED",
+    "OPENUSAGE_UNAVAILABLE",
+    "PERSISTENCE_FAILED",
+    "QUOTA_PERSISTENCE_FAILED",
+    "QUOTA_UNAVAILABLE",
+    "RATE_LIMITED",
+    "READER_FAILED",
+    "RUNNER_FAILED",
+    "SESSIONS_INVALID",
+    "SESSIONS_UNAVAILABLE",
+    "START_FAILED",
+    "TIMED_OUT",
+    "TIMEOUT",
+    "UNEXPECTED_FAILURE",
+    "UNSUPPORTED_OPENUSAGE_VERSION",
+})
 VERSION = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}(?:[-+][A-Za-z0-9.-]+)?$")
 CAPABILITY_STATES = frozenset({"supported", "unsupported", "unknown"})
 CAPABILITY_FIELDS = (
     "tokenHistory", "modelBreakdown", "resetTimestamps", "billing", "credits",
     "balance", "cost", "rateLimits", "serviceStatus",
 )
+SOURCE_EVIDENCE_FIELDS = (
+    "accountScope", "authority", "factFamilies", "modelScope", "verification",
+)
 FORBIDDEN_KEYS = frozenset({
     "accountref", "displayname", "credentialsource", "sourceid", "payloadjson",
     "apikey", "secret", "cookie", "prompt", "response", "rawpayload",
 })
+RECONCILIATION_FORBIDDEN_KEYS = FORBIDDEN_KEYS - {"accountref", "sourceid"}
 FORBIDDEN_INPUT_KEYS = frozenset({
     "apikey", "api_key", "secret", "token", "password", "cookie", "prompt",
     "response", "payloadjson", "rawpayload", "changejson",
@@ -41,6 +92,7 @@ SECRET_TEXT = (
     re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}"),
     re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----"),
 )
+UTC_OFFSET = re.compile(r"^UTC([+-])(\d{2}):(\d{2})$")
 
 
 def _mapping(value: Any, name: str) -> dict[str, Any]:
@@ -61,10 +113,108 @@ def _integer(value: Any, name: str) -> int:
     return value
 
 
+def _summary_totals(summary: dict[str, Any]) -> tuple[int | None, int, int]:
+    model_count = _integer(summary.get("modelCount"), "model count")
+    covered_day_count = _integer(summary.get("coveredDayCount"), "covered days")
+    if "todayTokens" not in summary:
+        raise ValueError("today tokens are missing")
+    today_tokens = summary["todayTokens"]
+    if today_tokens is None:
+        if model_count != 0 or covered_day_count != 0:
+            raise ValueError("unknown today tokens cannot have observed coverage")
+        return None, model_count, covered_day_count
+    today_tokens = _integer(today_tokens, "today tokens")
+    if model_count == 0 and not (
+        today_tokens == 0 and covered_day_count > 0
+    ):
+        raise ValueError("numeric today tokens require usage or covered zero")
+    return today_tokens, model_count, covered_day_count
+
+
 def _identifier(value: Any, name: str) -> str:
     if not isinstance(value, str) or IDENTIFIER.fullmatch(value) is None:
         raise ValueError(f"{name} must be a stable identifier")
     return value
+
+
+def _optional_identifier(value: Any, name: str) -> str | None:
+    if value is None:
+        return None
+    return _identifier(value, name)
+
+
+def _timestamp(value: Any, name: str, *, optional: bool = False) -> str | None:
+    if value is None and optional:
+        return None
+    if not isinstance(value, str) or len(value) > 64:
+        raise ValueError(f"{name} must be a timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(f"{name} must be a timestamp") from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{name} must include a timezone")
+    parsed = parsed.astimezone(timezone.utc)
+    timespec = "microseconds" if parsed.microsecond else "seconds"
+    return parsed.isoformat(timespec=timespec).replace("+00:00", "Z")
+
+
+def _day_text(value: Any, name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a local calendar day")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(f"{name} must be a local calendar day") from error
+    if parsed.isoformat() != value:
+        raise ValueError(f"{name} must be a canonical local calendar day")
+    return value
+
+
+def _error_code(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = None
+    if isinstance(value, str) and ERROR_CODE.fullmatch(value):
+        normalized = value
+    elif isinstance(value, str) and SOURCE_ERROR_CODE.fullmatch(value):
+        normalized = value.upper()
+    if normalized in SAFE_SOURCE_ERROR_CODES:
+        return normalized
+    return "UNCLASSIFIED"
+
+
+def _timezone_info(name: str) -> tzinfo:
+    if name == "UTC":
+        return timezone.utc
+    offset = UTC_OFFSET.fullmatch(name)
+    if offset is not None:
+        hours = int(offset.group(2))
+        minutes = int(offset.group(3))
+        if hours > 14 or minutes > 59 or (hours == 14 and minutes != 0):
+            raise ValueError("invalid local timezone")
+        delta = timedelta(hours=hours, minutes=minutes)
+        return timezone(delta if offset.group(1) == "+" else -delta, name)
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, TypeError) as error:
+        raise ValueError("invalid local timezone") from error
+
+
+def _local_timezone_name() -> str:
+    try:
+        target = os.readlink("/etc/localtime")
+        marker = "/zoneinfo/"
+        if marker in target:
+            candidate = target.split(marker, 1)[1]
+            _timezone_info(candidate)
+            return candidate
+    except (OSError, ValueError):
+        pass
+    offset = datetime.now().astimezone().strftime("%z")
+    if offset in {"", "+0000", "-0000"}:
+        return "UTC"
+    return f"UTC{offset[:3]}:{offset[3:]}"
 
 
 def _identifier_list(value: Any, name: str) -> list[str]:
@@ -74,6 +224,79 @@ def _identifier_list(value: Any, name: str) -> list[str]:
 
 def _counted(values: list[str]) -> dict[str, int]:
     return dict(sorted(Counter(values).items()))
+
+
+def _token_reconciliation(
+    *,
+    convention: str,
+    total_tokens: int,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int,
+    cache_creation_tokens: int,
+    reasoning_tokens: int | None,
+) -> dict[str, Any]:
+    """Compare a source total only when its declared arithmetic is complete."""
+    if convention == "unknown":
+        return {
+            "status": "not_comparable",
+            "reason": "unknown_counting_convention",
+        }
+    if convention == "provider_reported":
+        return {
+            "status": "not_comparable",
+            "reason": "provider_reported_total",
+        }
+    if convention == "components_disjoint" and reasoning_tokens is None:
+        return {
+            "status": "incomplete",
+            "reason": "reasoning_tokens_missing",
+        }
+    if convention == "input_includes_cache":
+        expected = input_tokens + output_tokens
+    else:
+        assert convention == "components_disjoint" and reasoning_tokens is not None
+        expected = (
+            input_tokens
+            + output_tokens
+            + cache_read_tokens
+            + cache_creation_tokens
+            + reasoning_tokens
+        )
+    delta = total_tokens - expected
+    return {
+        "status": "matched" if delta == 0 else "mismatch",
+        "expectedTotalTokens": expected,
+        "deltaTokens": delta,
+    }
+
+
+def _account_total_comparison(source_id: str) -> dict[str, Any]:
+    limitations = [
+        "deleted_or_unavailable_sessions",
+        "other_devices",
+        "web_or_mobile",
+    ]
+    if source_id == "codex.local_sessions":
+        return {
+            "status": "not_comparable",
+            "coverageScope": "local_device_sessions",
+            "reason": "local_sessions_are_partial_account_coverage",
+            "limitations": limitations,
+        }
+    if source_id == "openusage.daily":
+        return {
+            "status": "not_comparable",
+            "coverageScope": "local_collector",
+            "reason": "local_collector_is_not_account_total",
+            "limitations": limitations,
+        }
+    return {
+        "status": "unknown",
+        "coverageScope": "unknown",
+        "reason": "account_scope_not_declared",
+        "limitations": [],
+    }
 
 
 def _capability_declarations(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -96,13 +319,44 @@ def _capability_declarations(payload: dict[str, Any]) -> list[dict[str, Any]]:
             if state not in CAPABILITY_STATES:
                 raise ValueError("invalid capability state")
             states[field] = state
-        sources: list[dict[str, str]] = []
+        sources: list[dict[str, Any]] = []
         for raw_source in _items(provider.get("sources"), "capability sources", limit=100):
             source = _mapping(raw_source, "capability source")
+            if any(field in source for field in SOURCE_EVIDENCE_FIELDS):
+                evidence = {
+                    "accountScope": _identifier(
+                        source.get("accountScope"), "source account scope"
+                    ),
+                    "authority": _identifier(
+                        source.get("authority"), "source authority"
+                    ),
+                    "factFamilies": _identifier_list(
+                        source.get("factFamilies"), "source fact families"
+                    ),
+                    "modelScope": _identifier(
+                        source.get("modelScope"), "source model scope"
+                    ),
+                    "verification": _identifier(
+                        source.get("verification"), "source verification"
+                    ),
+                }
+            else:
+                evidence = {
+                    "accountScope": "unknown",
+                    "authority": "unknown",
+                    "factFamilies": [],
+                    "modelScope": "unknown",
+                    "verification": "unverified",
+                }
             sources.append({
+                "accountScope": evidence["accountScope"],
+                "authority": evidence["authority"],
+                "factFamilies": evidence["factFamilies"],
                 "kind": _identifier(source.get("kind"), "source kind"),
+                "modelScope": evidence["modelScope"],
                 "provenance": _identifier(source.get("provenance"), "source provenance"),
                 "stability": _identifier(source.get("stability"), "source stability"),
+                "verification": evidence["verification"],
             })
         supports_accounts = provider.get("supportsAccounts")
         if not isinstance(supports_accounts, bool):
@@ -121,7 +375,17 @@ def _capability_declarations(payload: dict[str, Any]) -> list[dict[str, Any]]:
             ),
             "regions": _identifier_list(provider.get("regions"), "regions"),
             "sources": sorted(
-                sources, key=lambda item: (item["kind"], item["stability"], item["provenance"])
+                sources,
+                key=lambda item: (
+                    item["kind"],
+                    item["stability"],
+                    item["provenance"],
+                    item["authority"],
+                    item["accountScope"],
+                    item["modelScope"],
+                    item["verification"],
+                    tuple(item["factFamilies"]),
+                ),
             ),
             "supportsAccounts": supports_accounts,
         })
@@ -137,6 +401,26 @@ def _validate_export(value: Any, *, home: Path | None = None) -> None:
     elif isinstance(value, list):
         for nested in value:
             _validate_export(nested, home=home)
+    elif isinstance(value, str):
+        if any(pattern.search(value) for pattern in SECRET_TEXT):
+            raise ValueError("diagnostic contains secret-like text")
+        if value.startswith(("/Users/", "/home/")) or (
+            home is not None and str(home) in value
+        ):
+            raise ValueError("diagnostic contains an absolute home path")
+
+
+def _validate_reconciliation_export(
+    value: Any, *, home: Path | None = None
+) -> None:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key.casefold() in RECONCILIATION_FORBIDDEN_KEYS:
+                raise ValueError("diagnostic contains a forbidden field")
+            _validate_reconciliation_export(nested, home=home)
+    elif isinstance(value, list):
+        for nested in value:
+            _validate_reconciliation_export(nested, home=home)
     elif isinstance(value, str):
         if any(pattern.search(value) for pattern in SECRET_TEXT):
             raise ValueError("diagnostic contains secret-like text")
@@ -188,8 +472,13 @@ def build_diagnostics(
         raise ValueError("invalid architecture")
 
     summary = _mapping(snapshot.get("summary"), "summary")
+    today_tokens, model_count, covered_day_count = _summary_totals(summary)
     providers = _items(snapshot.get("providers"), "providers")
     quotas = [_mapping(item, "quota window") for item in _items(snapshot.get("quotaWindows"), "quota windows")]
+    balances = [
+        _mapping(item, "balance")
+        for item in _items(snapshot.get("balances", []), "balances")
+    ]
     sources = [_mapping(item, "source") for item in _items(snapshot.get("sources"), "sources")]
     source_states = [_identifier(item.get("state"), "source state") for item in sources]
     errors = []
@@ -203,22 +492,35 @@ def build_diagnostics(
     stale_count = sum(item.get("stale") is True for item in quotas)
     if any(not isinstance(item.get("stale"), bool) for item in quotas):
         raise ValueError("quota stale state must be boolean")
+    balance_states = [
+        _identifier(item.get("state"), "balance state") for item in balances
+    ]
+    balance_quality = [
+        _identifier(item.get("quality"), "balance quality") for item in balances
+    ]
+    stale_balance_count = sum(item.get("stale") is True for item in balances)
+    if any(not isinstance(item.get("stale"), bool) for item in balances):
+        raise ValueError("balance stale state must be boolean")
     current = (clock or (lambda: datetime.now(timezone.utc)))()
     if current.tzinfo is None or current.utcoffset() is None:
         raise ValueError("clock must be timezone-aware")
     result = {
         "aggregates": {
-            "coveredDayCount": _integer(summary.get("coveredDayCount"), "covered days"),
-            "modelCount": _integer(summary.get("modelCount"), "model count"),
+            "balanceCount": len(balances),
+            "balanceQuality": _counted(balance_quality),
+            "balanceStates": _counted(balance_states),
+            "coveredDayCount": covered_day_count,
+            "modelCount": model_count,
             "providerInstanceCount": len(providers),
             "quotaQuality": _counted(quota_quality),
             "quotaStates": _counted(quota_states),
             "quotaWindowCount": len(quotas),
+            "staleBalanceCount": stale_balance_count,
             "staleQuotaWindowCount": stale_count,
             "sourceCount": len(sources),
             "sourceErrorCodes": _counted(errors),
             "sourceStates": _counted(source_states),
-            "todayTokens": _integer(summary.get("todayTokens"), "today tokens"),
+            "todayTokens": today_tokens,
         },
         "capabilityDeclarations": _capability_declarations(capabilities),
         "exportedAt": current.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -232,6 +534,341 @@ def build_diagnostics(
         "schemaVersion": DIAGNOSTIC_SCHEMA,
     }
     _validate_export(result, home=Path.home())
+    return result
+
+
+def build_reconciliation_diagnostics(
+    snapshot: dict[str, Any],
+    capabilities: dict[str, Any],
+    activity: dict[str, Any],
+    source_status: dict[str, Any],
+    *,
+    from_day: date,
+    to_day: date,
+    local_timezone: str,
+    product: dict[str, str],
+    runtime: dict[str, str],
+    clock: Callable[[], datetime] | None = None,
+) -> dict[str, Any]:
+    """Build a redacted, source-aware daily token reconciliation."""
+    if (
+        not isinstance(from_day, date)
+        or isinstance(from_day, datetime)
+        or not isinstance(to_day, date)
+        or isinstance(to_day, datetime)
+        or from_day > to_day
+        or (to_day - from_day).days + 1 > MAX_ACTIVITY_RANGE_DAYS
+    ):
+        raise ValueError("diagnostic date range is invalid or exceeds maximum")
+    if not isinstance(local_timezone, str) or not 1 <= len(local_timezone) <= 64:
+        raise ValueError("invalid local timezone")
+    _timezone_info(local_timezone)
+
+    activity = _mapping(activity, "activity")
+    source_status = _mapping(source_status, "source status")
+    _reject_sensitive_input(activity)
+    _reject_sensitive_input(source_status)
+    base = build_diagnostics(
+        snapshot,
+        capabilities,
+        product=product,
+        runtime=runtime,
+        clock=clock,
+    )
+    revision = base["localAPI"]["dataRevision"]
+    for payload, name in ((activity, "activity"), (source_status, "source status")):
+        if payload.get("schemaVersion") != API_SCHEMA:
+            raise ValueError(f"unsupported {name} Local API schema")
+        if _integer(payload.get("dataRevision"), f"{name} revision") != revision:
+            raise ValueError("Local API revision changed during export")
+
+    start_text = from_day.isoformat()
+    end_text = to_day.isoformat()
+    coverage_by_scope: dict[tuple[str, str, str | None], bool] = {}
+    coverage_rows: list[dict[str, Any]] = []
+    for raw in _items(activity.get("coverage"), "activity coverage"):
+        item = _mapping(raw, "activity coverage row")
+        day = _day_text(item.get("day"), "coverage day")
+        if not start_text <= day <= end_text:
+            raise ValueError("coverage day is outside requested range")
+        provider_id = _identifier(item.get("providerId"), "coverage providerId")
+        account_ref = _optional_identifier(item.get("accountRef"), "coverage accountRef")
+        covered = item.get("covered")
+        if not isinstance(covered, bool):
+            raise ValueError("coverage must be boolean")
+        source_id = _optional_identifier(item.get("sourceId"), "coverage sourceId")
+        key = (day, provider_id, account_ref)
+        if key in coverage_by_scope:
+            raise ValueError("duplicate activity coverage scope")
+        coverage_by_scope[key] = covered
+        coverage_rows.append({
+            "day": day,
+            "providerId": provider_id,
+            "accountRef": account_ref,
+            "covered": covered,
+            "sourceId": source_id,
+        })
+    account_pseudonyms = {
+        account_ref: f"account-{index}"
+        for index, account_ref in enumerate(
+            sorted({key[2] for key in coverage_by_scope if key[2] is not None}),
+            start=1,
+        )
+    }
+
+    token_conventions = {
+        "input_includes_cache", "components_disjoint", "provider_reported", "unknown"
+    }
+    daily_usage: list[dict[str, Any]] = []
+    for raw in _items(activity.get("rows"), "activity rows"):
+        item = _mapping(raw, "activity row")
+        day = _day_text(item.get("day"), "activity day")
+        if not start_text <= day <= end_text:
+            raise ValueError("activity day is outside requested range")
+        provider_id = _identifier(item.get("providerId"), "activity providerId")
+        account_ref = _optional_identifier(item.get("accountRef"), "activity accountRef")
+        coverage_key = (day, provider_id, account_ref)
+        if coverage_key not in coverage_by_scope:
+            raise ValueError("activity row has no coverage declaration")
+        convention = item.get("tokenCountingConvention")
+        if convention not in token_conventions:
+            raise ValueError("activity row has an invalid token counting convention")
+        reasoning = item.get("reasoningTokens")
+        if reasoning is not None:
+            reasoning = _integer(reasoning, "reasoning tokens")
+        total_tokens = _integer(item.get("totalTokens"), "total tokens")
+        input_tokens = _integer(item.get("inputTokens"), "input tokens")
+        output_tokens = _integer(item.get("outputTokens"), "output tokens")
+        cache_read_tokens = _integer(
+            item.get("cacheReadTokens"), "cache read tokens"
+        )
+        cache_creation_tokens = _integer(
+            item.get("cacheCreationTokens"), "cache creation tokens"
+        )
+        source_id = _identifier(item.get("sourceId"), "activity sourceId")
+        covered = coverage_by_scope[coverage_key]
+        daily_usage.append({
+            "day": day,
+            "providerId": provider_id,
+            "accountRef": account_ref,
+            "modelId": _identifier(item.get("modelId"), "activity modelId"),
+            "totalTokens": total_tokens,
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "cacheReadTokens": cache_read_tokens,
+            "cacheCreationTokens": cache_creation_tokens,
+            "reasoningTokens": reasoning,
+            "tokenCountingConvention": convention,
+            "sourceId": source_id,
+            "quality": _identifier(item.get("quality"), "activity quality"),
+            "coverage": "covered" if covered else "missing",
+            "importedAt": _timestamp(item.get("importedAt"), "activity importedAt"),
+            "completeness": (
+                "missing" if not covered else "partial" if reasoning is None else "complete"
+            ),
+            "reconciliation": _token_reconciliation(
+                convention=convention,
+                total_tokens=total_tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+                reasoning_tokens=reasoning,
+            ),
+            "accountTotalComparison": _account_total_comparison(source_id),
+        })
+    daily_usage.sort(key=lambda item: (
+        item["day"], item["providerId"], item["accountRef"] or "",
+        item["modelId"], item["sourceId"],
+    ))
+
+    issues: list[dict[str, Any]] = []
+    for item in coverage_rows:
+        if not item["covered"]:
+            issues.append({
+                "code": "coverage_gap",
+                "day": item["day"],
+                "providerId": item["providerId"],
+                "accountRef": item["accountRef"],
+                "sourceId": item["sourceId"],
+            })
+
+    effective_rows: dict[tuple[str, str, str | None, str], list[dict[str, Any]]] = {}
+    for row in daily_usage:
+        key = (
+            row["day"], row["providerId"], row["accountRef"], row["modelId"]
+        )
+        effective_rows.setdefault(key, []).append(row)
+    for (day, provider_id, account_ref, model_id), rows in effective_rows.items():
+        if len(rows) < 2:
+            continue
+        source_ids = sorted({row["sourceId"] for row in rows})
+        evidence = {
+            "day": day,
+            "providerId": provider_id,
+            "accountRef": account_ref,
+            "modelId": model_id,
+            "rowCount": len(rows),
+            "sourceIds": source_ids,
+        }
+        issues.append({"code": "duplicate_effective_row", **evidence})
+        if len(source_ids) > 1:
+            issues.append({"code": "duplicate_source_candidate", **evidence})
+
+    source_states: list[str] = []
+    source_errors: list[str] = []
+    for raw in _items(source_status.get("sources"), "source statuses", limit=1_000):
+        item = _mapping(raw, "source status")
+        provider_id = _identifier(item.get("providerId"), "source providerId")
+        source_id = _identifier(item.get("sourceId"), "source sourceId")
+        state = _identifier(item.get("state"), "source state")
+        last_attempt = _timestamp(item.get("lastAttemptAt"), "source lastAttemptAt")
+        last_success = _timestamp(
+            item.get("lastSuccessAt"), "source lastSuccessAt", optional=True
+        )
+        stale_at = _timestamp(item.get("staleAt"), "source staleAt", optional=True)
+        error_code = _error_code(item.get("errorCode"))
+        source_states.append(state)
+        if error_code is not None:
+            source_errors.append(error_code)
+        evidence = {
+            "providerId": provider_id,
+            "sourceId": source_id,
+            "state": state,
+            "lastAttemptAt": last_attempt,
+            "lastSuccessAt": last_success,
+            "staleAt": stale_at,
+            "errorCode": error_code,
+        }
+        if state == "stale":
+            issues.append({"code": "source_stale", **evidence})
+            retained = [
+                row for row in daily_usage
+                if row["providerId"] == provider_id and row["sourceId"] == source_id
+            ]
+            if last_success is not None and retained:
+                issues.append({
+                    "code": "last_good_retained",
+                    **evidence,
+                    "retainedRowCount": len(retained),
+                    "retainedFrom": min(row["day"] for row in retained),
+                    "retainedTo": max(row["day"] for row in retained),
+                })
+        elif state != "ok" and error_code is not None:
+            issues.append({"code": "source_error", **evidence})
+
+    issues.sort(key=lambda item: (
+        item["code"], item.get("day", ""), item.get("providerId", ""),
+        item.get("accountRef") or "", item.get("modelId", ""),
+        item.get("sourceId") or "",
+    ))
+    fully_covered = bool(coverage_rows) and all(
+        item["covered"] for item in coverage_rows
+    )
+    has_tokens = bool(daily_usage)
+
+    if not has_tokens:
+        aggregate_completeness = "covered_zero" if fully_covered else "missing"
+    elif fully_covered and all(
+        item["completeness"] == "complete" for item in daily_usage
+    ):
+        aggregate_completeness = "complete"
+    else:
+        aggregate_completeness = "partial"
+
+    def observed_component_total(name: str) -> int | None:
+        if not has_tokens:
+            return 0 if aggregate_completeness == "covered_zero" else None
+        values = [row[name] for row in daily_usage]
+        if any(value is None for value in values):
+            return None
+        return sum(values)
+
+    component_names = (
+        "totalTokens", "inputTokens", "outputTokens", "cacheReadTokens",
+        "cacheCreationTokens", "reasoningTokens",
+    )
+    observed_token_totals = {
+        name: observed_component_total(name) for name in component_names
+    }
+    if aggregate_completeness in {"complete", "covered_zero"}:
+        token_totals = dict(observed_token_totals)
+    else:
+        token_totals = {name: None for name in component_names}
+
+    def pseudonymized_account_ref(value: str | None) -> str | None:
+        if value is None:
+            return None
+        return account_pseudonyms[value]
+
+    exported_daily_usage = [
+        {**item, "accountRef": pseudonymized_account_ref(item["accountRef"])}
+        for item in daily_usage
+    ]
+    exported_issues = [
+        {
+            **item,
+            **(
+                {"accountRef": pseudonymized_account_ref(item["accountRef"])}
+                if "accountRef" in item
+                else {}
+            ),
+        }
+        for item in issues
+    ]
+
+    issue_counts = _counted([item["code"] for item in issues])
+    result = {
+        "aggregates": {
+            "aggregateCompleteness": aggregate_completeness,
+            "completenessCounts": _counted([
+                item["completeness"] for item in daily_usage
+            ]),
+            "countingConventionCounts": _counted([
+                item["tokenCountingConvention"] for item in daily_usage
+            ]),
+            "coverageGapCount": sum(not item["covered"] for item in coverage_rows),
+            "coverageRecordCount": len(coverage_rows),
+            "coveredScopeDayCount": sum(item["covered"] for item in coverage_rows),
+            "dailyUsageRowCount": len(daily_usage),
+            "issueCounts": issue_counts,
+            "modelCount": len({item["modelId"] for item in daily_usage}),
+            "providerCount": len({item["providerId"] for item in daily_usage}),
+            "qualityCounts": _counted([item["quality"] for item in daily_usage]),
+            "reconciliationStatusCounts": _counted([
+                item["reconciliation"]["status"] for item in daily_usage
+            ]),
+            "accountTotalComparisonStatusCounts": _counted([
+                item["accountTotalComparison"]["status"] for item in daily_usage
+            ]),
+            "sourceCount": len(source_states),
+            "sourceErrorCodes": _counted(source_errors),
+            "sourceStates": _counted(source_states),
+            "observedTokenTotals": observed_token_totals,
+            "tokenTotals": token_totals,
+        },
+        "capabilityDeclarations": base["capabilityDeclarations"],
+        "dailyUsage": exported_daily_usage,
+        "exportedAt": base["exportedAt"],
+        "issues": exported_issues,
+        "localAPI": {
+            **base["localAPI"],
+            "generatedAt": _timestamp(snapshot.get("generatedAt"), "snapshot generatedAt"),
+        },
+        "observability": {
+            "accountReferences": "per_export_pseudonyms",
+            "sourceSelectionHistory": "not_observable",
+        },
+        "product": base["product"],
+        "range": {
+            "from": start_text,
+            "to": end_text,
+            "timezone": local_timezone,
+        },
+        "runtime": base["runtime"],
+        "schemaVersion": RECONCILIATION_SCHEMA,
+    }
+    _validate_reconciliation_export(result, home=Path.home())
     return result
 
 
@@ -306,10 +943,29 @@ def main() -> int:
         default=Path.home() / ".local/state/openusage-bar/openusage.sock",
     )
     parser.add_argument("--app", type=Path, default=Path("/Applications/OpenUsage Bar.app"))
+    parser.add_argument(
+        "--schema-version", choices=("1", "2"), default="1",
+        help=(
+            "diagnostic schema to export (default: 1; choose 2 for daily "
+            "token reconciliation)"
+        ),
+    )
+    parser.add_argument("--from", dest="from_day", type=date.fromisoformat)
+    parser.add_argument("--to", dest="to_day", type=date.fromisoformat)
+    parser.add_argument("--timezone", default=_local_timezone_name())
     arguments = parser.parse_args()
     if not arguments.socket.is_absolute() or "\x00" in str(arguments.socket):
         parser.error("socket path must be absolute")
+    if (arguments.from_day is None) != (arguments.to_day is None):
+        parser.error("--from and --to must be provided together")
     try:
+        local_timezone = _timezone_info(arguments.timezone)
+        from_day = arguments.from_day
+        to_day = arguments.to_day
+        if arguments.schema_version == "2" and from_day is None:
+            local_today = datetime.now(timezone.utc).astimezone(local_timezone).date()
+            from_day = local_today
+            to_day = local_today
         diagnostic = None
         for _ in range(2):
             app = arguments.app
@@ -320,15 +976,35 @@ def main() -> int:
             snapshot = _get(arguments.socket, "/v1/snapshot")
             capabilities = _get(arguments.socket, "/v1/capabilities")
             try:
-                diagnostic = build_diagnostics(
-                    snapshot,
-                    capabilities,
-                    product=_product(app),
-                    runtime={
-                        "macOS": platform.mac_ver()[0] or "unknown",
-                        "architecture": platform.machine() if platform.machine() in {"arm64", "x86_64"} else "unknown",
-                    },
-                )
+                product = _product(app)
+                runtime = {
+                    "macOS": platform.mac_ver()[0] or "unknown",
+                    "architecture": platform.machine()
+                    if platform.machine() in {"arm64", "x86_64"}
+                    else "unknown",
+                }
+                if arguments.schema_version == "1":
+                    diagnostic = build_diagnostics(
+                        snapshot, capabilities, product=product, runtime=runtime
+                    )
+                else:
+                    assert from_day is not None and to_day is not None
+                    activity = _get(
+                        arguments.socket,
+                        f"/v1/activity/daily?from={from_day.isoformat()}&to={to_day.isoformat()}",
+                    )
+                    source_status = _get(arguments.socket, "/v1/sources/status")
+                    diagnostic = build_reconciliation_diagnostics(
+                        snapshot,
+                        capabilities,
+                        activity,
+                        source_status,
+                        from_day=from_day,
+                        to_day=to_day,
+                        local_timezone=arguments.timezone,
+                        product=product,
+                        runtime=runtime,
+                    )
                 break
             except ValueError as error:
                 if "revision changed" not in str(error):

@@ -14,6 +14,7 @@ from openusage_bar.aggregator import (
 )
 from openusage_bar.daily_history import ActivityCollector, DailyImportResult
 from openusage_bar.models import Category, Overview, ProviderCard, ProviderStatus
+from openusage_bar.performance_timing import RefreshTimingRecorder
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
@@ -57,6 +58,10 @@ class Adapter:
         return self.result
 
 
+class TimedAdapter(Adapter):
+    performance_source_class = "network"
+
+
 class BoundedReadOnlyKeychainTests(unittest.TestCase):
     def test_read_is_shell_free_bounded_and_returns_only_stdout(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -70,7 +75,7 @@ class BoundedReadOnlyKeychainTests(unittest.TestCase):
                 timeout_seconds=2, security_executable=str(helper)
             )
             with patch(
-                "openusage_bar.aggregator.subprocess.Popen", wraps=subprocess.Popen
+                "openusage_bar.keychain.subprocess.Popen", wraps=subprocess.Popen
             ) as popen:
                 self.assertEqual(keychain.get("minimax-main"), "value")
         command = popen.call_args.args[0]
@@ -176,15 +181,17 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
 
         collector.refresh.assert_called_once_with(
             overview,
+            balance_results=(),
             quota_results=((
                 "codex", "codex.local_rate_limits", adapter.last_quota_result,
             ),),
         )
 
-    def test_daily_feed_uses_shared_read_only_keychain_and_no_redirect_client(self):
+    def test_daily_feed_uses_shared_bounded_keychain_and_no_redirect_client(self):
         from openusage_bar.aggregator import build_headless_refresher
         from openusage_bar.config import DailyUsageFeedConfig
         from openusage_bar.daily_feed import DailyUsageFeedCardAdapter
+        from openusage_bar.keychain import BoundedMacOSKeychain
 
         configured = DailyUsageFeedConfig(
             provider_id="glm-work", name="GLM Work", family_id="zai",
@@ -206,15 +213,19 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         )
         importer = refresher.collector.official_importers["glm-work"]
         self.assertIs(importer.keychain, card_adapter.keychain)
-        self.assertIsInstance(importer.keychain, BoundedReadOnlyKeychain)
+        self.assertIsInstance(importer.keychain, BoundedMacOSKeychain)
         self.assertEqual(importer.client.allowed_redirect_hosts, frozenset())
 
-    def test_codex_openusage_is_registered_for_eager_collection(self):
+    def test_codex_local_sessions_are_primary_for_eager_collection(self):
         from openusage_bar.aggregator import build_headless_refresher
+        from openusage_bar.codex_daily import CodexLocalDailyImporter
 
         with patch("openusage_bar.config.ProviderConfigStore.load", return_value=[]):
             refresher = build_headless_refresher(Mock())
 
+        importer = refresher.collector.official_importers["codex"]
+        self.assertIsInstance(importer, CodexLocalDailyImporter)
+        self.assertEqual(importer.usage_source_id, "codex.local_sessions")
         self.assertEqual(refresher.eager_usage_provider_ids, ("codex",))
 
     def test_minimax_reuses_keychain_and_client_for_quota_and_daily_tokens(self):
@@ -242,9 +253,10 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         self.assertIs(importer.client, card_adapter.client)
         self.assertEqual(importer.client.allowed_redirect_hosts, frozenset())
 
-    def test_openai_organization_uses_read_only_keychain_and_no_redirect_client(self):
+    def test_openai_organization_uses_bounded_keychain_and_no_redirect_client(self):
         from openusage_bar.aggregator import build_headless_refresher
         from openusage_bar.config import OpenAIOrganizationConfig
+        from openusage_bar.keychain import BoundedMacOSKeychain
         from openusage_bar.openai_organization import OpenAIOrganizationCardAdapter
 
         with patch(
@@ -259,22 +271,19 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
             if isinstance(adapter, OpenAIOrganizationCardAdapter)
         )
         importer = refresher.collector.official_importers["openai"]
-        self.assertIsInstance(card_adapter.keychain, BoundedReadOnlyKeychain)
+        self.assertIsInstance(card_adapter.keychain, BoundedMacOSKeychain)
         self.assertIs(importer.keychain, card_adapter.keychain)
         self.assertEqual(importer.client.allowed_redirect_hosts, frozenset())
 
-    def test_step_plan_uses_dedicated_writable_keychain(self):
+    def test_headless_sources_share_bounded_read_write_keychain(self):
         from openusage_bar.aggregator import build_headless_refresher
         from openusage_bar.config import StepPlanConfig
+        from openusage_bar.keychain import BoundedMacOSKeychain
         from openusage_bar.step_plan import StepPlanAdapter
 
-        writable = Mock()
-        with (
-            patch(
-                "openusage_bar.config.ProviderConfigStore.load",
-                return_value=[StepPlanConfig("step-plan-main", "Step Plan")],
-            ),
-            patch("openusage_bar.keychain.MacOSKeychain", return_value=writable) as factory,
+        with patch(
+            "openusage_bar.config.ProviderConfigStore.load",
+            return_value=[StepPlanConfig("step-plan-main", "Step Plan")],
         ):
             refresher = build_headless_refresher(Mock())
 
@@ -283,32 +292,7 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
             for adapter in refresher.aggregator.adapters
             if isinstance(adapter, StepPlanAdapter)
         )
-        factory.assert_called_once_with()
-        self.assertIs(step_plan.keychain, writable)
-
-    def test_step_plan_falls_back_to_read_only_keychain_when_native_init_fails(self):
-        from openusage_bar.aggregator import build_headless_refresher
-        from openusage_bar.config import StepPlanConfig
-        from openusage_bar.step_plan import StepPlanAdapter
-
-        with (
-            patch(
-                "openusage_bar.config.ProviderConfigStore.load",
-                return_value=[StepPlanConfig("step-plan-main", "Step Plan")],
-            ),
-            patch(
-                "openusage_bar.keychain.MacOSKeychain",
-                side_effect=RuntimeError("Security unavailable"),
-            ),
-        ):
-            refresher = build_headless_refresher(Mock())
-
-        step_plan = next(
-            adapter
-            for adapter in refresher.aggregator.adapters
-            if isinstance(adapter, StepPlanAdapter)
-        )
-        self.assertIsInstance(step_plan.keychain, BoundedReadOnlyKeychain)
+        self.assertIsInstance(step_plan.keychain, BoundedMacOSKeychain)
 
 
 class AggregatorTests(unittest.TestCase):
@@ -489,6 +473,51 @@ class AggregatorTests(unittest.TestCase):
             self.assertEqual(result.cards[0].remaining_percent, 75)
             self.assertTrue(result.cards[0].stale)
             self.assertIn("11.7M tokens", result.cards[0].detail or "")
+
+    def test_failed_cursor_enrichment_keeps_last_good_quota_and_auto_activity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = CardCache(Path(directory) / "cards.json")
+            cache.save(
+                [
+                    card(
+                        "cursor",
+                        primary="72% remaining",
+                        source="OpenUsage",
+                        family_id="cursor",
+                        remaining_percent=72,
+                        credential_source="openusage",
+                        source_kind="openusage",
+                    )
+                ]
+            )
+
+            result = Aggregator(
+                [
+                    Adapter(
+                        card(
+                            "cursor",
+                            primary="1.3M tokens",
+                            source="OpenUsage",
+                            family_id="cursor",
+                            credential_source="openusage",
+                            source_kind="openusage",
+                        )
+                    )
+                ],
+                cache,
+            ).refresh()
+
+            cursor = result.cards[0]
+            self.assertEqual(cursor.remaining_percent, 72)
+            self.assertEqual(cursor.primary, "72% remaining")
+            self.assertTrue(cursor.stale)
+            self.assertEqual(cursor.credential_source, "openusage")
+            self.assertEqual(cursor.source_kind, "openusage")
+            self.assertIn("1.3M tokens", cursor.detail or "")
+            self.assertEqual(
+                cursor.last_error,
+                "Quota enrichment did not return fresh data",
+            )
 
     def _assert_legacy_quota_fallback_publishes_openusage_identity(
         self, provider_id, quota, remaining, quota_source, activity
@@ -684,6 +713,23 @@ class AggregatorTests(unittest.TestCase):
 
             self.assertEqual(result.cards[0].family_id, "minimax")
             self.assertEqual(result.cards[0].remaining_percent, 55)
+
+    def test_refresh_records_only_adapter_source_class_timing(self):
+        ticks = iter((3.0, 3.4))
+        recorder = RefreshTimingRecorder(monotonic=lambda: next(ticks))
+        adapter = TimedAdapter(card("private-provider"))
+
+        with tempfile.TemporaryDirectory() as directory:
+            Aggregator(
+                [adapter],
+                CardCache(Path(directory) / "cards.json"),
+                timing_recorder=recorder,
+            ).refresh()
+
+        payload = recorder.snapshot()
+        self.assertEqual(payload["classes"][0]["sourceClass"], "network")
+        self.assertEqual(payload["classes"][0]["durationSecondsTotal"], 0.4)
+        self.assertNotIn("private-provider", json.dumps(payload))
 
 
 if __name__ == "__main__":

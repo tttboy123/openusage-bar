@@ -32,8 +32,11 @@ cp \
   "$ROOT/scripts/rollback_app.sh" \
   "$ROOT/scripts/uninstall_app.sh" \
   "$ROOT/scripts/privacy_scan.py" \
+  "$ROOT/scripts/verify_canary_candidate.py" \
+  "$ROOT/scripts/verify_canary_surfaces.py" \
   "$ROOT/scripts/verify_local_api.py" \
   "$STAGE/scripts/"
+cp "$ROOT/openusage_bar/activity_schema.py" "$STAGE/scripts/"
 cp \
   "$ROOT/LICENSE" \
   "$ROOT/THIRD_PARTY_NOTICES.md" \
@@ -77,6 +80,7 @@ hdiutil verify "$DMG"
 "$PYTHON" "$ROOT/scripts/generate_release_manifest.py" \
   --app "$APP" \
   --archive "$ARCHIVE" \
+  --dmg "$DMG" \
   --requirements "$ROOT/requirements-build.txt" \
   --swift-package "$ROOT/swift_app" \
   --output "$MANIFEST" \

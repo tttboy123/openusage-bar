@@ -8,6 +8,8 @@ INSTALL_DIR=$(resolve_openusage_install_dir)
 TARGET="$INSTALL_DIR/OpenUsage Bar.app"
 ACTIVITY_APP="$TARGET/Contents/Helpers/OpenUsage Activity.app"
 ACTIVITY_EXECUTABLE="$TARGET/Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity"
+SETTINGS_APP="$TARGET/Contents/Helpers/OpenUsage Provider Settings.app"
+SETTINGS_EXECUTABLE="$TARGET/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
 NEW="$TARGET.new-$$"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 STATE_DIR=${OPENUSAGE_STATE_DIR:-"$HOME/.local/state/openusage-bar"}
@@ -45,6 +47,8 @@ SWAPPED=0
 FIRST_INSTALLED=0
 ACTIVITY_WAS_RUNNING=0
 ACTIVITY_STOPPED=0
+SETTINGS_WAS_RUNNING=0
+SETTINGS_STOPPED=0
 ROLLBACK_ACTIVE=0
 
 source "$ROOT/scripts/install_app_transaction.sh"
@@ -101,6 +105,7 @@ rollback() {
   local bundle_restored=1
   local activity_runtime_cleared=1
   local activity_clear_rc=0
+  local settings_clear_rc=0
   # Ignore, rather than reset, the outer EXIT trap while rolling back. zsh can
   # restore a function-scoped trap during exit and otherwise invoke rollback a
   # second time after the staged bundle has already moved.
@@ -108,12 +113,16 @@ rollback() {
   if (( MUTATED )); then
     "$LAUNCHCTL" bootout "$DOMAIN/$STATUS_LABEL" >/dev/null 2>&1 || true
     "$LAUNCHCTL" bootout "$DOMAIN/$COLLECTOR_LABEL" >/dev/null 2>&1 || true
-    if (( SWAPPED || FIRST_INSTALLED || ACTIVITY_STOPPED )); then
+    if (( SWAPPED || FIRST_INSTALLED || ACTIVITY_STOPPED || SETTINGS_STOPPED )); then
       clear_activity_for_runtime_rollback "$ACTIVITY_EXECUTABLE" || activity_clear_rc=$?
       if (( ACTIVITY_STOP_SIGNALLED )); then
         ACTIVITY_STOPPED=1
       fi
-      if (( activity_clear_rc != 0 )); then
+      clear_activity_for_runtime_rollback "$SETTINGS_EXECUTABLE" || settings_clear_rc=$?
+      if (( ACTIVITY_STOP_SIGNALLED )); then
+        SETTINGS_STOPPED=1
+      fi
+      if (( activity_clear_rc != 0 || settings_clear_rc != 0 )); then
         activity_runtime_cleared=0
         bundle_restored=0
       fi
@@ -147,6 +156,10 @@ rollback() {
       reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE" || \
         print -u2 "restored Activity helper could not be reopened"
     fi
+    if (( HAD_TARGET && SETTINGS_STOPPED && activity_runtime_cleared && bundle_restored )); then
+      reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE" || \
+        print -u2 "restored Provider Settings helper could not be reopened"
+    fi
   fi
   print -u2 "installation rolled back; transaction evidence retained at $BACKUP"
   exit "$code"
@@ -157,6 +170,7 @@ trap rollback EXIT INT TERM
 [[ -x "$ATOMIC_SWAP" ]] || { print -u2 "atomic swap helper unavailable"; exit 1; }
 validate_app_bundle "$SOURCE" || { print -u2 "build artifact failed validation"; exit 1; }
 activity_has_exact_process "$ACTIVITY_EXECUTABLE" && ACTIVITY_WAS_RUNNING=1
+activity_has_exact_process "$SETTINGS_EXECUTABLE" && SETTINGS_WAS_RUNNING=1
 mkdir -p "$BACKUP" "$BACKUP_ROOT" "$AGENTS" "$HOME/Library/Logs" "$INSTALL_DIR"
 if [[ -d "$TARGET" ]]; then
   create_complete_app_backup "$TARGET" "$BACKUP_ROOT" "$STAMP" > "$BACKUP/app-backup-path"
@@ -213,10 +227,20 @@ if (( ACTIVITY_WAS_RUNNING )); then
     ACTIVITY_STOPPED=1
   fi
 fi
+if (( SETTINGS_WAS_RUNNING )); then
+  stop_exact_activity_processes "$SETTINGS_EXECUTABLE"
+  if (( ACTIVITY_STOP_SIGNALLED )); then
+    SETTINGS_STOPPED=1
+  fi
+fi
 install_bundle_transaction "$ATOMIC_SWAP" "$TARGET" "$NEW"
 stop_exact_activity_processes "$ACTIVITY_EXECUTABLE"
 if (( ACTIVITY_STOP_SIGNALLED )); then
   ACTIVITY_STOPPED=1
+fi
+stop_exact_activity_processes "$SETTINGS_EXECUTABLE"
+if (( ACTIVITY_STOP_SIGNALLED )); then
+  SETTINGS_STOPPED=1
 fi
 mv "$BACKUP/$STATUS_LABEL.new.plist" "$STATUS_PLIST.tmp-$$"
 mv "$STATUS_PLIST.tmp-$$" "$STATUS_PLIST"
@@ -237,6 +261,9 @@ fi
 codesign --verify --deep --strict "$TARGET"
 if (( ACTIVITY_STOPPED )); then
   reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"
+fi
+if (( SETTINGS_STOPPED )); then
+  reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE"
 fi
 
 SWAPPED=0

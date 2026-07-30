@@ -31,6 +31,10 @@ MOUNTED=1
 
 APP="$MOUNT/OpenUsage Bar.app"
 AGENT="$APP/Contents/Library/LaunchAgents/com.lune.openusagebar.collector.plist"
+STATUS_LAUNCHER="$APP/Contents/MacOS/OpenUsage Bar"
+STATUS_RUNTIME="$APP/Contents/MacOS/OpenUsage Bar.runtime"
+COLLECTOR_LAUNCHER="$APP/Contents/MacOS/OpenUsage Collector"
+COLLECTOR_RUNTIME="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
 GUIDE="$MOUNT/安装说明 Installation Guide.txt"
 [[ -d "$APP" && -L "$MOUNT/Applications" ]]
 [[ $(readlink "$MOUNT/Applications") == /Applications ]]
@@ -44,6 +48,12 @@ codesign --verify --deep --strict "$APP"
 plutil -lint "$AGENT" >/dev/null
 [[ $(plutil -extract Label raw "$AGENT") == com.lune.openusagebar.collector ]]
 [[ $(plutil -extract BundleProgram raw "$AGENT") == \
-  'Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings' ]]
+  'Contents/MacOS/OpenUsage Collector' ]]
+for executable in "$STATUS_LAUNCHER" "$STATUS_RUNTIME" "$COLLECTOR_LAUNCHER" "$COLLECTOR_RUNTIME"; do
+  [[ -x "$executable" && ! -L "$executable" ]]
+  otool -L "$executable" >/dev/null
+  codesign --display "$executable" >/dev/null 2>&1
+  codesign --verify --strict "$executable"
+done
 
 print "release_dmg_ok version=$VERSION"

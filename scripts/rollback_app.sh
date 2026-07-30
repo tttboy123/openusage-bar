@@ -33,6 +33,68 @@ ROLLBACK_ACTIVE=0
 
 source "$ROOT/scripts/install_app_transaction.sh"
 
+bootstrap_agent() {
+  local label=$1
+  local plist=$2
+  local attempt
+  for attempt in {1..20}; do
+    if "$LAUNCHCTL" print "$DOMAIN/$label" >/dev/null 2>&1; then
+      return 0
+    fi
+    "$LAUNCHCTL" bootstrap "$DOMAIN" "$plist" >/dev/null 2>&1 || true
+    sleep 0.1
+  done
+  "$LAUNCHCTL" print "$DOMAIN/$label" >/dev/null 2>&1
+}
+
+wait_unloaded() {
+  local label=$1
+  local attempt
+  for attempt in {1..50}; do
+    if ! "$LAUNCHCTL" print "$DOMAIN/$label" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+wait_for_socket_release() {
+  local attempt
+  for attempt in {1..100}; do
+    if ! curl --fail --silent --unix-socket "$SOCKET" \
+      http://localhost/v1/health >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+restore_current_runtime() {
+  local failed=0
+  if [[ -f "$AGENTS/$COLLECTOR_LABEL.plist" ]]; then
+    bootstrap_agent "$COLLECTOR_LABEL" "$AGENTS/$COLLECTOR_LABEL.plist" || failed=1
+  fi
+  if [[ -f "$AGENTS/$STATUS_LABEL.plist" ]]; then
+    bootstrap_agent "$STATUS_LABEL" "$AGENTS/$STATUS_LABEL.plist" || failed=1
+  fi
+  return "$failed"
+}
+
+preparation_failed() {
+  local reason=$1
+  rm -rf "$NEW"
+  if ! restore_current_runtime; then
+    print -u2 "rollback preparation recovery could not restart the current runtime"
+  fi
+  if ! prune_complete_app_backups "$BACKUP_ROOT" 2; then
+    print -u2 "rollback preparation recovery could not prune app backups"
+  fi
+  print -u2 "rollback preparation failed: $reason"
+  exit 1
+}
+
 if (( $# > 1 )); then
   print -u2 "usage: scripts/rollback_app.sh [backup-directory]"
   exit 2
@@ -82,6 +144,12 @@ COPIED_HASH=$(bundle_content_hash "$NEW") || {
 
 "$LAUNCHCTL" bootout "$DOMAIN/$STATUS_LABEL" >/dev/null 2>&1 || true
 "$LAUNCHCTL" bootout "$DOMAIN/$COLLECTOR_LABEL" >/dev/null 2>&1 || true
+if ! wait_unloaded "$STATUS_LABEL" || ! wait_unloaded "$COLLECTOR_LABEL"; then
+  preparation_failed "LaunchAgents did not unload"
+fi
+if ! wait_for_socket_release; then
+  preparation_failed "local API socket remained active"
+fi
 "$ATOMIC_SWAP" "$TARGET" "$NEW"
 
 rollback_failed() {
@@ -101,18 +169,18 @@ rollback_failed() {
     mv "$NEW" "$FAILED"
   fi
   [[ -f "$AGENTS/$COLLECTOR_LABEL.plist" ]] && \
-    "$LAUNCHCTL" bootstrap "$DOMAIN" "$AGENTS/$COLLECTOR_LABEL.plist" >/dev/null 2>&1 || true
+    bootstrap_agent "$COLLECTOR_LABEL" "$AGENTS/$COLLECTOR_LABEL.plist" || true
   [[ -f "$AGENTS/$STATUS_LABEL.plist" ]] && \
-    "$LAUNCHCTL" bootstrap "$DOMAIN" "$AGENTS/$STATUS_LABEL.plist" >/dev/null 2>&1 || true
+    bootstrap_agent "$STATUS_LABEL" "$AGENTS/$STATUS_LABEL.plist" || true
   print -u2 "rollback health verification failed; the original app was restored"
   exit "$code"
 }
 trap rollback_failed EXIT INT TERM
 
 [[ -f "$AGENTS/$COLLECTOR_LABEL.plist" ]] && \
-  "$LAUNCHCTL" bootstrap "$DOMAIN" "$AGENTS/$COLLECTOR_LABEL.plist" >/dev/null
+  bootstrap_agent "$COLLECTOR_LABEL" "$AGENTS/$COLLECTOR_LABEL.plist"
 [[ -f "$AGENTS/$STATUS_LABEL.plist" ]] && \
-  "$LAUNCHCTL" bootstrap "$DOMAIN" "$AGENTS/$STATUS_LABEL.plist" >/dev/null
+  bootstrap_agent "$STATUS_LABEL" "$AGENTS/$STATUS_LABEL.plist"
 verify_local_api_contract "$SOCKET" "$HEALTH_PROBE"
 validate_app_bundle "$TARGET"
 

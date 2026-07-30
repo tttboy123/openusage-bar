@@ -28,7 +28,7 @@ struct ProviderCapabilityPresentationTests {
         let stepPlan = ProviderCapabilityPresentation(
             descriptor: try #require(GeneratedProviderCatalog.families["step_plan"])
         )
-        #expect(stepPlan.summary == "5-hour + weekly quota · Reset dates · Billing · Credits · Balance")
+        #expect(stepPlan.summary == "5-hour + weekly quota · Reset dates · Credits · Balance")
 
         let openAI = ProviderCapabilityPresentation(
             descriptor: try #require(GeneratedProviderCatalog.families["openai"])
@@ -128,12 +128,23 @@ struct ProviderCapabilityPresentationTests {
         let source = ProviderSourceCapability(
             sourceID: "private_account_alice", sourceKind: "browser_session",
             operatingSystems: [.linux, .macOS, .windows], stability: .experimental,
-            provenance: .userSession
+            provenance: .userSession,
+            factFamilies: [.detection, .subscriptionCapacity],
+            authority: .providerOfficial,
+            accountScope: .configuredAccount,
+            modelScope: .aggregate,
+            verification: .liveAccount
         )
         let strategy = ProviderSourceStrategyPresentation(source: source)
-        let output = [strategy.summary, strategy.platforms].joined(separator: " ")
+        let output = [
+            strategy.summary, strategy.factSummary, strategy.trustSummary,
+            strategy.scopeSummary, strategy.platforms,
+        ].joined(separator: " ")
 
         #expect(strategy.summary == "Browser session · Experimental · User session")
+        #expect(strategy.factSummary == "Detection · Subscription capacity")
+        #expect(strategy.trustSummary == "Provider official data · Real account verified")
+        #expect(strategy.scopeSummary == "Configured account · Aggregate only")
         #expect(strategy.platforms == "macOS, Windows, Linux")
         #expect(!output.contains("private_account_alice"))
         #expect(!output.contains("credential"))
