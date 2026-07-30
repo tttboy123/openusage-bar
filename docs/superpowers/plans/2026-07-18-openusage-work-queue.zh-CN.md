@@ -146,6 +146,11 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   合并；对应 Provider Issue 只按自身实机验收关闭，#19-#21 与 #24 继续
   保持 Open。发布入口修复 #49 随后通过 required `verify` 和 main push CI
   合入，且没有移动 `v0.6.0` Tag 或替换公开资产。
+- [x] Action 固定策略 Issue #17 已关闭：当前 `main` 中 checkout v7.0.1、
+  setup-python v7.0.0 与 upload-artifact v7.0.1 均使用清单登记的完整 SHA
+  和精确版本注释，验证器通过；Dependabot #5、#10、#11 因等价更新已进入
+  `main` 而作为过期 PR 关闭，没有绕过门禁合并。Python 审计依赖
+  #12-#14 保持独立审查，不由 #17 自动合并。
 
 **验收：**
 
