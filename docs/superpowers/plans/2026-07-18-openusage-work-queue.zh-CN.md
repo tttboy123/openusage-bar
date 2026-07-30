@@ -120,6 +120,14 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   隔离安装/升级/回滚/卸载；契约测试会阻止任一 workflow 删除这两项。
   本地 workflow、release metadata、release smoke 与 secret-scan
   相关 53 项测试通过，未创建 Tag 或 Release。
+- [x] 2026-07-30 公开工作面复核发现 Issue #16-#34 的正文把 Markdown
+  换行保存成了 30-32 个字面量 `\n`，导致 GitHub 页面不能正常呈现标题、
+  列表与段落。19 个 Issue 已只做换行规范化；逐项复核确认字面量剩余 0、
+  Goal / Implementation / Acceptance / Verification / Dependencies /
+  Guardrails / Source 七个结构全部存在，Open 状态、Milestone 与标签均未
+  改变。Draft PR #48 的陈旧版本、测试与安装说明也已同步到
+  `0.6.0 (9)` / Python 870 / Swift 255，并补充 `0.6 RC` Milestone、
+  `enhancement` 标签和不触发自动关闭的 Issue 证据映射。
 - [ ] `v*` Tag 与 release workflow 的联动只在下一次受控发布中验证，不创建会误触发 Release 的伪版本 Tag。Dependabot PR、Release 与外部 Canary 未在本轮合并、发布或协调。
 
 **验收：**
