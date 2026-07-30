@@ -364,6 +364,15 @@ OpenUsage Bar 的 Q4 不依赖 L1、L2 或 L3。L1 可以与 0.5 并行，但不
   `Unknown`，不会注册中国站的实验性 billing source，也不会写入 0。
 - StepFun 中国站运行态额度可读；当前响应未提供可用重置时间，界面继续显示
   `Reset unavailable`。国际站真实账号与跨账号 Last-good 仍待外部验收。
+- [x] 修复前的真实刷新曾捕获 `keychain_unavailable`，证明原来的统一
+  `invalid_response` 会掩盖真实失败类型。Step Plan 现将钥匙串、网络和响应解析失败分别
+  记录为 `keychain_unavailable`、`network_error` 与 `invalid_response`；
+  Provider Center 会把钥匙串失败标为需要处理的连接问题，并继续显示
+  Last-good。Kiro 同轮实时 `ok`，没有被连带标记为需要重配。最终修复包
+  未代替用户触发新的 Keychain ACL 授权，授权后的最终状态仍是外部门禁。
+- [x] 修复配置账号与 OpenUsage 自动发现实例使用同一 Provider ID 时的
+  family 归属冲突：已配置连接优先拥有自身 source health，因此 Step Plan
+  的钥匙串修复提示会进入可编辑的 StepFun Step Plan，而不是只读发现项。
 
 **验收：**
 
@@ -739,9 +748,10 @@ SPDX SBOM、隐私扫描和隔离安装/升级/回滚/卸载；该未提交本�
 当前候选已增加“高级与修复 → 授权钥匙串访问”：前台逐项检查固定应用
 service、已配置账号及 Kiro 只读 service，单项最长 90 秒，凭证 stdout/stderr
 直接丢弃，UI 只显示授权、缺失和拒绝数量。后台边界仍为 5 秒 fail closed，
-不刷新或改写 Kiro 登录，不改变 Provider 配置。Python 全量增至 880 项且
-发布构建通过；持久 ACL 授权与授权后的 Step Plan/Kiro 实机恢复仍需用户在
-系统提示中亲自确认，不能由自动化代签。
+不刷新或改写 Kiro 登录，不改变 Provider 配置。Python 全量增至 882 项、
+Swift 增至 257 项且发布构建通过；Kiro 已在同轮恢复实时 `ok`，Step Plan
+持久 ACL 授权与授权后的实机恢复仍需用户在系统提示中亲自确认，不能由
+自动化代签。
 
 同一轮安装验证发现，磁盘候选已更新但 07:04 启动的 Provider Settings
 可见进程未被事务安装器重启，因此可能继续显示旧窗口。安装器现与 Activity

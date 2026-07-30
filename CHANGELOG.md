@@ -64,6 +64,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   `c63a47c` provider-filter development build after also verifying the pinned
   base version and exact 35-provider catalog. Unknown development revisions
   remain unsupported and fail closed.
+- Step Plan source health now distinguishes Keychain access and network
+  failures from invalid upstream responses. Provider Center treats Keychain
+  failures as connection actions and keeps the last-good quota visible.
+- Provider Center now assigns source health to an explicitly configured
+  connection before a colliding OpenUsage-discovered Provider identity, so
+  repair actions remain attached to the editable account.
 - Codex local Token history no longer double-counts unchanged cumulative
   events, and parser-contract changes trigger one bounded historical backfill.
 - MiniMax regional sources, Cursor fallback, Kiro quota, and OpenAI

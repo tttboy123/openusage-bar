@@ -447,9 +447,21 @@ class StepPlanAdapter:
         except RateLimited:
             self.last_quota_result = QuotaFetchFailure("rate_limited")
             return self._error_card(ProviderStatus.RATE_LIMITED, "Rate limited", now)
+        except KeychainError:
+            self.last_quota_result = QuotaFetchFailure("keychain_unavailable")
+            return self._error_card(
+                ProviderStatus.ERROR,
+                "Step Plan credential unavailable",
+                now,
+            )
+        except NetworkError:
+            self.last_quota_result = QuotaFetchFailure("network_error")
+            return self._error_card(
+                ProviderStatus.ERROR,
+                "Step Plan network unavailable",
+                now,
+            )
         except (
-            KeychainError,
-            NetworkError,
             StepPlanParseError,
             TypeError,
             ValueError,

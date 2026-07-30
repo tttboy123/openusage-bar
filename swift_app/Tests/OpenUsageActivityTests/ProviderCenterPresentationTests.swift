@@ -217,6 +217,41 @@ struct ProviderCenterPresentationTests {
         ).status == .attention)
     }
 
+    @Test("Keychain failures require repair and use the quota label")
+    func keychainIssuesRequireRepair() throws {
+        let keychain = issue(
+            sourceID: "step_plan.quota",
+            effectiveState: "temporarily_unavailable",
+            errorCode: "keychain_unavailable"
+        )
+        let item = ProviderCenterItem(
+            descriptor: try descriptor("step_plan"),
+            instanceCount: 1,
+            observed: true,
+            issues: [keychain]
+        )
+
+        #expect(keychain.requiresUserAction)
+        #expect(keychain.message == "Current quota needs a valid connection.")
+        #expect(item.status == .attention)
+        #expect(item.connectionIssues == [keychain])
+        #expect(item.secondaryIssues.isEmpty)
+    }
+
+    @Test("Configured connection identity wins over a colliding discovered family")
+    func configuredConnectionOwnsSourceHealth() {
+        #expect(ProviderCenterPresentation.sourceFamilyID(
+            providerID: "step-plan-main",
+            configuredFamilies: ["step-plan-main": "step_plan"],
+            discoveredFamilyID: "step_plan_main"
+        ) == "step_plan")
+        #expect(ProviderCenterPresentation.sourceFamilyID(
+            providerID: "cursor",
+            configuredFamilies: ["step-plan-main": "step_plan"],
+            discoveredFamilyID: "cursor"
+        ) == "cursor")
+    }
+
     @Test("Secondary source failures keep a connected Provider healthy")
     func secondaryIssuesDoNotEscalateProvider() throws {
         let tokenHistory = issue(

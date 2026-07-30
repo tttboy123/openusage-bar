@@ -155,6 +155,7 @@ struct ProviderSourceIssuePresentation: Sendable, Hashable, Identifiable {
         return signals.contains { value in
             value.hasPrefix("auth_")
                 || value.contains("credential")
+                || value.contains("keychain")
                 || value == "login_required"
                 || value == "session_expired"
                 || value == "unauthorized"
@@ -165,7 +166,7 @@ struct ProviderSourceIssuePresentation: Sendable, Hashable, Identifiable {
     var title: String {
         switch sourceID {
         case "openusage.daily": AppLocalization.text("Daily token history")
-        case "current.quota": AppLocalization.text("Current quota")
+        case "current.quota", "step_plan.quota": AppLocalization.text("Current quota")
         case "minimax.billing": AppLocalization.text("Billing usage")
         case "moonshot.balance": AppLocalization.text("API balance")
         case "openusage.detect": AppLocalization.text("Provider compatibility")
@@ -229,6 +230,14 @@ struct ProviderCenterItem: Identifiable, Sendable, Hashable {
 enum ProviderCenterPresentation {
     static func isSystemIntegration(_ familyID: String) -> Bool {
         ["openusage", "openusage_catalog"].contains(familyID)
+    }
+
+    static func sourceFamilyID(
+        providerID: String,
+        configuredFamilies: [String: String],
+        discoveredFamilyID: String
+    ) -> String {
+        configuredFamilies[providerID] ?? discoveredFamilyID
     }
 
     static func filter(

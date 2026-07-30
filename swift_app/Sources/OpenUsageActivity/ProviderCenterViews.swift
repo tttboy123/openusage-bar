@@ -18,15 +18,29 @@ struct ProvidersPage: View {
         discoveredConnections.isEmpty ? data.providerInstances : discoveredConnections
     }
 
+    private var configuredFamilies: [String: String] {
+        Dictionary(uniqueKeysWithValues: configuredConnections.map {
+            ($0.providerID, $0.familyID)
+        })
+    }
+
+    private func sourceFamilyID(for providerID: String) -> String {
+        ProviderCenterPresentation.sourceFamilyID(
+            providerID: providerID,
+            configuredFamilies: configuredFamilies,
+            discoveredFamilyID: data.providerDescriptor(for: providerID).familyID
+        )
+    }
+
     private var allItems: [ProviderCenterItem] {
         let instances = Dictionary(grouping: providerInstances, by: \.familyID)
         let configured = Dictionary(grouping: configuredConnections, by: \.familyID)
         let observedFamilies = Set(data.availableProviderIDs.map {
-            data.providerDescriptor(for: $0).familyID
+            sourceFamilyID(for: $0)
         })
         let issues = Dictionary(grouping: data.health.sources.compactMap {
             source -> (String, ProviderSourceIssuePresentation)? in
-            let familyID = data.providerDescriptor(for: source.providerID).familyID
+            let familyID = sourceFamilyID(for: source.providerID)
             guard !ProviderCenterPresentation.isSystemIntegration(familyID) else { return nil }
             return (familyID, ProviderSourceIssuePresentation.make(from: source))
         }, by: { $0.0 }).mapValues { rows in rows.map { $0.1 } }
@@ -213,7 +227,7 @@ struct ProvidersPage: View {
 
     private func providerSources(for familyID: String) -> [SourceHealthItem] {
         data.health.sources.filter {
-            data.providerDescriptor(for: $0.providerID).familyID == familyID
+            sourceFamilyID(for: $0.providerID) == familyID
         }
     }
 
