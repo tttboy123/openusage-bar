@@ -9,7 +9,7 @@ import subprocess
 import sys
 import threading
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
@@ -23,6 +23,7 @@ from .query import QueryService, SCHEMA_VERSION, to_wire
 
 DEFAULT_LEDGER_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "activity.sqlite3"
 DEFAULT_API_SOCKET_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "openusage.sock"
+DEFAULT_RUNTIME_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "runtime.sqlite3"
 # An interactive attempt may legitimately use OpenUsage's bounded auto -> direct
 # fallback (12s + 75s) followed by a bounded daily-history import (60s). One
 # hundred sixty seconds avoids killing that slow path, but remains a hard limit;
@@ -152,6 +153,11 @@ def _parser() -> SafeArgumentParser:
     daemon = commands.add_parser("daemon")
     daemon.add_argument("--interval", required=True)
     daemon.add_argument("--api-socket", default=str(DEFAULT_API_SOCKET_PATH))
+    runtime_ingest = commands.add_parser("runtime-ingest")
+    runtime_ingest.add_argument("--database", default=str(DEFAULT_RUNTIME_PATH))
+    runtime_summary = commands.add_parser("runtime-summary")
+    runtime_summary.add_argument("--database", default=str(DEFAULT_RUNTIME_PATH))
+    runtime_summary.add_argument("--window-seconds", required=True)
     return parser
 
 
@@ -193,6 +199,134 @@ def _write_jsonl(stdout: TextIO, rows: list[dict[str, Any]], checkpoint: dict[st
     for row in rows:
         _write_json(stdout, row)
     _write_json(stdout, checkpoint)
+
+
+def _runtime_database_path(value: str) -> Path:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise CLIError("invalid runtime database")
+    path = Path(value)
+    if not path.is_absolute() or path.is_symlink():
+        raise CLIError("invalid runtime database")
+    if path == DEFAULT_RUNTIME_PATH:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not path.parent.is_dir():
+        raise CLIError("invalid runtime database")
+    return path
+
+
+def _runtime_window_seconds(value: str) -> int:
+    if not isinstance(value, str) or re.fullmatch(r"[1-9][0-9]*", value) is None:
+        raise CLIError("invalid runtime window")
+    seconds = int(value)
+    if not 60 <= seconds <= 86_400:
+        raise CLIError("invalid runtime window")
+    return seconds
+
+
+def _runtime_latency_wire(value: Any) -> dict[str, Any]:
+    return {
+        "durationSampleCount": value.duration_sample_count,
+        "durationAvgMs": value.duration_avg_ms,
+        "durationP95Ms": value.duration_p95_ms,
+        "ttftSampleCount": value.ttft_sample_count,
+        "ttftAvgMs": value.ttft_avg_ms,
+        "ttftP95Ms": value.ttft_p95_ms,
+    }
+
+
+def _runtime_costs_wire(values: Any) -> list[dict[str, Any]]:
+    return [
+        {"currency": value.currency, "micros": value.cost_micros}
+        for value in values
+    ]
+
+
+def _runtime_tokens_wire(value: Any) -> dict[str, Any]:
+    return {
+        "input": value.input_tokens,
+        "output": value.output_tokens,
+        "cacheRead": value.cache_read_tokens,
+        "cacheCreation": value.cache_creation_tokens,
+        "reasoning": value.reasoning_tokens,
+        "total": value.total_tokens,
+        "countingConventions": list(value.token_counting_conventions),
+    }
+
+
+def _runtime_summary_wire(value: Any) -> dict[str, Any]:
+    groups = []
+    for group in value.groups:
+        groups.append({
+            "providerId": group.provider_id,
+            "modelId": group.model_id,
+            "scopeRef": group.scope_ref,
+            "observationCount": group.observation_count,
+            "tokens": _runtime_tokens_wire(group),
+            "statusCounts": dict(group.status_counts),
+            "costCoverage": {"state": group.cost_coverage_state},
+            "costs": _runtime_costs_wire(group.costs),
+            "latency": _runtime_latency_wire(group.latency),
+        })
+    return {
+        "schemaVersion": value.schema_version,
+        "runtimeRevision": value.runtime_revision,
+        "generatedAt": value.generated_at,
+        "window": {"start": value.window_start, "end": value.window_end},
+        "coverage": {
+            "state": value.coverage_state,
+            "omittedGroupCount": value.omitted_group_count,
+        },
+        "observationCount": value.observation_count,
+        "tokens": _runtime_tokens_wire(value),
+        "statusCounts": dict(value.status_counts),
+        "costCoverage": {"state": value.cost_coverage_state},
+        "costs": _runtime_costs_wire(value.costs),
+        "latency": _runtime_latency_wire(value.latency),
+        "groups": groups,
+    }
+
+
+def _run_runtime_command(
+    args: argparse.Namespace,
+    *,
+    stdin: TextIO,
+    stdout: TextIO,
+    clock: Callable[[], datetime] | None,
+) -> int:
+    from .runtime_observation import MAX_DOCUMENT_BYTES, decode_runtime_document
+    from .runtime_store import RuntimeStore
+
+    if args.offline or args.fresh or args.strict:
+        raise CLIError("invalid runtime option")
+    path = _runtime_database_path(args.database)
+    current = (clock or (lambda: datetime.now(timezone.utc)))()
+    if args.command == "runtime-ingest":
+        payload = stdin.read(MAX_DOCUMENT_BYTES + 1)
+        document = decode_runtime_document(payload)
+        store = RuntimeStore(path, clock=lambda: current)
+        try:
+            result = store.ingest(document.observations)
+        finally:
+            store.close()
+        _write_json(stdout, {
+            "schemaVersion": document.schema_version,
+            "runtimeRevision": result.revision,
+            "acceptedCount": result.accepted_count,
+            "duplicateCount": result.duplicate_count,
+            "expiredCount": result.expired_count,
+            "prunedCount": result.pruned_count,
+        })
+        return 0
+    if args.command == "runtime-summary":
+        seconds = _runtime_window_seconds(args.window_seconds)
+        store = RuntimeStore(path, clock=lambda: current)
+        try:
+            summary = store.summary(current - timedelta(seconds=seconds), current)
+        finally:
+            store.close()
+        _write_json(stdout, _runtime_summary_wire(summary))
+        return 0
+    raise CLIError("invalid runtime command")
 
 
 @dataclass(frozen=True)
@@ -591,6 +725,7 @@ def _run_daemon_with_api(
 def main(
     argv: list[str] | None = None,
     *,
+    stdin: TextIO | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
     store: ActivityStore | None = None,
@@ -609,6 +744,7 @@ def main(
     child_environment: dict[str, str] | None = None,
     catalog_monitor: Any | None = None,
 ) -> int:
+    stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
     arguments = list(sys.argv[1:] if argv is None else argv)
@@ -629,6 +765,26 @@ def main(
     except CLIError:
         stderr.write("invalid command input\n")
         return 2
+
+    if args.command in {"runtime-ingest", "runtime-summary"}:
+        try:
+            return _run_runtime_command(
+                args, stdin=stdin, stdout=stdout, clock=clock
+            )
+        except CLIError:
+            stderr.write("invalid command input\n")
+            return 2
+        except ValueError as error:
+            from .runtime_observation import RuntimeObservationDecodeError
+
+            if isinstance(error, RuntimeObservationDecodeError):
+                stderr.write("invalid runtime input\n")
+            else:
+                stderr.write("invalid command input\n")
+            return 2
+        except Exception:
+            stderr.write("runtime observation unavailable\n")
+            return 1
 
     active_store: ActivityStore | None = store
     refresh_outcome: RefreshOutcome | None = None

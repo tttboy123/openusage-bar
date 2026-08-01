@@ -12,7 +12,7 @@ import socket
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from openusage_bar.activity_store import (
     ActivityStore,
@@ -1049,6 +1049,158 @@ class CollectorCLITests(unittest.TestCase):
             payload["health"]["openusageCatalog"]["status"],
             "provider_catalog_drift",
         )
+
+
+class RuntimeObservationCLITests(unittest.TestCase):
+    def test_runtime_ingest_reads_stdin_without_opening_activity_store(self):
+        from tests.test_runtime_observation import document
+
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime.sqlite3"
+            stdout, stderr = io.StringIO(), io.StringIO()
+            activity_factory = Mock(side_effect=AssertionError("must not open"))
+
+            code = main(
+                ["runtime-ingest", "--database", str(runtime)],
+                stdin=io.StringIO(document()),
+                stdout=stdout,
+                stderr=stderr,
+                store_factory=activity_factory,
+                clock=lambda: datetime(2026, 8, 1, 0, 1, tzinfo=timezone.utc),
+            )
+
+            self.assertEqual((code, stderr.getvalue()), (0, ""))
+            self.assertEqual(json.loads(stdout.getvalue()), {
+                "acceptedCount": 1,
+                "duplicateCount": 0,
+                "expiredCount": 0,
+                "prunedCount": 0,
+                "runtimeRevision": 1,
+                "schemaVersion": 1,
+            })
+            self.assertNotIn("openai", stdout.getvalue())
+            self.assertNotIn("gpt-5", stdout.getvalue())
+            self.assertTrue(runtime.is_file())
+            activity_factory.assert_not_called()
+            self.assertFalse((Path(directory) / "activity.sqlite3").exists())
+
+    def test_runtime_ingest_retry_is_idempotent(self):
+        from tests.test_runtime_observation import document
+
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime.sqlite3"
+            for expected in (
+                {"acceptedCount": 1, "duplicateCount": 0, "runtimeRevision": 1},
+                {"acceptedCount": 0, "duplicateCount": 1, "runtimeRevision": 1},
+            ):
+                stdout = io.StringIO()
+                code = main(
+                    ["runtime-ingest", "--database", str(runtime)],
+                    stdin=io.StringIO(document()),
+                    stdout=stdout,
+                    stderr=io.StringIO(),
+                    clock=lambda: datetime(2026, 8, 1, 0, 1, tzinfo=timezone.utc),
+                )
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(code, 0)
+                for key, value in expected.items():
+                    self.assertEqual(payload[key], value)
+
+    def test_runtime_summary_is_stable_bounded_json(self):
+        from tests.test_runtime_observation import document
+
+        current = datetime(2026, 8, 1, 0, 1, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime.sqlite3"
+            self.assertEqual(main(
+                ["runtime-ingest", "--database", str(runtime)],
+                stdin=io.StringIO(document()),
+                stdout=io.StringIO(),
+                stderr=io.StringIO(),
+                clock=lambda: current,
+            ), 0)
+            stdout, stderr = io.StringIO(), io.StringIO()
+            activity_factory = Mock(side_effect=AssertionError("must not open"))
+
+            code = main(
+                [
+                    "runtime-summary", "--database", str(runtime),
+                    "--window-seconds", "3600",
+                ],
+                stdin=io.StringIO("must-not-read"),
+                stdout=stdout,
+                stderr=stderr,
+                store_factory=activity_factory,
+                clock=lambda: current,
+            )
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual((code, stderr.getvalue()), (0, ""))
+            self.assertEqual(payload["schemaVersion"], 1)
+            self.assertEqual(payload["runtimeRevision"], 1)
+            self.assertEqual(payload["coverage"], {
+                "state": "complete", "omittedGroupCount": 0,
+            })
+            self.assertEqual(payload["observationCount"], 1)
+            self.assertEqual(payload["tokens"]["total"], 20)
+            self.assertEqual(payload["statusCounts"], {"completed": 1})
+            self.assertEqual(payload["costs"], [{"currency": "usd", "micros": 25}])
+            self.assertEqual(payload["latency"]["durationP95Ms"], 3000)
+            self.assertEqual(payload["groups"][0]["providerId"], "openai")
+            self.assertEqual(payload["groups"][0]["modelId"], "gpt-5")
+            self.assertEqual(
+                payload["groups"][0]["scopeRef"], "anon_0123456789abcdef"
+            )
+            self.assertNotIn("sourceId", stdout.getvalue())
+            self.assertNotIn("requestId", stdout.getvalue())
+            activity_factory.assert_not_called()
+
+    def test_invalid_or_private_runtime_input_is_sanitized_and_not_persisted(self):
+        from openusage_bar.runtime_observation import MAX_DOCUMENT_BYTES
+        from tests.test_runtime_observation import document, valid_observation
+
+        private = valid_observation()
+        private["prompt"] = "do not echo this private value"
+        payloads = (
+            document([private]),
+            "{" + " " * MAX_DOCUMENT_BYTES + "}",
+        )
+        for payload in payloads:
+            with self.subTest(size=len(payload)), tempfile.TemporaryDirectory() as directory:
+                runtime = Path(directory) / "runtime.sqlite3"
+                stdout, stderr = io.StringIO(), io.StringIO()
+                code = main(
+                    ["runtime-ingest", "--database", str(runtime)],
+                    stdin=io.StringIO(payload),
+                    stdout=stdout,
+                    stderr=stderr,
+                    clock=lambda: datetime(2026, 8, 1, 0, 1, tzinfo=timezone.utc),
+                )
+                self.assertEqual(code, 2)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue(), "invalid runtime input\n")
+                self.assertNotIn("private", stderr.getvalue())
+                self.assertFalse(runtime.exists())
+
+    def test_runtime_paths_and_windows_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target.sqlite3"
+            target.touch()
+            symlink = root / "runtime.sqlite3"
+            symlink.symlink_to(target)
+            for arguments in (
+                ["runtime-summary", "--database", "relative.sqlite3", "--window-seconds", "60"],
+                ["runtime-summary", "--database", str(symlink), "--window-seconds", "60"],
+                ["runtime-summary", "--database", str(root / "valid.sqlite3"), "--window-seconds", "59"],
+                ["runtime-summary", "--database", str(root / "valid.sqlite3"), "--window-seconds", "86401"],
+            ):
+                with self.subTest(arguments=arguments):
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    code = main(arguments, stdout=stdout, stderr=stderr)
+                    self.assertEqual(code, 2)
+                    self.assertEqual(stdout.getvalue(), "")
+                    self.assertEqual(stderr.getvalue(), "invalid command input\n")
 
 
 if __name__ == "__main__":
