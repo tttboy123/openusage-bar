@@ -938,10 +938,24 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   最终签名 App bundle 验证通过。** 真实 LiteLLM 账号流量、OTLP/CLIProxyAPI、
   Loom X1、外部 Canary、合并、推送和发布仍未开始。测试日志仍含既有 SQLite
   `ResourceWarning` 与测试 ZIP 重名警告；它们未改变门禁结果，也不计为已清理。
-- **WQ-23：版本化的 OTLP GenAI 与 CLIProxyAPI Producer Adapter。** 先冻结
-  上游版本和脱敏 Fixture，再接入经过严格 allowlist 处理的 GenAI span 与
-  CLIProxyAPI 用量事件。不得直接接收含消息内容、tool 参数、LiteLLM 身份
-  metadata 或高基数字段的原始 OTLP Payload。**尚未开始。**
+- **WQ-23：版本化的 OpenTelemetry GenAI 与 CLIProxyAPI Producer Adapter。**
+  **仓库实现与本地发行门禁已完成。** OpenTelemetry 路径固定
+  `semantic-conventions-genai` commit `f77b9235...`，使用进程内 SpanExporter
+  在序列化前缩减白名单事实；没有开放通用 OTLP HTTP/gRPC Receiver，也不接收
+  或保存原始 OTLP Payload。CLIProxyAPI 路径固定 `v7.2.113` 与 Token
+  Accounting schema v2，通过官方 `usage.Plugin` 读取规范化计数；不读取有
+  pop 副作用的管理队列。两端只输出时间、公开 Provider/Model、Token、状态与
+  匿名 scope，未知或不自洽记录 fail closed，Prompt、Response、tool 参数、
+  凭证、Header、身份、高基数 ID 和失败正文均不序列化。App 只打包 OTel Python
+  Producer；Go plugin 以固定依赖的源码模块交付，并明确要求自有宿主注册或重构建。
+  连续构建同时修复了只读 Integrations 目录阻止下一次清理的问题。最终本地门禁
+  为 Python 985 项通过、OTel 定向 7 项与模块行覆盖率 95%、CLIProxyAPI race/
+  vet 通过且覆盖率 90.0%、Swift 257 项/21 suites 与产品行覆盖率 87.64%；依赖
+  审计无已知漏洞，Git tree/history 密钥扫描与生产/发行隐私扫描均为 0，三个
+  打包后 Runtime 冒烟和最终深度验签通过。攻击性 Fixture 故意携带虚构敏感字段，
+  原始 Fixture 被隐私扫描拒绝属于预期；契约测试逐值证明它们不会进入 Collector，
+  且 Fixture 不进入 App。当前 ad-hoc 签名未公证，Gatekeeper 分发评估仍会拒绝。
+  **真实运行时流量、外部 Canary、合并、推送和发布仍未完成。**
 - **WQ-24：Loom X1 observe-only 接入。** Loom 只读 Resource Snapshot、
   Change Feed 与有界 Runtime Summary，映射为 Loom 自有 observation；不改变
   Scheduler 结果，不在 OpenUsage Bar 中实现预留、准入或策略路由。**尚未开始，

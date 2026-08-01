@@ -1,7 +1,8 @@
 # WQ-23 Runtime Producer Adapter 实施计划
 
-> 状态：执行中。本文冻结 WQ-23 的上游版本、隐私边界、输入契约和验收顺序；
-> 不代表真实账号流量、外部 Canary、合并、推送或发布已经完成。
+> 状态：仓库实现与本地发行门禁已完成。本文冻结 WQ-23 的上游版本、隐私边界、
+> 输入契约和验收顺序；不代表真实账号流量、外部 Canary、合并、推送或发布已经
+> 完成。
 
 ## 目标
 
@@ -111,3 +112,34 @@ CLIProxyAPI usage.Record ─ allowlist plugin ─┘
 - Loom 预留、准入、路由或 Scheduler 决策（属于 WQ-24，且在 Loom 仓库实施）。
 - 真实 Provider 账号流量和外部 30 天 Canary。
 - 合并、推送、发布、签名身份或凭证变更。
+
+## 完成记录（2026-08-01）
+
+- OpenTelemetry GenAI 已实现为进程内、可选 SDK 依赖的 `SpanExporter`，固定
+  `semantic-conventions-genai` commit `f77b9235...`，只接受显式 Provider
+  映射和白名单 Token 属性。它不开放 HTTP/gRPC/OTLP Receiver，也不保存原始
+  Span、事件、链接、Resource、Trace ID、Span ID 或内容型属性。
+- CLIProxyAPI 已实现为独立 Go module，固定 `v7.2.113` 与 Token Accounting
+  schema v2，通过官方 `usage.Plugin` 接口接入。预编译 CLIProxyAPI 不能动态
+  加载 Go module，使用者需要在自有宿主中注册或重新构建；本轮没有修改其凭证、
+  管理接口或运行实例。
+- 两条 Producer 都只通过绝对路径和 stdin 调用 Collector，使用三秒超时、最小
+  环境、1 MiB/256 条上限，失败不影响模型请求。未知 Provider、缺失计数、错误
+  schema、非 complete 或不自洽数据全部丢弃，不写成零或 `unknown`。
+- App bundle 只包含 LiteLLM 与 OpenTelemetry 两个 Python Producer，
+  `Integrations` 目录为只读。构建中发现上一次只读目录会阻止下一次清理，现已在
+  删除旧构建前只恢复该目录所有者写权限；连续完整构建已验证可重复。
+- 新鲜验证结果：Python 985 项通过；OpenTelemetry 定向 7 项通过且模块行覆盖率
+  95%；CLIProxyAPI `go test -race`、`go vet` 通过，语句覆盖率 90.0%；Swift
+  257 项、21 个 suite 通过，完整构建记录的产品行覆盖率为 87.64%。依赖审计无
+  已知漏洞，Git tree/history 密钥扫描为 0，生产适配器与最终发行包隐私扫描为
+  0，三个打包后 Runtime 冒烟均成功，最终 App 深度签名验证通过。
+- 两个攻击性 Fixture 故意包含虚构 Prompt、Response、API Key、Cookie、邮箱、
+  原始 ID 与失败正文，因此原始 Fixture 必须被通用隐私扫描拒绝；Python/Go
+  契约测试逐值证明这些哨兵不会进入 Collector 文档。Fixture 不进入 App bundle。
+- Gatekeeper 分发评估仍为 `rejected`：当前仅使用 ad-hoc 本地签名，没有 Apple
+  Developer ID 公证。这符合本轮“不变更签名身份”的边界，但不能宣称公开下载后
+  可直接通过 Gatekeeper。
+
+仍待外部证据：真实 OpenTelemetry/CLIProxyAPI 流量、外部 Canary、Developer ID
+公证（如未来选择）、合并、推送和发布。
