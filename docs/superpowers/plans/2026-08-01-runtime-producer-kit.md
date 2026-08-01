@@ -231,13 +231,13 @@ git commit -m "feat(runtime): normalize LiteLLM terminal usage"
 - Modify: `integrations/litellm_openusage.py`
 - Modify: `tests/test_litellm_runtime_integration.py`
 
-- [ ] **Step 1: Write failing delivery tests**
+- [x] **Step 1: Write failing delivery tests**
 
 Instantiate `OpenUsageRuntimeLogger` with an injected runner. Prove:
 
 - success delivery invokes `[collector, "runtime-ingest", "--database", path]`
-  with `shell=False`, a three-second timeout, compact JSON on stdin and bounded
-  captured output;
+  with `shell=False`, a three-second timeout and compact JSON on stdin; stdout
+  and stderr go to `DEVNULL`, so child output is never retained or logged;
 - the child environment contains only the explicit safe allowlist and never an
   inherited `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, cookie or session;
 - invalid/missing usage launches no child and records no zero;
@@ -246,7 +246,7 @@ Instantiate `OpenUsageRuntimeLogger` with an injected runner. Prove:
 - failure methods deliver only when real Token counters exist and never include
   an exception body.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 .build-venv/bin/python -m unittest tests.test_litellm_runtime_integration -v
@@ -254,7 +254,7 @@ Instantiate `OpenUsageRuntimeLogger` with an injected runner. Prove:
 
 Expected: FAIL because the callback logger does not exist.
 
-- [ ] **Step 3: Implement bounded delivery**
+- [x] **Step 3: Implement bounded delivery**
 
 Provide an optional LiteLLM `CustomLogger` base when LiteLLM is importable and a
 dependency-free fallback base for repository tests. Implement:
@@ -271,14 +271,14 @@ Delivery must be best-effort and must not print callback input, Collector output
 or exception text. Async delivery uses `asyncio.to_thread` so it does not block
 the event loop.
 
-- [ ] **Step 4: Run GREEN and privacy regression**
+- [x] **Step 4: Run GREEN and privacy regression**
 
 ```bash
 .build-venv/bin/python -m unittest tests.test_litellm_runtime_integration \
   tests.test_privacy_scan -v
 ```
 
-- [ ] **Step 5: Commit delivery**
+- [x] **Step 5: Commit delivery**
 
 ```bash
 git add integrations/litellm_openusage.py \

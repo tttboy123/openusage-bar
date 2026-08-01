@@ -6,13 +6,27 @@ without installing OpenUsage Bar as a Python package.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
+import os
 import secrets
 import re
+import subprocess
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from pathlib import Path
 from typing import Any
+
+
+try:
+    from litellm.integrations.custom_logger import CustomLogger
+except ImportError:
+    class CustomLogger:  # type: ignore[no-redef]
+        """Dependency-free base used when this file is audited outside LiteLLM."""
+
+        pass
 
 
 SOURCE_ID = "litellm.callback.v1"
@@ -144,12 +158,15 @@ def _usage(response_obj: object) -> tuple[int, int, int, int, int | None, int] |
     cache_creation_tokens = _counter(
         _read(usage, "cache_creation_input_tokens"), default=0
     )
-    reasoning_tokens = _counter(
-        _read(completion_details, "reasoning_tokens"), default=None
+    raw_reasoning = _read(completion_details, "reasoning_tokens")
+    reasoning_tokens = (
+        None if raw_reasoning is None else _counter(raw_reasoning)
     )
     if (
         cache_read_tokens is None
         or cache_creation_tokens is None
+        or raw_reasoning is not None
+        and reasoning_tokens is None
         or cache_read_tokens + cache_creation_tokens > input_tokens
         or reasoning_tokens is not None
         and reasoning_tokens > output_tokens
@@ -263,3 +280,146 @@ def build_runtime_document(
             "quality": quality,
         }],
     }
+
+
+def _child_environment() -> dict[str, str]:
+    return {
+        "HOME": str(Path.home()),
+        "LANG": "C.UTF-8",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
+class OpenUsageRuntimeLogger(CustomLogger):
+    """Best-effort LiteLLM callback that writes only canonical local facts."""
+
+    def __init__(
+        self,
+        *,
+        collector_path: str | Path,
+        database_path: str | Path,
+        scope_ref: str,
+        provider_map: dict[str, str],
+        runner: Any = subprocess.run,
+    ) -> None:
+        try:
+            super().__init__()
+        except TypeError:
+            pass
+        collector = Path(collector_path)
+        database = Path(database_path)
+        if (
+            not collector.is_absolute()
+            or collector.is_symlink()
+            or not collector.is_file()
+            or not os.access(collector, os.X_OK)
+            or not database.is_absolute()
+            or database.is_symlink()
+            or not database.parent.is_dir()
+            or not isinstance(scope_ref, str)
+            or _SCOPE_REF.fullmatch(scope_ref) is None
+            or not isinstance(provider_map, dict)
+            or not provider_map
+            or not callable(runner)
+        ):
+            raise ValueError("invalid OpenUsage Runtime callback configuration")
+        self._collector = collector
+        self._database = database
+        self._scope_ref = scope_ref
+        self._provider_map = dict(provider_map)
+        self._runner = runner
+
+    def _deliver(
+        self,
+        kwargs: object,
+        response_obj: object,
+        start_time: object,
+        end_time: object,
+        *,
+        status: str,
+    ) -> bool:
+        document = build_runtime_document(
+            kwargs,
+            response_obj,
+            start_time,
+            end_time,
+            scope_ref=self._scope_ref,
+            provider_map=self._provider_map,
+            status=status,
+        )
+        if document is None:
+            return False
+        encoded = json.dumps(
+            document,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        if len(encoded.encode("utf-8")) > 1024 * 1024:
+            return False
+        try:
+            completed = self._runner(
+                [
+                    str(self._collector),
+                    "runtime-ingest",
+                    "--database",
+                    str(self._database),
+                ],
+                input=encoded,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                shell=False,
+                check=False,
+                timeout=3,
+                close_fds=True,
+                env=_child_environment(),
+            )
+            return getattr(completed, "returncode", None) == 0
+        except Exception:
+            return False
+
+    def log_success_event(
+        self,
+        kwargs: object,
+        response_obj: object,
+        start_time: object,
+        end_time: object,
+    ) -> bool:
+        return self._deliver(
+            kwargs, response_obj, start_time, end_time, status="completed"
+        )
+
+    def log_failure_event(
+        self,
+        kwargs: object,
+        response_obj: object,
+        start_time: object,
+        end_time: object,
+    ) -> bool:
+        return self._deliver(
+            kwargs, response_obj, start_time, end_time, status="error"
+        )
+
+    async def async_log_success_event(
+        self,
+        kwargs: object,
+        response_obj: object,
+        start_time: object,
+        end_time: object,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self.log_success_event, kwargs, response_obj, start_time, end_time
+        )
+
+    async def async_log_failure_event(
+        self,
+        kwargs: object,
+        response_obj: object,
+        start_time: object,
+        end_time: object,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self.log_failure_event, kwargs, response_obj, start_time, end_time
+        )
