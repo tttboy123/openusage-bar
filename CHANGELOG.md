@@ -6,6 +6,10 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A bounded, content-free `GET /v1/runtime/summary` Local API route exposes the
+  separate 24-hour Runtime Ledger to local schedulers with an independent
+  `runtimeRevision`; unsafe or unavailable state fails closed instead of
+  fabricating zero usage.
 - A machine-readable release state now keeps the public version, build, Local
   API version, release channel, and external Canary clock under one strict
   validation boundary.

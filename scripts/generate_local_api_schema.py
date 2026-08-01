@@ -258,6 +258,114 @@ def render_schema() -> dict[str, object]:
         },
         ["rows", "coverage"],
     )
+    runtime_tokens = closed(
+        {
+            "input": {"type": "integer", "minimum": 0},
+            "output": {"type": "integer", "minimum": 0},
+            "cacheRead": {"type": "integer", "minimum": 0},
+            "cacheCreation": {"type": "integer", "minimum": 0},
+            "reasoning": nullable("integer"),
+            "total": {"type": "integer", "minimum": 0},
+            "countingConventions": {
+                "type": "array",
+                "items": {
+                    "enum": [
+                        "input_includes_cache",
+                        "components_disjoint",
+                        "provider_reported",
+                        "unknown",
+                    ]
+                },
+                "uniqueItems": True,
+            },
+        },
+        [
+            "input", "output", "cacheRead", "cacheCreation", "reasoning",
+            "total", "countingConventions",
+        ],
+    )
+    runtime_latency = closed(
+        {
+            "durationSampleCount": {"type": "integer", "minimum": 0},
+            "durationAvgMs": nullable("integer"),
+            "durationP95Ms": nullable("integer"),
+            "ttftSampleCount": {"type": "integer", "minimum": 0},
+            "ttftAvgMs": nullable("integer"),
+            "ttftP95Ms": nullable("integer"),
+        },
+        [
+            "durationSampleCount", "durationAvgMs", "durationP95Ms",
+            "ttftSampleCount", "ttftAvgMs", "ttftP95Ms",
+        ],
+    )
+    runtime_cost = closed(
+        {
+            "currency": {"type": "string"},
+            "micros": {"type": "integer", "minimum": 0},
+        },
+        ["currency", "micros"],
+    )
+    status_counts = {
+        "type": "object",
+        "propertyNames": {"enum": ["completed", "error"]},
+        "additionalProperties": {"type": "integer", "minimum": 1},
+    }
+    cost_coverage = closed(
+        {"state": {"enum": ["complete", "partial", "none"]}}, ["state"]
+    )
+    runtime_group = closed(
+        {
+            "providerId": {"type": "string"},
+            "modelId": {"type": "string"},
+            "scopeRef": {"type": "string"},
+            "observationCount": {"type": "integer", "minimum": 1},
+            "tokens": runtime_tokens,
+            "statusCounts": status_counts,
+            "costCoverage": cost_coverage,
+            "costs": {"type": "array", "items": runtime_cost},
+            "latency": runtime_latency,
+        },
+        [
+            "providerId", "modelId", "scopeRef", "observationCount",
+            "tokens", "statusCounts", "costCoverage", "costs", "latency",
+        ],
+    )
+    runtime_summary = closed(
+        {
+            "schemaVersion": {"const": 1},
+            "runtimeRevision": {"type": "integer", "minimum": 0},
+            "generatedAt": {"type": "string", "format": "date-time"},
+            "window": closed(
+                {
+                    "start": {"type": "string", "format": "date-time"},
+                    "end": {"type": "string", "format": "date-time"},
+                },
+                ["start", "end"],
+            ),
+            "coverage": closed(
+                {
+                    "state": {"enum": ["complete", "partial"]},
+                    "omittedGroupCount": {"type": "integer", "minimum": 0},
+                },
+                ["state", "omittedGroupCount"],
+            ),
+            "observationCount": {"type": "integer", "minimum": 0},
+            "tokens": runtime_tokens,
+            "statusCounts": status_counts,
+            "costCoverage": cost_coverage,
+            "costs": {"type": "array", "items": runtime_cost},
+            "latency": runtime_latency,
+            "groups": {
+                "type": "array", "items": runtime_group, "maxItems": 512,
+            },
+        },
+        [
+            "schemaVersion", "runtimeRevision", "generatedAt", "window",
+            "coverage", "observationCount", "tokens", "statusCounts",
+            "costCoverage", "costs", "latency", "groups",
+        ],
+    )
+    runtime = envelope({"runtime": runtime_summary}, ["runtime"])
     change = closed(
         {
             "changeSeq": {"type": "integer", "minimum": 1},
@@ -288,7 +396,9 @@ def render_schema() -> dict[str, object]:
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://openusage.bar/schemas/local-api-v1.schema.json",
         "title": "OpenUsage Bar Local API v1",
-        "oneOf": [summary, snapshot, balances, activity, changes, error],
+        "oneOf": [
+            summary, snapshot, balances, activity, runtime, changes, error,
+        ],
     }
 
 

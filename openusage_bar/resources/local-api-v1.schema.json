@@ -933,6 +933,432 @@
           "format": "date-time",
           "type": "string"
         },
+        "runtime": {
+          "additionalProperties": false,
+          "properties": {
+            "costCoverage": {
+              "additionalProperties": false,
+              "properties": {
+                "state": {
+                  "enum": [
+                    "complete",
+                    "partial",
+                    "none"
+                  ]
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "type": "object"
+            },
+            "costs": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "currency": {
+                    "type": "string"
+                  },
+                  "micros": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "currency",
+                  "micros"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "coverage": {
+              "additionalProperties": false,
+              "properties": {
+                "omittedGroupCount": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "state": {
+                  "enum": [
+                    "complete",
+                    "partial"
+                  ]
+                }
+              },
+              "required": [
+                "state",
+                "omittedGroupCount"
+              ],
+              "type": "object"
+            },
+            "generatedAt": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "groups": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "costCoverage": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "state": {
+                        "enum": [
+                          "complete",
+                          "partial",
+                          "none"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "state"
+                    ],
+                    "type": "object"
+                  },
+                  "costs": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "currency": {
+                          "type": "string"
+                        },
+                        "micros": {
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "currency",
+                        "micros"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "latency": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "durationAvgMs": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "durationP95Ms": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "durationSampleCount": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "ttftAvgMs": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "ttftP95Ms": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "ttftSampleCount": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "durationSampleCount",
+                      "durationAvgMs",
+                      "durationP95Ms",
+                      "ttftSampleCount",
+                      "ttftAvgMs",
+                      "ttftP95Ms"
+                    ],
+                    "type": "object"
+                  },
+                  "modelId": {
+                    "type": "string"
+                  },
+                  "observationCount": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "scopeRef": {
+                    "type": "string"
+                  },
+                  "statusCounts": {
+                    "additionalProperties": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "propertyNames": {
+                      "enum": [
+                        "completed",
+                        "error"
+                      ]
+                    },
+                    "type": "object"
+                  },
+                  "tokens": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "cacheCreation": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "cacheRead": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "countingConventions": {
+                        "items": {
+                          "enum": [
+                            "input_includes_cache",
+                            "components_disjoint",
+                            "provider_reported",
+                            "unknown"
+                          ]
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "input": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "output": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "reasoning": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "total": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "input",
+                      "output",
+                      "cacheRead",
+                      "cacheCreation",
+                      "reasoning",
+                      "total",
+                      "countingConventions"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "providerId",
+                  "modelId",
+                  "scopeRef",
+                  "observationCount",
+                  "tokens",
+                  "statusCounts",
+                  "costCoverage",
+                  "costs",
+                  "latency"
+                ],
+                "type": "object"
+              },
+              "maxItems": 512,
+              "type": "array"
+            },
+            "latency": {
+              "additionalProperties": false,
+              "properties": {
+                "durationAvgMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "durationP95Ms": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "durationSampleCount": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "ttftAvgMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "ttftP95Ms": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "ttftSampleCount": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "durationSampleCount",
+                "durationAvgMs",
+                "durationP95Ms",
+                "ttftSampleCount",
+                "ttftAvgMs",
+                "ttftP95Ms"
+              ],
+              "type": "object"
+            },
+            "observationCount": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "runtimeRevision": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "schemaVersion": {
+              "const": 1
+            },
+            "statusCounts": {
+              "additionalProperties": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "propertyNames": {
+                "enum": [
+                  "completed",
+                  "error"
+                ]
+              },
+              "type": "object"
+            },
+            "tokens": {
+              "additionalProperties": false,
+              "properties": {
+                "cacheCreation": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "cacheRead": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "countingConventions": {
+                  "items": {
+                    "enum": [
+                      "input_includes_cache",
+                      "components_disjoint",
+                      "provider_reported",
+                      "unknown"
+                    ]
+                  },
+                  "type": "array",
+                  "uniqueItems": true
+                },
+                "input": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "output": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "reasoning": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "total": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "input",
+                "output",
+                "cacheRead",
+                "cacheCreation",
+                "reasoning",
+                "total",
+                "countingConventions"
+              ],
+              "type": "object"
+            },
+            "window": {
+              "additionalProperties": false,
+              "properties": {
+                "end": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "start": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "start",
+                "end"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "runtimeRevision",
+            "generatedAt",
+            "window",
+            "coverage",
+            "observationCount",
+            "tokens",
+            "statusCounts",
+            "costCoverage",
+            "costs",
+            "latency",
+            "groups"
+          ],
+          "type": "object"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "runtime"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
         "hasMore": {
           "type": "boolean"
         },

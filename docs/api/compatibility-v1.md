@@ -10,6 +10,8 @@ The v1 compatibility promise includes:
 
 - `GET /v1/snapshot` and its coherent one-revision resource envelope.
 - `GET /v1/schema.json` and the committed Draft 2020-12 schema document.
+- `GET /v1/runtime/summary` as an additive, content-free Runtime Ledger view;
+  its nested `runtimeRevision` remains independent of `dataRevision`.
 - `schemaVersion: "1.0"`, `dataRevision`, and `generatedAt`.
 - the Provider capability schema and its stable machine identifiers.
 - HTTP/1.1 over the private Unix socket, a three-second client timeout, and a
@@ -17,6 +19,9 @@ The v1 compatibility promise includes:
 
 The descriptive routes, CLI, SwiftUI, and Local API must report the same
 canonical ledger facts at one `dataRevision`. UI copy is not part of the API.
+Runtime Summary is the explicit exception to the single-ledger statement: its
+nested facts come from the separate short-retention Runtime Ledger and declare
+their own `runtimeRevision`; no cross-ledger transaction is implied.
 
 ## Change classes
 

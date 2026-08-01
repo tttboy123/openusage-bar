@@ -116,7 +116,14 @@ GET /v1/costs/daily?from=2026-07-01&to=2026-07-14
 GET /v1/quotas/history
 GET /v1/sources/status
 GET /v1/changes?after=0&limit=100
+GET /v1/runtime/summary?windowSeconds=3600
 ```
+
+`/v1/runtime/summary` reads the separate 24-hour Runtime Ledger and returns a
+bounded, content-free summary of tokens, status, cost, and latency. It carries
+both the Local API `dataRevision` and the independent `runtimeRevision`; they
+are not one transaction. A missing or unsafe Runtime database returns the
+sanitized `503 runtime_unavailable` response instead of a fabricated zero.
 
 Signed helper JSON:
 

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable
+from urllib.parse import quote
 
 from .runtime_observation import (
     SCHEMA_VERSION,
@@ -101,6 +102,75 @@ class RuntimeSummary:
     costs: tuple[RuntimeCostTotal, ...]
     latency: RuntimeLatencySummary
     groups: tuple[RuntimeSummaryGroup, ...]
+
+
+def _runtime_latency_wire(value: RuntimeLatencySummary) -> dict[str, object]:
+    return {
+        "durationSampleCount": value.duration_sample_count,
+        "durationAvgMs": value.duration_avg_ms,
+        "durationP95Ms": value.duration_p95_ms,
+        "ttftSampleCount": value.ttft_sample_count,
+        "ttftAvgMs": value.ttft_avg_ms,
+        "ttftP95Ms": value.ttft_p95_ms,
+    }
+
+
+def _runtime_costs_wire(
+    values: tuple[RuntimeCostTotal, ...],
+) -> list[dict[str, object]]:
+    return [
+        {"currency": value.currency, "micros": value.cost_micros}
+        for value in values
+    ]
+
+
+def _runtime_tokens_wire(
+    value: RuntimeSummary | RuntimeSummaryGroup,
+) -> dict[str, object]:
+    return {
+        "input": value.input_tokens,
+        "output": value.output_tokens,
+        "cacheRead": value.cache_read_tokens,
+        "cacheCreation": value.cache_creation_tokens,
+        "reasoning": value.reasoning_tokens,
+        "total": value.total_tokens,
+        "countingConventions": list(value.token_counting_conventions),
+    }
+
+
+def runtime_summary_wire(value: RuntimeSummary) -> dict[str, object]:
+    """Return the one canonical, content-free Runtime Summary representation."""
+    groups = [
+        {
+            "providerId": group.provider_id,
+            "modelId": group.model_id,
+            "scopeRef": group.scope_ref,
+            "observationCount": group.observation_count,
+            "tokens": _runtime_tokens_wire(group),
+            "statusCounts": dict(group.status_counts),
+            "costCoverage": {"state": group.cost_coverage_state},
+            "costs": _runtime_costs_wire(group.costs),
+            "latency": _runtime_latency_wire(group.latency),
+        }
+        for group in value.groups
+    ]
+    return {
+        "schemaVersion": value.schema_version,
+        "runtimeRevision": value.runtime_revision,
+        "generatedAt": value.generated_at,
+        "window": {"start": value.window_start, "end": value.window_end},
+        "coverage": {
+            "state": value.coverage_state,
+            "omittedGroupCount": value.omitted_group_count,
+        },
+        "observationCount": value.observation_count,
+        "tokens": _runtime_tokens_wire(value),
+        "statusCounts": dict(value.status_counts),
+        "costCoverage": {"state": value.cost_coverage_state},
+        "costs": _runtime_costs_wire(value.costs),
+        "latency": _runtime_latency_wire(value.latency),
+        "groups": groups,
+    }
 
 
 def _canonical_row(observation: RuntimeObservation) -> tuple[object, ...]:
@@ -218,6 +288,71 @@ class RuntimeStore:
         except Exception:
             if self._connection is not None:
                 self._connection.close()
+            raise
+
+    @classmethod
+    def open_read_only(
+        cls,
+        path: str | Path,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        max_groups: int = MAX_GROUPS,
+    ) -> "RuntimeStore":
+        if (
+            isinstance(max_groups, bool)
+            or not isinstance(max_groups, int)
+            or not 1 <= max_groups <= MAX_GROUPS
+        ):
+            raise ValueError("invalid runtime store limit")
+        selected = Path(path)
+        if not selected.is_absolute() or selected.is_symlink():
+            raise RuntimeError("runtime database path is unavailable")
+        try:
+            parent = selected.parent.stat()
+            identity = selected.stat(follow_symlinks=False)
+        except OSError as error:
+            raise RuntimeError("runtime database path is unavailable") from error
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or selected.parent.is_symlink()
+            or parent.st_uid != os.getuid()
+            or stat.S_IMODE(parent.st_mode) & 0o077
+            or not stat.S_ISREG(identity.st_mode)
+            or identity.st_uid != os.getuid()
+            or stat.S_IMODE(identity.st_mode) & 0o077
+            or identity.st_size > MAX_DATABASE_BYTES
+        ):
+            raise RuntimeError("runtime database path is unavailable")
+
+        store = cls.__new__(cls)
+        store.path = str(selected)
+        store.clock = clock or (lambda: datetime.now(timezone.utc))
+        store.max_rows = MAX_ROWS
+        store.max_groups = max_groups
+        store.page_limit_bytes = MAX_DATABASE_BYTES
+        store._lock = threading.RLock()
+        store._connection = None
+        uri = f"file:{quote(str(selected), safe='/')}?mode=ro"
+        try:
+            connection = sqlite3.connect(
+                uri, uri=True, timeout=5.0, check_same_thread=False
+            )
+            store._connection = connection
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only=ON")
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            current = selected.stat(follow_symlinks=False)
+            if (
+                (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino)
+                or version != SCHEMA_VERSION
+            ):
+                raise RuntimeError("runtime database schema is incompatible")
+            store._validate_existing_schema(require_all=True)
+            return store
+        except Exception:
+            if store._connection is not None:
+                store._connection.close()
+                store._connection = None
             raise
 
     @staticmethod
@@ -585,3 +720,20 @@ class RuntimeStore:
             if self._connection is not None:
                 self._connection.close()
                 self._connection = None
+
+
+def read_runtime_summary(
+    path: str | Path,
+    start: datetime,
+    end: datetime,
+    *,
+    clock: Callable[[], datetime] | None = None,
+    max_groups: int = MAX_GROUPS,
+) -> RuntimeSummary:
+    store = RuntimeStore.open_read_only(
+        path, clock=clock, max_groups=max_groups
+    )
+    try:
+        return store.summary(start, end)
+    finally:
+        store.close()

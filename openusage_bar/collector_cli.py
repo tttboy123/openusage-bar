@@ -223,69 +223,6 @@ def _runtime_window_seconds(value: str) -> int:
     return seconds
 
 
-def _runtime_latency_wire(value: Any) -> dict[str, Any]:
-    return {
-        "durationSampleCount": value.duration_sample_count,
-        "durationAvgMs": value.duration_avg_ms,
-        "durationP95Ms": value.duration_p95_ms,
-        "ttftSampleCount": value.ttft_sample_count,
-        "ttftAvgMs": value.ttft_avg_ms,
-        "ttftP95Ms": value.ttft_p95_ms,
-    }
-
-
-def _runtime_costs_wire(values: Any) -> list[dict[str, Any]]:
-    return [
-        {"currency": value.currency, "micros": value.cost_micros}
-        for value in values
-    ]
-
-
-def _runtime_tokens_wire(value: Any) -> dict[str, Any]:
-    return {
-        "input": value.input_tokens,
-        "output": value.output_tokens,
-        "cacheRead": value.cache_read_tokens,
-        "cacheCreation": value.cache_creation_tokens,
-        "reasoning": value.reasoning_tokens,
-        "total": value.total_tokens,
-        "countingConventions": list(value.token_counting_conventions),
-    }
-
-
-def _runtime_summary_wire(value: Any) -> dict[str, Any]:
-    groups = []
-    for group in value.groups:
-        groups.append({
-            "providerId": group.provider_id,
-            "modelId": group.model_id,
-            "scopeRef": group.scope_ref,
-            "observationCount": group.observation_count,
-            "tokens": _runtime_tokens_wire(group),
-            "statusCounts": dict(group.status_counts),
-            "costCoverage": {"state": group.cost_coverage_state},
-            "costs": _runtime_costs_wire(group.costs),
-            "latency": _runtime_latency_wire(group.latency),
-        })
-    return {
-        "schemaVersion": value.schema_version,
-        "runtimeRevision": value.runtime_revision,
-        "generatedAt": value.generated_at,
-        "window": {"start": value.window_start, "end": value.window_end},
-        "coverage": {
-            "state": value.coverage_state,
-            "omittedGroupCount": value.omitted_group_count,
-        },
-        "observationCount": value.observation_count,
-        "tokens": _runtime_tokens_wire(value),
-        "statusCounts": dict(value.status_counts),
-        "costCoverage": {"state": value.cost_coverage_state},
-        "costs": _runtime_costs_wire(value.costs),
-        "latency": _runtime_latency_wire(value.latency),
-        "groups": groups,
-    }
-
-
 def _run_runtime_command(
     args: argparse.Namespace,
     *,
@@ -294,7 +231,7 @@ def _run_runtime_command(
     clock: Callable[[], datetime] | None,
 ) -> int:
     from .runtime_observation import MAX_DOCUMENT_BYTES, decode_runtime_document
-    from .runtime_store import RuntimeStore
+    from .runtime_store import RuntimeStore, runtime_summary_wire
 
     if args.offline or args.fresh or args.strict:
         raise CLIError("invalid runtime option")
@@ -324,7 +261,7 @@ def _run_runtime_command(
             summary = store.summary(current - timedelta(seconds=seconds), current)
         finally:
             store.close()
-        _write_json(stdout, _runtime_summary_wire(summary))
+        _write_json(stdout, runtime_summary_wire(summary))
         return 0
     raise CLIError("invalid runtime command")
 
@@ -697,11 +634,17 @@ def _run_daemon_with_api(
     waiter: Callable[[int], bool],
     stderr: TextIO,
     catalog_monitor: Any | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> int:
     from .local_api import create_unix_server
 
     try:
-        server = create_unix_server(api_socket, query)
+        server = create_unix_server(
+            api_socket,
+            query,
+            runtime_database=DEFAULT_RUNTIME_PATH,
+            clock=clock,
+        )
     except Exception:
         stderr.write("local API unavailable; daemon stopped\n")
         return 1
@@ -825,6 +768,7 @@ def main(
                 waiter=active_waiter,
                 stderr=stderr,
                 catalog_monitor=catalog_monitor,
+                clock=clock,
             )
 
         is_offline = offline or args.offline

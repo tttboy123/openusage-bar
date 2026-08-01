@@ -171,7 +171,13 @@ GET /v1/costs/daily?from=2026-07-01&to=2026-07-14
 GET /v1/quotas/history
 GET /v1/sources/status
 GET /v1/changes?after=0&limit=100
+GET /v1/runtime/summary?windowSeconds=3600
 ```
+
+`/v1/runtime/summary` 从独立的 24 小时 Runtime Ledger 返回有界、无内容的
+Token、状态、费用与延迟汇总。它同时携带 Local API 的 `dataRevision` 和独立
+`runtimeRevision`；两者不是同一事务。Runtime 数据库缺失或不可安全读取时返回
+`503 runtime_unavailable`，不会把缺失数据表达为零。
 
 `/v1/capabilities` 不只返回“是否有代码适配器”，还会按数据源声明
 Detection、Token Activity、Subscription Capacity、API Spend、权威程度、

@@ -176,6 +176,62 @@ class RuntimeStoreSecurityTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 RuntimeStore(newer)
 
+    def test_read_only_summary_preserves_database_bytes_metadata_and_sidecars(self):
+        from openusage_bar.runtime_store import RuntimeStore, read_runtime_summary
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runtime.sqlite3"
+            writer = RuntimeStore(path, clock=lambda: NOW)
+            try:
+                writer.ingest((observation(1),))
+            finally:
+                writer.close()
+            before_bytes = path.read_bytes()
+            before = path.stat()
+
+            summary = read_runtime_summary(
+                path, NOW - timedelta(hours=1), NOW, clock=lambda: NOW
+            )
+
+            after = path.stat()
+            self.assertEqual(summary.runtime_revision, 1)
+            self.assertEqual(summary.total_tokens, 20)
+            self.assertEqual(path.read_bytes(), before_bytes)
+            self.assertEqual(after.st_mtime_ns, before.st_mtime_ns)
+            self.assertEqual(after.st_mode, before.st_mode)
+            self.assertFalse(Path(str(path) + "-wal").exists())
+            self.assertFalse(Path(str(path) + "-shm").exists())
+
+    def test_read_only_summary_rejects_missing_symlink_and_incompatible_database(self):
+        from openusage_bar.runtime_store import read_runtime_summary
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            missing = root / "missing.sqlite3"
+            with self.assertRaises(RuntimeError):
+                read_runtime_summary(
+                    missing, NOW - timedelta(hours=1), NOW, clock=lambda: NOW
+                )
+
+            target = root / "target.sqlite3"
+            target.touch()
+            symlink = root / "runtime.sqlite3"
+            symlink.symlink_to(target)
+            with self.assertRaises(RuntimeError):
+                read_runtime_summary(
+                    symlink, NOW - timedelta(hours=1), NOW, clock=lambda: NOW
+                )
+
+            incompatible = root / "incompatible.sqlite3"
+            connection = sqlite3.connect(incompatible)
+            connection.execute("CREATE TABLE private_payload (prompt TEXT)")
+            connection.commit()
+            connection.close()
+            with self.assertRaises(RuntimeError):
+                read_runtime_summary(
+                    incompatible, NOW - timedelta(hours=1), NOW, clock=lambda: NOW
+                )
+
 
 class RuntimeStoreSummaryTests(unittest.TestCase):
     def test_summary_reports_bounded_groups_tokens_status_cost_and_latency(self):

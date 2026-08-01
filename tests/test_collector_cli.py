@@ -973,6 +973,52 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual(refresher.max_active, 1)
         self.assertEqual(catalog_monitor.calls, 2)
 
+    def test_daemon_local_api_exposes_default_runtime_summary_read_only(self):
+        from openusage_bar.runtime_store import RuntimeStore
+        from tests.test_local_api import unix_request
+        from tests.test_runtime_store import observation
+
+        stop = threading.Event()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime_path = root / "runtime.sqlite3"
+            socket_path = root / "api.sock"
+            runtime = RuntimeStore(runtime_path, clock=lambda: NOW)
+            try:
+                runtime.ingest((observation(1, completed_at=NOW),))
+            finally:
+                runtime.close()
+            responses = []
+
+            def wait(_seconds):
+                responses.append(
+                    unix_request(
+                        socket_path,
+                        "/v1/runtime/summary?windowSeconds=3600",
+                    )
+                )
+                stop.set()
+                return True
+
+            with patch(
+                "openusage_bar.collector_cli.DEFAULT_RUNTIME_PATH", runtime_path
+            ):
+                code, out, err = self.run_cli(
+                    [
+                        "daemon", "--interval", "60",
+                        "--api-socket", str(socket_path),
+                    ],
+                    refresher=FakeRefresher(),
+                    stop_event=stop,
+                    waiter=wait,
+                )
+
+        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual(responses[0][0], 200)
+        payload = json.loads(responses[0][2])
+        self.assertEqual(payload["runtime"]["runtimeRevision"], 1)
+        self.assertEqual(payload["runtime"]["tokens"]["total"], 20)
+
     def test_daemon_rejects_zero_bool_and_too_small_interval(self):
         for interval in ("0", "1", "true"):
             code, out, err = self.run_cli(["daemon", "--interval", interval], refresher=FakeRefresher())

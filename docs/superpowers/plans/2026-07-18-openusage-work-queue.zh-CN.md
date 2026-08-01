@@ -918,8 +918,17 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   门禁为 Python 964 项两轮通过、Swift 257 项通过，Runtime 契约与存储覆盖率
   分别为 91% 和 96%，Swift 产品行覆盖率 87.64%，全部 Python 产品模块不少于
   80%，依赖审计无已知漏洞，历史密钥扫描与隐私扫描均为 0，发行 metadata
-  保持 `0.6.0 (9)`，签名 App bundle 构建通过。** Live Provider producer、
-  网络写入、本地 API 暴露、Loom 预留/策略、外部 Canary、合并和发布仍未开始。
+  保持 `0.6.0 (9)`，签名 App bundle 构建通过。** Runtime Summary 的只读
+  Local API 前置切片现已实现：`GET /v1/runtime/summary` 以独立
+  `runtimeRevision` 返回最多 512 个匿名分组，SQLite 使用 `mode=ro` /
+  `query_only`，缺失或不安全数据库返回清洗后的 `503 runtime_unavailable`，
+  不创建、迁移、chmod、缓存或伪造零值。本切片的最终本地门禁为
+  Python 991 项两轮通过，`runtime_store` / `local_api` 产品行覆盖率
+  96% / 90%，Swift 257 项 / 21 suites 通过且产品行覆盖率
+  87.65%；依赖审计无已知漏洞，Git tree/history 密钥扫描与两阶段
+  隐私扫描均为 0，三个 Runtime 打包冒烟与最终深度验签通过。
+  Live Provider producer、网络写入、
+  Loom 预留/策略、外部 Canary、合并和发布仍未开始。
 - **WQ-22：Runtime Producer Kit 与 LiteLLM 首个真实生产者。** 使用独立、
   无 LiteLLM 硬依赖的本地 callback，只提取终态时间、公开 Provider/Model、
   Token 与可选估算费用，通过 stdin 调用现有 Collector；内容、凭证、直接身份、
@@ -958,8 +967,10 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   **真实运行时流量、外部 Canary、合并、推送和发布仍未完成。**
 - **WQ-24：Loom X1 observe-only 接入。** Loom 只读 Resource Snapshot、
   Change Feed 与有界 Runtime Summary，映射为 Loom 自有 observation；不改变
-  Scheduler 结果，不在 OpenUsage Bar 中实现预留、准入或策略路由。**尚未开始，
-  且必须在独立 Loom 仓库按其权限边界实施。**
+  Scheduler 结果，不在 OpenUsage Bar 中实现预留、准入或策略路由。**生产者侧
+  API 前置切片已实现并通过完整门禁：Snapshot、Changes 与新增的
+  `/v1/runtime/summary` 均可经只读 UDS API 消费；Loom 消费端尚未实现，且必须
+  在独立 Loom 仓库按其权限边界实施。**
 
 WQ-18 完成后才能开始 WQ-19；WQ-20 可与 WQ-19 按不同文件并行设计；
 WQ-21 必须先有独立 ADR、保留期与数据上限，不得直接写入

@@ -38,6 +38,7 @@ The remaining fields are the same fields emitted by the existing collector CLI:
 | `GET /v1/quotas/history` | optional `providerId`, `accountRef`, `limit`; `from` and `to` must be supplied together | `snapshots`; newest selected page returned in chronological order |
 | `GET /v1/sources/status` | none | `sources`, canonical provider/source order |
 | `GET /v1/changes` | optional `after` (default 0), `limit` (default 100) | `records`, `nextCursor`, `hasMore`; an ahead cursor is invalid |
+| `GET /v1/runtime/summary` | optional `windowSeconds` (default 3600; 60...86400) | nested, bounded Runtime Summary with its own `runtimeRevision`, Token, status, cost, latency, and at most 512 anonymous-scope groups |
 
 Daily activity rows preserve the `totalTokens` value reported by the selected
 source. Consumers must not recompute or replace it from the component counters.
@@ -97,6 +98,18 @@ unknown `recordType` values so additive producers remain compatible. A
 `ledger_schema` change requires a fresh `/v1/snapshot`; it is not a synthetic
 backfill of every fact created by a ledger migration. Coverage records are
 public facts: they distinguish an observed zero from unknown data.
+
+`/v1/runtime/summary` is an additive, read-only view over the separate
+short-retention Runtime Ledger. The outer `schemaVersion: "1.0"`,
+`dataRevision`, and `generatedAt` remain the Local API envelope. The nested
+`runtime` object retains Runtime schema `1`, `runtimeRevision`, exact UTC
+window, coverage, totals, groups, cost coverage, and latency. `dataRevision`
+and `runtimeRevision` are independent high-water marks; the response does not
+claim a transaction spanning the durable activity ledger and Runtime Ledger.
+The Runtime database is opened with SQLite `mode=ro` and `query_only`; the API
+does not create, migrate, chmod, repair, or cache it. Missing, unsafe, corrupt,
+or incompatible Runtime state returns the sanitized
+`503 runtime_unavailable` error and never a numeric zero summary.
 
 `/v1/capabilities` is the static family catalog. It exposes all 35 provider
 families from OpenUsage 0.23.0 plus the MiniMax and Step Plan built-ins. Each
