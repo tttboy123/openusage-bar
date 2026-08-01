@@ -884,11 +884,15 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
 - **WQ-18：基础设施边界与发布状态。** 固化 Fact、Telemetry、Reservation、
   Policy 四层写权限；Core Contract 改为 OS-neutral；OpenUsage Bar 分发继续
   单独要求 macOS；以严格 JSON 统一版本、API 与 Canary 状态。
-  **仓库实现、本地完整门禁与 PR #53 required CI 已完成；当前等待合入。**
+  **仓库实现、本地完整门禁与 PR #53 required CI 已完成并已合入 `main`。**
 - **WQ-19：移除 Card-first 核心遗留。** 逐个 Adapter 由
   `LegacyCardAdapter` 迁移为 fact-specific result，`ProviderCard` 只留在
   Presentation；每个 Provider 使用独立 RED → GREEN 切片。精确迁移顺序见
   [`2026-08-01-provider-card-retirement.md`](2026-08-01-provider-card-retirement.md)。
+  **WQ-19A 已完成本地实现和完整发行门禁：Codex、Kiro、MiniMax、Step Plan、
+  Generic HTTPS 与 Moonshot 直接返回带来源归属的额度/余额事实，headless
+  Collector 不再读取 `last_*` 卡片旁路；OpenAI 与自定义 Feed 不再注册伪额度
+  卡片。WQ-19B 仍须等待 WQ-20 冻结 `openusage-export/v1`。**
 - **WQ-20：冻结 `openusage-export/v1`。** 固定 producer 版本、Provider
   filter、Token 口径、Coverage、空结果、范围/分页与能力协商，并提供 N-1
   Fixture；OpenUsage Bar 不依赖未声明的开发 Commit 行为。

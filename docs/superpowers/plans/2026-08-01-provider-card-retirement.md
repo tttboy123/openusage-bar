@@ -428,7 +428,12 @@ Expected: all tests pass; Local API v1 and generated Swift fixtures are unchange
 ```bash
 scripts/audit_dependencies.sh
 .build-venv/bin/python scripts/release_secret_scan.py
-.build-venv/bin/python scripts/privacy_scan.py openusage_bar tests
+.build-venv/bin/python scripts/privacy_scan.py \
+  openusage_bar/resources/release-state.v1.json \
+  openusage_bar/resources/provider-catalog.v1.json \
+  openusage_bar/resources/local-api-v1.schema.json \
+  swift_app/Sources/UsageCore/GeneratedProviderCatalog.swift \
+  swift_app/Sources/UsageCore/GeneratedActivitySchema.swift
 .build-venv/bin/python scripts/verify_release_metadata.py
 scripts/build_app.sh
 ```
