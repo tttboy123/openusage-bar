@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import os
 import plistlib
 import re
@@ -18,6 +19,8 @@ PLISTS = (
 )
 RELEASE_GUIDE = Path("docs/release-quick-start.md")
 RELEASE_READMES = (Path("README.md"), Path("README.en.md"))
+RELEASE_STATE = Path("openusage_bar/resources/release-state.v1.json")
+ROADMAP = Path("ROADMAP.md")
 VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 TAG_PATTERN = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -35,6 +38,19 @@ README_DMG_PATTERN = re.compile(
     r"((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))"
     r"-macos-arm64\.dmg"
 )
+API_VERSION_PATTERN = re.compile(r"^[1-9]\d*\.\d+$")
+ROADMAP_STATE_PATTERN = re.compile(
+    r"(?m)^<!-- openusage-release-state: "
+    r"version=([^ ]+) channel=([^ ]+) api=([^ ]+) "
+    r"canary=(\d+)/(\d+) clock=([^ ]+) -->$"
+)
+RELEASE_STATE_FIELDS = {
+    "schemaVersion", "currentVersion", "buildVersion", "channel",
+    "apiVersion", "canary",
+}
+CANARY_FIELDS = {"qualifiedMachines", "targetMachines", "clock"}
+RELEASE_CHANNELS = {"alpha", "beta", "rc", "stable"}
+CANARY_CLOCKS = {"not_started", "running", "passed", "blocked"}
 
 
 class MetadataError(ValueError):
@@ -121,6 +137,65 @@ def _verify_release_readmes(root: Path, version: str) -> None:
             raise MetadataError("release_readme")
 
 
+def _release_state(root: Path, version: str, build: str) -> dict[str, object]:
+    try:
+        state = json.loads((root / RELEASE_STATE).read_text("utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeError) as error:
+        raise MetadataError("release_state") from error
+    if not isinstance(state, dict) or set(state) != RELEASE_STATE_FIELDS:
+        raise MetadataError("release_state")
+    if type(state["schemaVersion"]) is not int or state["schemaVersion"] != 1:
+        raise MetadataError("release_state")
+    if state["currentVersion"] != version or state["buildVersion"] != build:
+        raise MetadataError("release_state")
+    channel = state["channel"]
+    api_version = state["apiVersion"]
+    if not isinstance(channel, str) or channel not in RELEASE_CHANNELS:
+        raise MetadataError("release_state")
+    if (
+        not isinstance(api_version, str)
+        or API_VERSION_PATTERN.fullmatch(api_version) is None
+    ):
+        raise MetadataError("release_state")
+    canary = state["canary"]
+    if not isinstance(canary, dict) or set(canary) != CANARY_FIELDS:
+        raise MetadataError("release_state")
+    qualified = canary["qualifiedMachines"]
+    target = canary["targetMachines"]
+    clock = canary["clock"]
+    if (
+        type(qualified) is not int
+        or type(target) is not int
+        or qualified < 0
+        or target <= 0
+        or qualified > target
+        or not isinstance(clock, str)
+        or clock not in CANARY_CLOCKS
+    ):
+        raise MetadataError("release_state")
+    if qualified < target and clock in {"running", "passed"}:
+        raise MetadataError("release_state")
+    return state
+
+
+def _verify_roadmap_state(root: Path, state: dict[str, object]) -> None:
+    roadmap = (root / ROADMAP).read_text("utf-8")
+    matches = ROADMAP_STATE_PATTERN.findall(roadmap)
+    canary = state["canary"]
+    if not isinstance(canary, dict):
+        raise MetadataError("roadmap_state")
+    expected = (
+        str(state["currentVersion"]),
+        str(state["channel"]),
+        str(state["apiVersion"]),
+        str(canary["qualifiedMachines"]),
+        str(canary["targetMachines"]),
+        str(canary["clock"]),
+    )
+    if matches != [expected]:
+        raise MetadataError("roadmap_state")
+
+
 def _verify_build_history(root: Path, version: str, build: str) -> None:
     current_build = int(build)
     for tag in _git(root, "tag", "--list", "v*").splitlines():
@@ -180,6 +255,8 @@ def verify(root: Path, tag: str | None, expected_commit: str | None) -> tuple[st
     _verify_changelog(root, version)
     _verify_release_guide(root, version)
     _verify_release_readmes(root, version)
+    state = _release_state(root, version, build)
+    _verify_roadmap_state(root, state)
     _verify_build_history(root, version, build)
     if tag:
         _verify_tag(root, version, tag, expected_commit)

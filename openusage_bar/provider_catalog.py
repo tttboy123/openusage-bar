@@ -255,6 +255,25 @@ class ProviderCatalog:
     def require(self, family_id: str) -> ProviderFamily:
         return self._families[family_id]
 
+    def require_operating_system(self, operating_system: str) -> None:
+        """Validate a product distribution separately from the core schema."""
+        selected = _require_enum(
+            operating_system,
+            OPERATING_SYSTEMS,
+            "Distribution operating system",
+        )
+        unsupported = tuple(
+            f"{family.family_id}/{source.source_id}"
+            for family in self.families
+            for source in family.sources
+            if selected not in source.operating_systems
+        )
+        if unsupported:
+            raise ValueError(
+                f"{selected} distribution cannot register sources: "
+                + ", ".join(unsupported)
+            )
+
     def search(self, query: str) -> tuple[ProviderFamily, ...]:
         """Search public labels without rewriting a Provider identity."""
         if not isinstance(query, str):
@@ -556,8 +575,8 @@ def _parse_source(value: Any, family_id: str, index: int) -> CatalogSource:
     )
     if not set(operating_systems) <= OPERATING_SYSTEMS:
         raise ValueError(f"{context} has unsupported operating system")
-    if "macos" not in operating_systems:
-        raise ValueError(f"{context} must support macos")
+    if not operating_systems:
+        raise ValueError(f"{context} must declare an operating system")
     stability = _require_enum(raw["stability"], SOURCE_STABILITIES, context)
     provenance = _require_enum(raw["provenance"], SOURCE_PROVENANCES, context)
     fact_families = _require_sorted_unique_strings(
@@ -695,3 +714,4 @@ def _unknown_capabilities() -> ProviderCapabilities:
 
 
 catalog = load_provider_catalog()
+catalog.require_operating_system("macos")

@@ -4,6 +4,22 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- A machine-readable release state now keeps the public version, build, Local
+  API version, release channel, and external Canary clock under one strict
+  validation boundary.
+- ADR 0001 freezes ownership of durable resource facts, bounded request
+  telemetry, scheduler reservations, and policy decisions.
+
+### Changed
+
+- Provider source contracts are OS-neutral; the OpenUsage Bar distribution
+  separately verifies that every source registered in its shipped catalog
+  supports macOS.
+- The public roadmap now reports the released v0.6.0 RC baseline and keeps the
+  0 / 5 external Canary state distinct from repository test results.
+
 ## 0.6.0 - 2026-07-30
 
 ### Added

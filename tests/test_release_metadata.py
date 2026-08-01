@@ -12,6 +12,7 @@ from scripts.verify_action_pins import action_pin_issues, verify_action_pin_repo
 
 ROOT = Path(__file__).resolve().parents[1]
 VERIFIER = ROOT / "scripts" / "verify_release_metadata.py"
+RELEASE_STATE = Path("openusage_bar/resources/release-state.v1.json")
 OFFICIAL_ACTION_REFERENCE = re.compile(
     r"^\s*(?:-\s*)?uses:\s*(actions/[A-Za-z0-9_./-]+)@([^\s#]+)",
     re.MULTILINE,
@@ -34,6 +35,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.repo, check=True)
         (self.repo / "swift_app/Resources").mkdir(parents=True)
         (self.repo / "openusage_bar").mkdir()
+        (self.repo / "openusage_bar/resources").mkdir()
         (self.repo / "docs").mkdir(exist_ok=True)
         self.write_metadata("0.3.0", "3")
         self.commit("release 0.3.0")
@@ -75,6 +77,27 @@ class ReleaseMetadataTests(unittest.TestCase):
                 f"download/v{version}/OpenUsage-Bar-v{version}-macos-arm64.dmg)\n",
                 encoding="utf-8",
             )
+        release_state = {
+            "schemaVersion": 1,
+            "currentVersion": version,
+            "buildVersion": build,
+            "channel": "rc",
+            "apiVersion": "1.0",
+            "canary": {
+                "qualifiedMachines": 0,
+                "targetMachines": 5,
+                "clock": "not_started",
+            },
+        }
+        (self.repo / RELEASE_STATE).write_text(
+            json.dumps(release_state, indent=2) + "\n", encoding="utf-8"
+        )
+        (self.repo / "ROADMAP.md").write_text(
+            "<!-- openusage-release-state: "
+            f"version={version} channel=rc api=1.0 "
+            "canary=0/5 clock=not_started -->\n",
+            encoding="utf-8",
+        )
 
     def commit(self, message):
         subprocess.run(["git", "add", "."], cwd=self.repo, check=True)
@@ -132,6 +155,46 @@ class ReleaseMetadataTests(unittest.TestCase):
             "<!-- openusage-release-version: 0.4.0 -->\n"
             "[Download](https://github.com/tttboy123/openusage-bar/releases/"
             "download/v0.3.0/OpenUsage-Bar-v0.3.0-macos-arm64.dmg)\n",
+            encoding="utf-8",
+        )
+        self.assertNotEqual(self.run_verifier().returncode, 0)
+
+    def test_release_state_version_must_match_bundle(self):
+        state = json.loads((self.repo / RELEASE_STATE).read_text("utf-8"))
+        state["currentVersion"] = "0.3.0"
+        (self.repo / RELEASE_STATE).write_text(
+            json.dumps(state), encoding="utf-8"
+        )
+        self.assertNotEqual(self.run_verifier().returncode, 0)
+
+    def test_release_state_build_must_match_bundle(self):
+        state = json.loads((self.repo / RELEASE_STATE).read_text("utf-8"))
+        state["buildVersion"] = "3"
+        (self.repo / RELEASE_STATE).write_text(
+            json.dumps(state), encoding="utf-8"
+        )
+        self.assertNotEqual(self.run_verifier().returncode, 0)
+
+    def test_release_state_rejects_unknown_fields(self):
+        state = json.loads((self.repo / RELEASE_STATE).read_text("utf-8"))
+        state["private"] = "value"
+        (self.repo / RELEASE_STATE).write_text(
+            json.dumps(state), encoding="utf-8"
+        )
+        self.assertNotEqual(self.run_verifier().returncode, 0)
+
+    def test_release_state_rejects_invalid_canary_counts(self):
+        state = json.loads((self.repo / RELEASE_STATE).read_text("utf-8"))
+        state["canary"]["qualifiedMachines"] = 6
+        (self.repo / RELEASE_STATE).write_text(
+            json.dumps(state), encoding="utf-8"
+        )
+        self.assertNotEqual(self.run_verifier().returncode, 0)
+
+    def test_roadmap_release_state_marker_must_match(self):
+        (self.repo / "ROADMAP.md").write_text(
+            "<!-- openusage-release-state: version=0.3.0 channel=rc "
+            "api=1.0 canary=0/5 clock=not_started -->\n",
             encoding="utf-8",
         )
         self.assertNotEqual(self.run_verifier().returncode, 0)

@@ -531,8 +531,8 @@ class ProviderCatalogTests(unittest.TestCase):
             "unknown source field": lambda value: source(value).update(
                 {"future": "value"}
             ),
-            "missing macos": lambda value: source(value).update(
-                {"operating_systems": ["linux"]}
+            "empty operating systems": lambda value: source(value).update(
+                {"operating_systems": []}
             ),
             "invalid operating system": lambda value: source(value).update(
                 {"operating_systems": ["macos", "unix"]}
@@ -556,6 +556,23 @@ class ProviderCatalogTests(unittest.TestCase):
                 mutate(candidate)
                 with self.assertRaises(ValueError):
                     self._load_payload(candidate)
+
+    def test_core_catalog_accepts_linux_but_macos_distribution_rejects_it(self):
+        payload = self._manifest_payload()
+        payload["families"][0]["sources"][0]["operating_systems"] = ["linux"]
+
+        parsed = self._load_payload(payload)
+
+        self.assertEqual(
+            parsed.families[0].sources[0].operating_systems,
+            frozenset({"linux"}),
+        )
+        with self.assertRaisesRegex(ValueError, "macos distribution"):
+            parsed.require_operating_system("macos")
+
+    def test_distribution_operating_system_must_be_known(self):
+        with self.assertRaisesRegex(ValueError, "operating system"):
+            self.catalog.require_operating_system("unix")
 
     def test_source_fact_evidence_must_match_supported_capabilities(self):
         payload = self._capability_payload()

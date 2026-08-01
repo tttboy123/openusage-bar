@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "currentVersion": "0.6.0",
+  "buildVersion": "9",
+  "channel": "rc",
+  "apiVersion": "1.0",
+  "canary": {
+    "qualifiedMachines": 0,
+    "targetMachines": 5,
+    "clock": "not_started"
+  }
+}
