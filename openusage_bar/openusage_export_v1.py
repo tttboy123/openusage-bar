@@ -11,13 +11,14 @@ CONTRACT = "openusage-export/v1"
 SCHEMA_VERSION = "1"
 MAX_RANGE_DAYS = 366
 MAX_PAGE_SIZE = 1000
+MAX_PROVIDER_ROWS = 512
 MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
 MAX_CURSOR_LENGTH = 2048
 MAX_VERSION_LENGTH = 128
 MAX_MODEL_LENGTH = 256
 MAX_TOKEN_VALUE = 9_223_372_036_854_775_807
 
-KINDS = ("capabilities", "daily_usage")
+KINDS = ("capabilities", "daily_usage", "providers")
 COVERAGE_STATES = ("complete", "partial", "none")
 COUNTING_CONVENTIONS = (
     "components_disjoint",
@@ -25,6 +26,15 @@ COUNTING_CONVENTIONS = (
     "provider_reported",
 )
 QUALITIES = ("direct", "derived", "estimated")
+PROVIDER_STATES = (
+    "available",
+    "near_limit",
+    "limited",
+    "auth_required",
+    "unsupported",
+    "error",
+    "unknown",
+)
 
 _PROVIDER_ID = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
 _MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -88,6 +98,7 @@ class ExportCapabilities:
     provider_filter: str
     max_range_days: int
     max_page_size: int
+    max_provider_rows: int
     coverage_states: tuple[str, ...]
     token_counting_conventions: tuple[str, ...]
     qualities: tuple[str, ...]
@@ -128,6 +139,23 @@ class ExportDailyRow:
     total_tokens: int
     token_counting_convention: str
     quality: str
+
+
+@dataclass(frozen=True)
+class ExportProviderRow:
+    provider_id: str
+    state: str
+    observed_at: datetime
+
+
+@dataclass(frozen=True)
+class ExportProviders:
+    contract: str
+    schema_version: str
+    generated_at: datetime
+    openusage_version: str
+    coverage_state: str
+    rows: tuple[ExportProviderRow, ...]
 
 
 @dataclass(frozen=True)
@@ -286,7 +314,12 @@ def decode_capabilities(
         raise ExportDecodeError()
     max_range = _integer(_required(raw, "max_range_days"), minimum=1)
     max_page = _integer(_required(raw, "max_page_size"), minimum=1)
-    if max_range != MAX_RANGE_DAYS or max_page != MAX_PAGE_SIZE:
+    max_providers = _integer(_required(raw, "max_provider_rows"), minimum=1)
+    if (
+        max_range != MAX_RANGE_DAYS
+        or max_page != MAX_PAGE_SIZE
+        or max_providers != MAX_PROVIDER_ROWS
+    ):
         raise ExportDecodeError()
     return ExportCapabilities(
         contract=CONTRACT,
@@ -297,9 +330,50 @@ def decode_capabilities(
         provider_filter="exact",
         max_range_days=max_range,
         max_page_size=max_page,
+        max_provider_rows=max_providers,
         coverage_states=coverage_states,
         token_counting_conventions=conventions,
         qualities=qualities,
+    )
+
+
+def decode_providers(
+    payload: str | bytes | bytearray | dict[str, Any],
+) -> ExportProviders:
+    document = _document(payload)
+    generated_at, version = _header(document, "providers")
+    coverage = _mapping(_required(document, "coverage"))
+    coverage_state = _required(coverage, "state")
+    if coverage_state not in COVERAGE_STATES:
+        raise ExportDecodeError()
+    raw_rows = _required(document, "rows")
+    if not isinstance(raw_rows, list) or len(raw_rows) > MAX_PROVIDER_ROWS:
+        raise ExportDecodeError()
+    rows: list[ExportProviderRow] = []
+    previous = ""
+    for raw_value in raw_rows:
+        raw = _mapping(raw_value)
+        provider_id = _safe_string(_required(raw, "provider_id"), 128)
+        state = _required(raw, "state")
+        observed_at = _utc_datetime(_required(raw, "observed_at"))
+        if (
+            _PROVIDER_ID.fullmatch(provider_id) is None
+            or provider_id <= previous
+            or state not in PROVIDER_STATES
+            or observed_at > generated_at
+        ):
+            raise ExportDecodeError()
+        rows.append(ExportProviderRow(provider_id, state, observed_at))
+        previous = provider_id
+    if coverage_state == "none" and rows:
+        raise ExportDecodeError()
+    return ExportProviders(
+        CONTRACT,
+        SCHEMA_VERSION,
+        generated_at,
+        version,
+        coverage_state,
+        tuple(rows),
     )
 
 

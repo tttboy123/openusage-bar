@@ -27,7 +27,7 @@ from ..minimax import (
 from ..moonshot import MoonshotBalanceAdapter
 from ..network import BoundedHTTPClient
 from ..openai_organization import OpenAIOrganizationImporter
-from ..openusage_adapter import OpenUsageAdapter
+from ..openusage_adapter import OpenUsageDiscoveryAdapter
 from ..step_plan import StepPlanAdapter, endpoints_for_site
 from .contracts import ProviderBinding, ProviderDescriptor, SourceAttribution
 from .registry import AdapterRegistry
@@ -91,18 +91,28 @@ def default_registry(
     openai_client = BoundedHTTPClient(allowed_redirect_hosts=set())
     moonshot_client = BoundedHTTPClient(allowed_redirect_hosts=set())
 
-    registry.register_global(lambda: ProviderBinding(
-        provider_id="openusage", family_id="openusage",
-        descriptor=_descriptor(
-            "openusage", "openusage", "OpenUsage", "local_tool"
-        ),
-        quota_sources=(_quota_source(
-            OpenUsageAdapter(clock), "openusage.cards", 10, "child_process"
-        ),),
-        usage_sources=(_performance_source(
+    def openusage() -> ProviderBinding:
+        importer = _performance_source(
             OpenUsageDailyImporter(clock=clock), "child_process"
-        ),),
-    ))
+        )
+        discovery = _performance_source(
+            OpenUsageDiscoveryAdapter(
+                clock=clock,
+                openusage_path=importer.openusage_path,
+                capability_probe=importer.export_v1_capabilities,
+            ),
+            "child_process",
+        )
+        return ProviderBinding(
+            provider_id="openusage", family_id="openusage",
+            descriptor=_descriptor(
+                "openusage", "openusage", "OpenUsage", "local_tool"
+            ),
+            discovery_sources=(discovery,),
+            usage_sources=(importer,),
+        )
+
+    registry.register_global(openusage)
     registry.register_global(lambda: ProviderBinding(
         provider_id="kiro_cli", family_id="kiro_cli",
         descriptor=_descriptor(

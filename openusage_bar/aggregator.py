@@ -23,6 +23,8 @@ from .performance_timing import (
 from .providers.contracts import (
     BalanceCollectionResult,
     BalanceFetchFailure,
+    DiscoveryFetchFailure,
+    DiscoveryFetchSuccess,
     ProviderDescriptor,
     QuotaCollectionResult,
     QuotaFetchFailure,
@@ -254,18 +256,18 @@ class Aggregator:
 
 
 class LedgerRefresher:
-    """Headless bridge from provider cards into the canonical activity ledger."""
+    """Fact-only bridge from Provider adapters into the activity ledger."""
 
     def __init__(
-        self, aggregator, collector, quota_sources=(), balance_sources=(), *,
+        self, collector, discovery_sources=(), quota_sources=(), balance_sources=(), *,
         provider_descriptors=(),
         provider_attributions=(),
         eager_usage_provider_ids=(),
         clock=None,
         timing_recorder: RefreshTimingRecorder | None = None,
     ) -> None:
-        self.aggregator = aggregator
         self.collector = collector
+        self.discovery_sources = tuple(discovery_sources)
         self.quota_sources = tuple(quota_sources)
         self.balance_sources = tuple(balance_sources)
         self.provider_descriptors = tuple(provider_descriptors)
@@ -280,7 +282,6 @@ class LedgerRefresher:
                 self.collector.refresh_usage(self.eager_usage_provider_ids)
             except Exception:
                 pass
-        overview = self.aggregator.refresh()
         attempted_at = self.clock().astimezone(timezone.utc)
         instances = {
             descriptor.provider_id: descriptor.observed(
@@ -288,6 +289,31 @@ class LedgerRefresher:
             )
             for descriptor, attribution in self.provider_attributions
         }
+        discovery_observations = []
+        discovery_failures = []
+        dynamic_descriptors = {}
+        for owner, source_id, adapter in self.discovery_sources:
+            try:
+                result = measure_source_call(
+                    self.timing_recorder,
+                    source_class_for(adapter, "child_process"),
+                    adapter.fetch_discovery,
+                )
+            except Exception:
+                result = DiscoveryFetchFailure("unexpected_failure")
+            if isinstance(result, DiscoveryFetchSuccess):
+                for observation in result.observations:
+                    descriptor = observation.descriptor
+                    dynamic_descriptors[descriptor.provider_id] = descriptor
+                    discovery_observations.append(observation)
+            elif isinstance(result, DiscoveryFetchFailure):
+                discovery_failures.append((
+                    owner.provider_id, source_id, result.error_code
+                ))
+            else:
+                discovery_failures.append((
+                    owner.provider_id, source_id, "invalid_import_result"
+                ))
         results = []
         for descriptor, source_id, adapter in self.quota_sources:
             try:
@@ -351,14 +377,18 @@ class LedgerRefresher:
                 pass
 
         self.collector.refresh(
-            overview,
             provider_instances=tuple(
                 instances[provider_id] for provider_id in sorted(instances)
             ),
             provider_families={
                 descriptor.provider_id: descriptor.family_id
-                for descriptor in self.provider_descriptors
+                for descriptor in (
+                    *self.provider_descriptors,
+                    *(dynamic_descriptors[key] for key in sorted(dynamic_descriptors)),
+                )
             },
+            discovery_observations=tuple(discovery_observations),
+            discovery_failures=tuple(discovery_failures),
             balance_results=tuple(balance_results),
             quota_results=tuple(results),
         )
@@ -391,19 +421,6 @@ def build_headless_refresher(
     except (OSError, ValueError):
         configs = []
     bindings = default_registry(clock=clock, keychain=keychain).build(configs)
-    adapters = [item[4] for item in sorted(
-        (
-            getattr(adapter, "source_priority", 100),
-            binding.provider_id,
-            getattr(adapter, "source_id", type(adapter).__name__),
-            type(adapter).__qualname__,
-            adapter,
-        )
-        for binding in bindings
-        for adapter in (*binding.quota_sources, *binding.balance_sources)
-        if not hasattr(adapter, "fetch_quota")
-        and not hasattr(adapter, "fetch_balance")
-    )]
     openusage_importer = next(
         source
         for binding in bindings if binding.provider_id == "openusage"
@@ -422,12 +439,6 @@ def build_headless_refresher(
             )
         if sources:
             official_importers[binding.provider_id] = next(iter(sources.values()))
-    aggregator = Aggregator(
-        adapters,
-        CardCache(),
-        clock,
-        timing_recorder=timing_recorder,
-    )
     collector = ActivityCollector(
         activity_store,
         openusage_importer,
@@ -443,6 +454,14 @@ def build_headless_refresher(
         )
         for binding in bindings for adapter in binding.quota_sources
         if hasattr(adapter, "fetch_quota")
+    )
+    discovery_sources = tuple(
+        (
+            binding.descriptor,
+            getattr(adapter, "source_id", type(adapter).__name__),
+            adapter,
+        )
+        for binding in bindings for adapter in binding.discovery_sources
     )
     balance_sources = tuple(
         (
@@ -473,7 +492,7 @@ def build_headless_refresher(
                     (binding.descriptor, attribution),
                 )
     return LedgerRefresher(
-        aggregator, collector, quota_sources, balance_sources,
+        collector, discovery_sources, quota_sources, balance_sources,
         provider_descriptors=tuple(
             binding.descriptor
             for binding in bindings

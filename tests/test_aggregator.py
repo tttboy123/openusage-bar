@@ -17,7 +17,10 @@ from openusage_bar.daily_history import ActivityCollector, DailyImportResult
 from openusage_bar.models import Category, Overview, ProviderCard, ProviderStatus
 from openusage_bar.performance_timing import RefreshTimingRecorder
 from openusage_bar.providers.contracts import (
+    DiscoveryFetchFailure,
+    DiscoveryFetchSuccess,
     ProviderDescriptor,
+    ProviderDiscoveryObservation,
     QuotaCollectionResult,
     QuotaFetchFailure,
     SourceAttribution,
@@ -156,11 +159,75 @@ class BoundedReadOnlyKeychainTests(unittest.TestCase):
 
 
 class HeadlessRefresherFactoryTests(unittest.TestCase):
+    def test_ledger_refresher_forwards_openusage_discovery_facts(self):
+        collector = Mock()
+        adapter = Mock()
+        adapter.performance_source_class = "child_process"
+        owner = ProviderDescriptor(
+            provider_id="openusage",
+            family_id="openusage",
+            display_name="OpenUsage",
+            category="local_tool",
+        )
+        discovered = ProviderDescriptor(
+            provider_id="cursor",
+            family_id="cursor",
+            display_name="Cursor",
+            category="subscription",
+        )
+        observation = ProviderDiscoveryObservation(
+            descriptor=discovered,
+            attribution=SourceAttribution(
+                credential_source="openusage", source_kind="openusage"
+            ),
+            source_id="openusage.discovery",
+            state="available",
+            observed_at=NOW,
+        )
+        adapter.fetch_discovery.return_value = DiscoveryFetchSuccess((observation,))
+
+        LedgerRefresher(
+            collector,
+            discovery_sources=((owner, "openusage.discovery", adapter),),
+            clock=lambda: NOW,
+        ).refresh()
+
+        collector.refresh.assert_called_once_with(
+            provider_instances=(),
+            provider_families={"cursor": "cursor"},
+            discovery_observations=(observation,),
+            discovery_failures=(),
+            balance_results=(),
+            quota_results=(),
+        )
+
+    def test_ledger_refresher_sanitizes_discovery_failures(self):
+        owner = ProviderDescriptor(
+            provider_id="openusage",
+            family_id="openusage",
+            display_name="OpenUsage",
+            category="local_tool",
+        )
+        for returned, expected in (
+            (DiscoveryFetchFailure("export_failed"), "export_failed"),
+            (object(), "invalid_import_result"),
+        ):
+            with self.subTest(expected=expected):
+                collector = Mock()
+                adapter = Mock()
+                adapter.fetch_discovery.return_value = returned
+                LedgerRefresher(
+                    collector,
+                    discovery_sources=((owner, "openusage.discovery", adapter),),
+                    clock=lambda: NOW,
+                ).refresh()
+                self.assertEqual(
+                    collector.refresh.call_args.kwargs["discovery_failures"],
+                    (("openusage", "openusage.discovery", expected),),
+                )
+
     def test_eager_local_usage_is_collected_before_slow_quota_refresh(self):
         events = []
-        overview = Overview([])
-        aggregator = Mock()
-        aggregator.refresh.side_effect = lambda: events.append("quota") or overview
         collector = Mock()
         collector.refresh_usage.side_effect = lambda provider_ids: events.append(
             ("usage", provider_ids)
@@ -168,15 +235,12 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         collector.refresh.side_effect = lambda *_args, **_kwargs: events.append("ledger")
 
         LedgerRefresher(
-            aggregator, collector, eager_usage_provider_ids=("codex",),
+            collector, eager_usage_provider_ids=("codex",),
         ).refresh()
 
-        self.assertEqual(events, [("usage", ("codex",)), "quota", "ledger"])
+        self.assertEqual(events, [("usage", ("codex",)), "ledger"])
 
     def test_ledger_refresher_forwards_explicit_quota_results(self):
-        overview = Overview([])
-        aggregator = Mock()
-        aggregator.refresh.return_value = overview
         collector = Mock()
         adapter = Mock()
         adapter.performance_source_class = "local_file"
@@ -197,8 +261,8 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         )
 
         LedgerRefresher(
-            aggregator, collector,
-            ((descriptor, "codex.local_rate_limits", adapter),),
+            collector,
+            quota_sources=((descriptor, "codex.local_rate_limits", adapter),),
             provider_descriptors=(descriptor,),
             clock=lambda: NOW,
         ).refresh()
@@ -206,7 +270,6 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         adapter.fetch_quota.assert_called_once_with()
         adapter.fetch.assert_not_called()
         collector.refresh.assert_called_once_with(
-            overview,
             provider_instances=(ProviderInstance(
                 provider_id="codex",
                 family_id="codex",
@@ -217,6 +280,8 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
                 observed_at="2026-07-14T00:00:00.000000Z",
             ),),
             provider_families={"codex": "codex"},
+            discovery_observations=(),
+            discovery_failures=(),
             balance_results=(),
             quota_results=((
                 "codex", "codex.local_rate_limits", failure,
@@ -224,9 +289,6 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         )
 
     def test_usage_only_provider_identity_does_not_require_a_card(self):
-        overview = Overview([])
-        aggregator = Mock()
-        aggregator.refresh.return_value = overview
         collector = Mock()
         descriptor = ProviderDescriptor(
             provider_id="openai",
@@ -240,7 +302,6 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         )
 
         LedgerRefresher(
-            aggregator,
             collector,
             provider_descriptors=(descriptor,),
             provider_attributions=((descriptor, attribution),),
@@ -248,9 +309,10 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         ).refresh()
 
         collector.refresh.assert_called_once_with(
-            overview,
             provider_instances=(descriptor.observed(NOW, attribution),),
             provider_families={"openai": "openai"},
+            discovery_observations=(),
+            discovery_failures=(),
             balance_results=(),
             quota_results=(),
         )
@@ -639,19 +701,7 @@ class AggregatorTests(unittest.TestCase):
             self.assertEqual(result.source_kind, "openusage")
             self.assertIn(activity, result.detail or "")
 
-            store = Mock()
-            store.has_daily_history.return_value = True
-            importer = Mock()
-            importer.fetch.return_value = DailyImportResult(True, ())
-            ActivityCollector(store, importer, clock=lambda: NOW).refresh(overview)
-
-            instance = store.upsert_provider_instance.call_args.args[0]
-            self.assertEqual(instance.provider_id, provider_id)
-            self.assertEqual(instance.family_id, provider_id)
-            self.assertEqual(instance.credential_source, "openusage")
-            self.assertEqual(instance.source_kind, "openusage")
-
-    def test_legacy_kiro_quota_fallback_publishes_openusage_identity(self):
+    def test_legacy_kiro_quota_fallback_preserves_presentation_identity(self):
         self._assert_legacy_quota_fallback_publishes_openusage_identity(
             "kiro_cli",
             "49 / 50 credits remaining",
@@ -660,7 +710,7 @@ class AggregatorTests(unittest.TestCase):
             "1 conversation",
         )
 
-    def test_legacy_codex_quota_fallback_publishes_openusage_identity(self):
+    def test_legacy_codex_quota_fallback_preserves_presentation_identity(self):
         self._assert_legacy_quota_fallback_publishes_openusage_identity(
             "codex",
             "5h 75% remaining",

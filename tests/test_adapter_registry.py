@@ -25,7 +25,7 @@ from openusage_bar.kiro import KiroQuotaAdapter
 from openusage_bar.minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
 from openusage_bar.moonshot import MoonshotBalanceAdapter
 from openusage_bar.openai_organization import OpenAIOrganizationImporter
-from openusage_bar.openusage_adapter import OpenUsageAdapter
+from openusage_bar.openusage_adapter import OpenUsageDiscoveryAdapter
 from openusage_bar.performance_timing import RefreshTimingRecorder
 from openusage_bar.providers.builtins import default_registry
 from openusage_bar.providers.contracts import (
@@ -168,7 +168,7 @@ class AdapterRegistryTests(unittest.TestCase):
         }
 
         expected = {
-            "openusage": ((OpenUsageAdapter,), (OpenUsageDailyImporter,), ()),
+            "openusage": ((), (OpenUsageDailyImporter,), ()),
             "kiro_cli": ((KiroQuotaAdapter,), (), ()),
             "codex": (
                 (CodexSubscriptionAdapter,), (CodexLocalDailyImporter,), (),
@@ -195,6 +195,10 @@ class AdapterRegistryTests(unittest.TestCase):
             self.assertEqual(tuple(map(type, binding.quota_sources)), groups[0])
             self.assertEqual(tuple(map(type, binding.usage_sources)), groups[1])
             self.assertEqual(tuple(map(type, binding.cost_sources)), groups[2])
+        self.assertEqual(
+            tuple(map(type, bindings["openusage"].discovery_sources)),
+            (OpenUsageDiscoveryAdapter,),
+        )
         self.assertEqual(
             tuple(map(type, bindings["moonshot-work"].balance_sources)),
             (MoonshotBalanceAdapter,),
@@ -284,26 +288,25 @@ class AdapterRegistryTests(unittest.TestCase):
             sorted(binding.provider_id for binding in forward),
         )
 
-    def test_openusage_base_precedes_direct_quota_overrides(self):
+    def test_openusage_discovery_is_separate_from_direct_quota_sources(self):
         bindings = self.registry().build(self.configs())
-        ordered = sorted(
-            (
-                source.source_priority, binding.provider_id, type(source).__name__
-            )
-            for binding in bindings for source in binding.quota_sources
+        openusage = next(
+            binding for binding in bindings if binding.provider_id == "openusage"
         )
-        self.assertEqual(ordered[0][2], "OpenUsageAdapter")
-        self.assertTrue(all(priority > ordered[0][0] for priority, _, _ in ordered[1:]))
+        self.assertEqual(openusage.quota_sources, ())
+        self.assertIsInstance(
+            openusage.discovery_sources[0], OpenUsageDiscoveryAdapter
+        )
 
         with patch(
             "openusage_bar.config.ProviderConfigStore.load",
             return_value=self.configs(),
         ):
             refresher = build_headless_refresher(Mock())
-        runtime_types = [type(adapter) for adapter in refresher.aggregator.adapters]
-        self.assertIs(runtime_types[0], OpenUsageAdapter)
-        self.assertNotIn(CodexSubscriptionAdapter, runtime_types)
-        self.assertNotIn(KiroQuotaAdapter, runtime_types)
+        self.assertFalse(hasattr(refresher, "aggregator"))
+        self.assertIsInstance(
+            refresher.discovery_sources[0][2], OpenUsageDiscoveryAdapter
+        )
         direct_types = [
             type(adapter) for _descriptor, _source_id, adapter
             in refresher.quota_sources
@@ -318,7 +321,7 @@ class AdapterRegistryTests(unittest.TestCase):
         }
 
         self.assertEqual(
-            bindings["openusage"].quota_sources[0].performance_source_class,
+            bindings["openusage"].discovery_sources[0].performance_source_class,
             "child_process",
         )
         self.assertEqual(
@@ -368,7 +371,6 @@ class AdapterRegistryTests(unittest.TestCase):
             )
 
         self.assertIs(refresher.timing_recorder, recorder)
-        self.assertIs(refresher.aggregator.timing_recorder, recorder)
         self.assertIs(refresher.collector.timing_recorder, recorder)
         self.assertEqual(
             refresher.performance_timing_snapshot(),

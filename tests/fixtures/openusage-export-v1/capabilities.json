@@ -5,10 +5,11 @@
   "openusage_version": "v0.24.0",
   "kind": "capabilities",
   "capabilities": {
-    "kinds": ["capabilities", "daily_usage"],
+    "kinds": ["capabilities", "daily_usage", "providers"],
     "provider_filter": "exact",
     "max_range_days": 366,
     "max_page_size": 1000,
+    "max_provider_rows": 512,
     "coverage_states": ["complete", "partial", "none"],
     "token_counting_conventions": ["components_disjoint", "input_includes_cache", "provider_reported"],
     "qualities": ["direct", "derived", "estimated"]

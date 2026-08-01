@@ -19,9 +19,34 @@ class OpenUsageExportV1DecoderTests(unittest.TestCase):
 
         result = decode_capabilities(fixture("capabilities.json"))
         self.assertEqual(result.contract, "openusage-export/v1")
-        self.assertEqual(result.kinds, ("capabilities", "daily_usage"))
+        self.assertEqual(result.kinds, ("capabilities", "daily_usage", "providers"))
         self.assertEqual(result.max_range_days, 366)
         self.assertEqual(result.max_page_size, 1000)
+        self.assertEqual(result.max_provider_rows, 512)
+
+    def test_decodes_bounded_provider_discovery_without_identity(self):
+        from openusage_bar.openusage_export_v1 import decode_providers
+
+        result = decode_providers(fixture("providers.json"))
+        self.assertEqual(result.coverage_state, "complete")
+        self.assertEqual(
+            [(row.provider_id, row.state) for row in result.rows],
+            [("codex", "available")],
+        )
+
+    def test_provider_discovery_rejects_private_invalid_and_oversized_rows(self):
+        from openusage_bar.openusage_export_v1 import ExportDecodeError, decode_providers
+
+        base = json.loads(fixture("providers.json"))
+        private = json.loads(json.dumps(base))
+        private["rows"][0]["account_id"] = "private"
+        invalid = json.loads(json.dumps(base))
+        invalid["rows"][0]["state"] = "cached"
+        oversized = json.loads(json.dumps(base))
+        oversized["rows"] = [dict(base["rows"][0]) for _ in range(513)]
+        for payload in (private, invalid, oversized):
+            with self.assertRaises(ExportDecodeError):
+                decode_providers(json.dumps(payload))
 
     def test_decodes_daily_and_complete_empty_only_means_covered_zero(self):
         from openusage_bar.openusage_export_v1 import decode_daily

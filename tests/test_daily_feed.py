@@ -6,7 +6,7 @@ from unittest.mock import Mock
 from urllib.parse import parse_qs, urlsplit
 
 from openusage_bar.config import DailyUsageFeedConfig
-from openusage_bar.activity_store import ActivityStore
+from openusage_bar.activity_store import ActivityStore, ProviderInstance
 from openusage_bar.daily_history import ActivityCollector
 from openusage_bar.daily_feed import (
     CUSTOM_DAILY_FEED_SOURCE_ID,
@@ -242,7 +242,18 @@ class DailyUsageFeedImporterTests(unittest.TestCase):
                     clock=lambda: NOW,
                     local_timezone=timezone.utc,
                 )
-                collector.refresh(Overview([card]))
+                collector.refresh(
+                    provider_instances=(ProviderInstance(
+                        provider_id="glm-work",
+                        family_id="zai",
+                        display_name=card.name,
+                        category="api",
+                        credential_source="api_key",
+                        source_kind="generic_https",
+                        observed_at=NOW.isoformat(),
+                    ),),
+                    provider_families={"glm-work": "zai"},
+                )
 
                 instances = store.provider_instances()
                 rows = store.snapshot_daily_usage("2026-07-01", "2026-07-31").rows

@@ -14,13 +14,10 @@ from .activity_store import (
     ActivityStore,
     DailyUsageRow,
     ProviderInstance,
-    QuotaObservation,
 )
 from .bounded_process import BoundedProcessError, run_bounded
-from .capabilities import MetricFamily, registry, state_from_card
 from .codex_attribution import CodexAttributionResolver
 from .config import ID_PATTERN
-from .models import Overview, ProviderCard
 from .model_ids import InvalidModelID, canonical_model_id
 from .openusage_adapter import (
     child_subprocess_environment,
@@ -42,6 +39,7 @@ from .providers.contracts import (
     BalanceFetchSuccess,
     CostImportSuccess,
     ImportFailure,
+    ProviderDiscoveryObservation,
     QuotaFetchFailure,
     QuotaFetchSuccess,
     UsageImportSuccess,
@@ -843,166 +841,16 @@ class ActivityCollector:
         self._safe_source_failure(provider_id, error_code, attempted_at, source_id)
 
     @staticmethod
-    def _provider_instance(
-        card: ProviderCard, observed_at: datetime
-    ) -> ProviderInstance | None:
-        if (
-            card.provider_id == "openusage"
-            or not card.family_id
-            or not card.credential_source
-            or not card.source_kind
-        ):
-            return None
-        category = (
-            "local_tool" if card.category.value == "local" else card.category.value
-        )
-        return ProviderInstance(
-            provider_id=card.provider_id,
-            family_id=card.family_id,
-            display_name=card.name,
-            category=category,
-            credential_source=card.credential_source,
-            source_kind=card.source_kind,
-            observed_at=observed_at.isoformat(),
-        )
-
-    @staticmethod
-    def _quota_observation(card: ProviderCard) -> QuotaObservation | None:
-        remaining = card.remaining_percent
-        if (
-            isinstance(remaining, bool)
-            or not isinstance(remaining, (int, float))
-            or not math.isfinite(remaining)
-            or not 0 <= remaining <= 100
-        ):
-            return None
-        observed_at = card.refreshed_at
-        if (
-            not isinstance(observed_at, datetime)
-            or observed_at.tzinfo is None
-            or observed_at.utcoffset() is None
-        ):
-            raise ValueError("quota observation time must include a timezone")
-        reset = card.resets_at
-        return QuotaObservation(
-            record_id=(
-                f"{card.provider_id}."
-                f"{card.account_ref + '.' if card.account_ref else ''}subscription"
-            ),
-            observed_at=observed_at.astimezone(timezone.utc).isoformat(),
-            provider_id=card.provider_id,
-            account_ref=card.account_ref,
-            quota_name="Subscription",
-            unit="percent",
-            used=str(100 - float(remaining)),
-            quota_limit="100",
-            remaining=str(float(remaining)),
-            remaining_ratio=float(remaining) / 100,
-            resets_at=None if reset is None else reset.astimezone(timezone.utc).isoformat(),
-            period_start=None,
-            period_end=None,
-            state=state_from_card(card.status, card.stale).value,
-            quality="direct",
-            stale=card.stale,
-            source_id="current.quota",
-            quota_window="subscription",
-            applies_to_kind="account",
-            applies_to_model_ids=(),
-        )
-
-    @staticmethod
-    def _tracks_current_quota(card: ProviderCard) -> bool:
-        try:
-            descriptor = registry.require(card.family_id or card.provider_id)
-        except KeyError:
-            return True
-        return MetricFamily.SUBSCRIPTION_QUOTA in descriptor.metric_families
-
-    def _persist_current_quotas(
-        self, overview: Overview, attempted_at: datetime,
-        explicit_provider_ids: frozenset[str] = frozenset(),
-    ) -> None:
-        for card in overview.cards:
-            if card.provider_id in explicit_provider_ids:
-                continue
-            if not self._tracks_current_quota(card):
-                try:
-                    self.store.delete_source_status(
-                        card.provider_id, "current.quota", attempted_at
-                    )
-                except Exception:
-                    pass
-                continue
-            try:
-                observation = self._quota_observation(card)
-            except (TypeError, ValueError):
-                try:
-                    self.store.record_source_status(
-                        card.provider_id,
-                        "current.quota",
-                        "temporarily_unavailable",
-                        attempted_at,
-                        "invalid_observation_time",
-                    )
-                except Exception:
-                    pass
-                continue
-            if observation is None:
-                state = state_from_card(card.status, card.stale)
-                if state.value != "ok":
-                    try:
-                        self.store.record_source_status(
-                            card.provider_id,
-                            "current.quota",
-                            state.value,
-                            attempted_at,
-                            "quota_unavailable",
-                        )
-                    except Exception:
-                        pass
-                continue
-            try:
-                self.store.record_quota(observation)
-            except Exception:
-                try:
-                    self.store.record_source_status(
-                        card.provider_id,
-                        "current.quota",
-                        "temporarily_unavailable",
-                        attempted_at,
-                        "quota_persistence_failed",
-                    )
-                except Exception:
-                    pass
-                continue
-            state = state_from_card(card.status, card.stale)
-            try:
-                if state.value == "ok":
-                    self.store.record_source_success(
-                        card.provider_id, "current.quota", attempted_at
-                    )
-                else:
-                    self.store.record_source_status(
-                        card.provider_id,
-                        "current.quota",
-                        state.value,
-                        attempted_at,
-                        "quota_unavailable",
-                    )
-            except Exception:
-                pass
-
-    @staticmethod
     def _provider_ids(
-        overview: Overview,
+        provider_instances: tuple[ProviderInstance, ...],
         official_importers: Mapping[str, Any],
         provider_families: Mapping[str, str] | None = None,
     ) -> tuple[str, ...]:
         return tuple(sorted(
             {
-                card.provider_id
-                for card in overview.cards
-                if card.provider_id != "openusage"
+                instance.provider_id
+                for instance in provider_instances
+                if instance.provider_id != "openusage"
             }
             | set(official_importers)
             | set(provider_families or {})
@@ -1010,17 +858,8 @@ class ActivityCollector:
 
     def _publish_provider_instances(
         self,
-        overview: Overview,
-        attempted_at: datetime,
         provider_instances: tuple[ProviderInstance, ...] = (),
     ) -> None:
-        for card in sorted(overview.cards, key=lambda item: item.provider_id):
-            try:
-                instance = self._provider_instance(card, attempted_at)
-                if instance is not None:
-                    self.store.upsert_provider_instance(instance)
-            except Exception:
-                pass
         for instance in sorted(
             provider_instances, key=lambda item: item.provider_id
         ):
@@ -1029,17 +868,58 @@ class ActivityCollector:
             except Exception:
                 pass
 
+    def _refresh_discovery_sources(
+        self,
+        observations: tuple[ProviderDiscoveryObservation, ...],
+        failures: tuple[tuple[str, str, str], ...],
+        attempted_at: datetime,
+    ) -> None:
+        for observation in observations:
+            descriptor = observation.descriptor
+            try:
+                self.store.upsert_provider_instance(descriptor.observed(
+                    observation.observed_at, observation.attribution
+                ))
+                if observation.state in {"available", "near_limit", "limited"}:
+                    self.store.record_source_success(
+                        descriptor.provider_id,
+                        observation.source_id,
+                        attempted_at,
+                    )
+                else:
+                    state = {
+                        "auth_required": "auth_required",
+                        "unsupported": "unsupported",
+                        "error": "temporarily_unavailable",
+                        "unknown": "unknown",
+                    }.get(observation.state, "unknown")
+                    self.store.record_source_status(
+                        descriptor.provider_id,
+                        observation.source_id,
+                        state,
+                        attempted_at,
+                        None if state == "unknown" else "provider_unavailable",
+                    )
+            except Exception:
+                self._safe_source_failure(
+                    descriptor.provider_id,
+                    "persistence_failed",
+                    attempted_at,
+                    observation.source_id,
+                )
+        for provider_id, source_id, error_code in failures:
+            self._safe_source_failure(
+                provider_id, error_code, attempted_at, source_id
+            )
+
     def _refresh_quota_sources(
         self,
-        overview: Overview,
         attempted_at: datetime,
         quota_results: tuple[tuple[str, str, object], ...],
     ) -> None:
         # Current capacity publishes before slower history sources and remains an
         # independent failure domain.
-        explicit_provider_ids: set[str] = set()
         for provider_id, source_id, result in quota_results:
-            explicit_provider_ids.add(provider_id)
             if isinstance(result, QuotaFetchSuccess):
                 try:
                     if any(
@@ -1050,9 +930,22 @@ class ActivityCollector:
                         raise ValueError("quota result scope mismatch")
                     for observation in result.observations:
                         self.store.record_quota(observation)
-                    self.store.record_source_success(
-                        provider_id, source_id, attempted_at
-                    )
+                    if any(
+                        observation.stale
+                        or observation.state in {"stale", "unknown"}
+                        for observation in result.observations
+                    ):
+                        self.store.record_source_status(
+                            provider_id,
+                            source_id,
+                            "stale",
+                            attempted_at,
+                            "quota_unavailable",
+                        )
+                    else:
+                        self.store.record_source_success(
+                            provider_id, source_id, attempted_at
+                        )
                 except Exception:
                     self._safe_source_failure(
                         provider_id, "persistence_failed", attempted_at, source_id
@@ -1065,12 +958,6 @@ class ActivityCollector:
                 self._safe_source_failure(
                     provider_id, "invalid_import_result", attempted_at, source_id
                 )
-        try:
-            self._persist_current_quotas(
-                overview, attempted_at, frozenset(explicit_provider_ids)
-            )
-        except Exception:
-            pass
 
     def _refresh_balance_sources(
         self,
@@ -1117,17 +1004,12 @@ class ActivityCollector:
 
     def _refresh_usage_sources(
         self,
-        overview: Overview,
         provider_ids: tuple[str, ...],
         today: date,
         attempted_at: datetime,
         provider_families: Mapping[str, str] | None = None,
     ) -> None:
-        fallback_families = {
-            card.provider_id: card.family_id or card.provider_id
-            for card in overview.cards
-        }
-        fallback_families.update(provider_families or {})
+        fallback_families = dict(provider_families or {})
         fallback_family_counts: dict[str, int] = {}
         for configured_id in self.official_importers:
             family_id = fallback_families.get(configured_id, configured_id)
@@ -1335,10 +1217,11 @@ class ActivityCollector:
 
     def refresh(
         self,
-        overview: Overview,
         *,
         provider_instances: tuple[ProviderInstance, ...] = (),
         provider_families: Mapping[str, str] | None = None,
+        discovery_observations: tuple[ProviderDiscoveryObservation, ...] = (),
+        discovery_failures: tuple[tuple[str, str, str], ...] = (),
         balance_results: tuple[tuple[str, str, object], ...] = (),
         quota_results: tuple[tuple[str, str, object], ...] = (),
     ) -> bool:
@@ -1349,15 +1232,15 @@ class ActivityCollector:
             attempted_at = current.astimezone(timezone.utc)
             today = current.astimezone(self.local_timezone).date()
             provider_ids = self._provider_ids(
-                overview, self.official_importers, provider_families
+                provider_instances, self.official_importers, provider_families
             )
-            self._publish_provider_instances(
-                overview, attempted_at, provider_instances
+            self._publish_provider_instances(provider_instances)
+            self._refresh_discovery_sources(
+                discovery_observations, discovery_failures, attempted_at
             )
             self._refresh_balance_sources(attempted_at, balance_results)
-            self._refresh_quota_sources(overview, attempted_at, quota_results)
+            self._refresh_quota_sources(attempted_at, quota_results)
             self._refresh_usage_sources(
-                overview,
                 provider_ids,
                 today,
                 attempted_at,
@@ -1388,7 +1271,7 @@ class ActivityCollector:
             attempted_at = current.astimezone(timezone.utc)
             today = current.astimezone(self.local_timezone).date()
             self._refresh_usage_sources(
-                Overview([]), selected, today, attempted_at
+                selected, today, attempted_at
             )
             return True
         finally:

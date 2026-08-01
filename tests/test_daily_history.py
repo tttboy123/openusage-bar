@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -17,7 +18,7 @@ from openusage_bar.activity_store import (
     ProviderInstance,
 )
 from openusage_bar.daily_history import (
-    ActivityCollector,
+    ActivityCollector as FactActivityCollector,
     DailyImportResult,
     EXPORT_V1_SOURCE_ID,
     OpenUsageDailyImporter,
@@ -31,7 +32,7 @@ from openusage_bar.openai_organization import (
     ImportFailure,
     UsageImportSuccess,
 )
-from openusage_bar.providers.contracts import QuotaFetchSuccess
+from openusage_bar.providers.contracts import QuotaFetchFailure, QuotaFetchSuccess
 from openusage_bar.providers.quota import percent_observation
 
 
@@ -156,6 +157,114 @@ def card(
         source_kind=source_kind,
         account_ref=account_ref,
     )
+
+
+class ActivityCollector(FactActivityCollector):
+    """Test-only translator for pre-fact fixtures retained as regression cases."""
+
+    def refresh(self, overview=None, **kwargs):
+        if overview is None:
+            return super().refresh(**kwargs)
+        explicit_quota_ids = {
+            provider_id for provider_id, _source_id, _result
+            in kwargs.get("quota_results", ())
+        }
+        instances = {
+            instance.provider_id: instance
+            for instance in kwargs.get("provider_instances", ())
+        }
+        families = dict(kwargs.get("provider_families") or {})
+        projected_quotas = []
+        post_status = []
+        for item in overview.cards:
+            valid_observed_at = (
+                isinstance(item.refreshed_at, datetime)
+                and item.refreshed_at.tzinfo is not None
+                and item.refreshed_at.utcoffset() is not None
+            )
+            observed_at = item.refreshed_at if valid_observed_at else self.clock()
+            if item.provider_id != "openusage":
+                instances.setdefault(item.provider_id, ProviderInstance(
+                    provider_id=item.provider_id,
+                    family_id=item.family_id or item.provider_id,
+                    display_name=item.name,
+                    category=(
+                        "local_tool"
+                        if item.category == Category.LOCAL
+                        else item.category.value
+                    ),
+                    credential_source=item.credential_source or "openusage",
+                    source_kind=item.source_kind or "openusage",
+                    observed_at=observed_at.isoformat(),
+                ))
+                families.setdefault(
+                    item.provider_id, item.family_id or item.provider_id
+                )
+            if item.provider_id in explicit_quota_ids:
+                continue
+            if item.category != Category.SUBSCRIPTION:
+                post_status.append((item, "delete"))
+                continue
+            if item.remaining_percent is None:
+                if item.status != ProviderStatus.OK:
+                    projected_quotas.append((
+                        item.provider_id,
+                        "current.quota",
+                        QuotaFetchFailure("quota_unavailable"),
+                    ))
+                    if item.stale:
+                        post_status.append((item, "stale"))
+                continue
+            if not valid_observed_at:
+                projected_quotas.append((
+                    item.provider_id,
+                    "current.quota",
+                    QuotaFetchFailure("invalid_observation_time"),
+                ))
+                continue
+            observation = percent_observation(
+                provider_id=item.provider_id,
+                source_id="current.quota",
+                quota_name="Subscription",
+                quota_window="subscription",
+                remaining_percent=item.remaining_percent,
+                resets_at=item.resets_at,
+                observed_at=observed_at,
+                applies_to_kind="account",
+                account_ref=item.account_ref,
+            )
+            if item.stale:
+                observation = replace(
+                    observation, state="stale", quality="cached", stale=True
+                )
+                post_status.append((item, "stale"))
+            projected_quotas.append((
+                item.provider_id,
+                "current.quota",
+                QuotaFetchSuccess((observation,)),
+            ))
+        kwargs["provider_instances"] = tuple(
+            instances[key] for key in sorted(instances)
+        )
+        kwargs["provider_families"] = families
+        kwargs["quota_results"] = (
+            *kwargs.get("quota_results", ()), *projected_quotas
+        )
+        result = super().refresh(**kwargs)
+        for item, action in post_status:
+            if action == "delete":
+                self.store.delete_source_status(
+                    item.provider_id, "current.quota", self.clock()
+                )
+            elif action == "stale":
+                self.store.record_source_status(
+                    item.provider_id,
+                    "current.quota",
+                    "stale",
+                    self.clock(),
+                    "quota_unavailable",
+                )
+        return result
 
 
 class OpenUsageDailyImporterTests(unittest.TestCase):
@@ -927,9 +1036,8 @@ class ActivityCollectorTests(unittest.TestCase):
                 )]))
 
                 if failed_family == "quota":
-                    store.record_source_status.assert_any_call(
-                        "openai", "current.quota", "temporarily_unavailable",
-                        NOW, "quota_persistence_failed",
+                    store.record_source_failure.assert_any_call(
+                        "openai", "current.quota", "persistence_failed", NOW,
                     )
                 else:
                     store.record_quota.assert_called_once()
@@ -1373,7 +1481,10 @@ class ActivityCollectorTests(unittest.TestCase):
             ["quota", "quota_source", "history", "retention"],
         )
         observation = store.record_quota.call_args.args[0]
-        self.assertEqual(observation.record_id, "codex.subscription")
+        self.assertEqual(
+            observation.record_id,
+            "codex.current.quota.subscription.subscription",
+        )
         self.assertEqual(observation.remaining_ratio, 0.18)
         self.assertEqual(observation.remaining, "18")
         self.assertEqual(observation.observed_at, "2026-07-14T02:00:00.000000Z")
@@ -1393,7 +1504,10 @@ class ActivityCollectorTests(unittest.TestCase):
 
         observation = store.record_quota.call_args.args[0]
         self.assertEqual(observation.account_ref, "work")
-        self.assertEqual(observation.record_id, "generic-work.work.subscription")
+        self.assertEqual(
+            observation.record_id,
+            "generic-work.work.current.quota.subscription.subscription",
+        )
 
     def test_stale_numeric_quota_uses_last_good_time_and_keeps_unhealthy_source(self):
         store = Mock()
@@ -1452,15 +1566,8 @@ class ActivityCollectorTests(unittest.TestCase):
         )
 
         store.record_quota.assert_not_called()
-        self.assertIn(
-            (
-                "minimax",
-                "current.quota",
-                "temporarily_unavailable",
-                NOW,
-                "invalid_observation_time",
-            ),
-            [call.args for call in store.record_source_status.call_args_list],
+        store.record_source_failure.assert_any_call(
+            "minimax", "current.quota", "invalid_observation_time", NOW
         )
 
     def test_unknown_quota_is_not_recorded_as_zero(self):
@@ -1481,16 +1588,15 @@ class ActivityCollectorTests(unittest.TestCase):
             call.args for call in store.record_source_status.call_args_list
             if call.args[1] == "current.quota"
         ]
+        store.record_source_failure.assert_any_call(
+            "codex", "current.quota", "quota_unavailable", NOW
+        )
+        store.record_source_failure.assert_any_call(
+            "minimax", "current.quota", "quota_unavailable", NOW
+        )
         self.assertEqual(
             current_health,
             [
-                (
-                    "codex",
-                    "current.quota",
-                    "temporarily_unavailable",
-                    NOW,
-                    "quota_unavailable",
-                ),
                 (
                     "minimax",
                     "current.quota",
@@ -1649,13 +1755,9 @@ class ActivityStoreCollectorIntegrationTests(unittest.TestCase):
                 for row in statuses
                 if row.source_id == "current.quota"
             }
-            self.assertEqual(set(quota_statuses), {"cursor", "mistral"})
+            self.assertEqual(set(quota_statuses), {"cursor"})
             self.assertEqual(
                 quota_statuses["cursor"].state,
-                "temporarily_unavailable",
-            )
-            self.assertEqual(
-                quota_statuses["mistral"].state,
                 "temporarily_unavailable",
             )
             self.assertEqual(

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock
 
-from openusage_bar.activity_store import ActivityStore
+from openusage_bar.activity_store import ActivityStore, ProviderInstance
 from openusage_bar.config import GenericProviderConfig
 from openusage_bar.daily_history import ActivityCollector, DailyImportResult
 from openusage_bar.generic import GenericHTTPSAdapter, MissingField, extract_path
@@ -48,7 +48,16 @@ class GenericProviderTests(unittest.TestCase):
             path = Path(directory) / "ledger.sqlite3"
             with ActivityStore(path) as store:
                 ActivityCollector(store, importer, clock=lambda: NOW).refresh(
-                    Overview([card])
+                    provider_instances=(ProviderInstance(
+                        provider_id="demo",
+                        family_id="demo",
+                        display_name=card.name,
+                        category="api",
+                        credential_source="api_key",
+                        source_kind="generic_https",
+                        observed_at=NOW.isoformat(),
+                    ),),
+                    provider_families={"demo": "demo"},
                 )
                 instances = store.provider_instances()
                 self.assertEqual(len(instances), 1)
