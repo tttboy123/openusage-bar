@@ -356,7 +356,7 @@ git commit -m "feat(runtime): package the LiteLLM producer kit"
 - Modify: `docs/superpowers/plans/2026-07-18-openusage-work-queue.zh-CN.md`
 - Modify: `docs/superpowers/plans/2026-08-01-runtime-producer-kit.md`
 
-- [ ] **Step 1: Prove authority and data-plane separation**
+- [x] **Step 1: Prove authority and data-plane separation**
 
 ```bash
 ! rg -n "RuntimeStore|runtime_observation|runtime\.sqlite3" \
@@ -369,7 +369,7 @@ git commit -m "feat(runtime): package the LiteLLM producer kit"
 The second command may match comments or safe test names only after manual
 review; it must not match a serialized field or diagnostic.
 
-- [ ] **Step 2: Run focused and complete release gates**
+- [x] **Step 2: Run focused and complete release gates**
 
 ```bash
 .build-venv/bin/python -m unittest tests.test_runtime_observation \
@@ -380,20 +380,40 @@ scripts/audit_dependencies.sh
 scripts/build_app.sh
 ```
 
-- [ ] **Step 3: Record exact evidence without widening claims**
+- [x] **Step 3: Record exact evidence without widening claims**
 
 Record test totals, Python and Swift coverage, dependency/secret/privacy scan,
 signed bundle and packaged producer smoke. Keep real LiteLLM account traffic,
 OTLP/CLIProxyAPI adapters, Loom X1, external Canary, merge, push and publication
 open.
 
-- [ ] **Step 4: Commit verification**
+- [x] **Step 4: Commit verification**
 
 ```bash
 git add docs/superpowers/plans/2026-07-18-openusage-work-queue.zh-CN.md \
   docs/superpowers/plans/2026-08-01-runtime-producer-kit.md
 git commit -m "docs(runtime): record producer-kit verification"
 ```
+
+Fresh local evidence recorded on 2026-08-01:
+
+- Runtime/Producer focused suite: 35 tests passed.
+- Full Python suite: 976 tests passed twice (direct and traced); every
+  `openusage_bar` product module met the 80% floor. The standalone LiteLLM
+  Producer reached 92%; Runtime contract/store reached 92%/96%.
+- Swift: 257 tests in 21 suites passed; product line coverage was 87.64%.
+- Dependency audit: no known vulnerabilities. Tree/history secret scan and
+  both source/package privacy scans reported zero matches.
+- The packaged content-bearing callback produced exactly one 15-Token,
+  25-micro-USD estimated observation; the packaged Runtime fixture produced
+  exactly one revisioned observation.
+- A first full build exposed post-signing `__pycache__` mutation. The final
+  build makes `Contents/Resources/Integrations` read-only and re-verifies the
+  deep bundle seal after Producer smoke; independent final verification passed.
+- Bundle metadata remained `0.6.0 (9)`. No real LiteLLM account traffic,
+  external machine, merge, push, release or Canary-day evidence was claimed.
+- Existing non-failing suite noise remains visible: one SQLite
+  `ResourceWarning` and one duplicate ZIP-entry warning from test fixtures.
 
 ## Completion boundary
 

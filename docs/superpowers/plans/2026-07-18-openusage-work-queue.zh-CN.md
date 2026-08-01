@@ -924,8 +924,20 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   无 LiteLLM 硬依赖的本地 callback，只提取终态时间、公开 Provider/Model、
   Token 与可选估算费用，通过 stdin 调用现有 Collector；内容、凭证、直接身份、
   原始请求 ID 与原始 Payload 永不序列化。缺失用量不写成零，未知 TTFT 保持
-  `null`。**实施计划已冻结，正在 `feature/runtime-producer-kit` 分支按 TDD
-  推进；当前不代表真实 LiteLLM 流量已经接入。**
+  `null`。**仓库内实现与本地发行门禁已完成：独立标准库 callback 已覆盖同步、
+  异步、成功和带真实计数的失败终态，通过绝对路径、最小环境和三秒上限调用
+  Collector；应用包内提供 Producer、匿名 Scope 生成器和中英边界明确的快速
+  接入文档。内容型恶意 Fixture 经打包后的 Producer 与 Collector 写成一条
+  15 Token / 25 微美元估算观察，Prompt、Response、假凭证、异常正文和原始
+  上游 ID 均未进入数据库或汇总。构建中发现并修复了 Python `__pycache__`
+  破坏 App seal 的问题：Integration 目录现在只读，并在 Producer 冒烟后再次
+  深度验签。最终本地门禁为 Python 976 项两轮通过、LiteLLM Producer 覆盖率
+  92%、Runtime 契约与存储覆盖率分别为 92% 和 96%，全部 Python 产品模块
+  不少于 80%；Swift 257 项通过，产品行覆盖率 87.64%；依赖审计无已知漏洞，
+  历史密钥扫描与两阶段隐私扫描均为 0，发行 metadata 保持 `0.6.0 (9)`，
+  最终签名 App bundle 验证通过。** 真实 LiteLLM 账号流量、OTLP/CLIProxyAPI、
+  Loom X1、外部 Canary、合并、推送和发布仍未开始。测试日志仍含既有 SQLite
+  `ResourceWarning` 与测试 ZIP 重名警告；它们未改变门禁结果，也不计为已清理。
 - **WQ-23：版本化的 OTLP GenAI 与 CLIProxyAPI Producer Adapter。** 先冻结
   上游版本和脱敏 Fixture，再接入经过严格 allowlist 处理的 GenAI span 与
   CLIProxyAPI 用量事件。不得直接接收含消息内容、tool 参数、LiteLLM 身份
