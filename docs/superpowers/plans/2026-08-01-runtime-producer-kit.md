@@ -144,7 +144,7 @@ git commit -m "fix(runtime): preserve unknown first-token timing"
 - Create: `tests/test_litellm_runtime_integration.py`
 - Test: `tests/fixtures/runtime-producers/litellm-success-v1.json`
 
-- [ ] **Step 1: Write failing pure-transform tests**
+- [x] **Step 1: Write failing pure-transform tests**
 
 Test `build_runtime_document(...)` with dictionary and attribute-style response
 objects. Prove the result:
@@ -174,7 +174,7 @@ exception and raw call ID are absent from the encoded document. Assert missing
 usage, unsafe IDs, invalid timestamps and inconsistent totals return `None`
 without a synthetic zero row.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 .build-venv/bin/python -m unittest tests.test_litellm_runtime_integration -v
@@ -182,7 +182,7 @@ without a synthetic zero row.
 
 Expected: FAIL because `integrations/litellm_openusage.py` does not exist.
 
-- [ ] **Step 3: Implement a standard-library-only transformer**
+- [x] **Step 3: Implement a standard-library-only transformer**
 
 Create these public values:
 
@@ -211,13 +211,13 @@ the first 32 lowercase hexadecimal characters after `obs_`. Convert dollars to
 integer micro-units with `Decimal(str(value))`; mark rows with calculated cost
 as `estimated`, otherwise `provider_reported`.
 
-- [ ] **Step 4: Run GREEN**
+- [x] **Step 4: Run GREEN**
 
 ```bash
 .build-venv/bin/python -m unittest tests.test_litellm_runtime_integration -v
 ```
 
-- [ ] **Step 5: Commit the transformer**
+- [x] **Step 5: Commit the transformer**
 
 ```bash
 git add integrations/litellm_openusage.py \
