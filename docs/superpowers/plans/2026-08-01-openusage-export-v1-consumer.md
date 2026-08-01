@@ -20,7 +20,7 @@
 - Create: `tests/fixtures/openusage-export-v1/daily-usage-partial.json`
 - Create: `tests/test_openusage_export_v1.py`
 
-- [ ] **Step 1: Write failing strict-decoder tests**
+- [x] **Step 1: Write failing strict-decoder tests**
 
 Test exact contract/schema/kind, UTC generated time, request echo, inclusive range,
 coverage states, row bounds, nonnegative integer Tokens, nullable reasoning, three
@@ -34,20 +34,20 @@ def test_failed_empty_is_not_covered_zero():
     assert page.covered_zero is False
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `.build-venv/bin/python -m unittest tests.test_openusage_export_v1 -v`
 
 Expected: FAIL because the decoder does not exist.
 
-- [ ] **Step 3: Implement frozen dataclasses and decoder**
+- [x] **Step 3: Implement frozen dataclasses and decoder**
 
 Define `ExportCapabilities`, `ExportCoverage`, `ExportDailyRow`, `ExportPage` and
 `decode_capabilities`/`decode_daily`. Accept additive fields but require every frozen
 field. Forbid credential, endpoint, cookie/session, Prompt/Response and raw payload
 keys at every nesting level.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Run: `.build-venv/bin/python -m unittest tests.test_openusage_export_v1 -v`
 
@@ -61,18 +61,18 @@ Commit: `feat(openusage): decode export v1 facts`
 - Test: `tests/test_openusage_export_v1.py`
 - Test: `tests/test_daily_history.py`
 
-- [ ] **Step 1: Write failing probe tests**
+- [x] **Step 1: Write failing probe tests**
 
 Assert direct argv, shell disabled, closed stdin, the credential-free child environment,
 3-second timeout, 128 KiB output limits, exact contract/kinds and one cached probe per
 importer. Unsupported, timeout, oversize, nonzero, malformed and wrong-version results
 become `unsupported` without logging payloads.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `.build-venv/bin/python -m unittest tests.test_openusage_export_v1 tests.test_daily_history -v`
 
-- [ ] **Step 3: Implement capability negotiation**
+- [x] **Step 3: Implement capability negotiation**
 
 Invoke only this direct argv:
 
@@ -83,7 +83,7 @@ Invoke only this direct argv:
 
 Cache only the typed supported/unsupported result, never stdout, stderr or paths.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Commit: `feat(openusage): negotiate export v1`
 
@@ -94,31 +94,31 @@ Commit: `feat(openusage): negotiate export v1`
 - Test: `tests/test_daily_history.py`
 - Test: `tests/test_aggregator.py`
 
-- [ ] **Step 1: Write failing contract-first/fallback tests**
+- [x] **Step 1: Write failing contract-first/fallback tests**
 
 Cover supported success, complete empty, multi-page success, malformed page, cursor
 loop, scope mismatch, later-page failure, unsupported producer and legacy success.
 Prove v1 and legacy rows are selected, never summed; failed/partial empty preserves
 Last-good and never writes zero.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `.build-venv/bin/python -m unittest tests.test_daily_history tests.test_aggregator -v`
 
-- [ ] **Step 3: Implement exact bounded collection**
+- [x] **Step 3: Implement exact bounded collection**
 
 Invoke exact Provider/since/until with limit 500 and opaque cursor. Bound collection
 to 366 days, 512 models/day, 200000 rows, 16 MiB/page and 100 pages. Validate every
 page before constructing any `DailyUsageRow`; only complete coverage plus the final
 page can commit covered-zero days. On any v1 failure, invoke legacy once.
 
-- [ ] **Step 4: Preserve provenance and Last-good**
+- [x] **Step 4: Preserve provenance and Last-good**
 
 V1 rows use source `openusage.export.v1`; legacy rows retain `openusage.daily` and
 fallback quality. Empty legacy, timeout or partial v1 never replaces official or
 Last-good facts. Do not change SQLite or Local API v1.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [x] **Step 5: Run GREEN and commit**
 
 Run: `.build-venv/bin/python -m unittest tests.test_openusage_export_v1 tests.test_daily_history tests.test_aggregator -v`
 
@@ -132,13 +132,13 @@ Commit: `feat(openusage): prefer export v1 daily facts`
 - Modify: `docs/provider-authoritative-sources.md`
 - Modify: `docs/superpowers/plans/2026-07-18-openusage-work-queue.zh-CN.md`
 
-- [ ] **Step 1: Add producer/consumer fixture agreement tests**
+- [x] **Step 1: Add producer/consumer fixture agreement tests**
 
 Decode all four producer fixtures. Accept additive fields, reject missing required
 fields, and require exact provider filter, daily usage, coverage, page/range bounds
 and all Token conventions in capabilities.
 
-- [ ] **Step 2: Document source priority**
+- [x] **Step 2: Document source priority**
 
 Record the exact selection chain:
 
@@ -152,7 +152,7 @@ official Provider source
 
 The first successful source wins; sources are never added.
 
-- [ ] **Step 3: Run compatibility tests and commit**
+- [x] **Step 3: Run compatibility tests and commit**
 
 Run:
 
@@ -170,7 +170,7 @@ Commit: `test(openusage): freeze export v1 compatibility`
 **Files:**
 - Modify only regressions introduced by Tasks 1-4.
 
-- [ ] **Step 1: Run complete gates**
+- [x] **Step 1: Run complete gates**
 
 ```bash
 .build-venv/bin/python -m unittest discover -s tests -v
@@ -181,14 +181,14 @@ scripts/audit_dependencies.sh
 scripts/build_app.sh
 ```
 
-- [ ] **Step 2: Verify the completion boundary**
+- [x] **Step 2: Verify the completion boundary**
 
 Confirm an unsupported stock binary yields unchanged ledger facts through legacy
 fallback and a capable fixture yields identical canonical facts. Do not remove
 `OpenUsageAdapter` cards here; WQ-19B performs that deletion after this contract is
 green.
 
-- [ ] **Step 3: Commit final verification**
+- [x] **Step 3: Commit final verification**
 
 Commit: `test(openusage): verify export v1 release gates`
 
@@ -198,3 +198,13 @@ WQ-20 completes only when producer fixtures and consumer decoder agree, supporte
 producers are preferred, unsupported producers fall back safely, and complete-empty
 is the only path that can create covered zero. WQ-19B may then publish OpenUsage
 discovery as facts instead of cards.
+
+## Verification record
+
+2026-08-01: Python 915 tests passed; the new decoder module has 92% line
+coverage and every product module remains at or above 80%. Swift 257 tests passed
+with 87.70% product line coverage. Dependency audit reported no known
+vulnerabilities; tree/history secret scan and packaged privacy scans reported zero
+matches; release metadata remained `0.6.0 (9)`; `scripts/build_app.sh` reached the
+signed `dist/OpenUsage Bar.app` completion marker. Producer and consumer branches
+remain local/unmerged pending the separate publication action.

@@ -37,7 +37,7 @@ of scope.
 - Create: `internal/exportv1/types.go`
 - Create: `internal/exportv1/types_test.go`
 
-- [ ] **Step 1: Write failing validation and JSON tests**
+- [x] **Step 1: Write failing validation and JSON tests**
 
 Test exact contract/kind enums, UTC timestamps, inclusive ranges of at most 366 days,
 limits 1...1000, exact Provider IDs, nonnegative integer Token fields, nullable
@@ -53,20 +53,20 @@ func TestDailyEnvelopeFailedEmptyIsNotCoveredZero(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `go test ./internal/exportv1 -run Test -count=1`
 
 Expected: FAIL because the package does not exist.
 
-- [ ] **Step 3: Implement immutable wire types**
+- [x] **Step 3: Implement immutable wire types**
 
 Define `Contract = "openusage-export/v1"`, schema `1`, capabilities/daily kinds,
 complete/partial/none coverage, three counting conventions, three qualities, request,
 coverage, daily row, page and envelope types. Validation fails closed without echoing
 rejected values.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Run: `go test ./internal/exportv1 -count=1`
 
@@ -79,25 +79,25 @@ Commit: `feat(export): define openusage-export v1 contract`
 - Create: `internal/exportv1/daily_test.go`
 - Modify: `cmd/openusage/report.go`
 
-- [ ] **Step 1: Write failing source-outcome tests**
+- [x] **Step 1: Write failing source-outcome tests**
 
 Cover successful empty, successful model rows, failed empty and mixed partial
 collection. A provider request may claim complete only when its chosen source examined
 the entire requested range successfully.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `go test ./internal/exportv1 -run TestBuildDaily -count=1`
 
 Expected: FAIL because `BuildDaily` is undefined.
 
-- [ ] **Step 3: Separate collection outcome from presentation notes**
+- [x] **Step 3: Separate collection outcome from presentation notes**
 
 Add a typed internal source outcome to report collection while preserving current
 human notes. Aggregate by local calendar day and canonical model, omit cost and direct
 identity, and set partial/none instead of inventing complete coverage on failures.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `go test ./internal/exportv1 ./internal/report ./cmd/openusage -count=1`
 
@@ -110,22 +110,22 @@ Commit: `feat(export): publish daily token coverage`
 - Create: `internal/exportv1/cursor_test.go`
 - Modify: `internal/exportv1/daily.go`
 
-- [ ] **Step 1: Write failing cursor tests**
+- [x] **Step 1: Write failing cursor tests**
 
 Test stable `(day, provider_id, model_id)` order, maximum 1000 rows, URL-safe opaque
 cursors, exact request binding, no duplicate keys across pages, malformed/foreign
 cursor rejection and final-page completion.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `go test ./internal/exportv1 -run 'TestCursor|TestPage' -count=1`
 
-- [ ] **Step 3: Implement keyset pagination**
+- [x] **Step 3: Implement keyset pagination**
 
 Encode only version, Provider, since/until and last day/model key. Never encode rows,
 credentials or direct identity. Return stable `invalid_cursor` errors.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Run: `go test ./internal/exportv1 -count=1`
 
@@ -140,23 +140,23 @@ Commit: `feat(export): bound v1 daily pages`
 - Modify: `internal/export/export.go`
 - Test: `internal/export/provider_filter_test.go`
 
-- [ ] **Step 1: Write failing CLI tests**
+- [x] **Step 1: Write failing CLI tests**
 
 Assert legacy export keeps its current shape. The explicit contract accepts only
 capabilities/daily usage; daily requires Provider/since/until, rejects CSV and
 out-of-bound inputs, and writes one clean JSON envelope to stdout.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `go test ./cmd/openusage ./internal/export -run TestExport -count=1`
 
-- [ ] **Step 3: Add flags and exact dispatch**
+- [x] **Step 3: Add flags and exact dispatch**
 
 Add `--contract`, `--kind`, `--since`, `--until`, `--limit` and `--cursor`. Dispatch
 only for the exact contract. Reuse exact `--provider`; never match aliases, display
 names, prefixes or substrings.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Run: `go test ./cmd/openusage ./internal/export ./internal/exportv1 -count=1`
 
@@ -171,12 +171,12 @@ Commit: `feat(export): negotiate openusage-export v1`
 - Create: `internal/exportv1/testdata/daily-usage-v1-partial.json`
 - Create: `internal/exportv1/fixture_test.go`
 
-- [ ] **Step 1: Add exact golden and additive-field tests**
+- [x] **Step 1: Add exact golden and additive-field tests**
 
 The deterministic encoder must equal each fixture. The decoder accepts an unknown
 additive top-level field but rejects removed/renamed required fields.
 
-- [ ] **Step 2: Run complete gates**
+- [x] **Step 2: Run complete gates**
 
 Run:
 
@@ -193,13 +193,13 @@ The isolated HOME is required because three pre-existing upstream tests assume
 Hermes/Kiro source files are absent; the developer machine contains real source
 files under HOME. The same three failures reproduce on untouched upstream main.
 
-- [ ] **Step 3: Build and inspect the real CLI**
+- [x] **Step 3: Build and inspect the real CLI**
 
 Run capabilities plus complete-empty daily through a temporary binary. Confirm one
 JSON envelope on stdout and no credentials, Prompt/Response, raw payload or direct
 identity in output/stderr.
 
-- [ ] **Step 4: Commit verification**
+- [x] **Step 4: Commit verification**
 
 Commit: `test(export): freeze v1 producer fixtures`
 
@@ -208,3 +208,12 @@ Commit: `test(export): freeze v1 producer fixtures`
 Producer work ends with a green branch in the user's OpenUsage fork. Opening or
 merging an upstream PR is a separate external action. No consumer requires this
 contract until capability negotiation succeeds.
+
+## Verification record
+
+2026-08-01: focused Go packages passed; the complete Go suite passed with an
+isolated empty HOME. The same three HOME-sensitive Hermes/Kiro tests fail on
+untouched upstream main when the developer's real source files are visible.
+Capabilities and complete-empty daily CLI invocations emitted one valid envelope;
+all four current/N-1 fixtures matched the encoder; output files are forced to mode
+`0600`. The producer branch remains local/unpublished.

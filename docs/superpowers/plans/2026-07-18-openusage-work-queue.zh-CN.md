@@ -898,7 +898,9 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   Fixture；OpenUsage Bar 不依赖未声明的开发 Commit 行为。
   **生产端契约、真实 Coverage、确定性分页、CLI 协商和四份冻结 Fixture 已在
   独立 OpenUsage 分支完成；消费端严格解码、单次能力探测、v1 优先与 legacy
-  单次回退已通过专项测试，当前进入完整发布门禁。两端尚未发布或合并。**
+  单次回退已完成。完整门禁为 Python 915 项、Swift 257 项、Python 新模块
+  92% 与 Swift 产品 87.70% 行覆盖率，依赖/秘密/隐私/元数据/签名构建全部
+  通过。两端仍为独立未发布分支，合并与发布属于后续外部动作。**
 - **WQ-21：Runtime Observation 独立方案。** 只接收时间戳、匿名作用域、
   Token、延迟、状态和费用；使用独立短保留存储，禁止 Prompt、Response、
   凭证和直接身份。它不拥有额度事实，也不实现 Loom 的预留、准入或路由。
