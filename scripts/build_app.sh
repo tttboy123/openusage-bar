@@ -62,6 +62,7 @@ PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
   --minimum "$PYTHON_MIN_LINE_COVERAGE" \
   --package-root "$ROOT/openusage_bar"
 "$PYTHON" scripts/privacy_scan.py \
+  "$ROOT/openusage_bar/resources/release-state.v1.json" \
   "$ROOT/openusage_bar/resources/provider-catalog.v1.json" \
   "$ROOT/openusage_bar/resources/local-api-v1.schema.json" \
   "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift" \

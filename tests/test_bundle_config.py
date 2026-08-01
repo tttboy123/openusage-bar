@@ -1,3 +1,4 @@
+import json
 import plistlib
 import unittest
 from pathlib import Path
@@ -52,6 +53,13 @@ class BundleConfigTests(unittest.TestCase):
             with (resources / name).open("rb") as handle:
                 payload = plistlib.load(handle)
             self.assertEqual((payload["CFBundleShortVersionString"], payload["CFBundleVersion"]), expected)
+        release_state = json.loads(
+            Path("openusage_bar/resources/release-state.v1.json").read_text("utf-8")
+        )
+        self.assertEqual(
+            (release_state["currentVersion"], release_state["buildVersion"]),
+            expected,
+        )
 
     def test_launch_agent_runs_the_bundle_executable(self):
         payload = launch_agent_payload("/tmp/stdout.log", "/tmp/stderr.log")

@@ -225,6 +225,8 @@ class SourceCapability:
                 OperatingSystem,
                 "Source operating system",
             )
+        if not self.operating_systems:
+            raise ValueError("Source must declare an operating system")
         _require_instance(self.stability, SourceStability, "Source stability")
         _require_instance(self.provenance, SourceProvenance, "Source provenance")
         _require_instance(
@@ -248,8 +250,6 @@ class SourceCapability:
             raise ValueError("Source timeout must be positive")
         if self.freshness_seconds <= 0:
             raise ValueError("Source freshness must be positive")
-        if OperatingSystem.MACOS not in self.operating_systems:
-            raise ValueError("Source must support macos")
         if self.source_id == "openusage" and (
             self.credential_type is not CredentialType.PROVIDER_OWNED
             or self.credential_scope is not None

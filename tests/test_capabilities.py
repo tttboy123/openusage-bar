@@ -402,12 +402,17 @@ class ProviderCapabilityTests(unittest.TestCase):
             QuotaWindowCapability(
                 CapabilityState.UNKNOWN, (QuotaWindow.WEEKLY,)
             )
+        linux_source = SourceCapability(
+            "source", SourceKind.LOCAL_LOG, 12, 300, CredentialType.LOCAL,
+            frozenset({OperatingSystem.LINUX}), SourceStability.STABLE,
+            SourceProvenance.PROVIDER_LOCAL,
+        )
+        self.assertEqual(
+            linux_source.operating_systems,
+            frozenset({OperatingSystem.LINUX}),
+        )
         with self.assertRaises(ValueError):
-            SourceCapability(
-                "source", SourceKind.LOCAL_LOG, 12, 300, CredentialType.LOCAL,
-                frozenset({OperatingSystem.LINUX}), SourceStability.STABLE,
-                SourceProvenance.PROVIDER_LOCAL,
-            )
+            replace(linux_source, operating_systems=frozenset())
 
     def test_quota_window_capability_rejects_type_and_state_mutations(self):
         self.assertEqual(

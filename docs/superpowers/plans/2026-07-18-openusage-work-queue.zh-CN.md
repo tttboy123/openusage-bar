@@ -875,6 +875,31 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
 
 ## Q4：1.0 Canary 与稳定发布
 
+在进入外部 Canary 前，新增一条不改写既有 0.6 事实语义的 0.7
+基础设施边界队列。详细实现步骤见
+[`2026-08-01-openusage-infrastructure-boundary.md`](2026-08-01-openusage-infrastructure-boundary.md)，
+数据所有权决策见
+[`ADR 0001`](../../adr/0001-infrastructure-boundary.md)。
+
+- **WQ-18：基础设施边界与发布状态。** 固化 Fact、Telemetry、Reservation、
+  Policy 四层写权限；Core Contract 改为 OS-neutral；OpenUsage Bar 分发继续
+  单独要求 macOS；以严格 JSON 统一版本、API 与 Canary 状态。
+  **仓库实现与本地完整门禁已完成；远端 CI 待分支提交后验证。**
+- **WQ-19：移除 Card-first 核心遗留。** 逐个 Adapter 由
+  `LegacyCardAdapter` 迁移为 fact-specific result，`ProviderCard` 只留在
+  Presentation；每个 Provider 使用独立 RED → GREEN 切片。
+- **WQ-20：冻结 `openusage-export/v1`。** 固定 producer 版本、Provider
+  filter、Token 口径、Coverage、空结果、范围/分页与能力协商，并提供 N-1
+  Fixture；OpenUsage Bar 不依赖未声明的开发 Commit 行为。
+- **WQ-21：Runtime Observation 独立方案。** 只接收时间戳、匿名作用域、
+  Token、延迟、状态和费用；使用独立短保留存储，禁止 Prompt、Response、
+  凭证和直接身份。它不拥有额度事实，也不实现 Loom 的预留、准入或路由。
+
+WQ-18 完成后才能开始 WQ-19；WQ-20 可与 WQ-19 按不同文件并行设计；
+WQ-21 必须先有独立 ADR、保留期与数据上限，不得直接写入
+`activity.sqlite3`。这些仓库内工作不会把外部机器从 0 / 5 改为已验证，
+也不会启动 30 天时钟。
+
 ### WQ-16：运行 30 天外部 Canary
 
 **目标：** 用真实环境而不是仓库自测证明稳定性。

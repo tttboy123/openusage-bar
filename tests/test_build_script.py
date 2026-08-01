@@ -66,6 +66,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("-name 'test_*.py'", source)
         self.assertIn("-name '*_test.py'", source)
         self.assertIn("provider-catalog.v1.json", source)
+        self.assertIn("release-state.v1.json", source)
         self.assertIn("GeneratedProviderCatalog.swift", source)
         self.assertIn("generate_local_api_schema.py --output", source)
         self.assertIn("generate_swift_activity_schema.py --output", source)
