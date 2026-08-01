@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "observations": [
+    {
+      "observationId": "obs_0123456789abcdef0123456789abcdef",
+      "providerId": "openai",
+      "modelId": "gpt-5",
+      "scopeRef": "anon_0123456789abcdef",
+      "startedAt": "2026-08-01T00:00:00Z",
+      "firstTokenAt": "2026-08-01T00:00:01Z",
+      "completedAt": "2026-08-01T00:00:03Z",
+      "inputTokens": 12,
+      "outputTokens": 3,
+      "cacheReadTokens": 4,
+      "cacheCreationTokens": 0,
+      "reasoningTokens": 1,
+      "totalTokens": 20,
+      "tokenCountingConvention": "components_disjoint",
+      "status": "completed",
+      "costMicros": 25,
+      "costCurrency": "usd",
+      "sourceId": "litellm.otel",
+      "quality": "provider_reported"
+    }
+  ]
+}

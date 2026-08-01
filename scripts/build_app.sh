@@ -179,4 +179,7 @@ otool -L "$APP/Contents/MacOS/OpenUsage Bar" >/dev/null
 otool -L "$STATUS_RUNTIME" >/dev/null
 otool -L "$COLLECTOR_LAUNCHER" >/dev/null
 otool -L "$ACTIVITY_APP/Contents/MacOS/OpenUsage Activity" >/dev/null
+"$PYTHON" scripts/runtime_observation_smoke.py \
+  --collector "$COLLECTOR_LAUNCHER" \
+  --fixture "$ROOT/tests/fixtures/runtime-observation-v1.json"
 print "built $APP"

@@ -313,6 +313,18 @@ class BuildScriptContractTests(unittest.TestCase):
                 self.assertIn("scripts/audit_dependencies.sh", workflow)
                 self.assertIn("scripts/release_smoke.sh", workflow)
 
+    def test_build_smokes_packaged_runtime_observation_commands(self):
+        build = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
+        smoke = ROOT / "scripts/runtime_observation_smoke.py"
+
+        self.assertTrue(smoke.is_file())
+        self.assertIn("runtime_observation_smoke.py", build)
+        self.assertIn("runtime-observation-v1.json", build)
+        source = smoke.read_text(encoding="utf-8")
+        self.assertIn('"runtime-ingest"', source)
+        self.assertIn('"runtime-summary"', source)
+        self.assertIn("runtime_observation_smoke_ok", source)
+
     def test_atomic_swap_helper_exchanges_two_directories_without_a_missing_target_window(self):
         helper = ROOT / "scripts/atomic_swap.c"
         self.assertTrue(helper.is_file())

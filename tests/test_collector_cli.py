@@ -714,7 +714,10 @@ class CollectorCLITests(unittest.TestCase):
             code, out, err = self.run_cli(
                 ["status", "--format", "json", "--fresh"],
                 refresh_entrypoint=helper,
-                fresh_timeout=1,
+                # Line tracing can delay interpreter startup substantially on
+                # slower macOS runners. Keep the timeout bounded while giving
+                # the helper enough time to fork and publish its child PID.
+                fresh_timeout=3,
             )
             self.assertEqual(code, 0)
             self.assertEqual(json.loads(out)["todayTokens"], 100)

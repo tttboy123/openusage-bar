@@ -1,5 +1,9 @@
 import json
 import unittest
+from pathlib import Path
+
+
+FIXTURE = Path(__file__).parent / "fixtures" / "runtime-observation-v1.json"
 
 
 def valid_observation() -> dict[str, object]:
@@ -34,6 +38,13 @@ def document(observations: list[dict[str, object]] | None = None) -> str:
 
 
 class RuntimeObservationContractTests(unittest.TestCase):
+    def test_frozen_v1_fixture_matches_the_strict_decoder(self):
+        from openusage_bar.runtime_observation import decode_runtime_document
+
+        decoded = decode_runtime_document(FIXTURE.read_bytes())
+        self.assertEqual(decoded.schema_version, 1)
+        self.assertEqual(decoded.observations[0].source_id, "litellm.otel")
+
     def test_decodes_strict_terminal_observation_and_derives_latency(self):
         from openusage_bar.runtime_observation import decode_runtime_document
 
@@ -205,4 +216,3 @@ class RuntimeObservationContractTests(unittest.TestCase):
 
         decoded = decode_runtime_document(document([]))
         self.assertEqual(decoded.observations, ())
-
