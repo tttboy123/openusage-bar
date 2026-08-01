@@ -68,16 +68,91 @@ class OpenUsageExportV1DecoderTests(unittest.TestCase):
 
         base = json.loads(fixture("daily-usage.json"))
         mutations = []
-        boolean = json.loads(json.dumps(base)); boolean["rows"][0]["input_tokens"] = True; mutations.append(boolean)
-        total = json.loads(json.dumps(base)); total["rows"][0]["total_tokens"] = 4; mutations.append(total)
-        scope = json.loads(json.dumps(base)); scope["rows"][0]["provider_id"] = "other"; mutations.append(scope)
-        duplicate = json.loads(json.dumps(base)); duplicate["rows"].append(dict(duplicate["rows"][0])); mutations.append(duplicate)
+        boolean = json.loads(json.dumps(base))
+        boolean["rows"][0]["input_tokens"] = True
+        mutations.append(boolean)
+        total = json.loads(json.dumps(base))
+        total["rows"][0]["total_tokens"] = 4
+        mutations.append(total)
+        scope = json.loads(json.dumps(base))
+        scope["rows"][0]["provider_id"] = "other"
+        mutations.append(scope)
+        duplicate = json.loads(json.dumps(base))
+        duplicate["rows"].append(dict(duplicate["rows"][0]))
+        mutations.append(duplicate)
+        huge = json.loads(json.dumps(base))
+        huge["rows"][0]["input_tokens"] = 2**63
+        huge["rows"][0]["total_tokens"] = 2**63 + 1
+        mutations.append(huge)
         for payload in mutations:
             with self.assertRaises(ExportDecodeError):
                 decode_daily(json.dumps(payload))
 
+    def test_validates_range_page_cursor_enums_and_request_echo(self):
+        from openusage_bar.openusage_export_v1 import ExportDecodeError, decode_daily
+
+        base = json.loads(fixture("daily-usage.json"))
+        mutations = []
+        for path, value in (
+            (("request", "limit"), 0),
+            (("request", "until"), "2027-07-03"),
+            (("coverage", "until"), "2026-07-03"),
+            (("rows", 0, "quality"), "fallback"),
+            (("rows", 0, "token_counting_convention"), "unknown"),
+        ):
+            payload = json.loads(json.dumps(base))
+            target = payload
+            for component in path[:-1]:
+                target = target[component]
+            target[path[-1]] = value
+            mutations.append(payload)
+        bad_cursor = json.loads(json.dumps(base))
+        bad_cursor["page"] = {"next_cursor": "bad cursor", "complete": False}
+        mutations.append(bad_cursor)
+        cursor_on_complete = json.loads(json.dumps(base))
+        cursor_on_complete["page"]["next_cursor"] = "opaque"
+        mutations.append(cursor_on_complete)
+        for payload in mutations:
+            with self.assertRaises(ExportDecodeError):
+                decode_daily(json.dumps(payload))
+
+    def test_rejects_forbidden_privacy_key_at_any_depth(self):
+        from openusage_bar.openusage_export_v1 import ExportDecodeError, decode_daily
+
+        base = json.loads(fixture("daily-usage.json"))
+        for key in (
+            "api_key",
+            "cookie",
+            "session_id",
+            "prompt_tokens",
+            "response",
+            "raw_payload",
+            "account_id",
+            "access_token",
+            "endpoint_url",
+            "device_id",
+        ):
+            with self.subTest(key=key):
+                payload = json.loads(json.dumps(base))
+                payload["future"] = {"nested": {key: "secret"}}
+                with self.assertRaises(ExportDecodeError):
+                    decode_daily(json.dumps(payload))
+
 
 class OpenUsageExportV1ProbeTests(unittest.TestCase):
+    @staticmethod
+    def _completed(payload, returncode: int = 0):
+        stdout = payload if isinstance(payload, str) else json.dumps(payload)
+        return subprocess.CompletedProcess([], returncode, stdout, "private stderr")
+
+    @staticmethod
+    def _capabilities():
+        return OpenUsageExportV1ProbeTests._completed(fixture("capabilities.json"))
+
+    @staticmethod
+    def _daily(name: str = "daily-usage.json") -> dict:
+        return json.loads(fixture(name))
+
     def test_probe_uses_exact_bounded_direct_command_and_safe_environment(self):
         from openusage_bar.daily_history import OpenUsageDailyImporter
 
@@ -179,32 +254,147 @@ class OpenUsageExportV1ProbeTests(unittest.TestCase):
         self.assertEqual(runner.call_args_list[1].args[0][1], "daily")
         self.assertEqual(runner.call_args_list[2].args[0][1], "daily")
 
-    def test_validates_range_page_cursor_enums_and_request_echo(self):
-        from openusage_bar.openusage_export_v1 import ExportDecodeError, decode_daily
+    def test_supported_v1_is_selected_without_running_or_summing_legacy(self):
+        from openusage_bar.daily_history import (
+            EXPORT_V1_SOURCE_ID,
+            OpenUsageDailyImporter,
+        )
 
-        base = json.loads(fixture("daily-usage.json"))
-        mutations = []
-        bad_limit = json.loads(json.dumps(base)); bad_limit["request"]["limit"] = 0; mutations.append(bad_limit)
-        too_long = json.loads(json.dumps(base)); too_long["request"]["until"] = "2027-07-03"; mutations.append(too_long)
-        wrong_coverage = json.loads(json.dumps(base)); wrong_coverage["coverage"]["until"] = "2026-07-03"; mutations.append(wrong_coverage)
-        bad_quality = json.loads(json.dumps(base)); bad_quality["rows"][0]["quality"] = "fallback"; mutations.append(bad_quality)
-        bad_convention = json.loads(json.dumps(base)); bad_convention["rows"][0]["token_counting_convention"] = "unknown"; mutations.append(bad_convention)
-        bad_cursor = json.loads(json.dumps(base)); bad_cursor["page"] = {"next_cursor": "bad cursor", "complete": False}; mutations.append(bad_cursor)
-        cursor_on_complete = json.loads(json.dumps(base)); cursor_on_complete["page"]["next_cursor"] = "opaque"; mutations.append(cursor_on_complete)
-        for payload in mutations:
-            with self.assertRaises(ExportDecodeError):
-                decode_daily(json.dumps(payload))
+        runner = Mock(
+            side_effect=[self._capabilities(), self._completed(self._daily())]
+        )
+        importer = OpenUsageDailyImporter(runner=runner)
+        result = importer.fetch("codex", date(2026, 7, 1), date(2026, 7, 2))
 
-    def test_rejects_forbidden_privacy_key_at_any_depth(self):
-        from openusage_bar.openusage_export_v1 import ExportDecodeError, decode_daily
+        self.assertTrue(result.ok)
+        self.assertEqual(result.source_id, EXPORT_V1_SOURCE_ID)
+        self.assertEqual([row.total_tokens for row in result.rows], [3])
+        self.assertEqual(runner.call_count, 2)
+        command = runner.call_args_list[1].args[0]
+        self.assertEqual(
+            command,
+            [
+                importer.openusage_path,
+                "export",
+                "--output",
+                "-",
+                "--format",
+                "json",
+                "--contract",
+                "openusage-export/v1",
+                "--kind",
+                "daily_usage",
+                "--provider",
+                "codex",
+                "--since",
+                "2026-07-01",
+                "--until",
+                "2026-07-02",
+                "--limit",
+                "500",
+            ],
+        )
 
-        base = json.loads(fixture("daily-usage.json"))
-        for key in ("api_key", "cookie", "session_id", "prompt", "response", "raw_payload", "account_id"):
-            payload = json.loads(json.dumps(base))
-            payload["future"] = {"nested": {key: "secret"}}
-            with self.assertRaises(ExportDecodeError):
-                decode_daily(json.dumps(payload))
+    def test_only_complete_empty_v1_can_report_covered_zero(self):
+        from openusage_bar.daily_history import OpenUsageDailyImporter
 
+        runner = Mock(
+            side_effect=[
+                self._capabilities(),
+                self._completed(self._daily("daily-usage-empty-complete.json")),
+            ]
+        )
+        result = OpenUsageDailyImporter(runner=runner).fetch(
+            "codex", date(2026, 7, 1), date(2026, 7, 2)
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.rows, ())
+        self.assertTrue(result.covered_zero)
+        self.assertEqual(runner.call_count, 2)
+
+    def test_multi_page_v1_is_validated_before_rows_are_published(self):
+        from openusage_bar.daily_history import OpenUsageDailyImporter
+
+        first = self._daily()
+        first["page"] = {"next_cursor": "opaque-cursor", "complete": False}
+        second = self._daily()
+        second["request"]["cursor"] = "opaque-cursor"
+        second["rows"][0].update(
+            {"day": "2026-07-02", "model_id": "gpt-5.5"}
+        )
+        runner = Mock(
+            side_effect=[
+                self._capabilities(), self._completed(first), self._completed(second)
+            ]
+        )
+
+        result = OpenUsageDailyImporter(runner=runner).fetch(
+            "codex", date(2026, 7, 1), date(2026, 7, 2)
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(
+            [(row.day, row.model_id) for row in result.rows],
+            [("2026-07-01", "gpt-5"), ("2026-07-02", "gpt-5.5")],
+        )
+        self.assertEqual(
+            runner.call_args_list[2].args[0][-2:], ["--cursor", "opaque-cursor"]
+        )
+
+    def test_invalid_or_partial_v1_falls_back_once_to_legacy(self):
+        from openusage_bar.daily_history import DAILY_SOURCE_ID, OpenUsageDailyImporter
+
+        legacy = {
+            "kind": "daily",
+            "rows": [
+                {
+                    "key": "2026-07-01",
+                    "model_breakdown": [
+                        {
+                            "key": "gpt-legacy",
+                            "input_tokens": 4,
+                            "output_tokens": 1,
+                            "cache_read_tokens": 0,
+                            "cache_creation_tokens": 0,
+                            "reasoning_tokens": None,
+                            "total_tokens": 5,
+                            "cost_usd": None,
+                        }
+                    ],
+                }
+            ],
+            "totals": {},
+        }
+        partial = self._daily("daily-usage-partial.json")
+        malformed = self._daily()
+        malformed["request"]["provider_id"] = "other"
+        loop = self._daily()
+        loop["page"] = {"next_cursor": "same", "complete": False}
+        loop_next = self._daily()
+        loop_next["request"]["cursor"] = "same"
+        loop_next["page"] = {"next_cursor": "same", "complete": False}
+        cases = (
+            [self._completed(partial)],
+            [self._completed(malformed)],
+            [self._completed(loop), self._completed(loop_next)],
+            [self._completed(loop), self._completed("", returncode=9)],
+        )
+        for v1_calls in cases:
+            with self.subTest(case=len(v1_calls)):
+                runner = Mock(
+                    side_effect=[
+                        self._capabilities(), *v1_calls, self._completed(legacy)
+                    ]
+                )
+                result = OpenUsageDailyImporter(runner=runner).fetch(
+                    "codex", date(2026, 7, 1), date(2026, 7, 2)
+                )
+                self.assertTrue(result.ok)
+                self.assertEqual(result.source_id, DAILY_SOURCE_ID)
+                self.assertFalse(result.covered_zero)
+                self.assertEqual([row.total_tokens for row in result.rows], [5])
+                self.assertEqual(runner.call_args_list[-1].args[0][1], "daily")
 
 if __name__ == "__main__":
     unittest.main()

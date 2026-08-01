@@ -15,6 +15,7 @@ MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
 MAX_CURSOR_LENGTH = 2048
 MAX_VERSION_LENGTH = 128
 MAX_MODEL_LENGTH = 256
+MAX_TOKEN_VALUE = 9_223_372_036_854_775_807
 
 KINDS = ("capabilities", "daily_usage")
 COVERAGE_STATES = ("complete", "partial", "none")
@@ -32,28 +33,40 @@ _FORBIDDEN_EXACT_KEYS = {
     "account",
     "account_id",
     "account_ref",
+    "access_token",
     "api_key",
     "authorization",
     "auth_token",
+    "base_url",
     "coding_plan_key",
     "cookie",
     "credentials",
+    "device_id",
     "email",
     "endpoint",
+    "endpoint_url",
     "headers",
+    "organization_id",
     "password",
     "project",
     "project_id",
     "prompt",
     "raw",
     "raw_payload",
+    "refresh_token",
     "request_body",
     "response",
     "response_body",
     "secret",
     "session",
     "session_id",
+    "session_key",
+    "token",
+    "uri",
+    "url",
     "user_id",
+    "username",
+    "workspace_id",
 }
 
 
@@ -200,7 +213,18 @@ def _forbid_private_keys(value: Any) -> None:
             if not isinstance(key, str):
                 raise ExportDecodeError()
             normalized = key.lower().replace("-", "_")
-            if normalized in _FORBIDDEN_EXACT_KEYS:
+            if normalized in _FORBIDDEN_EXACT_KEYS or normalized.startswith(
+                (
+                    "account_",
+                    "cookie_",
+                    "credential_",
+                    "project_",
+                    "prompt_",
+                    "raw_",
+                    "response_",
+                    "session_",
+                )
+            ):
                 raise ExportDecodeError("forbidden_export_field")
             _forbid_private_keys(nested)
     elif isinstance(value, list):
@@ -322,15 +346,27 @@ def _decode_row(raw_value: Any, request: ExportRequest) -> ExportDailyRow:
         or not request.since <= day <= request.until
     ):
         raise ExportDecodeError()
-    input_tokens = _integer(_required(raw, "input_tokens"))
-    output_tokens = _integer(_required(raw, "output_tokens"))
-    cache_read_tokens = _integer(_required(raw, "cache_read_tokens"))
-    cache_creation_tokens = _integer(_required(raw, "cache_creation_tokens"))
+    input_tokens = _integer(
+        _required(raw, "input_tokens"), maximum=MAX_TOKEN_VALUE
+    )
+    output_tokens = _integer(
+        _required(raw, "output_tokens"), maximum=MAX_TOKEN_VALUE
+    )
+    cache_read_tokens = _integer(
+        _required(raw, "cache_read_tokens"), maximum=MAX_TOKEN_VALUE
+    )
+    cache_creation_tokens = _integer(
+        _required(raw, "cache_creation_tokens"), maximum=MAX_TOKEN_VALUE
+    )
     reasoning_value = _required(raw, "reasoning_tokens")
     reasoning_tokens = (
-        None if reasoning_value is None else _integer(reasoning_value)
+        None
+        if reasoning_value is None
+        else _integer(reasoning_value, maximum=MAX_TOKEN_VALUE)
     )
-    total_tokens = _integer(_required(raw, "total_tokens"))
+    total_tokens = _integer(
+        _required(raw, "total_tokens"), maximum=MAX_TOKEN_VALUE
+    )
     convention = _required(raw, "token_counting_convention")
     quality = _required(raw, "quality")
     if convention not in COUNTING_CONVENTIONS or quality not in QUALITIES:
@@ -401,3 +437,8 @@ def decode_daily(
         next_cursor,
         complete,
     )
+    "base_url",
+    "device_id",
+    "organization_id",
+    "refresh_token",
+    "session_key",

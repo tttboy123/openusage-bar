@@ -19,6 +19,7 @@ from openusage_bar.activity_store import (
 from openusage_bar.daily_history import (
     ActivityCollector,
     DailyImportResult,
+    EXPORT_V1_SOURCE_ID,
     OpenUsageDailyImporter,
 )
 from openusage_bar.codex_attribution import CodexAttributionResolver
@@ -790,6 +791,29 @@ class ActivityCollectorTests(unittest.TestCase):
         ActivityCollector(store, importer, clock=lambda: NOW).refresh(Overview([card("codex")]))
 
         importer.fetch.assert_called_once_with("codex", date(2026, 7, 14), date(2026, 7, 14))
+
+    def test_complete_empty_export_v1_commits_covered_zero_with_v1_provenance(self):
+        store = Mock()
+        store.has_daily_history.return_value = True
+        importer = Mock()
+        importer.fetch.return_value = DailyImportResult(
+            True, (), source_id=EXPORT_V1_SOURCE_ID, covered_zero=True
+        )
+
+        ActivityCollector(store, importer, clock=lambda: NOW).refresh(
+            Overview([card("codex")])
+        )
+
+        store.commit_usage_import_success.assert_called_once_with(
+            "codex",
+            EXPORT_V1_SOURCE_ID,
+            date(2026, 7, 14),
+            date(2026, 7, 14),
+            (),
+            NOW,
+            account_ref="",
+        )
+        store.record_source_status.assert_not_called()
 
     def test_refresh_uses_local_calendar_day_across_utc_boundary(self):
         store = Mock()
