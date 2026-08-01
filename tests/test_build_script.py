@@ -349,6 +349,49 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("runtime_producer_smoke_ok", smoke_source)
         self.assertIn("litellm.callback.v1", smoke_source)
 
+    def test_build_packages_and_smokes_versioned_runtime_adapters(self):
+        build = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
+        integration = ROOT / "integrations/otel_genai_openusage.py"
+        go_module = ROOT / "integrations/cliproxyapi-openusage/go.mod"
+        smoke = ROOT / "scripts/runtime_adapter_smoke.py"
+
+        self.assertTrue(integration.is_file())
+        self.assertTrue(go_module.is_file())
+        self.assertTrue(smoke.is_file())
+        self.assertIn("otel_genai_openusage.py", build)
+        self.assertIn("runtime_adapter_smoke.py", build)
+        self.assertIn("otel-genai-f77b923-success-v1.json", build)
+        self.assertIn("cliproxyapi-openusage", build)
+        self.assertIn("GOTOOLCHAIN=local go test -race ./...", build)
+        self.assertIn("GOTOOLCHAIN=local go vet ./...", build)
+        self.assertGreater(
+            build.rindex('codesign --verify --deep --strict "$APP"'),
+            build.index("scripts/runtime_adapter_smoke.py"),
+        )
+        smoke_source = smoke.read_text(encoding="utf-8")
+        self.assertIn("integration.parent.stat().st_mode & 0o222", smoke_source)
+        self.assertIn('integration.parent / "__pycache__"', smoke_source)
+        self.assertIn("runtime_adapter_smoke_ok", smoke_source)
+        self.assertIn("otel.genai.f77b923.v1", smoke_source)
+
+    def test_ci_and_release_pin_the_cli_proxy_plugin_toolchain(self):
+        pin_manifest = (ROOT / ".github/action-pins.json").read_text(
+            encoding="utf-8"
+        )
+        for workflow_name in ("ci.yml", "release.yml"):
+            workflow = (
+                ROOT / ".github" / "workflows" / workflow_name
+            ).read_text(encoding="utf-8")
+            with self.subTest(workflow=workflow_name):
+                self.assertIn("actions/setup-go@", workflow)
+                self.assertIn(
+                    "integrations/cliproxyapi-openusage/go.mod", workflow
+                )
+                self.assertIn(
+                    "integrations/cliproxyapi-openusage/go.sum", workflow
+                )
+        self.assertIn('"repository": "actions/setup-go"', pin_manifest)
+
     def test_atomic_swap_helper_exchanges_two_directories_without_a_missing_target_window(self):
         helper = ROOT / "scripts/atomic_swap.c"
         self.assertTrue(helper.is_file())

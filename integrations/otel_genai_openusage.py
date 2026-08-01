@@ -154,7 +154,7 @@ def _usage(
     ):
         return None
     total_tokens = input_tokens + output_tokens
-    if total_tokens > MAX_COUNTER:
+    if total_tokens <= 0 or total_tokens > MAX_COUNTER:
         return None
     return (
         input_tokens,

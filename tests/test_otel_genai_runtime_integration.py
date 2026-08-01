@@ -145,6 +145,12 @@ class OTelGenAIRuntimeTransformTests(unittest.TestCase):
             {"gen_ai.usage.cache_read.input_tokens": 13},
             {"gen_ai.usage.reasoning.output_tokens": 4},
             {"gen_ai.usage.output_tokens": -1},
+            {
+                "gen_ai.usage.input_tokens": 0,
+                "gen_ai.usage.output_tokens": 0,
+                "gen_ai.usage.cache_read.input_tokens": 0,
+                "gen_ai.usage.reasoning.output_tokens": 0,
+            },
         )
 
         for changes in cases:

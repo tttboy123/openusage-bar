@@ -27,6 +27,11 @@ CODESIGN_IDENTITY=${OPENUSAGE_CODESIGN_IDENTITY:--}
 cd "$ROOT"
 "$PYTHON" scripts/release_secret_scan.py
 "$PYTHON" scripts/verify_action_pins.py
+(
+  cd "$ROOT/integrations/cliproxyapi-openusage"
+  GOTOOLCHAIN=local go test -race ./...
+  GOTOOLCHAIN=local go vet ./...
+)
 CATALOG_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-provider-catalog.XXXXXX")
 LOCAL_API_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-local-api-schema.XXXXXX")
 ACTIVITY_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-activity-schema.XXXXXX")
@@ -113,7 +118,10 @@ cp "$SWIFT_PACKAGE/.build/release/OpenUsageBar" "$STATUS_RUNTIME"
 cp "$APP/Contents/MacOS/OpenUsage Bar" "$COLLECTOR_LAUNCHER"
 chmod 755 "$APP/Contents/MacOS/OpenUsage Bar" "$STATUS_RUNTIME" "$COLLECTOR_LAUNCHER"
 cp "$ROOT/integrations/litellm_openusage.py" "$INTEGRATIONS/litellm_openusage.py"
-chmod 644 "$INTEGRATIONS/litellm_openusage.py"
+cp "$ROOT/integrations/otel_genai_openusage.py" "$INTEGRATIONS/otel_genai_openusage.py"
+chmod 644 \
+  "$INTEGRATIONS/litellm_openusage.py" \
+  "$INTEGRATIONS/otel_genai_openusage.py"
 chmod 555 "$INTEGRATIONS"
 
 mkdir -p "$ACTIVITY_APP/Contents/MacOS"
@@ -195,5 +203,9 @@ otool -L "$ACTIVITY_APP/Contents/MacOS/OpenUsage Activity" >/dev/null
   --collector "$COLLECTOR_LAUNCHER" \
   --integration "$INTEGRATIONS/litellm_openusage.py" \
   --fixture "$ROOT/tests/fixtures/runtime-producers/litellm-success-v1.json"
+"$PYTHON" scripts/runtime_adapter_smoke.py \
+  --collector "$COLLECTOR_LAUNCHER" \
+  --integration "$INTEGRATIONS/otel_genai_openusage.py" \
+  --fixture "$ROOT/tests/fixtures/runtime-producers/otel-genai-f77b923-success-v1.json"
 codesign --verify --deep --strict "$APP"
 print "built $APP"
