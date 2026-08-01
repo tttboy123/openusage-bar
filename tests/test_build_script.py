@@ -338,8 +338,16 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("litellm_openusage.py", build)
         self.assertIn("runtime_producer_smoke.py", build)
         self.assertIn("runtime-producers/litellm-success-v1.json", build)
-        self.assertIn("runtime_producer_smoke_ok", smoke.read_text(encoding="utf-8"))
-        self.assertIn("litellm.callback.v1", smoke.read_text(encoding="utf-8"))
+        self.assertIn('chmod 555 "$INTEGRATIONS"', build)
+        self.assertGreater(
+            build.rindex('codesign --verify --deep --strict "$APP"'),
+            build.index('scripts/runtime_producer_smoke.py'),
+        )
+        smoke_source = smoke.read_text(encoding="utf-8")
+        self.assertIn("integration.parent.stat().st_mode & 0o222", smoke_source)
+        self.assertIn('integration.parent / "__pycache__"', smoke_source)
+        self.assertIn("runtime_producer_smoke_ok", smoke_source)
+        self.assertIn("litellm.callback.v1", smoke_source)
 
     def test_atomic_swap_helper_exchanges_two_directories_without_a_missing_target_window(self):
         helper = ROOT / "scripts/atomic_swap.c"

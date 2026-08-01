@@ -114,6 +114,7 @@ cp "$APP/Contents/MacOS/OpenUsage Bar" "$COLLECTOR_LAUNCHER"
 chmod 755 "$APP/Contents/MacOS/OpenUsage Bar" "$STATUS_RUNTIME" "$COLLECTOR_LAUNCHER"
 cp "$ROOT/integrations/litellm_openusage.py" "$INTEGRATIONS/litellm_openusage.py"
 chmod 644 "$INTEGRATIONS/litellm_openusage.py"
+chmod 555 "$INTEGRATIONS"
 
 mkdir -p "$ACTIVITY_APP/Contents/MacOS"
 cp "$RESOURCES/OpenUsageActivity-Info.plist" "$ACTIVITY_APP/Contents/Info.plist"
@@ -194,4 +195,5 @@ otool -L "$ACTIVITY_APP/Contents/MacOS/OpenUsage Activity" >/dev/null
   --collector "$COLLECTOR_LAUNCHER" \
   --integration "$INTEGRATIONS/litellm_openusage.py" \
   --fixture "$ROOT/tests/fixtures/runtime-producers/litellm-success-v1.json"
+codesign --verify --deep --strict "$APP"
 print "built $APP"

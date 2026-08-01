@@ -90,6 +90,7 @@ def verify(collector: Path, integration: Path, fixture_path: Path) -> None:
         not _regular(collector, executable=True)
         or not _regular(integration)
         or not _regular(fixture_path)
+        or integration.parent.stat().st_mode & 0o222
         or fixture_path.stat().st_size > MAX_BYTES
     ):
         raise ValueError("producer smoke input unavailable")
@@ -97,6 +98,8 @@ def verify(collector: Path, integration: Path, fixture_path: Path) -> None:
     if not isinstance(fixture, dict):
         raise ValueError("producer smoke fixture invalid")
     integration_module = _load(integration)
+    if (integration.parent / "__pycache__").exists():
+        raise RuntimeError("producer modified the signed integration directory")
     completed_at = datetime.now(timezone.utc).replace(microsecond=0)
     started_at = completed_at - timedelta(seconds=3)
 
