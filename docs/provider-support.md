@@ -187,11 +187,30 @@ OpenUsage Bar selects one effective source for each Provider/account range; it
 does not sum overlapping official and OpenUsage rows:
 
 1. Use the official daily usage response when it succeeds.
-2. If the official source fails, try `openusage.daily` with a 60-second process
-   timeout and mark accepted rows as `quality=fallback`.
-3. If OpenUsage fails or returns no model rows, preserve last-good rows and mark
-   source health stale/temporarily unavailable.
-4. If no source has ever succeeded, report missing data rather than numeric zero.
+2. After exact `openusage-export/v1` capability negotiation succeeds, collect its
+   bounded pages as source `openusage.export.v1`. Every page must match the exact
+   Provider/range/cursor scope and report complete coverage before any row is
+   committed.
+3. If negotiation is unsupported or any v1 page fails, invoke the bounded legacy
+   `openusage daily` command once as source `openusage.daily`.
+4. If both OpenUsage paths fail, or legacy returns no model rows, preserve Last-good
+   and mark source health stale/temporarily unavailable.
+5. If no source has ever succeeded, report missing data rather than numeric zero.
+
+This is a selection chain, not an aggregation chain:
+
+```text
+official Provider source
+  -> openusage-export/v1 after successful negotiation
+  -> bounded legacy OpenUsage daily command
+  -> Last-good
+  -> No data
+```
+
+The first successful source wins and overlapping sources are never added. Only an
+initial, final v1 page with `coverage.state=complete` may turn an empty row set into
+covered zero. Partial/none coverage, an empty legacy result, a cursor loop or a
+later-page failure never erases Last-good facts.
 
 Codex and local clients without an official daily Token endpoint start at step
 2, so their OpenUsage rows retain their native quality rather than being
