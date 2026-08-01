@@ -120,19 +120,13 @@ class RuntimeObservationContractTests(unittest.TestCase):
                 with self.assertRaises(RuntimeObservationDecodeError):
                     decode_runtime_document(document([observation]))
 
-    def test_requires_first_token_when_output_was_observed(self):
+    def test_output_tokens_may_have_unknown_first_token_time(self):
         from openusage_bar.runtime_observation import (
-            RuntimeObservationDecodeError,
             decode_runtime_document,
         )
 
         observation = valid_observation()
         observation["firstTokenAt"] = None
-        with self.assertRaises(RuntimeObservationDecodeError):
-            decode_runtime_document(document([observation]))
-
-        observation["outputTokens"] = 0
-        observation["totalTokens"] = 17
         decoded = decode_runtime_document(document([observation]))
         self.assertIsNone(decoded.observations[0].ttft_ms)
 
@@ -160,6 +154,12 @@ class RuntimeObservationContractTests(unittest.TestCase):
         bad_convention = valid_observation()
         bad_convention["tokenCountingConvention"] = "guess"
         invalid.append(bad_convention)
+        reasoning_exceeds_output = valid_observation()
+        reasoning_exceeds_output["tokenCountingConvention"] = "input_includes_cache"
+        reasoning_exceeds_output["reasoningTokens"] = 4
+        reasoning_exceeds_output["outputTokens"] = 3
+        reasoning_exceeds_output["totalTokens"] = 15
+        invalid.append(reasoning_exceeds_output)
 
         for observation in invalid:
             with self.subTest(observation=observation):

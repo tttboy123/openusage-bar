@@ -194,9 +194,6 @@ def _decode_observation(value: Any) -> RuntimeObservation:
     assert isinstance(cache_read_tokens, int)
     assert isinstance(cache_creation_tokens, int)
     assert isinstance(total_tokens, int)
-    if output_tokens > 0 and first_token_at is None:
-        raise RuntimeObservationDecodeError("invalid runtime observation document")
-
     convention = raw["tokenCountingConvention"]
     if convention not in TOKEN_COUNTING_CONVENTIONS:
         raise RuntimeObservationDecodeError("invalid runtime observation document")
@@ -218,6 +215,8 @@ def _decode_observation(value: Any) -> RuntimeObservation:
         if (
             cache_read_tokens + cache_creation_tokens > input_tokens
             or total_tokens != input_tokens + output_tokens
+            or reasoning_tokens is not None
+            and reasoning_tokens > output_tokens
         ):
             raise RuntimeObservationDecodeError("invalid runtime observation document")
 

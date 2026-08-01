@@ -89,7 +89,7 @@ git commit -m "docs(runtime): queue the first local producer"
 - Modify: `openusage_bar/runtime_observation.py`
 - Modify: `tests/test_runtime_observation.py`
 
-- [ ] **Step 1: Write the failing contract test**
+- [x] **Step 1: Write the failing contract test**
 
 Replace the old expectation that output Token usage requires `firstTokenAt`
 with:
@@ -106,7 +106,7 @@ Also prove that a present first-Token timestamp must remain within the request
 window and that reasoning Token count cannot exceed output Token count when the
 convention says output includes reasoning.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 .build-venv/bin/python -m unittest \
@@ -116,21 +116,21 @@ convention says output includes reasoning.
 Expected: FAIL because the v1 decoder currently rejects null first-Token time
 when output usage is nonzero.
 
-- [ ] **Step 3: Implement the minimal semantic correction**
+- [x] **Step 3: Implement the minimal semantic correction**
 
 Remove the output/non-null coupling. Keep timestamp ordering validation when the
 field is present, and reject `reasoningTokens > outputTokens` for
 `input_includes_cache` because reasoning is a subset of output under the
 OpenTelemetry/LiteLLM convention.
 
-- [ ] **Step 4: Run GREEN and contract regression**
+- [x] **Step 4: Run GREEN and contract regression**
 
 ```bash
 .build-venv/bin/python -m unittest tests.test_runtime_observation \
   tests.test_runtime_store tests.test_collector_cli.RuntimeObservationCLITests -v
 ```
 
-- [ ] **Step 5: Commit the contract correction**
+- [x] **Step 5: Commit the contract correction**
 
 ```bash
 git add openusage_bar/runtime_observation.py tests/test_runtime_observation.py
