@@ -14,8 +14,8 @@ from ..config import (
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
-from ..cost_feed import DailyCostFeedCardAdapter, DailyCostFeedImporter
-from ..daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
+from ..cost_feed import DailyCostFeedImporter
+from ..daily_feed import DailyUsageFeedImporter
 from ..daily_history import OpenUsageDailyImporter
 from ..generic import GenericHTTPSAdapter
 from ..kiro import KiroQuotaAdapter
@@ -26,13 +26,10 @@ from ..minimax import (
 )
 from ..moonshot import MoonshotBalanceAdapter
 from ..network import BoundedHTTPClient
-from ..openai_organization import (
-    OpenAIOrganizationCardAdapter,
-    OpenAIOrganizationImporter,
-)
+from ..openai_organization import OpenAIOrganizationImporter
 from ..openusage_adapter import OpenUsageAdapter
 from ..step_plan import StepPlanAdapter, endpoints_for_site
-from .contracts import ProviderBinding, ProviderDescriptor
+from .contracts import ProviderBinding, ProviderDescriptor, SourceAttribution
 from .registry import AdapterRegistry
 
 
@@ -41,6 +38,19 @@ def _performance_source(source: object, source_class: str) -> object:
         raise ValueError("invalid performance source class")
     source.performance_source_class = source_class
     return source
+
+
+def _attributed_source(
+    source: object,
+    source_class: str,
+    credential_source: str,
+    source_kind: str,
+) -> object:
+    source.source_attribution = SourceAttribution(
+        credential_source=credential_source,
+        source_kind=source_kind,
+    )
+    return _performance_source(source, source_class)
 
 
 def _quota_source(
@@ -142,19 +152,17 @@ def default_registry(
         )
 
     def openai(config: OpenAIOrganizationConfig) -> ProviderBinding:
-        importer = _performance_source(
+        importer = _attributed_source(
             OpenAIOrganizationImporter(config, keychain, openai_client, clock),
             "network",
+            "openai_admin_api",
+            "official_api",
         )
         return ProviderBinding(
             provider_id=config.provider_id, family_id="openai",
             descriptor=_descriptor(
                 config.provider_id, "openai", config.name, "api"
             ),
-            quota_sources=(_quota_source(
-                OpenAIOrganizationCardAdapter(config, keychain, clock),
-                "openai.organization", 20
-            ),),
             usage_sources=(importer,), cost_sources=(importer,),
         )
 
@@ -176,40 +184,36 @@ def default_registry(
         )
 
     def daily_feed(config: DailyUsageFeedConfig) -> ProviderBinding:
-        importer = _performance_source(
+        importer = _attributed_source(
             DailyUsageFeedImporter(
                 config, keychain, daily_feed_client, clock
             ),
             "network",
+            "api_key",
+            "generic_https",
         )
         return ProviderBinding(
             provider_id=config.provider_id, family_id=config.family_id,
             descriptor=_descriptor(
                 config.provider_id, config.family_id, config.name, "api"
             ),
-            quota_sources=(_quota_source(
-                DailyUsageFeedCardAdapter(config, keychain, clock),
-                "custom.daily", 20
-            ),),
             usage_sources=(importer,),
         )
 
     def cost_feed(config: DailyCostFeedConfig) -> ProviderBinding:
-        importer = _performance_source(
+        importer = _attributed_source(
             DailyCostFeedImporter(
                 config, keychain, daily_feed_client, clock
             ),
             "network",
+            "api_key",
+            "generic_https",
         )
         return ProviderBinding(
             provider_id=config.provider_id, family_id=config.family_id,
             descriptor=_descriptor(
                 config.provider_id, config.family_id, config.name, "api"
             ),
-            quota_sources=(_quota_source(
-                DailyCostFeedCardAdapter(config, keychain, clock),
-                "custom.cost", 20
-            ),),
             cost_sources=(importer,),
         )
 

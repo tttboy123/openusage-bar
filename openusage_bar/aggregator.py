@@ -20,6 +20,13 @@ from .performance_timing import (
     measure_source_call,
     source_class_for,
 )
+from .providers.contracts import (
+    BalanceCollectionResult,
+    BalanceFetchFailure,
+    ProviderDescriptor,
+    QuotaCollectionResult,
+    QuotaFetchFailure,
+)
 
 
 DEFAULT_CACHE_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "cards.json"
@@ -251,14 +258,20 @@ class LedgerRefresher:
 
     def __init__(
         self, aggregator, collector, quota_sources=(), balance_sources=(), *,
+        provider_descriptors=(),
+        provider_attributions=(),
         eager_usage_provider_ids=(),
+        clock=None,
         timing_recorder: RefreshTimingRecorder | None = None,
     ) -> None:
         self.aggregator = aggregator
         self.collector = collector
         self.quota_sources = tuple(quota_sources)
         self.balance_sources = tuple(balance_sources)
+        self.provider_descriptors = tuple(provider_descriptors)
+        self.provider_attributions = tuple(provider_attributions)
         self.eager_usage_provider_ids = tuple(eager_usage_provider_ids)
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.timing_recorder = timing_recorder
 
     def refresh(self) -> None:
@@ -268,20 +281,86 @@ class LedgerRefresher:
             except Exception:
                 pass
         overview = self.aggregator.refresh()
-        results = tuple(
-            (provider_id, source_id, result)
-            for provider_id, source_id, adapter in self.quota_sources
-            if (result := getattr(adapter, "last_quota_result", None)) is not None
-        )
-        balance_results = tuple(
-            (provider_id, source_id, result)
-            for provider_id, source_id, adapter in self.balance_sources
-            if (result := getattr(adapter, "last_balance_result", None)) is not None
-        )
+        attempted_at = self.clock().astimezone(timezone.utc)
+        instances = {
+            descriptor.provider_id: descriptor.observed(
+                attempted_at, attribution
+            )
+            for descriptor, attribution in self.provider_attributions
+        }
+        results = []
+        for descriptor, source_id, adapter in self.quota_sources:
+            try:
+                collection = measure_source_call(
+                    self.timing_recorder,
+                    source_class_for(adapter, "network"),
+                    adapter.fetch_quota,
+                )
+            except Exception:
+                results.append((
+                    descriptor.provider_id,
+                    source_id,
+                    QuotaFetchFailure("unexpected_failure"),
+                ))
+                continue
+            if not isinstance(collection, QuotaCollectionResult):
+                results.append((
+                    descriptor.provider_id,
+                    source_id,
+                    QuotaFetchFailure("invalid_import_result"),
+                ))
+                continue
+            results.append((descriptor.provider_id, source_id, collection.result))
+            try:
+                instances[descriptor.provider_id] = descriptor.observed(
+                    attempted_at, collection.attribution
+                )
+            except (TypeError, ValueError):
+                pass
+
+        balance_results = []
+        for descriptor, source_id, adapter in self.balance_sources:
+            try:
+                collection = measure_source_call(
+                    self.timing_recorder,
+                    source_class_for(adapter, "network"),
+                    adapter.fetch_balance,
+                )
+            except Exception:
+                balance_results.append((
+                    descriptor.provider_id,
+                    source_id,
+                    BalanceFetchFailure("unexpected_failure"),
+                ))
+                continue
+            if not isinstance(collection, BalanceCollectionResult):
+                balance_results.append((
+                    descriptor.provider_id,
+                    source_id,
+                    BalanceFetchFailure("invalid_import_result"),
+                ))
+                continue
+            balance_results.append((
+                descriptor.provider_id, source_id, collection.result
+            ))
+            try:
+                instances[descriptor.provider_id] = descriptor.observed(
+                    attempted_at, collection.attribution
+                )
+            except (TypeError, ValueError):
+                pass
+
         self.collector.refresh(
             overview,
-            balance_results=balance_results,
-            quota_results=results,
+            provider_instances=tuple(
+                instances[provider_id] for provider_id in sorted(instances)
+            ),
+            provider_families={
+                descriptor.provider_id: descriptor.family_id
+                for descriptor in self.provider_descriptors
+            },
+            balance_results=tuple(balance_results),
+            quota_results=tuple(results),
         )
 
     def performance_timing_snapshot(self) -> dict:
@@ -322,6 +401,8 @@ def build_headless_refresher(
         )
         for binding in bindings
         for adapter in (*binding.quota_sources, *binding.balance_sources)
+        if not hasattr(adapter, "fetch_quota")
+        and not hasattr(adapter, "fetch_balance")
     )]
     openusage_importer = next(
         source
@@ -356,20 +437,21 @@ def build_headless_refresher(
     )
     quota_sources = tuple(
         (
-            binding.provider_id,
+            binding.descriptor,
             getattr(adapter, "source_id", type(adapter).__name__),
             adapter,
         )
         for binding in bindings for adapter in binding.quota_sources
-        if hasattr(adapter, "last_quota_result")
+        if hasattr(adapter, "fetch_quota")
     )
     balance_sources = tuple(
         (
-            binding.provider_id,
+            binding.descriptor,
             getattr(adapter, "source_id", type(adapter).__name__),
             adapter,
         )
         for binding in bindings for adapter in binding.balance_sources
+        if hasattr(adapter, "fetch_balance")
     )
     eager_usage_provider_ids = tuple(sorted(
         {"codex"} | {
@@ -378,8 +460,30 @@ def build_headless_refresher(
             if getattr(importer, "eager_local", False) is True
         }
     ))
+    attributed_providers = {}
+    for binding in bindings:
+        sources = {id(source): source for source in (
+            *binding.usage_sources, *binding.cost_sources,
+        )}
+        for source in sources.values():
+            attribution = getattr(source, "source_attribution", None)
+            if attribution is not None:
+                attributed_providers.setdefault(
+                    binding.provider_id,
+                    (binding.descriptor, attribution),
+                )
     return LedgerRefresher(
         aggregator, collector, quota_sources, balance_sources,
+        provider_descriptors=tuple(
+            binding.descriptor
+            for binding in bindings
+            if binding.provider_id != "openusage"
+        ),
+        provider_attributions=tuple(
+            attributed_providers[provider_id]
+            for provider_id in sorted(attributed_providers)
+        ),
         eager_usage_provider_ids=eager_usage_provider_ids,
+        clock=clock,
         timing_recorder=timing_recorder,
     )

@@ -784,7 +784,9 @@ class ActivityCollector:
 
     @staticmethod
     def _provider_ids(
-        overview: Overview, official_importers: Mapping[str, Any]
+        overview: Overview,
+        official_importers: Mapping[str, Any],
+        provider_families: Mapping[str, str] | None = None,
     ) -> tuple[str, ...]:
         return tuple(sorted(
             {
@@ -793,16 +795,27 @@ class ActivityCollector:
                 if card.provider_id != "openusage"
             }
             | set(official_importers)
+            | set(provider_families or {})
         ))
 
     def _publish_provider_instances(
-        self, overview: Overview, attempted_at: datetime
+        self,
+        overview: Overview,
+        attempted_at: datetime,
+        provider_instances: tuple[ProviderInstance, ...] = (),
     ) -> None:
         for card in sorted(overview.cards, key=lambda item: item.provider_id):
             try:
                 instance = self._provider_instance(card, attempted_at)
                 if instance is not None:
                     self.store.upsert_provider_instance(instance)
+            except Exception:
+                pass
+        for instance in sorted(
+            provider_instances, key=lambda item: item.provider_id
+        ):
+            try:
+                self.store.upsert_provider_instance(instance)
             except Exception:
                 pass
 
@@ -898,11 +911,13 @@ class ActivityCollector:
         provider_ids: tuple[str, ...],
         today: date,
         attempted_at: datetime,
+        provider_families: Mapping[str, str] | None = None,
     ) -> None:
         fallback_families = {
             card.provider_id: card.family_id or card.provider_id
             for card in overview.cards
         }
+        fallback_families.update(provider_families or {})
         fallback_family_counts: dict[str, int] = {}
         for configured_id in self.official_importers:
             family_id = fallback_families.get(configured_id, configured_id)
@@ -1109,6 +1124,8 @@ class ActivityCollector:
         self,
         overview: Overview,
         *,
+        provider_instances: tuple[ProviderInstance, ...] = (),
+        provider_families: Mapping[str, str] | None = None,
         balance_results: tuple[tuple[str, str, object], ...] = (),
         quota_results: tuple[tuple[str, str, object], ...] = (),
     ) -> bool:
@@ -1118,12 +1135,20 @@ class ActivityCollector:
             current = self.clock()
             attempted_at = current.astimezone(timezone.utc)
             today = current.astimezone(self.local_timezone).date()
-            provider_ids = self._provider_ids(overview, self.official_importers)
-            self._publish_provider_instances(overview, attempted_at)
+            provider_ids = self._provider_ids(
+                overview, self.official_importers, provider_families
+            )
+            self._publish_provider_instances(
+                overview, attempted_at, provider_instances
+            )
             self._refresh_balance_sources(attempted_at, balance_results)
             self._refresh_quota_sources(overview, attempted_at, quota_results)
             self._refresh_usage_sources(
-                overview, provider_ids, today, attempted_at
+                overview,
+                provider_ids,
+                today,
+                attempted_at,
+                provider_families,
             )
             self._refresh_cost_sources(provider_ids, today, attempted_at)
             try:

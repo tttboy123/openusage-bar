@@ -13,7 +13,12 @@ from .config import StepPlanConfig
 from .keychain import KeychainError, MacOSKeychain
 from .models import Category, ProviderCard, ProviderStatus
 from .network import AuthenticationRequired, BoundedHTTPClient, NetworkError, RateLimited
-from .providers.contracts import QuotaFetchFailure, QuotaFetchSuccess
+from .providers.contracts import (
+    QuotaCollectionResult,
+    QuotaFetchFailure,
+    QuotaFetchSuccess,
+    SourceAttribution,
+)
 from .providers.quota import percent_observation
 
 
@@ -172,6 +177,15 @@ def _compact_credit(value: float) -> str:
 
 
 class StepPlanAdapter:
+    _OFFICIAL_ATTRIBUTION = SourceAttribution(
+        credential_source="step_plan_official_api",
+        source_kind="official_api",
+    )
+    _SESSION_ATTRIBUTION = SourceAttribution(
+        credential_source="step_plan_browser_session",
+        source_kind="browser_session",
+    )
+
     def __init__(
         self,
         config: StepPlanConfig,
@@ -471,7 +485,69 @@ class StepPlanAdapter:
                 ProviderStatus.ERROR, "Step Plan refresh failed", now
             )
 
+    def fetch_quota(self) -> QuotaCollectionResult:
+        attribution = self._OFFICIAL_ATTRIBUTION
+        try:
+            token = self.keychain.get(
+                self.config.provider_id + STEP_PLAN_TOKEN_SUFFIX
+            )
+            if token:
+                attribution = self._SESSION_ATTRIBUTION
+            webid = self.keychain.get(
+                self.config.provider_id + STEP_PLAN_WEBID_SUFFIX
+            )
+            if webid:
+                attribution = self._SESSION_ATTRIBUTION
+            if token or webid:
+                if not token or not webid:
+                    result = QuotaFetchFailure("invalid_response")
+                else:
+                    _session, payload = self._fetch_session_payload(
+                        StepPlanSession(token=token, webid=webid)
+                    )
+                    result = self.quota_observations(
+                        self.config, payload, self.clock()
+                    )
+            else:
+                api_key = self.keychain.get(self.config.provider_id)
+                result = QuotaFetchFailure(
+                    "quota_unavailable" if api_key else "auth_required"
+                )
+        except AuthenticationRequired:
+            result = QuotaFetchFailure("auth_rejected")
+        except RateLimited:
+            result = QuotaFetchFailure("rate_limited")
+        except KeychainError:
+            result = QuotaFetchFailure("keychain_unavailable")
+        except NetworkError:
+            result = QuotaFetchFailure("network_error")
+        except (StepPlanParseError, TypeError, ValueError):
+            result = QuotaFetchFailure("invalid_response")
+        return QuotaCollectionResult(
+            result=result,
+            attribution=attribution,
+        )
+
     def _fetch_session(self, session: StepPlanSession, now: datetime) -> ProviderCard:
+        session, quota_payload = self._fetch_session_payload(session)
+
+        status_payload: dict[str, Any] | None = None
+        try:
+            status_payload = self.client.post_json(
+                self.endpoints.status,
+                self._session_headers(session),
+                {},
+            )
+        except NetworkError:
+            pass
+        self.last_quota_result = self.quota_observations(
+            self.config, quota_payload, now
+        )
+        return self.parse_quota(self.config, quota_payload, status_payload, now)
+
+    def _fetch_session_payload(
+        self, session: StepPlanSession
+    ) -> tuple[StepPlanSession, dict[str, Any]]:
         try:
             quota_payload = self.client.post_json(
                 self.endpoints.quota,
@@ -489,20 +565,9 @@ class StepPlanAdapter:
                 self._session_headers(session),
                 {},
             )
-
-        status_payload: dict[str, Any] | None = None
-        try:
-            status_payload = self.client.post_json(
-                self.endpoints.status,
-                self._session_headers(session),
-                {},
-            )
-        except NetworkError:
-            pass
-        self.last_quota_result = self.quota_observations(
-            self.config, quota_payload, now
-        )
-        return self.parse_quota(self.config, quota_payload, status_payload, now)
+        if not isinstance(quota_payload, dict):
+            raise StepPlanParseError("StepFun quota response is invalid")
+        return session, quota_payload
 
     def _refresh_session(self, session: StepPlanSession) -> StepPlanSession:
         payload = self.client.post_json(

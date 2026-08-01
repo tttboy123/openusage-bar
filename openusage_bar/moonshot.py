@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from .activity_records import BalanceObservation, canonical_decimal
 from .config import MoonshotConfig
+from .keychain import KeychainError
 from .models import Category, ProviderCard, ProviderStatus
 from .network import (
     AuthenticationRequired,
@@ -15,7 +16,12 @@ from .network import (
     RateLimited,
     ResponseTooLarge,
 )
-from .providers.contracts import BalanceFetchFailure, BalanceFetchSuccess
+from .providers.contracts import (
+    BalanceCollectionResult,
+    BalanceFetchFailure,
+    BalanceFetchSuccess,
+    SourceAttribution,
+)
 
 
 MOONSHOT_ENDPOINTS = {
@@ -56,6 +62,10 @@ def _compact_amount(value: str) -> str:
 class MoonshotBalanceAdapter:
     source_id = "moonshot.balance"
     source_priority = 20
+    _ATTRIBUTION = SourceAttribution(
+        credential_source="moonshot_official_api",
+        source_kind="official_api",
+    )
 
     def __init__(
         self,
@@ -167,6 +177,39 @@ class MoonshotBalanceAdapter:
             return self._error_card(
                 ProviderStatus.ERROR, "Balance request failed", now
             )
+
+    def fetch_balance(self) -> BalanceCollectionResult:
+        now = self.clock()
+        try:
+            secret = self.keychain.get(self.config.provider_id)
+        except KeychainError:
+            return BalanceCollectionResult(
+                result=BalanceFetchFailure("keychain_unavailable"),
+                attribution=self._ATTRIBUTION,
+            )
+        if not secret:
+            result = BalanceFetchFailure("authentication_required")
+        else:
+            try:
+                payload = self.client.get_json(
+                    endpoint_for_site(self.config.site),
+                    {"Authorization": f"Bearer {secret}"},
+                )
+                result = BalanceFetchSuccess((self._observation(payload, now),))
+            except AuthenticationRequired:
+                result = BalanceFetchFailure("authentication_required")
+            except RateLimited:
+                result = BalanceFetchFailure("rate_limited")
+            except (KeyError, TypeError, ValueError, MalformedResponse):
+                result = BalanceFetchFailure("invalid_response")
+            except ResponseTooLarge:
+                result = BalanceFetchFailure("response_too_large")
+            except NetworkError:
+                result = BalanceFetchFailure("network_error")
+        return BalanceCollectionResult(
+            result=result,
+            attribution=self._ATTRIBUTION,
+        )
 
     def _error_card(
         self, status: ProviderStatus, message: str, now: datetime

@@ -17,17 +17,14 @@ from openusage_bar.config import (
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
-from openusage_bar.cost_feed import DailyCostFeedCardAdapter, DailyCostFeedImporter
-from openusage_bar.daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
+from openusage_bar.cost_feed import DailyCostFeedImporter
+from openusage_bar.daily_feed import DailyUsageFeedImporter
 from openusage_bar.daily_history import OpenUsageDailyImporter
 from openusage_bar.generic import GenericHTTPSAdapter
 from openusage_bar.kiro import KiroQuotaAdapter
 from openusage_bar.minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
 from openusage_bar.moonshot import MoonshotBalanceAdapter
-from openusage_bar.openai_organization import (
-    OpenAIOrganizationCardAdapter,
-    OpenAIOrganizationImporter,
-)
+from openusage_bar.openai_organization import OpenAIOrganizationImporter
 from openusage_bar.openusage_adapter import OpenUsageAdapter
 from openusage_bar.performance_timing import RefreshTimingRecorder
 from openusage_bar.providers.builtins import default_registry
@@ -176,18 +173,18 @@ class AdapterRegistryTests(unittest.TestCase):
             "codex": (
                 (CodexSubscriptionAdapter,), (CodexLocalDailyImporter,), (),
             ),
-            "cost-work": ((DailyCostFeedCardAdapter,), (), (DailyCostFeedImporter,)),
+            "cost-work": ((), (), (DailyCostFeedImporter,)),
             "minimax-work": (
                 (MiniMaxCodingPlanAdapter,), (MiniMaxBillingImporter,), (),
             ),
             "moonshot-work": ((), (), ()),
             "openai": (
-                (OpenAIOrganizationCardAdapter,),
+                (),
                 (OpenAIOrganizationImporter,),
                 (OpenAIOrganizationImporter,),
             ),
             "glm-work": (
-                (DailyUsageFeedCardAdapter,), (DailyUsageFeedImporter,), (),
+                (), (DailyUsageFeedImporter,), (),
             ),
             "step-work": ((StepPlanAdapter,), (), ()),
             "generic-work": ((GenericHTTPSAdapter,), (), ()),
@@ -305,8 +302,14 @@ class AdapterRegistryTests(unittest.TestCase):
             refresher = build_headless_refresher(Mock())
         runtime_types = [type(adapter) for adapter in refresher.aggregator.adapters]
         self.assertIs(runtime_types[0], OpenUsageAdapter)
-        self.assertGreater(runtime_types.index(CodexSubscriptionAdapter), 0)
-        self.assertGreater(runtime_types.index(KiroQuotaAdapter), 0)
+        self.assertNotIn(CodexSubscriptionAdapter, runtime_types)
+        self.assertNotIn(KiroQuotaAdapter, runtime_types)
+        direct_types = [
+            type(adapter) for _descriptor, _source_id, adapter
+            in refresher.quota_sources
+        ]
+        self.assertIn(CodexSubscriptionAdapter, direct_types)
+        self.assertIn(KiroQuotaAdapter, direct_types)
 
     def test_builtin_sources_declare_privacy_safe_performance_classes(self):
         bindings = {
