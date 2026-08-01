@@ -969,8 +969,13 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   Change Feed 与有界 Runtime Summary，映射为 Loom 自有 observation；不改变
   Scheduler 结果，不在 OpenUsage Bar 中实现预留、准入或策略路由。**生产者侧
   API 前置切片已实现并通过完整门禁：Snapshot、Changes 与新增的
-  `/v1/runtime/summary` 均可经只读 UDS API 消费；Loom 消费端尚未实现，且必须
-  在独立 Loom 仓库按其权限边界实施。**
+  `/v1/runtime/summary` 均可经只读 UDS API 消费。Loom 消费端基础库已在独立
+  Loom 工作树以本地提交 `8cf329c` 完成：严格 Unix Socket Client 映射三类
+  只读 observation，Unknown 不转零，`dataRevision` / `runtimeRevision` 保持
+  独立，最终 Contract Review 与 Implementation Review 均 PASS，全仓普通测试、
+  race 与 vet 通过。该提交尚未推送、合并或激活，也未接入 SessionBinding、
+  append-only Evidence、Scheduler、预留、准入或策略路由；这些仍需在 Loom
+  对应权限边界内以独立 Candidate 实施。**
 
 WQ-18 完成后才能开始 WQ-19；WQ-20 可与 WQ-19 按不同文件并行设计；
 WQ-21 必须先有独立 ADR、保留期与数据上限，不得直接写入
