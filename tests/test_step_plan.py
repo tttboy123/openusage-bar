@@ -7,7 +7,10 @@ from unittest.mock import Mock
 from openusage_bar.config import StepPlanConfig
 from openusage_bar.keychain import KeychainError
 from openusage_bar.models import Category, ProviderStatus
-from openusage_bar.providers.contracts import QuotaFetchSuccess
+from openusage_bar.providers.contracts import (
+    QuotaCollectionResult,
+    QuotaFetchSuccess,
+)
 from openusage_bar.step_plan import (
     STEP_PLAN_MODELS_ENDPOINT,
     STEP_PLAN_RATE_LIMIT_ENDPOINT,
@@ -194,6 +197,41 @@ class StepPlanAdapterTests(unittest.TestCase):
         self.assertEqual(card.credential_source, "step_plan_browser_session")
         self.assertEqual(card.source_kind, "browser_session")
         client.get_json.assert_not_called()
+
+    def test_collects_session_quota_without_presentation_status_request(self):
+        keychain = Mock()
+        keychain.get.side_effect = lambda account: {
+            "step-plan-main" + STEP_PLAN_TOKEN_SUFFIX: "access...refresh",
+            "step-plan-main" + STEP_PLAN_WEBID_SUFFIX: "web-id",
+        }.get(account)
+        client = Mock()
+        client.post_json.return_value = {
+            "status": 1,
+            "five_hour_usage_left_rate": 0.75,
+            "weekly_usage_left_rate": 0.5,
+            "five_hour_usage_reset_time": "0",
+            "weekly_usage_reset_time": "0",
+        }
+        adapter = StepPlanAdapter(
+            StepPlanConfig("step-plan-main", "Step Plan"),
+            keychain,
+            client,
+            lambda: NOW,
+        )
+
+        collection = adapter.fetch_quota()
+
+        self.assertIsInstance(collection, QuotaCollectionResult)
+        self.assertIsInstance(collection.result, QuotaFetchSuccess)
+        client.post_json.assert_called_once()
+        self.assertEqual(
+            client.post_json.call_args.args[0], STEP_PLAN_RATE_LIMIT_ENDPOINT
+        )
+        self.assertEqual(
+            collection.attribution.credential_source,
+            "step_plan_browser_session",
+        )
+        self.assertEqual(collection.attribution.source_kind, "browser_session")
 
     def test_live_zero_reset_timestamps_do_not_hide_valid_quota(self):
         card = StepPlanAdapter.parse_quota(

@@ -10,7 +10,10 @@ from openusage_bar.codex_subscription import (
     parse_rate_limit_card,
     parse_rate_limit_observations,
 )
-from openusage_bar.providers.contracts import QuotaFetchSuccess
+from openusage_bar.providers.contracts import (
+    QuotaCollectionResult,
+    QuotaFetchSuccess,
+)
 from openusage_bar.models import Category, ProviderStatus
 
 
@@ -180,6 +183,39 @@ class CodexSubscriptionTests(unittest.TestCase):
             overview = adapter.fetch()
 
         self.assertEqual(overview.cards, [])
+
+    def test_adapter_collects_quota_fact_with_local_log_attribution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "session.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-14T00:30:00Z",
+                        "payload": {
+                            "type": "token_count",
+                            "rate_limits": rate_limits(
+                                window(25, 300, NOW + timedelta(hours=2))
+                            ),
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            adapter = CodexSubscriptionAdapter(root, clock=lambda: NOW)
+
+            collection = adapter.fetch_quota()
+
+        self.assertIsInstance(collection, QuotaCollectionResult)
+        self.assertIsInstance(collection.result, QuotaFetchSuccess)
+        self.assertEqual(
+            collection.attribution.credential_source, "codex_local_log"
+        )
+        self.assertEqual(collection.attribution.source_kind, "local_log")
+        self.assertEqual(
+            collection.result.observations[0].source_id,
+            "codex.local_rate_limits",
+        )
 
 
 if __name__ == "__main__":

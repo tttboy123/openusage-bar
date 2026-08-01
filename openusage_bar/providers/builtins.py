@@ -14,8 +14,8 @@ from ..config import (
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
-from ..cost_feed import DailyCostFeedCardAdapter, DailyCostFeedImporter
-from ..daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
+from ..cost_feed import DailyCostFeedImporter
+from ..daily_feed import DailyUsageFeedImporter
 from ..daily_history import OpenUsageDailyImporter
 from ..generic import GenericHTTPSAdapter
 from ..kiro import KiroQuotaAdapter
@@ -26,13 +26,10 @@ from ..minimax import (
 )
 from ..moonshot import MoonshotBalanceAdapter
 from ..network import BoundedHTTPClient
-from ..openai_organization import (
-    OpenAIOrganizationCardAdapter,
-    OpenAIOrganizationImporter,
-)
+from ..openai_organization import OpenAIOrganizationImporter
 from ..openusage_adapter import OpenUsageAdapter
 from ..step_plan import StepPlanAdapter, endpoints_for_site
-from .contracts import ProviderBinding
+from .contracts import ProviderBinding, ProviderDescriptor, SourceAttribution
 from .registry import AdapterRegistry
 
 
@@ -41,6 +38,19 @@ def _performance_source(source: object, source_class: str) -> object:
         raise ValueError("invalid performance source class")
     source.performance_source_class = source_class
     return source
+
+
+def _attributed_source(
+    source: object,
+    source_class: str,
+    credential_source: str,
+    source_kind: str,
+) -> object:
+    source.source_attribution = SourceAttribution(
+        credential_source=credential_source,
+        source_kind=source_kind,
+    )
+    return _performance_source(source, source_class)
 
 
 def _quota_source(
@@ -56,6 +66,20 @@ def _quota_source(
     return _performance_source(source, source_class)
 
 
+def _descriptor(
+    provider_id: str,
+    family_id: str,
+    display_name: str,
+    category: str,
+) -> ProviderDescriptor:
+    return ProviderDescriptor(
+        provider_id=provider_id,
+        family_id=family_id,
+        display_name=display_name,
+        category=category,
+    )
+
+
 def default_registry(
     *, clock: Callable[[], datetime], keychain: object
 ) -> AdapterRegistry:
@@ -69,6 +93,9 @@ def default_registry(
 
     registry.register_global(lambda: ProviderBinding(
         provider_id="openusage", family_id="openusage",
+        descriptor=_descriptor(
+            "openusage", "openusage", "OpenUsage", "local_tool"
+        ),
         quota_sources=(_quota_source(
             OpenUsageAdapter(clock), "openusage.cards", 10, "child_process"
         ),),
@@ -78,12 +105,16 @@ def default_registry(
     ))
     registry.register_global(lambda: ProviderBinding(
         provider_id="kiro_cli", family_id="kiro_cli",
+        descriptor=_descriptor(
+            "kiro_cli", "kiro_cli", "Kiro", "subscription"
+        ),
         quota_sources=(_quota_source(
             KiroQuotaAdapter(clock=clock), "kiro.codewhisperer", 20
         ),),
     ))
     registry.register_global(lambda: ProviderBinding(
         provider_id="codex", family_id="codex",
+        descriptor=_descriptor("codex", "codex", "Codex", "subscription"),
         quota_sources=(_quota_source(
             CodexSubscriptionAdapter(clock=clock),
             "codex.local_rate_limits",
@@ -111,6 +142,9 @@ def default_registry(
         )
         return ProviderBinding(
             provider_id=config.provider_id, family_id="minimax",
+            descriptor=_descriptor(
+                config.provider_id, "minimax", config.name, "subscription"
+            ),
             quota_sources=(_quota_source(MiniMaxCodingPlanAdapter(
                 config, keychain, client, clock
             ), "minimax.coding_plan", 20),),
@@ -118,16 +152,17 @@ def default_registry(
         )
 
     def openai(config: OpenAIOrganizationConfig) -> ProviderBinding:
-        importer = _performance_source(
+        importer = _attributed_source(
             OpenAIOrganizationImporter(config, keychain, openai_client, clock),
             "network",
+            "openai_admin_api",
+            "official_api",
         )
         return ProviderBinding(
             provider_id=config.provider_id, family_id="openai",
-            quota_sources=(_quota_source(
-                OpenAIOrganizationCardAdapter(config, keychain, clock),
-                "openai.organization", 20
-            ),),
+            descriptor=_descriptor(
+                config.provider_id, "openai", config.name, "api"
+            ),
             usage_sources=(importer,), cost_sources=(importer,),
         )
 
@@ -135,6 +170,9 @@ def default_registry(
         return ProviderBinding(
             provider_id=config.provider_id,
             family_id="moonshot",
+            descriptor=_descriptor(
+                config.provider_id, "moonshot", config.name, "api"
+            ),
             balance_sources=(
                 _performance_source(
                     MoonshotBalanceAdapter(
@@ -146,34 +184,36 @@ def default_registry(
         )
 
     def daily_feed(config: DailyUsageFeedConfig) -> ProviderBinding:
-        importer = _performance_source(
+        importer = _attributed_source(
             DailyUsageFeedImporter(
                 config, keychain, daily_feed_client, clock
             ),
             "network",
+            "api_key",
+            "generic_https",
         )
         return ProviderBinding(
             provider_id=config.provider_id, family_id=config.family_id,
-            quota_sources=(_quota_source(
-                DailyUsageFeedCardAdapter(config, keychain, clock),
-                "custom.daily", 20
-            ),),
+            descriptor=_descriptor(
+                config.provider_id, config.family_id, config.name, "api"
+            ),
             usage_sources=(importer,),
         )
 
     def cost_feed(config: DailyCostFeedConfig) -> ProviderBinding:
-        importer = _performance_source(
+        importer = _attributed_source(
             DailyCostFeedImporter(
                 config, keychain, daily_feed_client, clock
             ),
             "network",
+            "api_key",
+            "generic_https",
         )
         return ProviderBinding(
             provider_id=config.provider_id, family_id=config.family_id,
-            quota_sources=(_quota_source(
-                DailyCostFeedCardAdapter(config, keychain, clock),
-                "custom.cost", 20
-            ),),
+            descriptor=_descriptor(
+                config.provider_id, config.family_id, config.name, "api"
+            ),
             cost_sources=(importer,),
         )
 
@@ -185,6 +225,9 @@ def default_registry(
         )
         return ProviderBinding(
             provider_id=config.provider_id, family_id="step_plan",
+            descriptor=_descriptor(
+                config.provider_id, "step_plan", config.name, "subscription"
+            ),
             quota_sources=(_quota_source(StepPlanAdapter(
                 config, keychain, client, clock
             ), "step_plan.quota", 20),),
@@ -194,6 +237,12 @@ def default_registry(
         return ProviderBinding(
             provider_id=config.provider_id,
             family_id=config.family_id or config.provider_id,
+            descriptor=_descriptor(
+                config.provider_id,
+                config.family_id or config.provider_id,
+                config.name,
+                "api",
+            ),
             quota_sources=(_quota_source(GenericHTTPSAdapter(
                 config, keychain, generic_client, clock
             ), "generic.quota", 20),),

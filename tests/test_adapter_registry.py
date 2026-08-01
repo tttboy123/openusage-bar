@@ -17,26 +17,40 @@ from openusage_bar.config import (
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
-from openusage_bar.cost_feed import DailyCostFeedCardAdapter, DailyCostFeedImporter
-from openusage_bar.daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
+from openusage_bar.cost_feed import DailyCostFeedImporter
+from openusage_bar.daily_feed import DailyUsageFeedImporter
 from openusage_bar.daily_history import OpenUsageDailyImporter
 from openusage_bar.generic import GenericHTTPSAdapter
 from openusage_bar.kiro import KiroQuotaAdapter
 from openusage_bar.minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
 from openusage_bar.moonshot import MoonshotBalanceAdapter
-from openusage_bar.openai_organization import (
-    OpenAIOrganizationCardAdapter,
-    OpenAIOrganizationImporter,
-)
+from openusage_bar.openai_organization import OpenAIOrganizationImporter
 from openusage_bar.openusage_adapter import OpenUsageAdapter
 from openusage_bar.performance_timing import RefreshTimingRecorder
 from openusage_bar.providers.builtins import default_registry
-from openusage_bar.providers.contracts import ProviderBinding
+from openusage_bar.providers.contracts import (
+    ProviderBinding,
+    ProviderDescriptor,
+    QuotaCollectionResult,
+    QuotaFetchFailure,
+    SourceAttribution,
+)
 from openusage_bar.providers.registry import AdapterRegistry, UnknownProviderConfig
 from openusage_bar.step_plan import StepPlanAdapter
 
 
 NOW = datetime(2026, 7, 18, tzinfo=timezone.utc)
+
+
+def descriptor(
+    provider_id: str, family_id: str = "custom"
+) -> ProviderDescriptor:
+    return ProviderDescriptor(
+        provider_id=provider_id,
+        family_id=family_id,
+        display_name=provider_id.replace("-", " ").title(),
+        category="api",
+    )
 
 
 class AdapterRegistryTests(unittest.TestCase):
@@ -78,6 +92,75 @@ class AdapterRegistryTests(unittest.TestCase):
             ),
         ]
 
+    def test_provider_descriptor_combines_stable_identity_with_attempt_source(self):
+        descriptor = ProviderDescriptor(
+            provider_id="step-work",
+            family_id="step_plan",
+            display_name="Step Plan Work",
+            category="subscription",
+        )
+
+        instance = descriptor.observed(
+            NOW,
+            SourceAttribution(
+                credential_source="step_plan_browser_session",
+                source_kind="browser_session",
+            ),
+        )
+
+        self.assertEqual(instance.provider_id, "step-work")
+        self.assertEqual(instance.family_id, "step_plan")
+        self.assertEqual(instance.display_name, "Step Plan Work")
+        self.assertEqual(instance.category, "subscription")
+        self.assertEqual(
+            instance.credential_source, "step_plan_browser_session"
+        )
+        self.assertEqual(instance.source_kind, "browser_session")
+        self.assertEqual(instance.observed_at, "2026-07-18T00:00:00.000000Z")
+
+    def test_provider_binding_rejects_descriptor_identity_mismatch(self):
+        descriptor = ProviderDescriptor(
+            provider_id="different",
+            family_id="step_plan",
+            display_name="Step Plan",
+            category="subscription",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "descriptor must match binding identity"
+        ):
+            ProviderBinding(
+                provider_id="step-work",
+                family_id="step_plan",
+                descriptor=descriptor,
+            )
+
+    def test_collection_result_keeps_failure_separate_from_source_attribution(self):
+        attribution = SourceAttribution(
+            credential_source="step_plan_official_api",
+            source_kind="official_api",
+        )
+
+        collection = QuotaCollectionResult(
+            result=QuotaFetchFailure("auth_required"),
+            attribution=attribution,
+        )
+
+        self.assertEqual(collection.result.error_code, "auth_required")
+        self.assertEqual(collection.attribution, attribution)
+
+    def test_source_attribution_rejects_noncanonical_public_values(self):
+        with self.assertRaisesRegex(ValueError, "credential_source"):
+            SourceAttribution(
+                credential_source="not canonical",
+                source_kind="official_api",
+            )
+        with self.assertRaisesRegex(ValueError, "source_kind"):
+            SourceAttribution(
+                credential_source="step_plan_official_api",
+                source_kind="unknown_transport",
+            )
+
     def test_current_configs_build_the_existing_adapter_and_importer_graph(self):
         bindings = {
             binding.provider_id: binding
@@ -90,18 +173,18 @@ class AdapterRegistryTests(unittest.TestCase):
             "codex": (
                 (CodexSubscriptionAdapter,), (CodexLocalDailyImporter,), (),
             ),
-            "cost-work": ((DailyCostFeedCardAdapter,), (), (DailyCostFeedImporter,)),
+            "cost-work": ((), (), (DailyCostFeedImporter,)),
             "minimax-work": (
                 (MiniMaxCodingPlanAdapter,), (MiniMaxBillingImporter,), (),
             ),
             "moonshot-work": ((), (), ()),
             "openai": (
-                (OpenAIOrganizationCardAdapter,),
+                (),
                 (OpenAIOrganizationImporter,),
                 (OpenAIOrganizationImporter,),
             ),
             "glm-work": (
-                (DailyUsageFeedCardAdapter,), (DailyUsageFeedImporter,), (),
+                (), (DailyUsageFeedImporter,), (),
             ),
             "step-work": ((StepPlanAdapter,), (), ()),
             "generic-work": ((GenericHTTPSAdapter,), (), ()),
@@ -219,8 +302,14 @@ class AdapterRegistryTests(unittest.TestCase):
             refresher = build_headless_refresher(Mock())
         runtime_types = [type(adapter) for adapter in refresher.aggregator.adapters]
         self.assertIs(runtime_types[0], OpenUsageAdapter)
-        self.assertGreater(runtime_types.index(CodexSubscriptionAdapter), 0)
-        self.assertGreater(runtime_types.index(KiroQuotaAdapter), 0)
+        self.assertNotIn(CodexSubscriptionAdapter, runtime_types)
+        self.assertNotIn(KiroQuotaAdapter, runtime_types)
+        direct_types = [
+            type(adapter) for _descriptor, _source_id, adapter
+            in refresher.quota_sources
+        ]
+        self.assertIn(CodexSubscriptionAdapter, direct_types)
+        self.assertIn(KiroQuotaAdapter, direct_types)
 
     def test_builtin_sources_declare_privacy_safe_performance_classes(self):
         bindings = {
@@ -299,14 +388,19 @@ class AdapterRegistryTests(unittest.TestCase):
         registry = AdapterRegistry()
         registry.register_global(lambda: ProviderBinding(
             provider_id="duplicate-sources", family_id="custom",
+            descriptor=descriptor("duplicate-sources"),
             quota_sources=(Source(), Source()),
         ))
         with self.assertRaisesRegex(ValueError, "duplicate quota source IDs"):
             registry.build([])
 
         registry = AdapterRegistry()
-        registry.register_global(lambda: ProviderBinding("same", "one"))
-        registry.register_global(lambda: ProviderBinding("same", "two"))
+        registry.register_global(lambda: ProviderBinding(
+            "same", "one", descriptor("same", "one")
+        ))
+        registry.register_global(lambda: ProviderBinding(
+            "same", "two", descriptor("same", "two")
+        ))
         with self.assertRaisesRegex(ValueError, "duplicate provider IDs"):
             registry.build([])
 
@@ -321,6 +415,7 @@ class AdapterRegistryTests(unittest.TestCase):
         registry = AdapterRegistry()
         registry.register_global(lambda: ProviderBinding(
             provider_id="ordered", family_id="custom",
+            descriptor=descriptor("ordered"),
             quota_sources=(
                 Source("z", 20), Source("b", 10), Source("a", 10),
             ),

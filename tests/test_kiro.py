@@ -20,7 +20,10 @@ from openusage_bar.kiro import (
     parse_kiro_quota,
     parse_kiro_quota_observations,
 )
-from openusage_bar.providers.contracts import QuotaFetchSuccess
+from openusage_bar.providers.contracts import (
+    QuotaCollectionResult,
+    QuotaFetchSuccess,
+)
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
@@ -318,6 +321,20 @@ class KiroQuotaAdapterTests(unittest.TestCase):
         self.assertIn("profileArn=arn%3Aaws%3Acodewhisperer", endpoint)
         self.assertEqual(headers["Authorization"], f"Bearer {SECRET}")
         self.assertEqual(headers["User-Agent"], "KiroIDE")
+
+    def test_collects_quota_fact_once_with_official_api_attribution(self):
+        adapter, client = self.adapter()
+
+        collection = adapter.fetch_quota()
+
+        self.assertIsInstance(collection, QuotaCollectionResult)
+        self.assertIsInstance(collection.result, QuotaFetchSuccess)
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(
+            collection.attribution.credential_source,
+            "kiro_codewhisperer_api",
+        )
+        self.assertEqual(collection.attribution.source_kind, "official_api")
 
     def test_request_id_uses_packaged_os_randomness_without_uuid_dependency(self):
         credentials = parse_kiro_credentials(credential_json())

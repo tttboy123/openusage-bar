@@ -12,9 +12,16 @@ from unittest.mock import Mock, patch
 from openusage_bar.aggregator import (
     Aggregator, BoundedReadOnlyKeychain, CardCache, LedgerRefresher, merge_cards,
 )
+from openusage_bar.activity_records import ProviderInstance
 from openusage_bar.daily_history import ActivityCollector, DailyImportResult
 from openusage_bar.models import Category, Overview, ProviderCard, ProviderStatus
 from openusage_bar.performance_timing import RefreshTimingRecorder
+from openusage_bar.providers.contracts import (
+    ProviderDescriptor,
+    QuotaCollectionResult,
+    QuotaFetchFailure,
+    SourceAttribution,
+)
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
@@ -172,25 +179,85 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         aggregator.refresh.return_value = overview
         collector = Mock()
         adapter = Mock()
-        adapter.last_quota_result = object()
+        adapter.performance_source_class = "local_file"
+        adapter.fetch.side_effect = AssertionError("card path must not run")
+        failure = QuotaFetchFailure("quota_unavailable")
+        adapter.fetch_quota.return_value = QuotaCollectionResult(
+            result=failure,
+            attribution=SourceAttribution(
+                credential_source="codex_local_log",
+                source_kind="local_log",
+            ),
+        )
+        descriptor = ProviderDescriptor(
+            provider_id="codex",
+            family_id="codex",
+            display_name="Codex",
+            category="subscription",
+        )
 
         LedgerRefresher(
             aggregator, collector,
-            (("codex", "codex.local_rate_limits", adapter),),
+            ((descriptor, "codex.local_rate_limits", adapter),),
+            provider_descriptors=(descriptor,),
+            clock=lambda: NOW,
+        ).refresh()
+
+        adapter.fetch_quota.assert_called_once_with()
+        adapter.fetch.assert_not_called()
+        collector.refresh.assert_called_once_with(
+            overview,
+            provider_instances=(ProviderInstance(
+                provider_id="codex",
+                family_id="codex",
+                display_name="Codex",
+                category="subscription",
+                credential_source="codex_local_log",
+                source_kind="local_log",
+                observed_at="2026-07-14T00:00:00.000000Z",
+            ),),
+            provider_families={"codex": "codex"},
+            balance_results=(),
+            quota_results=((
+                "codex", "codex.local_rate_limits", failure,
+            ),),
+        )
+
+    def test_usage_only_provider_identity_does_not_require_a_card(self):
+        overview = Overview([])
+        aggregator = Mock()
+        aggregator.refresh.return_value = overview
+        collector = Mock()
+        descriptor = ProviderDescriptor(
+            provider_id="openai",
+            family_id="openai",
+            display_name="OpenAI Organization",
+            category="api",
+        )
+        attribution = SourceAttribution(
+            credential_source="openai_admin_api",
+            source_kind="official_api",
+        )
+
+        LedgerRefresher(
+            aggregator,
+            collector,
+            provider_descriptors=(descriptor,),
+            provider_attributions=((descriptor, attribution),),
+            clock=lambda: NOW,
         ).refresh()
 
         collector.refresh.assert_called_once_with(
             overview,
+            provider_instances=(descriptor.observed(NOW, attribution),),
+            provider_families={"openai": "openai"},
             balance_results=(),
-            quota_results=((
-                "codex", "codex.local_rate_limits", adapter.last_quota_result,
-            ),),
+            quota_results=(),
         )
 
     def test_daily_feed_uses_shared_bounded_keychain_and_no_redirect_client(self):
         from openusage_bar.aggregator import build_headless_refresher
         from openusage_bar.config import DailyUsageFeedConfig
-        from openusage_bar.daily_feed import DailyUsageFeedCardAdapter
         from openusage_bar.keychain import BoundedMacOSKeychain
 
         configured = DailyUsageFeedConfig(
@@ -206,15 +273,15 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         ):
             refresher = build_headless_refresher(Mock())
 
-        card_adapter = next(
-            adapter
-            for adapter in refresher.aggregator.adapters
-            if isinstance(adapter, DailyUsageFeedCardAdapter)
-        )
         importer = refresher.collector.official_importers["glm-work"]
-        self.assertIs(importer.keychain, card_adapter.keychain)
         self.assertIsInstance(importer.keychain, BoundedMacOSKeychain)
         self.assertEqual(importer.client.allowed_redirect_hosts, frozenset())
+        attribution = dict(
+            (descriptor.provider_id, source)
+            for descriptor, source in refresher.provider_attributions
+        )["glm-work"]
+        self.assertEqual(attribution.credential_source, "api_key")
+        self.assertEqual(attribution.source_kind, "generic_https")
 
     def test_codex_local_sessions_are_primary_for_eager_collection(self):
         from openusage_bar.aggregator import build_headless_refresher
@@ -227,6 +294,17 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         self.assertIsInstance(importer, CodexLocalDailyImporter)
         self.assertEqual(importer.usage_source_id, "codex.local_sessions")
         self.assertEqual(refresher.eager_usage_provider_ids, ("codex",))
+
+    def test_openusage_meta_source_is_not_treated_as_a_provider(self):
+        from openusage_bar.aggregator import build_headless_refresher
+
+        with patch("openusage_bar.config.ProviderConfigStore.load", return_value=[]):
+            refresher = build_headless_refresher(Mock())
+
+        self.assertNotIn(
+            "openusage",
+            {item.provider_id for item in refresher.provider_descriptors},
+        )
 
     def test_minimax_reuses_keychain_and_client_for_quota_and_daily_tokens(self):
         from openusage_bar.aggregator import build_headless_refresher
@@ -242,22 +320,21 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         ):
             refresher = build_headless_refresher(Mock())
 
-        card_adapter = next(
+        quota_adapter = next(
             adapter
-            for adapter in refresher.aggregator.adapters
+            for _descriptor, _source_id, adapter in refresher.quota_sources
             if isinstance(adapter, MiniMaxCodingPlanAdapter)
         )
         importer = refresher.collector.official_importers["minimax-main"]
         self.assertIsInstance(importer, MiniMaxBillingImporter)
-        self.assertIs(importer.keychain, card_adapter.keychain)
-        self.assertIs(importer.client, card_adapter.client)
+        self.assertIs(importer.keychain, quota_adapter.keychain)
+        self.assertIs(importer.client, quota_adapter.client)
         self.assertEqual(importer.client.allowed_redirect_hosts, frozenset())
 
     def test_openai_organization_uses_bounded_keychain_and_no_redirect_client(self):
         from openusage_bar.aggregator import build_headless_refresher
         from openusage_bar.config import OpenAIOrganizationConfig
         from openusage_bar.keychain import BoundedMacOSKeychain
-        from openusage_bar.openai_organization import OpenAIOrganizationCardAdapter
 
         with patch(
             "openusage_bar.config.ProviderConfigStore.load",
@@ -265,15 +342,17 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         ):
             refresher = build_headless_refresher(Mock())
 
-        card_adapter = next(
-            adapter
-            for adapter in refresher.aggregator.adapters
-            if isinstance(adapter, OpenAIOrganizationCardAdapter)
-        )
         importer = refresher.collector.official_importers["openai"]
-        self.assertIsInstance(card_adapter.keychain, BoundedMacOSKeychain)
-        self.assertIs(importer.keychain, card_adapter.keychain)
+        self.assertIsInstance(importer.keychain, BoundedMacOSKeychain)
         self.assertEqual(importer.client.allowed_redirect_hosts, frozenset())
+        attribution = dict(
+            (descriptor.provider_id, source)
+            for descriptor, source in refresher.provider_attributions
+        )["openai"]
+        self.assertEqual(
+            attribution.credential_source, "openai_admin_api"
+        )
+        self.assertEqual(attribution.source_kind, "official_api")
 
     def test_headless_sources_share_bounded_read_write_keychain(self):
         from openusage_bar.aggregator import build_headless_refresher
@@ -289,7 +368,7 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
 
         step_plan = next(
             adapter
-            for adapter in refresher.aggregator.adapters
+            for _descriptor, _source_id, adapter in refresher.quota_sources
             if isinstance(adapter, StepPlanAdapter)
         )
         self.assertIsInstance(step_plan.keychain, BoundedMacOSKeychain)

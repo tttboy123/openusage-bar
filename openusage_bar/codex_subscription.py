@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .models import Category, Overview, ProviderCard, ProviderStatus
-from .providers.contracts import QuotaFetchFailure, QuotaFetchSuccess
+from .providers.contracts import (
+    QuotaCollectionResult,
+    QuotaFetchFailure,
+    QuotaFetchSuccess,
+    SourceAttribution,
+)
 from .providers.quota import percent_observation
 
 
@@ -246,6 +251,11 @@ def parse_rate_limit_observations(
 
 
 class CodexSubscriptionAdapter:
+    _ATTRIBUTION = SourceAttribution(
+        credential_source="codex_local_log",
+        source_kind="local_log",
+    )
+
     def __init__(
         self,
         sessions_root: Path = DEFAULT_SESSIONS_ROOT,
@@ -257,15 +267,36 @@ class CodexSubscriptionAdapter:
         self.max_files = max_files
         self.last_quota_result = QuotaFetchFailure("not_collected")
 
-    def fetch(self) -> Overview:
+    def _collect(
+        self, now: datetime,
+    ) -> tuple[
+        tuple[dict[str, Any], datetime] | None,
+        QuotaCollectionResult,
+    ]:
         event = latest_rate_limit_event(self.sessions_root, self.max_files)
         if event is None:
-            self.last_quota_result = QuotaFetchFailure("quota_unavailable")
-            return Overview([])
+            return None, QuotaCollectionResult(
+                result=QuotaFetchFailure("quota_unavailable"),
+                attribution=self._ATTRIBUTION,
+            )
         rate_limits, observed_at = event
-        now = self.clock()
-        self.last_quota_result = parse_rate_limit_observations(
+        result = parse_rate_limit_observations(
             rate_limits, observed_at, now
         )
+        return event, QuotaCollectionResult(
+            result=result,
+            attribution=self._ATTRIBUTION,
+        )
+
+    def fetch_quota(self) -> QuotaCollectionResult:
+        return self._collect(self.clock())[1]
+
+    def fetch(self) -> Overview:
+        now = self.clock()
+        event, collection = self._collect(now)
+        self.last_quota_result = collection.result
+        if event is None:
+            return Overview([])
+        rate_limits, observed_at = event
         card = parse_rate_limit_card(rate_limits, observed_at, now)
         return Overview([card] if card else [])

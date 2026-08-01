@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import Mock
 
 from openusage_bar.activity_records import BalanceObservation
 from openusage_bar.config import MoonshotConfig
+from openusage_bar.keychain import KeychainError
 from openusage_bar.models import Category, ProviderStatus
 from openusage_bar.moonshot import MoonshotBalanceAdapter, endpoint_for_site
-from openusage_bar.providers.contracts import BalanceFetchFailure, BalanceFetchSuccess
+from openusage_bar.providers.contracts import (
+    BalanceCollectionResult,
+    BalanceFetchFailure,
+    BalanceFetchSuccess,
+)
 
 
 NOW = datetime(2026, 7, 29, 12, 0, tzinfo=timezone.utc)
@@ -118,6 +124,36 @@ class MoonshotBalanceAdapterTests(unittest.TestCase):
                 source_id="moonshot.balance",
             ),
         )
+
+    def test_collects_balance_once_with_official_api_attribution(self):
+        adapter, _keychain, client = self.adapter(site="china")
+
+        collection = adapter.fetch_balance()
+
+        self.assertIsInstance(collection, BalanceCollectionResult)
+        self.assertIsInstance(collection.result, BalanceFetchSuccess)
+        self.assertEqual(len(client.requests), 1)
+        self.assertEqual(
+            collection.attribution.credential_source,
+            "moonshot_official_api",
+        )
+        self.assertEqual(collection.attribution.source_kind, "official_api")
+
+    def test_direct_balance_sanitizes_keychain_failures(self):
+        keychain = FakeKeychain()
+        keychain.get = Mock(side_effect=KeychainError("private system detail"))
+        client = FakeClient({})
+        adapter = MoonshotBalanceAdapter(
+            MoonshotConfig("moonshot-china", "Moonshot", site="china"),
+            keychain,
+            client,
+            lambda: NOW,
+        )
+
+        collection = adapter.fetch_balance()
+
+        self.assertEqual(collection.result.error_code, "keychain_unavailable")
+        self.assertEqual(client.requests, [])
 
     def test_international_site_uses_usd(self):
         adapter, _, _ = self.adapter(site="international")
