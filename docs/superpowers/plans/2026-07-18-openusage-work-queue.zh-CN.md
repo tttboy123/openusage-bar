@@ -920,6 +920,20 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   80%，依赖审计无已知漏洞，历史密钥扫描与隐私扫描均为 0，发行 metadata
   保持 `0.6.0 (9)`，签名 App bundle 构建通过。** Live Provider producer、
   网络写入、本地 API 暴露、Loom 预留/策略、外部 Canary、合并和发布仍未开始。
+- **WQ-22：Runtime Producer Kit 与 LiteLLM 首个真实生产者。** 使用独立、
+  无 LiteLLM 硬依赖的本地 callback，只提取终态时间、公开 Provider/Model、
+  Token 与可选估算费用，通过 stdin 调用现有 Collector；内容、凭证、直接身份、
+  原始请求 ID 与原始 Payload 永不序列化。缺失用量不写成零，未知 TTFT 保持
+  `null`。**实施计划已冻结，正在 `feature/runtime-producer-kit` 分支按 TDD
+  推进；当前不代表真实 LiteLLM 流量已经接入。**
+- **WQ-23：版本化的 OTLP GenAI 与 CLIProxyAPI Producer Adapter。** 先冻结
+  上游版本和脱敏 Fixture，再接入经过严格 allowlist 处理的 GenAI span 与
+  CLIProxyAPI 用量事件。不得直接接收含消息内容、tool 参数、LiteLLM 身份
+  metadata 或高基数字段的原始 OTLP Payload。**尚未开始。**
+- **WQ-24：Loom X1 observe-only 接入。** Loom 只读 Resource Snapshot、
+  Change Feed 与有界 Runtime Summary，映射为 Loom 自有 observation；不改变
+  Scheduler 结果，不在 OpenUsage Bar 中实现预留、准入或策略路由。**尚未开始，
+  且必须在独立 Loom 仓库按其权限边界实施。**
 
 WQ-18 完成后才能开始 WQ-19；WQ-20 可与 WQ-19 按不同文件并行设计；
 WQ-21 必须先有独立 ADR、保留期与数据上限，不得直接写入
