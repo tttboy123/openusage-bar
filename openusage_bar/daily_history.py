@@ -31,6 +31,11 @@ from .openusage_catalog import (
     CatalogDiagnostic,
     OpenUsageCatalogDiscovery,
 )
+from .openusage_export_v1 import (
+    ExportCapabilityProbe,
+    ExportDecodeError,
+    decode_capabilities,
+)
 from .providers.contracts import (
     BalanceFetchFailure,
     BalanceFetchSuccess,
@@ -49,6 +54,8 @@ from .openai_organization import COST_SOURCE_ID, USAGE_SOURCE_ID
 
 
 DAILY_TIMEOUT_SECONDS = 60
+EXPORT_V1_PROBE_TIMEOUT_SECONDS = 3
+EXPORT_V1_PROBE_BYTES = 128 * 1024
 MAX_DAILY_EXPORT_BYTES = 16 * 1024 * 1024
 MAX_DAILY_DAYS = 5000
 MAX_DAILY_MODELS_PER_DAY = 4096
@@ -169,6 +176,57 @@ class OpenUsageDailyImporter:
         self.path_exists = path_exists
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.codex_attribution = codex_attribution or CodexAttributionResolver()
+        self._export_v1_probe: ExportCapabilityProbe | None = None
+        self._export_v1_probe_lock = threading.Lock()
+
+    def export_v1_capabilities(self) -> ExportCapabilityProbe:
+        with self._export_v1_probe_lock:
+            if self._export_v1_probe is not None:
+                return self._export_v1_probe
+            command = [
+                self.openusage_path,
+                "export",
+                "--output",
+                "-",
+                "--format",
+                "json",
+                "--contract",
+                "openusage-export/v1",
+                "--kind",
+                "capabilities",
+            ]
+            try:
+                runner = self.runner or run_bounded
+                options = {}
+                if self.runner is None:
+                    options = {
+                        "stdout_limit": EXPORT_V1_PROBE_BYTES,
+                        "stderr_limit": EXPORT_V1_PROBE_BYTES,
+                    }
+                completed = runner(
+                    command,
+                    shell=False,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=EXPORT_V1_PROBE_TIMEOUT_SECONDS,
+                    env=child_subprocess_environment(
+                        self.environment, self.path_exists
+                    ),
+                    **options,
+                )
+                if completed.returncode != 0:
+                    raise ExportDecodeError()
+                capabilities = decode_capabilities(completed.stdout)
+                result = ExportCapabilityProbe(True, capabilities)
+            except Exception:
+                result = ExportCapabilityProbe(False)
+            self._export_v1_probe = result
+            return result
 
     @staticmethod
     def _valid_request(provider_id: str, since: date, until: date) -> bool:
@@ -390,6 +448,7 @@ class OpenUsageDailyImporter:
     ) -> DailyImportResult:
         if not self._valid_request(provider_id, since, until):
             return DailyImportResult(False, (), "invalid_request")
+        self.export_v1_capabilities()
         command = [
             self.openusage_path,
             "daily",

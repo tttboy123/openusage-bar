@@ -81,6 +81,12 @@ class ExportCapabilities:
 
 
 @dataclass(frozen=True)
+class ExportCapabilityProbe:
+    supported: bool
+    capabilities: ExportCapabilities | None = None
+
+
+@dataclass(frozen=True)
 class ExportRequest:
     provider_id: str
     since: date

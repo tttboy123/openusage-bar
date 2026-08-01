@@ -1,6 +1,9 @@
 import json
+import subprocess
 import unittest
+from datetime import date
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "openusage-export-v1"
@@ -72,6 +75,109 @@ class OpenUsageExportV1DecoderTests(unittest.TestCase):
         for payload in mutations:
             with self.assertRaises(ExportDecodeError):
                 decode_daily(json.dumps(payload))
+
+
+class OpenUsageExportV1ProbeTests(unittest.TestCase):
+    def test_probe_uses_exact_bounded_direct_command_and_safe_environment(self):
+        from openusage_bar.daily_history import OpenUsageDailyImporter
+
+        completed = subprocess.CompletedProcess(
+            [], 0, fixture("capabilities.json"), "ignored private stderr"
+        )
+        with patch(
+            "openusage_bar.daily_history.run_bounded", return_value=completed
+        ) as runner:
+            importer = OpenUsageDailyImporter(
+                openusage_path="/opt/bin/openusage",
+                environment={"PATH": "/usr/bin", "API_KEY": "must-not-pass"},
+                path_exists=lambda _path: False,
+            )
+            first = importer.export_v1_capabilities()
+            second = importer.export_v1_capabilities()
+
+        self.assertTrue(first.supported)
+        self.assertIs(first, second)
+        runner.assert_called_once()
+        self.assertEqual(
+            runner.call_args.args[0],
+            [
+                "/opt/bin/openusage",
+                "export",
+                "--output",
+                "-",
+                "--format",
+                "json",
+                "--contract",
+                "openusage-export/v1",
+                "--kind",
+                "capabilities",
+            ],
+        )
+        options = runner.call_args.kwargs
+        self.assertFalse(options["shell"])
+        self.assertIs(options["stdin"], subprocess.DEVNULL)
+        self.assertIs(options["stdout"], subprocess.PIPE)
+        self.assertIs(options["stderr"], subprocess.PIPE)
+        self.assertEqual(options["timeout"], 3)
+        self.assertEqual(options["stdout_limit"], 128 * 1024)
+        self.assertEqual(options["stderr_limit"], 128 * 1024)
+        self.assertEqual(options["env"]["PATH"], "/usr/bin")
+        self.assertNotIn("API_KEY", options["env"])
+
+    def test_probe_failures_are_cached_as_sanitized_unsupported(self):
+        from openusage_bar.bounded_process import BoundedProcessError
+        from openusage_bar.daily_history import OpenUsageDailyImporter
+
+        private = "Bearer secret cookie=session"
+        cases = (
+            Mock(side_effect=BoundedProcessError("output_overflow")),
+            Mock(side_effect=subprocess.TimeoutExpired(private, 3)),
+            Mock(side_effect=OSError(private)),
+            Mock(return_value=subprocess.CompletedProcess([], 7, private, private)),
+            Mock(return_value=subprocess.CompletedProcess([], 0, private, private)),
+            Mock(
+                return_value=subprocess.CompletedProcess(
+                    [],
+                    0,
+                    fixture("capabilities.json").replace(
+                        '"schema_version": "1"', '"schema_version": "2"'
+                    ),
+                    private,
+                )
+            ),
+        )
+        for runner in cases:
+            with self.subTest(runner=runner):
+                importer = OpenUsageDailyImporter(runner=runner)
+                first = importer.export_v1_capabilities()
+                second = importer.export_v1_capabilities()
+                self.assertFalse(first.supported)
+                self.assertIs(first, second)
+                self.assertEqual(runner.call_count, 1)
+                self.assertNotIn("secret", repr(first))
+                self.assertNotIn("cookie", repr(first))
+                self.assertNotIn("Bearer", repr(first))
+
+    def test_fetch_probes_once_then_uses_legacy_for_unsupported_binary(self):
+        from openusage_bar.daily_history import OpenUsageDailyImporter
+
+        legacy = {"kind": "daily", "rows": [], "totals": {}}
+        runner = Mock(
+            side_effect=[
+                subprocess.CompletedProcess([], 2, "", "unsupported"),
+                subprocess.CompletedProcess([], 0, json.dumps(legacy), ""),
+                subprocess.CompletedProcess([], 0, json.dumps(legacy), ""),
+            ]
+        )
+        importer = OpenUsageDailyImporter(runner=runner)
+        first = importer.fetch("codex", date(2026, 7, 1), date(2026, 7, 2))
+        second = importer.fetch("codex", date(2026, 7, 1), date(2026, 7, 2))
+
+        self.assertTrue(first.ok)
+        self.assertTrue(second.ok)
+        self.assertEqual(runner.call_count, 3)
+        self.assertEqual(runner.call_args_list[1].args[0][1], "daily")
+        self.assertEqual(runner.call_args_list[2].args[0][1], "daily")
 
     def test_validates_range_page_cursor_enums_and_request_echo(self):
         from openusage_bar.openusage_export_v1 import ExportDecodeError, decode_daily
