@@ -101,6 +101,9 @@ swift package --package-path "$SWIFT_PACKAGE" show-dependencies --format json
 swift build --package-path "$SWIFT_PACKAGE" -c release --product OpenUsageBar -Xswiftc -warnings-as-errors
 swift build --package-path "$SWIFT_PACKAGE" -c release --product OpenUsageActivity -Xswiftc -warnings-as-errors
 
+if [[ -d "$INTEGRATIONS" && ! -L "$INTEGRATIONS" ]]; then
+  chmod u+w "$INTEGRATIONS"
+fi
 rm -rf "$BUILD_ROOT" "$DIST"
 mkdir -p \
   "$APP/Contents/MacOS" \

@@ -364,6 +364,11 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("cliproxyapi-openusage", build)
         self.assertIn("GOTOOLCHAIN=local go test -race ./...", build)
         self.assertIn("GOTOOLCHAIN=local go vet ./...", build)
+        self.assertIn('chmod u+w "$INTEGRATIONS"', build)
+        self.assertLess(
+            build.index('chmod u+w "$INTEGRATIONS"'),
+            build.index('rm -rf "$BUILD_ROOT" "$DIST"'),
+        )
         self.assertGreater(
             build.rindex('codesign --verify --deep --strict "$APP"'),
             build.index("scripts/runtime_adapter_smoke.py"),
