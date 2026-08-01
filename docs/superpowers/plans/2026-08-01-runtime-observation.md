@@ -50,6 +50,7 @@ Expected: all commands exit 0.
 
 **Files:**
 - Create: `openusage_bar/runtime_observation.py`
+- Create: `tests/fixtures/runtime-observation-v1.json`
 - Create: `tests/test_runtime_observation.py`
 
 - [x] **Step 1: Write failing contract tests**
@@ -104,7 +105,7 @@ terminal status, safe identifiers and nonnegative bounded integers. Derive
 
 Run the Task 2 command and expect all tests to pass.
 
-- [ ] **Step 5: Commit the contract slice**
+- [x] **Step 5: Commit the contract slice**
 
 ```bash
 git add docs/adr/0002-runtime-observation-plane.md \
@@ -119,7 +120,7 @@ git commit -m "feat(runtime): freeze bounded observation contract"
 - Create: `openusage_bar/runtime_store.py`
 - Create: `tests/test_runtime_store.py`
 
-- [ ] **Step 1: Write failing store tests**
+- [x] **Step 1: Write failing store tests**
 
 Use a temporary `runtime.sqlite3` to prove:
 
@@ -131,7 +132,7 @@ Use a temporary `runtime.sqlite3` to prove:
 - a symlink database is rejected and a new database is mode `0600`;
 - opening the runtime store never creates or modifies `activity.sqlite3`.
 
-- [ ] **Step 2: Run the tests to verify RED**
+- [x] **Step 2: Run the tests to verify RED**
 
 Run:
 
@@ -141,25 +142,25 @@ Run:
 
 Expected: FAIL because `RuntimeStore` does not exist.
 
-- [ ] **Step 3: Implement schema-v1 storage**
+- [x] **Step 3: Implement schema-v1 storage**
 
 Create only `runtime_observations` and `runtime_meta`. Validate existing table
 signatures and `PRAGMA user_version=1`, use transactions, set the page cap from
 the actual page size, reject newer or incompatible schemas, and prune by both
 retention and row count after every accepted batch.
 
-- [ ] **Step 4: Implement bounded summaries**
+- [x] **Step 4: Implement bounded summaries**
 
 Return one `RuntimeSummary` containing `runtimeRevision`, exact UTC window,
 coverage, overall Token/status/cost/latency totals and at most 512 sorted
 Provider/model/scope groups. A complete empty window is covered zero; an
 oversized group set is partial and never silently complete.
 
-- [ ] **Step 5: Run the tests to verify GREEN**
+- [x] **Step 5: Run the tests to verify GREEN**
 
 Run the Task 3 command and expect all tests to pass.
 
-- [ ] **Step 6: Commit the storage slice**
+- [x] **Step 6: Commit the storage slice**
 
 ```bash
 git add openusage_bar/runtime_store.py tests/test_runtime_store.py
@@ -172,7 +173,7 @@ git commit -m "feat(runtime): add short-retention observation store"
 - Modify: `openusage_bar/collector_cli.py`
 - Modify: `tests/test_collector_cli.py`
 
-- [ ] **Step 1: Write failing CLI tests**
+- [x] **Step 1: Write failing CLI tests**
 
 Add tests proving:
 
@@ -187,7 +188,7 @@ open `ActivityStore`. Summary emits stable compact JSON with no credential or
 direct identity fields. Relative/symlink paths and windows outside 60..86400
 seconds fail closed.
 
-- [ ] **Step 2: Run the CLI tests to verify RED**
+- [x] **Step 2: Run the CLI tests to verify RED**
 
 Run:
 
@@ -197,18 +198,18 @@ Run:
 
 Expected: the new runtime commands fail because the parser does not know them.
 
-- [ ] **Step 3: Implement the minimal commands**
+- [x] **Step 3: Implement the minimal commands**
 
 Parse runtime commands before opening `ActivityStore`. Use a bounded stdin
 reader, `decode_runtime_document()`, `RuntimeStore.ingest()` and
 `RuntimeStore.summary()`. Use the standard compact JSON renderer and sanitized
 exit codes only; do not add a network route or accept telemetry in argv.
 
-- [ ] **Step 4: Run the CLI tests to verify GREEN**
+- [x] **Step 4: Run the CLI tests to verify GREEN**
 
 Run the Task 4 command and expect all tests to pass.
 
-- [ ] **Step 5: Commit the CLI slice**
+- [x] **Step 5: Commit the CLI slice**
 
 ```bash
 git add openusage_bar/collector_cli.py tests/test_collector_cli.py
@@ -222,7 +223,7 @@ git commit -m "feat(runtime): expose bounded local ingestion"
 - Modify: `docs/superpowers/plans/2026-08-01-runtime-observation.md`
 - Modify only files required by regressions introduced by Tasks 1-4.
 
-- [ ] **Step 1: Prove database and API separation**
+- [x] **Step 1: Prove database and API separation**
 
 ```bash
 ! rg -n "RuntimeStore|runtime_observation|runtime\.sqlite3" \
@@ -232,7 +233,7 @@ git commit -m "feat(runtime): expose bounded local ingestion"
 
 Expected: no matches.
 
-- [ ] **Step 2: Run targeted and complete suites**
+- [x] **Step 2: Run targeted and complete suites**
 
 ```bash
 .build-venv/bin/python -m unittest \
@@ -242,7 +243,7 @@ Expected: no matches.
 swift test --package-path swift_app -Xswiftc -warnings-as-errors
 ```
 
-- [ ] **Step 3: Run coverage, dependency, privacy and build gates**
+- [x] **Step 3: Run coverage, dependency, privacy and build gates**
 
 ```bash
 scripts/audit_dependencies.sh
@@ -254,13 +255,13 @@ Expected: no known dependency vulnerability, zero secret/privacy matches,
 every Python product module and Swift product lines at or above 80%, release
 metadata remains `0.6.0 (9)`, and the signed App bundle completes.
 
-- [ ] **Step 4: Update queue status honestly**
+- [x] **Step 4: Update queue status honestly**
 
 Record repository-local implementation and exact gate counts. Keep Provider
 adapters, live telemetry producers, Loom reservations/policy, external Canary,
 merge and publication open.
 
-- [ ] **Step 5: Commit final verification**
+- [x] **Step 5: Commit final verification**
 
 ```bash
 git add docs openusage_bar tests
@@ -273,3 +274,25 @@ WQ-21 is repository-complete when strict ingestion, separate bounded storage,
 read-only summaries, database/API separation and full release gates are proven.
 It does not make live LiteLLM/CLIProxyAPI/hooks available, does not authorize
 Loom scheduling, and does not qualify any external Canary machine.
+
+## Verification record
+
+Verified locally on 2026-08-01:
+
+- strict Runtime contract, store, CLI, packaged entrypoint and build-contract
+  tests passed;
+- the complete Python suite passed twice with 964 tests; every product module
+  remained at or above 80% line coverage, including
+  `runtime_observation=91%` and `runtime_store=96%`;
+- 257 Swift tests passed and Swift product line coverage was 87.64%;
+- dependency audit reported no known vulnerabilities;
+- release secret scan reported zero matches across the tree and history, and
+  both source and packaged privacy scans reported zero matches;
+- database/API separation search returned no matches;
+- release metadata remained `0.6.0 (9)`, the App bundle passed strict code-sign
+  verification, and the packaged Collector emitted
+  `runtime_observation_smoke_ok observations=1 revision=1`.
+
+This is repository-local evidence only. No live producer, network route, Loom
+reservation/policy integration, external Canary, merge, push or publication is
+claimed by this record.

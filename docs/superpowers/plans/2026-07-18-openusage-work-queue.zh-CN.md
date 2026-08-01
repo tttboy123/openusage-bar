@@ -910,9 +910,16 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
 - **WQ-21：Runtime Observation 独立方案。** 只接收时间戳、匿名作用域、
   Token、延迟、状态和费用；使用独立短保留存储，禁止 Prompt、Response、
   凭证和直接身份。它不拥有额度事实，也不实现 Loom 的预留、准入或路由。
-  **ADR 0002 已接受：原始观察固定保留 24 小时，上限 100,000 行、64 MiB，
-  单次文档不超过 1 MiB / 256 条，使用独立 `runtime.sqlite3` 和
-  `runtimeRevision`；严格契约的本地实现正在 WQ-21 分支推进。**
+  **仓库内实现与本地发行门禁已完成：ADR 0002 固定原始观察保留 24 小时、
+  上限 100,000 行 / 64 MiB、单次文档不超过 1 MiB / 256 条；严格 v1
+  契约、独立 `runtime.sqlite3`、幂等写入、淘汰策略、有界汇总和独立
+  `runtimeRevision` 已落地。Collector 提供仅本地的 `runtime-ingest` 与
+  `runtime-summary`，打包后的 Collector 也通过冻结 Fixture 冒烟。最终本地
+  门禁为 Python 964 项两轮通过、Swift 257 项通过，Runtime 契约与存储覆盖率
+  分别为 91% 和 96%，Swift 产品行覆盖率 87.64%，全部 Python 产品模块不少于
+  80%，依赖审计无已知漏洞，历史密钥扫描与隐私扫描均为 0，发行 metadata
+  保持 `0.6.0 (9)`，签名 App bundle 构建通过。** Live Provider producer、
+  网络写入、本地 API 暴露、Loom 预留/策略、外部 Canary、合并和发布仍未开始。
 
 WQ-18 完成后才能开始 WQ-19；WQ-20 可与 WQ-19 按不同文件并行设计；
 WQ-21 必须先有独立 ADR、保留期与数据上限，不得直接写入
