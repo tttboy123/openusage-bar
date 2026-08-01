@@ -31,12 +31,29 @@ from openusage_bar.openai_organization import (
 from openusage_bar.openusage_adapter import OpenUsageAdapter
 from openusage_bar.performance_timing import RefreshTimingRecorder
 from openusage_bar.providers.builtins import default_registry
-from openusage_bar.providers.contracts import ProviderBinding
+from openusage_bar.providers.contracts import (
+    ProviderBinding,
+    ProviderDescriptor,
+    QuotaCollectionResult,
+    QuotaFetchFailure,
+    SourceAttribution,
+)
 from openusage_bar.providers.registry import AdapterRegistry, UnknownProviderConfig
 from openusage_bar.step_plan import StepPlanAdapter
 
 
 NOW = datetime(2026, 7, 18, tzinfo=timezone.utc)
+
+
+def descriptor(
+    provider_id: str, family_id: str = "custom"
+) -> ProviderDescriptor:
+    return ProviderDescriptor(
+        provider_id=provider_id,
+        family_id=family_id,
+        display_name=provider_id.replace("-", " ").title(),
+        category="api",
+    )
 
 
 class AdapterRegistryTests(unittest.TestCase):
@@ -77,6 +94,75 @@ class AdapterRegistryTests(unittest.TestCase):
                 primary_path="data.remaining",
             ),
         ]
+
+    def test_provider_descriptor_combines_stable_identity_with_attempt_source(self):
+        descriptor = ProviderDescriptor(
+            provider_id="step-work",
+            family_id="step_plan",
+            display_name="Step Plan Work",
+            category="subscription",
+        )
+
+        instance = descriptor.observed(
+            NOW,
+            SourceAttribution(
+                credential_source="step_plan_browser_session",
+                source_kind="browser_session",
+            ),
+        )
+
+        self.assertEqual(instance.provider_id, "step-work")
+        self.assertEqual(instance.family_id, "step_plan")
+        self.assertEqual(instance.display_name, "Step Plan Work")
+        self.assertEqual(instance.category, "subscription")
+        self.assertEqual(
+            instance.credential_source, "step_plan_browser_session"
+        )
+        self.assertEqual(instance.source_kind, "browser_session")
+        self.assertEqual(instance.observed_at, "2026-07-18T00:00:00.000000Z")
+
+    def test_provider_binding_rejects_descriptor_identity_mismatch(self):
+        descriptor = ProviderDescriptor(
+            provider_id="different",
+            family_id="step_plan",
+            display_name="Step Plan",
+            category="subscription",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "descriptor must match binding identity"
+        ):
+            ProviderBinding(
+                provider_id="step-work",
+                family_id="step_plan",
+                descriptor=descriptor,
+            )
+
+    def test_collection_result_keeps_failure_separate_from_source_attribution(self):
+        attribution = SourceAttribution(
+            credential_source="step_plan_official_api",
+            source_kind="official_api",
+        )
+
+        collection = QuotaCollectionResult(
+            result=QuotaFetchFailure("auth_required"),
+            attribution=attribution,
+        )
+
+        self.assertEqual(collection.result.error_code, "auth_required")
+        self.assertEqual(collection.attribution, attribution)
+
+    def test_source_attribution_rejects_noncanonical_public_values(self):
+        with self.assertRaisesRegex(ValueError, "credential_source"):
+            SourceAttribution(
+                credential_source="not canonical",
+                source_kind="official_api",
+            )
+        with self.assertRaisesRegex(ValueError, "source_kind"):
+            SourceAttribution(
+                credential_source="step_plan_official_api",
+                source_kind="unknown_transport",
+            )
 
     def test_current_configs_build_the_existing_adapter_and_importer_graph(self):
         bindings = {
@@ -299,14 +385,19 @@ class AdapterRegistryTests(unittest.TestCase):
         registry = AdapterRegistry()
         registry.register_global(lambda: ProviderBinding(
             provider_id="duplicate-sources", family_id="custom",
+            descriptor=descriptor("duplicate-sources"),
             quota_sources=(Source(), Source()),
         ))
         with self.assertRaisesRegex(ValueError, "duplicate quota source IDs"):
             registry.build([])
 
         registry = AdapterRegistry()
-        registry.register_global(lambda: ProviderBinding("same", "one"))
-        registry.register_global(lambda: ProviderBinding("same", "two"))
+        registry.register_global(lambda: ProviderBinding(
+            "same", "one", descriptor("same", "one")
+        ))
+        registry.register_global(lambda: ProviderBinding(
+            "same", "two", descriptor("same", "two")
+        ))
         with self.assertRaisesRegex(ValueError, "duplicate provider IDs"):
             registry.build([])
 
@@ -321,6 +412,7 @@ class AdapterRegistryTests(unittest.TestCase):
         registry = AdapterRegistry()
         registry.register_global(lambda: ProviderBinding(
             provider_id="ordered", family_id="custom",
+            descriptor=descriptor("ordered"),
             quota_sources=(
                 Source("z", 20), Source("b", 10), Source("a", 10),
             ),

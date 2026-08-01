@@ -4,7 +4,7 @@
 
 **Goal:** Remove `ProviderCard` and `LegacyCardAdapter` from the Collector-to-ledger path while preserving the existing menu-bar and Usage Details output.
 
-**Architecture:** Provider adapters return only fact-specific results and sanitized source failures. Static Provider identity moves into `ProviderBinding`; the Collector writes those identities and facts directly. `ProviderCard`, `Overview`, stale-card merging and the card cache remain presentation compatibility code until the Python UI is retired, but they are no longer inputs to the durable ledger.
+**Architecture:** Provider adapters return only fact-specific results, sanitized source failures and the actual source attribution used by that attempt. Stable Provider identity moves into `ProviderBinding`; credential/source kind remains attempt-specific because one configured Provider (for example Step Plan) may use either an API key or a browser session. The Collector combines both into `ProviderInstance` and writes facts directly. `ProviderCard`, `Overview`, stale-card merging and the card cache remain presentation compatibility code until the Python UI is retired, but they are no longer inputs to the durable ledger.
 
 **Tech Stack:** Python 3 dataclasses and protocols, existing SQLite activity ledger, standard-library unittest, existing SwiftUI read-only client.
 
@@ -41,8 +41,6 @@ ProviderDescriptor(
     family_id="minimax",
     display_name="MiniMax Primary",
     category="subscription",
-    credential_source="minimax_builtin_api",
-    source_kind="builtin_api",
 )
 ```
 
@@ -52,8 +50,14 @@ Add a quota source exposing only:
 source_id = "minimax.coding_plan"
 source_priority = 20
 
-def fetch_quota(self) -> QuotaFetchResult:
-    return QuotaFetchFailure("quota_unavailable")
+def fetch_quota(self) -> QuotaCollectionResult:
+    return QuotaCollectionResult(
+        result=QuotaFetchFailure("quota_unavailable"),
+        attribution=SourceAttribution(
+            credential_source="minimax_builtin_api",
+            source_kind="builtin_api",
+        ),
+    )
 ```
 
 Assert that a `fetch()`-only source is rejected from `quota_sources`, duplicate
@@ -72,23 +76,31 @@ still accepts `LegacyCardAdapter` in `quota_sources`.
 
 - [ ] **Step 3: Implement the minimal contracts**
 
-Add a frozen `ProviderDescriptor` with the six fields above. Validate identifiers
-with `validate_id`, category against `PROVIDER_CATEGORIES`, source kind against the
-public Provider catalog kinds and display name with `validate_safe_display_name`.
+Add a frozen `ProviderDescriptor` with the four stable fields above. Validate
+identifiers with `validate_id`, category against `PROVIDER_CATEGORIES` and display
+name with `validate_safe_display_name`. Add frozen `SourceAttribution` with
+`credential_source` and `source_kind`; validate the first as a stable ID and the
+second against the Provider-instance source kinds.
 Add:
 
 ```python
-def observed(self, observed_at: datetime) -> ProviderInstance:
+def observed(
+    self, observed_at: datetime, attribution: SourceAttribution
+) -> ProviderInstance:
     return ProviderInstance(
         provider_id=self.provider_id,
         family_id=self.family_id,
         display_name=self.display_name,
         category=self.category,
-        credential_source=self.credential_source,
-        source_kind=self.source_kind,
+        credential_source=attribution.credential_source,
+        source_kind=attribution.source_kind,
         observed_at=observed_at.isoformat(),
     )
 ```
+
+Add `QuotaCollectionResult` and `BalanceCollectionResult` envelopes containing a
+typed fact result plus `SourceAttribution`. This prevents a multi-mode adapter from
+publishing a static credential/source claim that was not used by the attempt.
 
 Change the protocols to:
 
@@ -96,12 +108,12 @@ Change the protocols to:
 class QuotaAdapter(Protocol):
     source_id: str
     source_priority: int
-    def fetch_quota(self) -> QuotaFetchResult: ...
+    def fetch_quota(self) -> QuotaCollectionResult: ...
 
 class BalanceAdapter(Protocol):
     source_id: str
     source_priority: int
-    def fetch_balance(self) -> BalanceFetchResult: ...
+    def fetch_balance(self) -> BalanceCollectionResult: ...
 ```
 
 Make `ProviderBinding.descriptor` required and require its Provider/family IDs to
@@ -159,8 +171,9 @@ Expected: the headless builder still calls card-producing `fetch()` and reads
 
 Change `LedgerRefresher` to own sorted tuples of `(ProviderDescriptor, adapter)`.
 Within one refresh it must call each fact method through `measure_source_call`,
-capture a typed failure on exceptions, and pass immutable result tuples to the
-Collector. Delete all reads of `last_quota_result` and `last_balance_result`.
+capture a typed failure with the adapter's bounded public attribution on exceptions,
+and pass immutable result tuples to the Collector. Delete all reads of
+`last_quota_result` and `last_balance_result`.
 
 Change `ActivityCollector.refresh` to receive:
 
