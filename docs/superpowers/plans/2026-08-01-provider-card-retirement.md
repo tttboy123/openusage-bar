@@ -359,14 +359,14 @@ git commit -m "refactor: collect balance facts directly"
 - Test: `tests/test_adapter_registry.py`
 - Test: `tests/test_daily_history.py`
 
-- [ ] **Step 1: Require the frozen producer fixture**
+- [x] **Step 1: Require the frozen producer fixture**
 
 Use only the WQ-20 `openusage-export/v1` decoder. Add tests proving dynamic Provider
 snapshots produce bounded `ProviderInstance` and `SourceStatus` facts without
 creating `ProviderCard`; empty coverage remains Unknown and malformed/oversized
 exports fail closed.
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 ```bash
 .build-venv/bin/python -m unittest \
@@ -377,20 +377,20 @@ exports fail closed.
 Expected: `OpenUsageAdapter.parse()` still returns `Overview` and the headless
 builder still registers `openusage.cards` as a quota/card source.
 
-- [ ] **Step 3: Split discovery from presentation**
+- [x] **Step 3: Split discovery from presentation**
 
 Replace the production card adapter with an `OpenUsageDiscoveryAdapter` that
 returns Provider descriptors and sanitized source results from the frozen export.
 Keep `OpenUsageDailyImporter` as the daily Token producer. Move card rendering, if
 the legacy Python UI still requires it, into a presentation-only wrapper.
 
-- [ ] **Step 4: Remove the final core card dependency**
+- [x] **Step 4: Remove the final core card dependency**
 
 Delete `LegacyCardAdapter`; ensure `daily_history.py`, `providers/contracts.py`,
 `providers/registry.py` and `build_headless_refresher()` contain no imports or type
 references to `ProviderCard` or `Overview`.
 
-- [ ] **Step 5: Verify and commit WQ-19B**
+- [x] **Step 5: Verify and commit WQ-19B**
 
 Run the Step 2 command and expect all tests to pass.
 
@@ -404,7 +404,7 @@ git commit -m "refactor: publish openusage discovery facts directly"
 **Files:**
 - Modify only files required by regressions introduced by Tasks 1-6.
 
-- [ ] **Step 1: Prove the core no longer depends on cards**
+- [x] **Step 1: Prove the core no longer depends on cards**
 
 ```bash
 ! rg -n "ProviderCard|Overview|LegacyCardAdapter" \
@@ -414,7 +414,7 @@ git commit -m "refactor: publish openusage discovery facts directly"
 
 Expected: no matches.
 
-- [ ] **Step 2: Run all Python and Swift tests**
+- [x] **Step 2: Run all Python and Swift tests**
 
 ```bash
 .build-venv/bin/python -m unittest discover -s tests -v
@@ -423,7 +423,7 @@ swift test --package-path swift_app -Xswiftc -warnings-as-errors
 
 Expected: all tests pass; Local API v1 and generated Swift fixtures are unchanged.
 
-- [ ] **Step 3: Run security, privacy and release gates**
+- [x] **Step 3: Run security, privacy and release gates**
 
 ```bash
 scripts/audit_dependencies.sh
@@ -442,13 +442,13 @@ Expected: dependency audit has no known vulnerability, both scans report zero,
 release metadata remains `0.6.0 (9)` until an explicitly authorized version change,
 and the complete App bundle build passes.
 
-- [ ] **Step 4: Review compatibility evidence**
+- [x] **Step 4: Review compatibility evidence**
 
 Confirm Snapshot/Changes payloads, `dataRevision`, quota history, Source Health,
 Provider visibility, menu-bar values and N-1 fixtures have no breaking changes.
 External Canary remains 0/5 and its 30-day clock remains `not_started`.
 
-- [ ] **Step 5: Commit final compatibility fixes**
+- [x] **Step 5: Commit final compatibility fixes**
 
 ```bash
 git add openusage_bar swift_app tests scripts docs
@@ -464,3 +464,16 @@ named compatibility module is acceptable until the Python UI is separately retir
 
 This plan does not add request telemetry, change Loom, start external Canary,
 publish a new App version or change Provider credentials.
+
+## Verification record
+
+2026-08-01: the card-dependency proof returned no matches. Python passed 938
+tests twice during the release build; every product module remained at or above
+80% line coverage (`aggregator` 83%, `openusage_export_v1` 92%). Swift passed
+257 tests with 87.64% product line coverage. Dependency audit reported no known
+vulnerabilities; tree/history secret scan and both privacy scans reported zero
+matches. Release metadata remained `0.6.0 (9)`, producer and consumer
+`providers` fixtures matched byte-for-byte, and the ad-hoc signed
+`dist/OpenUsage Bar.app` passed deep strict signature and plist validation.
+These are local repository gates only: no merge, publication, installation or
+external Canary validation was performed.

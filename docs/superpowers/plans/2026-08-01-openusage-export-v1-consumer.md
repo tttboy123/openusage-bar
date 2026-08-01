@@ -134,9 +134,10 @@ Commit: `feat(openusage): prefer export v1 daily facts`
 
 - [x] **Step 1: Add producer/consumer fixture agreement tests**
 
-Decode all four producer fixtures. Accept additive fields, reject missing required
+Decode all five producer fixtures. Accept additive fields, reject missing required
 fields, and require exact provider filter, daily usage, coverage, page/range bounds
-and all Token conventions in capabilities.
+and all Token conventions in capabilities. The fifth fixture freezes bounded Provider
+discovery without account identity, credentials, endpoint, Prompt/Response or raw data.
 
 - [x] **Step 2: Document source priority**
 
@@ -208,3 +209,10 @@ vulnerabilities; tree/history secret scan and packaged privacy scans reported ze
 matches; release metadata remained `0.6.0 (9)`; `scripts/build_app.sh` reached the
 signed `dist/OpenUsage Bar.app` completion marker. Producer and consumer branches
 remain local/unmerged pending the separate publication action.
+
+2026-08-01 WQ-19B follow-up: the producer and consumer `providers` fixtures were
+made byte-identical before publication. The fact-first integration then passed
+938 Python tests, 257 Swift tests, all 80% product coverage gates, dependency and
+release metadata checks, zero-match tree/history secret and privacy scans, and a
+deep-strict verified App bundle build. No external publication or installation
+was performed.

@@ -66,6 +66,12 @@ complete/partial/none coverage, three counting conventions, three qualities, req
 coverage, daily row, page and envelope types. Validation fails closed without echoing
 rejected values.
 
+Before publication, WQ-19B exposed a missing explicit discovery boundary: daily Token
+rows cannot be used to infer installed Providers. The same v1 contract therefore also
+freezes a `providers` kind with at most 512 sorted, account-free rows containing only
+`provider_id`, sanitized state and UTC observation time. Complete empty is a truthful
+"none discovered" result; partial/none coverage cannot replace Last-good discovery.
+
 - [x] **Step 4: Run GREEN and commit**
 
 Run: `go test ./internal/exportv1 -count=1`

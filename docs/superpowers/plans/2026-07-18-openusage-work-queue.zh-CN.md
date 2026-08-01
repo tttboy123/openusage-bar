@@ -892,15 +892,21 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   **WQ-19A 已完成本地实现和完整发行门禁：Codex、Kiro、MiniMax、Step Plan、
   Generic HTTPS 与 Moonshot 直接返回带来源归属的额度/余额事实，headless
   Collector 不再读取 `last_*` 卡片旁路；OpenAI 与自定义 Feed 不再注册伪额度
-  卡片。WQ-19B 仍须等待 WQ-20 冻结 `openusage-export/v1`。**
+  卡片。WQ-19B 已在本地集成分支完成：OpenUsage 动态发现改为有界
+  `providers` 事实，headless 路径不再构造 CardCache/Aggregator，核心
+  contracts、registry 与 ActivityCollector 已无 `ProviderCard`、`Overview`
+  或 `LegacyCardAdapter` 依赖；旧卡片只保留在 Python 展示兼容层。最终本地
+  门禁为 Python 938 项、Swift 257 项、Swift 产品行覆盖率 87.64%，全部
+  Python 产品模块不少于 80%，依赖审计无已知漏洞，密钥与隐私扫描均为 0，
+  签名 App bundle 构建通过。**
 - **WQ-20：冻结 `openusage-export/v1`。** 固定 producer 版本、Provider
   filter、Token 口径、Coverage、空结果、范围/分页与能力协商，并提供 N-1
   Fixture；OpenUsage Bar 不依赖未声明的开发 Commit 行为。
-  **生产端契约、真实 Coverage、确定性分页、CLI 协商和四份冻结 Fixture 已在
+  **生产端契约、真实 Coverage、确定性分页、CLI 协商和五份冻结 Fixture 已在
   独立 OpenUsage 分支完成；消费端严格解码、单次能力探测、v1 优先与 legacy
-  单次回退已完成。完整门禁为 Python 915 项、Swift 257 项、Python 新模块
-  92% 与 Swift 产品 87.70% 行覆盖率，依赖/秘密/隐私/元数据/签名构建全部
-  通过。两端仍为独立未发布分支，合并与发布属于后续外部动作。**
+  单次回退已完成；发布前补齐的 `providers` kind 只暴露 Provider ID、脱敏
+  状态和 UTC 观察时间，最多 512 行，不含账号身份。两端仍为独立未发布
+  分支；生产端和消费端冻结样例已逐字一致，合并与发布属于后续外部动作。**
 - **WQ-21：Runtime Observation 独立方案。** 只接收时间戳、匿名作用域、
   Token、延迟、状态和费用；使用独立短保留存储，禁止 Prompt、Response、
   凭证和直接身份。它不拥有额度事实，也不实现 Loom 的预留、准入或路由。
