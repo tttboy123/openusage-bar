@@ -75,6 +75,8 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("python_coverage_gate.py", source)
         self.assertIn("--module unittest discover -s tests -v", source)
         self.assertIn('--package-root "$ROOT/openusage_bar"', source)
+        self.assertIn('--package-root "$ROOT/integrations"', source)
+        self.assertEqual(source.count("scripts/python_coverage_gate.py"), 2)
         self.assertNotIn("PYTHON_TOUCHED_MODULES", source)
         self.assertIn('actual=${SWIFT_LINE_COVERAGE}%', source)
 
@@ -324,6 +326,20 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn('"runtime-ingest"', source)
         self.assertIn('"runtime-summary"', source)
         self.assertIn("runtime_observation_smoke_ok", source)
+
+    def test_build_packages_and_smokes_litellm_runtime_producer(self):
+        build = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
+        integration = ROOT / "integrations/litellm_openusage.py"
+        smoke = ROOT / "scripts/runtime_producer_smoke.py"
+
+        self.assertTrue(integration.is_file())
+        self.assertTrue(smoke.is_file())
+        self.assertIn("Contents/Resources/Integrations", build)
+        self.assertIn("litellm_openusage.py", build)
+        self.assertIn("runtime_producer_smoke.py", build)
+        self.assertIn("runtime-producers/litellm-success-v1.json", build)
+        self.assertIn("runtime_producer_smoke_ok", smoke.read_text(encoding="utf-8"))
+        self.assertIn("litellm.callback.v1", smoke.read_text(encoding="utf-8"))
 
     def test_atomic_swap_helper_exchanges_two_directories_without_a_missing_target_window(self):
         helper = ROOT / "scripts/atomic_swap.c"

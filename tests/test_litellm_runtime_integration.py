@@ -212,6 +212,18 @@ class LiteLLMRuntimeTransformTests(unittest.TestCase):
         self.assertRegex(second, r"^anon_[0-9a-f]{32}$")
         self.assertNotEqual(first, second)
 
+    def test_standalone_helper_prints_only_a_new_scope_ref(self):
+        integration = load_integration()
+        stdout, stderr = io.StringIO(), io.StringIO()
+
+        code = integration.main(
+            ["--create-scope-ref"], stdout=stdout, stderr=stderr
+        )
+
+        self.assertEqual(code, 0)
+        self.assertRegex(stdout.getvalue(), r"^anon_[0-9a-f]{32}\n$")
+        self.assertEqual(stderr.getvalue(), "")
+
 
 class Completed:
     def __init__(self, returncode: int) -> None:

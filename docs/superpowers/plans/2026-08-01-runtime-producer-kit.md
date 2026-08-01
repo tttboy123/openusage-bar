@@ -296,7 +296,7 @@ git commit -m "feat(runtime): deliver LiteLLM observations locally"
 - Modify: `scripts/privacy_scan.py` only if its public allowlist needs the new
   safe source identifier.
 
-- [ ] **Step 1: Write failing packaging tests**
+- [x] **Step 1: Write failing packaging tests**
 
 Require `build_app.sh` to copy the standalone module to:
 
@@ -313,7 +313,7 @@ verify one 15-Token row, mode `0600`, no private strings and print:
 runtime_producer_smoke_ok producer=litellm.callback.v1 observations=1
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 .build-venv/bin/python -m unittest \
@@ -322,12 +322,16 @@ runtime_producer_smoke_ok producer=litellm.callback.v1 observations=1
 
 Expected: FAIL because the packaged integration and smoke do not exist.
 
-- [ ] **Step 3: Implement package copy and smoke**
+- [x] **Step 3: Implement package copy and smoke**
 
 Use only absolute paths, regular-file/symlink checks, temporary storage and
-bounded subprocesses. Add the packaged integration file to the privacy scan.
+bounded subprocesses. Enforce the same 80% source coverage gate for the
+standalone `integrations/` tree. The generic artifact privacy scanner is not
+run against executable source code because source necessarily names sensitive
+field classes; privacy is instead proven by the content-bearing persistence
+smoke, allowlist tests and release secret scan.
 
-- [ ] **Step 4: Write the quick-start guide**
+- [x] **Step 4: Write the quick-start guide**
 
 Document LiteLLM SDK and Proxy registration, one-time `create_scope_ref()` use,
 explicit Provider mapping, the required app path, how to query
@@ -336,7 +340,7 @@ cleanup. State that OpenTelemetry must use `NO_CONTENT`, but direct OTLP ingest
 is not shipped in WQ-22 because LiteLLM also emits identity metadata unless a
 strict allowlist processor removes it.
 
-- [ ] **Step 5: Run package tests and commit**
+- [x] **Step 5: Run package tests and commit**
 
 ```bash
 .build-venv/bin/python -m unittest tests.test_build_script \

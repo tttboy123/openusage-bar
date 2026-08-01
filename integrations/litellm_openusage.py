@@ -13,6 +13,7 @@ import os
 import secrets
 import re
 import subprocess
+import sys
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -423,3 +424,23 @@ class OpenUsageRuntimeLogger(CustomLogger):
         return await asyncio.to_thread(
             self.log_failure_event, kwargs, response_obj, start_time, end_time
         )
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    stdout: Any = None,
+    stderr: Any = None,
+) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    output = stdout or sys.stdout
+    errors = stderr or sys.stderr
+    if arguments != ["--create-scope-ref"]:
+        errors.write("invalid integration command\n")
+        return 2
+    output.write(create_scope_ref() + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

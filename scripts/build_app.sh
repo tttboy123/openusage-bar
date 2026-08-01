@@ -13,6 +13,7 @@ STATUS_RUNTIME="$APP/Contents/MacOS/OpenUsage Bar.runtime"
 COLLECTOR_LAUNCHER="$APP/Contents/MacOS/OpenUsage Collector"
 RESOURCES="$SWIFT_PACKAGE/Resources"
 ATOMIC_SWAP="$APP/Contents/Resources/atomic-swap"
+INTEGRATIONS="$APP/Contents/Resources/Integrations"
 SWIFT_MIN_LINE_COVERAGE=80
 PYTHON_MIN_LINE_COVERAGE=80
 # Declarative SwiftUI composition is exercised by native hosting smoke tests.
@@ -61,6 +62,10 @@ PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
   --report "$PYTHON_COVERAGE_REPORT" \
   --minimum "$PYTHON_MIN_LINE_COVERAGE" \
   --package-root "$ROOT/openusage_bar"
+"$PYTHON" scripts/python_coverage_gate.py \
+  --report "$PYTHON_COVERAGE_REPORT" \
+  --minimum "$PYTHON_MIN_LINE_COVERAGE" \
+  --package-root "$ROOT/integrations"
 "$PYTHON" scripts/privacy_scan.py \
   "$ROOT/openusage_bar/resources/release-state.v1.json" \
   "$ROOT/openusage_bar/resources/provider-catalog.v1.json" \
@@ -95,6 +100,7 @@ rm -rf "$BUILD_ROOT" "$DIST"
 mkdir -p \
   "$APP/Contents/MacOS" \
   "$APP/Contents/Helpers" \
+  "$INTEGRATIONS" \
   "$APP/Contents/Resources/LaunchAgents" \
   "$APP/Contents/Library/LaunchAgents"
 /usr/bin/clang -Wall -Wextra -Werror -mmacosx-version-min=15.0 \
@@ -106,6 +112,8 @@ cp "$SWIFT_PACKAGE/.build/release/OpenUsageBar" "$STATUS_RUNTIME"
   "$ROOT/scripts/clean_env_launcher.c" -o "$APP/Contents/MacOS/OpenUsage Bar"
 cp "$APP/Contents/MacOS/OpenUsage Bar" "$COLLECTOR_LAUNCHER"
 chmod 755 "$APP/Contents/MacOS/OpenUsage Bar" "$STATUS_RUNTIME" "$COLLECTOR_LAUNCHER"
+cp "$ROOT/integrations/litellm_openusage.py" "$INTEGRATIONS/litellm_openusage.py"
+chmod 644 "$INTEGRATIONS/litellm_openusage.py"
 
 mkdir -p "$ACTIVITY_APP/Contents/MacOS"
 cp "$RESOURCES/OpenUsageActivity-Info.plist" "$ACTIVITY_APP/Contents/Info.plist"
@@ -182,4 +190,8 @@ otool -L "$ACTIVITY_APP/Contents/MacOS/OpenUsage Activity" >/dev/null
 "$PYTHON" scripts/runtime_observation_smoke.py \
   --collector "$COLLECTOR_LAUNCHER" \
   --fixture "$ROOT/tests/fixtures/runtime-observation-v1.json"
+"$PYTHON" scripts/runtime_producer_smoke.py \
+  --collector "$COLLECTOR_LAUNCHER" \
+  --integration "$INTEGRATIONS/litellm_openusage.py" \
+  --fixture "$ROOT/tests/fixtures/runtime-producers/litellm-success-v1.json"
 print "built $APP"
