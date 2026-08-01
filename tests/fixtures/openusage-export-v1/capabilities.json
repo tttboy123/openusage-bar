@@ -1,0 +1,16 @@
+{
+  "contract": "openusage-export/v1",
+  "schema_version": "1",
+  "generated_at": "2026-08-01T00:00:00Z",
+  "openusage_version": "v0.24.0",
+  "kind": "capabilities",
+  "capabilities": {
+    "kinds": ["capabilities", "daily_usage"],
+    "provider_filter": "exact",
+    "max_range_days": 366,
+    "max_page_size": 1000,
+    "coverage_states": ["complete", "partial", "none"],
+    "token_counting_conventions": ["components_disjoint", "input_includes_cache", "provider_reported"],
+    "qualities": ["direct", "derived", "estimated"]
+  }
+}

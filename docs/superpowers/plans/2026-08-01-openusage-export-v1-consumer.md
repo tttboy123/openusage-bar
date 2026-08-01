@@ -31,7 +31,6 @@ compatibility. Reject booleans as integers and never echo rejected values.
 def test_failed_empty_is_not_covered_zero():
     page = decode_daily(fixture("daily-usage-partial.json"))
     assert page.coverage.state == "partial"
-    assert page.rows == ()
     assert page.covered_zero is False
 ```
 

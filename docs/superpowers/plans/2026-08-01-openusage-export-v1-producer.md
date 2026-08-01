@@ -182,12 +182,16 @@ Run:
 
 ```bash
 go test ./internal/exportv1 ./internal/export ./cmd/openusage -count=1
-go test ./...
+env HOME=/tmp/openusage-export-v1-test-home go test ./...
 gofmt -w internal/exportv1 cmd/openusage/export.go internal/export
 git diff --check
 ```
 
 Expected: all tests pass and formatting is clean.
+
+The isolated HOME is required because three pre-existing upstream tests assume
+Hermes/Kiro source files are absent; the developer machine contains real source
+files under HOME. The same three failures reproduce on untouched upstream main.
 
 - [ ] **Step 3: Build and inspect the real CLI**
 
