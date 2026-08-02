@@ -23,6 +23,7 @@ def target(
         model_id=model_id,
         connection_ref="connection-1",
         execution_class="direct_api",
+        execution_adapter_id="openai.direct",
         enabled=enabled,
         adapter_available=adapter_available,
         regions=regions,

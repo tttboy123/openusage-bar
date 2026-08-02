@@ -77,6 +77,7 @@ class RouteTarget:
     model_id: str
     connection_ref: str
     execution_class: str
+    execution_adapter_id: str
     enabled: bool
     adapter_available: bool
     regions: tuple[str, ...]
@@ -86,7 +87,10 @@ class RouteTarget:
     quality_tier: int
 
     def __post_init__(self) -> None:
-        for name in ("target_id", "provider_id", "account_ref", "model_id", "connection_ref"):
+        for name in (
+            "target_id", "provider_id", "account_ref", "model_id",
+            "connection_ref", "execution_adapter_id",
+        ):
             _stable_id(name, getattr(self, name))
         _enum("execution_class", self.execution_class, EXECUTION_CLASSES)
         _enum("privacy_class", self.privacy_class, TARGET_PRIVACY_CLASSES)
@@ -255,4 +259,3 @@ class RouteDecision:
     selected: ScoredTarget | None
     alternatives: tuple[ScoredTarget, ...]
     rejected: tuple[RejectedTarget, ...]
-
