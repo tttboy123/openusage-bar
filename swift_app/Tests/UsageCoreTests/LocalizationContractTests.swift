@@ -57,6 +57,13 @@ struct LocalizationContractTests {
             "Add policy",
             "Add custom policy",
             "Edit custom policy",
+            "OpenAI-compatible chat proxy",
+            "Optional local execution endpoint for OpenAI-compatible clients",
+            "Enable proxy",
+            "Disable proxy",
+            "Rotate token",
+            "Save your proxy token",
+            "Copy token",
         ]
 
         for key in requiredKeys {

@@ -49,6 +49,24 @@ class ExecutionAuthenticationError(RuntimeError):
     """A configured execution connection has no readable credential."""
 
 
+class ExecutionTransientError(RuntimeError):
+    """A sanitized Provider outcome that may move to the next ranked target."""
+
+    def __init__(self, status_class: str, reason_code: str):
+        if status_class not in {
+            "transport", "timeout", "http_408", "http_429", "http_5xx",
+        }:
+            raise ValueError("invalid transient execution status")
+        if reason_code not in {
+            "transport_error", "provider_timeout", "provider_rate_limited",
+            "provider_unavailable",
+        }:
+            raise ValueError("invalid transient execution reason")
+        super().__init__("transient execution failure")
+        self.status_class = status_class
+        self.reason_code = reason_code
+
+
 class ExecutionAdapter(Protocol):
     adapter_id: str
     execution_class: str
@@ -72,6 +90,13 @@ class ExecutionHTTPClient(Protocol):
         headers: dict[str, str],
         body: dict[str, object],
     ) -> dict[str, object]: ...
+
+    def post_stream(
+        self,
+        endpoint: str,
+        headers: dict[str, str],
+        body: dict[str, object],
+    ) -> Iterable[bytes]: ...
 
 
 def _invalid() -> ExecutionConnectionConfigError:
@@ -395,12 +420,14 @@ class OpenAICompatibleExecutionAdapter:
         self.keychain = keychain
         self.client = client
 
-    def execute_chat(
+    def _prepared_request(
         self,
         connection: ExecutionConnection,
         model_id: str,
         body: dict[str, object],
-    ) -> dict[str, object]:
+        *,
+        stream: bool,
+    ) -> tuple[dict[str, object], str]:
         if (
             not isinstance(connection, ExecutionConnection)
             or connection.execution_adapter_id != self.adapter_id
@@ -408,7 +435,7 @@ class OpenAICompatibleExecutionAdapter:
             or not connection.enabled
             or _stable_id(model_id) not in connection.models
             or not isinstance(body, dict)
-            or body.get("stream", False) is not False
+            or body.get("stream", False) is not stream
         ):
             raise ValueError("invalid chat execution request")
         request_body = dict(body)
@@ -433,13 +460,85 @@ class OpenAICompatibleExecutionAdapter:
             or "\n" in secret
         ):
             raise ExecutionAuthenticationError("execution credential unavailable")
-        response = self.client.post_json(
-            connection.base_url + "/chat/completions",
-            {"Authorization": "Bearer " + secret},
-            request_body,
+        return request_body, secret
+
+    @staticmethod
+    def _raise_network(error: BaseException) -> None:
+        from .network import (
+            AuthenticationRequired,
+            HTTPStatusError,
+            NetworkError,
+            RateLimited,
         )
+
+        if isinstance(error, AuthenticationRequired):
+            raise ExecutionAuthenticationError(
+                "execution credential rejected"
+            ) from error
+        if isinstance(error, RateLimited):
+            raise ExecutionTransientError(
+                "http_429", "provider_rate_limited"
+            ) from error
+        if isinstance(error, HTTPStatusError):
+            if error.status == 408:
+                raise ExecutionTransientError(
+                    "http_408", "provider_timeout"
+                ) from error
+            if error.status in {500, 502, 503, 504}:
+                raise ExecutionTransientError(
+                    "http_5xx", "provider_unavailable"
+                ) from error
+            raise ValueError("provider rejected execution request") from error
+        if isinstance(error, NetworkError):
+            raise ExecutionTransientError(
+                "transport", "transport_error"
+            ) from error
+        raise error
+
+    def execute_chat(
+        self,
+        connection: ExecutionConnection,
+        model_id: str,
+        body: dict[str, object],
+    ) -> dict[str, object]:
+        request_body, secret = self._prepared_request(
+            connection, model_id, body, stream=False
+        )
+        from .network import AuthenticationRequired, NetworkError, RateLimited
+
+        try:
+            response = self.client.post_json(
+                connection.base_url + "/chat/completions",
+                {"Authorization": "Bearer " + secret},
+                request_body,
+            )
+        except (AuthenticationRequired, RateLimited, NetworkError) as error:
+            self._raise_network(error)
         if not isinstance(response, dict):
             raise ValueError("invalid chat execution response")
+        return response
+
+    def execute_chat_stream(
+        self,
+        connection: ExecutionConnection,
+        model_id: str,
+        body: dict[str, object],
+    ) -> Iterable[bytes]:
+        request_body, secret = self._prepared_request(
+            connection, model_id, body, stream=True
+        )
+        from .network import AuthenticationRequired, NetworkError, RateLimited
+
+        try:
+            response = self.client.post_stream(
+                connection.base_url + "/chat/completions",
+                {"Authorization": "Bearer " + secret},
+                request_body,
+            )
+        except (AuthenticationRequired, RateLimited, NetworkError) as error:
+            self._raise_network(error)
+        if not hasattr(response, "__iter__"):
+            raise ValueError("invalid chat execution stream")
         return response
 
 

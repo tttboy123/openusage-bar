@@ -1017,9 +1017,15 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   Decision API 健康及隐私扫描均已在本机 0.8.0 (12) 开发版验证；公开发布版本
   仍保持 0.6.0。WQ-27 的本地 Phase A 工作完成。**
 - **WQ-28：实现 Phase B 可选代理。** 独立显式开启的 IPv4 loopback
-  OpenAI-compatible Chat Completions Proxy；Keychain Bearer、本地内存转发、
+  OpenAI-compatible Chat Completions Proxy；一次性 Bearer 与私有不可逆 verifier、本地内存转发、
   有界重试/回退，流式输出开始后禁止透明换目标。关闭代理不影响菜单栏、账本、
-  Provider Center、Resource API 或 Decision API。
+  Provider Center、Resource API 或 Decision API。**本地实现已完成：代理默认关闭，
+  仅绑定 `127.0.0.1`，支持 `/v1/models` 与非流式/流式 Chat Completions；
+  `openusage/auto` 使用当前默认策略，显式 Target ID 会约束到单一目标。Bearer 仅在
+  enable/rotate 时返回一次，原始值不落盘，仅保存不可逆 verifier；配置热加载无需重启 Collector。
+  408、429、传输错误和选定 5xx 只允许在首字节前、最多三个候选内回退；认证、
+  参数和能力错误不重试，首字节后固定目标。SwiftUI 已提供中英文开关、端点、
+  轮换与一次性复制面板，剪贴板一分钟后在未被覆盖时自动清理。**
 - **WQ-29：评测、故障注入与发行门禁。** 增加 replay/shadow 决策、性能基线、
   429/5xx/timeout/stream 故障、隐私与依赖扫描、完整 Python/Swift/打包/安装/
   升级/回滚及独立安全复核。Learned Router 只有通过这些门禁后才能从 shadow
@@ -1035,9 +1041,16 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   继续使用写连接，两个 API 通过独立 SQLite WAL 连接读取最后提交快照。完整
   Python 1,128 项、隐私扫描、打包、事务安装、深度签名、双 `0600` Socket、
   连续 20 轮健康读取、两次相同哈希的确定性 Replay 和原生 SwiftUI 可达性均已
-  在本机 `0.8.0 (12)` 通过。WQ-29 剩余门禁随 WQ-28 的可选代理实施：429、5xx、
-  timeout、stream、隐私、性能与独立安全复核；完成前不得把 0.8 标记为公开
-  发行。**
+  在本机 `0.8.0 (12)` 通过。**Phase B 已补充 408/429/5xx/transport、认证、
+  过期决策、首字节前回退、首字节后中断、客户端断开、请求走私、重复长度、
+  chunked、HTTP/1.0、超长请求、慢客户端、并发上限、verifier 原子持久化、热启停与
+  同端口无停机轮换测试。当前源码完整门禁为 Python 1,155 项、Swift 290 项通过，
+  新代理模块行覆盖率 81%，Swift 产品行覆盖率 87.43%，源码/历史密钥与两次
+  隐私扫描均为 0；200 次本机测量的代理本地处理 p95 为 0.020 ms，低于 20 ms
+  门限。本机 `0.8.1 (18)` 已完成事务升级、深度签名、Resource/Decision API、
+  原生智能路由页面、真实 enable/401/rotate/disable 验收；旧令牌轮换后立即 401，
+  新令牌保持 200，原始令牌未落盘。剩余工作是独立安全复核、真实回滚演练与公开
+  0.8 发布资格；完成前不得把 0.8 标记为公开发行。**
 
 WQ-25 通过前不得开始 WQ-26 产品代码；WQ-26 是 WQ-27 与 WQ-28 的共同依赖。
 WQ-28 不阻塞只使用 Decision API 的用户。0.8 的实现和发布不依赖 Loom X1。

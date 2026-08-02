@@ -19,15 +19,24 @@ if str(PROJECT_ROOT) not in sys.path:
 from openusage_bar.routing_api import RoutingController, create_routing_unix_server
 from openusage_bar.routing_engine import decide_route
 from openusage_bar.routing_policy import built_in_policy
+from openusage_bar.routing_proxy import RoutingProxyController
 from openusage_bar.routing_store import RoutingStore
 from openusage_bar.routing_targets import RouteTargetConfiguration
 from tests.test_routing_api import FakeQuery, NOW, request_payload
 from tests.test_routing_engine import context, facts, request, target
+from tests.test_routing_proxy import (
+    FakeDecisionController,
+    FakeEvidenceStore,
+    FakeRegistry,
+    connection as execution_connection,
+    target as execution_target,
+)
 
 
 TARGET_COUNT = 128
 ENGINE_P95_BUDGET_MS = 5.0
 API_P95_BUDGET_MS = 50.0
+PROXY_P95_BUDGET_MS = 20.0
 
 
 def _validate_samples(value: int) -> int:
@@ -141,6 +150,52 @@ def _api_samples(samples: int) -> list[int]:
             evidence.close()
 
 
+def _proxy_samples(samples: int) -> list[int]:
+    selected = execution_target(
+        "openai.performance.gpt-5",
+        model="gpt-5",
+        connection="performance",
+    )
+
+    class Adapter:
+        @staticmethod
+        def execute_chat(connection, model_id, body):
+            return {
+                "id": "chatcmpl-performance",
+                "object": "chat.completion",
+                "model": model_id,
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 3,
+                    "total_tokens": 15,
+                },
+            }
+
+    controller = RoutingProxyController(
+        decision_controller=FakeDecisionController(selected, ()),
+        target_loader=lambda: RouteTargetConfiguration(1, 1, (selected,)),
+        registry_loader=lambda: FakeRegistry({
+            selected.target_id: (Adapter(), execution_connection(selected))
+        }),
+        evidence_store=FakeEvidenceStore(),
+        clock=lambda: NOW,
+    )
+    payload = {
+        "model": "openusage/reliable",
+        "messages": [{"role": "user", "content": "performance-fixture"}],
+        "stream": False,
+    }
+    for _ in range(20):
+        controller.complete(payload)
+    values: list[int] = []
+    for _ in range(samples):
+        started = time.perf_counter_ns()
+        controller.complete(payload)
+        values.append(time.perf_counter_ns() - started)
+    return values
+
+
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--samples", type=int, default=200)
@@ -149,16 +204,19 @@ def main(arguments: list[str] | None = None) -> int:
         samples = _validate_samples(parsed.samples)
         engine_p95 = _p95_ms(_engine_samples(samples))
         api_p95 = _p95_ms(_api_samples(samples))
+        proxy_p95 = _p95_ms(_proxy_samples(samples))
     except (OSError, RuntimeError, ValueError):
         print("routing_performance_unavailable")
         return 2
     result = "ok" if (
         engine_p95 <= ENGINE_P95_BUDGET_MS
         and api_p95 <= API_P95_BUDGET_MS
+        and proxy_p95 <= PROXY_P95_BUDGET_MS
     ) else "budget_failed"
     print(
         f"routing_performance_{result} targets={TARGET_COUNT} samples={samples} "
-        f"engineP95Ms={engine_p95:.3f} apiP95Ms={api_p95:.3f}"
+        f"engineP95Ms={engine_p95:.3f} apiP95Ms={api_p95:.3f} "
+        f"proxyP95Ms={proxy_p95:.3f}"
     )
     return 0 if result == "ok" else 1
 

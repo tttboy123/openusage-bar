@@ -26,6 +26,14 @@ class RateLimited(NetworkError):
     pass
 
 
+class HTTPStatusError(NetworkError):
+    def __init__(self, status: int):
+        if isinstance(status, bool) or not isinstance(status, int) or not 400 <= status <= 599:
+            raise ValueError("HTTP status is invalid")
+        super().__init__("Provider returned an unsuccessful HTTP status")
+        self.status = status
+
+
 class ResponseTooLarge(NetworkError):
     pass
 
@@ -119,6 +127,66 @@ class BoundedHTTPClient:
     ) -> dict[str, Any]:
         return self._request_json("POST", endpoint, headers, body)
 
+    def post_stream(
+        self,
+        endpoint: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+    ):
+        validate_endpoint(endpoint, self.resolver, self.allowed_reserved_hosts)
+        try:
+            encoded = json.dumps(
+                body, ensure_ascii=False, allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError, UnicodeError) as error:
+            raise MalformedResponse("Provider request JSON is invalid") from error
+        request = urllib.request.Request(
+            endpoint,
+            data=encoded,
+            headers={
+                "Accept": "text/event-stream",
+                "Content-Type": "application/json",
+                **headers,
+            },
+            method="POST",
+        )
+        try:
+            response = self.opener.open(request, timeout=self.timeout)
+        except urllib.error.HTTPError as error:
+            if error.code in {401, 403}:
+                raise AuthenticationRequired(
+                    "Provider rejected the credential"
+                ) from error
+            if error.code == 429:
+                raise RateLimited("Provider rate limit reached") from error
+            if error.code in {301, 302, 303, 307, 308}:
+                raise NetworkError("Provider redirect is not allowed") from error
+            raise HTTPStatusError(error.code) from error
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            raise NetworkError("Provider request failed") from error
+
+        def chunks():
+            total = 0
+            try:
+                with response:
+                    while True:
+                        chunk = response.read(min(64 * 1024, self.max_bytes + 1 - total))
+                        if not chunk:
+                            return
+                        total += len(chunk)
+                        if total > self.max_bytes:
+                            raise ResponseTooLarge(
+                                "Provider response exceeded the size limit"
+                            )
+                        yield chunk
+            except (ResponseTooLarge, NetworkError):
+                raise
+            except (urllib.error.URLError, TimeoutError, OSError) as error:
+                raise NetworkError("Provider request failed") from error
+
+        return chunks()
+
     def _request_json(
         self,
         method: str,
@@ -162,7 +230,7 @@ class BoundedHTTPClient:
                     raise AuthenticationRequired("Provider rejected the credential") from error
                 if error.code == 429:
                     raise RateLimited("Provider rate limit reached") from error
-                raise NetworkError(f"Provider returned HTTP {error.code}") from error
+                raise HTTPStatusError(error.code) from error
             except (urllib.error.URLError, TimeoutError, OSError) as error:
                 raise NetworkError("Provider request failed") from error
 

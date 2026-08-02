@@ -7,6 +7,7 @@ from email.message import Message
 from openusage_bar.network import (
     AuthenticationRequired,
     BoundedHTTPClient,
+    HTTPStatusError,
     MalformedResponse,
     NetworkError,
     RateLimited,
@@ -58,6 +59,39 @@ class EndpointSafetyTests(unittest.TestCase):
         self.assertEqual(payload, {"status": 1})
         self.assertEqual(opener.last_request.method, "POST")
         self.assertEqual(json.loads(opener.last_request.data), {"probe": True})
+
+    def test_post_stream_is_bounded_and_keeps_the_response_out_of_json_parsing(self):
+        resolver = lambda _host: ["93.184.216.34"]
+        wire = b'data: {"id":"one"}\n\ndata: [DONE]\n\n'
+        opener = Opener(Response(wire))
+        client = BoundedHTTPClient(resolver, opener, max_bytes=len(wire))
+
+        stream = client.post_stream(
+            "https://api.example.com/v1/chat/completions",
+            {"Authorization": "Bearer test-only"},
+            {"model": "gpt-5", "stream": True},
+        )
+
+        self.assertEqual(b"".join(stream), wire)
+        self.assertEqual(opener.last_request.method, "POST")
+        self.assertEqual(json.loads(opener.last_request.data)["model"], "gpt-5")
+
+        oversized = BoundedHTTPClient(
+            resolver, Opener(Response(b"12345")), max_bytes=4
+        ).post_stream(
+            "https://api.example.com/v1/chat/completions", {}, {"stream": True}
+        )
+        with self.assertRaises(ResponseTooLarge):
+            b"".join(oversized)
+
+    def test_preserves_non_auth_http_status_for_execution_retry_policy(self):
+        resolver = lambda _host: ["93.184.216.34"]
+        for code in (400, 408, 500, 503):
+            with self.subTest(code=code), self.assertRaises(HTTPStatusError) as raised:
+                BoundedHTTPClient(resolver, Opener(http_error(code))).post_json(
+                    "https://api.example.com", {}, {"probe": True}
+                )
+            self.assertEqual(raised.exception.status, code)
     def test_rejects_non_https_endpoint(self):
         with self.assertRaises(UnsafeEndpoint):
             validate_endpoint("http://api.example.com/usage", lambda _host: ["93.184.216.34"])

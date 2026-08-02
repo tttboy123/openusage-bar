@@ -80,6 +80,79 @@ struct ProviderMutationClientTests {
         )))
     }
 
+    @Test("Proxy management resolves only the fixed local CLI surface")
+    func routingProxyCommand() throws {
+        let command = try #require(ProviderMutationCommand.resolveProxy(
+            action: .enable,
+            activityBundleURL: URL(fileURLWithPath: "/tmp/OpenUsageActivity.app"),
+            activityExecutableURL: URL(fileURLWithPath: "/tmp/OpenUsageActivity"),
+            isExecutable: { $0.lastPathComponent == "OpenUsageSettings" }
+        ))
+        #expect(command.arguments == ["proxy", "enable", "--format", "json"])
+    }
+
+    @Test("Proxy management validates status and returns a generated token once")
+    func routingProxyClient() async throws {
+        let statusScript = #"printf '{\"schemaVersion\":\"1.0\",\"enabled\":false,\"endpoint\":\"http://127.0.0.1:64123/v1\",\"configurationRevision\":0}'"#
+        let client = RoutingProxyManagementClient(
+            limits: .init(timeout: .seconds(1), maximumResponseBytes: 4_096),
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/Users/tester"]
+        )
+        let status = await client.run(
+            action: .status,
+            command: .init(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", statusScript]
+            )
+        )
+        #expect(status == .success(.init(
+            enabled: false,
+            endpoint: "http://127.0.0.1:64123/v1",
+            configurationRevision: 0,
+            restartRequired: false,
+            bearerToken: nil
+        )))
+
+        let token = "generated-proxy-token-0123456789abcdef"
+        let enableScript = #"printf '{\"schemaVersion\":\"1.0\",\"enabled\":true,\"endpoint\":\"http://127.0.0.1:64123/v1\",\"configurationRevision\":1,\"restartRequired\":false,\"bearerToken\":\"generated-proxy-token-0123456789abcdef\"}'"#
+        let enabled = await client.run(
+            action: .enable,
+            command: .init(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", enableScript]
+            )
+        )
+        #expect(enabled == .success(.init(
+            enabled: true,
+            endpoint: "http://127.0.0.1:64123/v1",
+            configurationRevision: 1,
+            restartRequired: false,
+            bearerToken: token
+        )))
+    }
+
+    @Test("Proxy management rejects remote endpoints and unexpected secret replay")
+    func routingProxyClientRejectsUnsafeStatus() async {
+        let client = RoutingProxyManagementClient(
+            limits: .init(timeout: .seconds(1), maximumResponseBytes: 4_096),
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/Users/tester"]
+        )
+        let responses = [
+            #"{\"schemaVersion\":\"1.0\",\"enabled\":true,\"endpoint\":\"https://remote.example/v1\",\"configurationRevision\":1}"#,
+            #"{\"schemaVersion\":\"1.0\",\"enabled\":true,\"endpoint\":\"http://127.0.0.1:64123/v1\",\"configurationRevision\":1,\"bearerToken\":\"replayed-private-token-0123456789\"}"#,
+        ]
+        for response in responses {
+            let result = await client.run(
+                action: .status,
+                command: .init(
+                    executableURL: URL(fileURLWithPath: "/bin/sh"),
+                    arguments: ["-c", "printf '\(response)'"]
+                )
+            )
+            #expect(result == .failure(.invalidResponse))
+        }
+    }
+
     @Test("Routing target mutation drops server-derived adapter state")
     func routingTargetWire() throws {
         let target = try JSONDecoder().decode(RoutingTarget.self, from: Data(#"{"targetId":"openai.work.gpt-5","providerId":"openai","accountRef":"account-1","modelId":"gpt-5","connectionRef":"connection-1","executionClass":"direct_api","executionAdapterId":"openai.direct","resourceMode":"quota","factAccountRef":"account-1","runtimeScopeRef":null,"balanceCurrency":null,"costCurrency":"USD","inputCostMicrosPerMillion":3000000,"outputCostMicrosPerMillion":3000000,"enabled":true,"adapterAvailable":true,"regions":["global"],"privacyClass":"direct_provider","capabilities":["chat","reasoning","tools"],"contextWindowTokens":400000,"qualityTier":4}"#.utf8))

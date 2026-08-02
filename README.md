@@ -223,10 +223,41 @@ Provider Center 的“智能路由”页面配置；自动发现 Provider 不会
 路由能力。完整契约与退出码见 [Route Decision API v1](docs/routing-api-v1.md)。
 
 0.8 当前开发树还提供内容无关的 Shadow 比较与有界离线 Replay：前者比较实际
-目标和策略推荐，后者使用冻结事实评估策略；两者均不代理请求，Replay 也不写
+目标和策略推荐，后者使用冻结事实评估策略；Replay 不读取实时事实，也不写
 证据。原生评测界面已经接入 Shadow 历史、紧凑汇总指标和本地 Replay JSON
-导入；本地开发版 `0.8.0 (12)` 已完成完整构建、事务升级、双私有 Socket、CLI、
-确定性 Replay 与用户可见界面验收。下一切片是默认关闭的 loopback 执行代理。
+导入。
+
+默认关闭的本地执行代理也已进入开发版。先在“用量详情 → 智能路由”中配置
+Execution Connection 与 Route Target，启用决策 API，再显式启用
+“OpenAI 兼容聊天代理”。应用只在首次启用或轮换时显示 Bearer Token；原始令牌
+不会落盘，私有 `0600` 配置只保存不可逆 SHA-256 verifier，状态查询不会再次返回
+令牌。配置由常驻 Collector 自动热加载，不需要重启前台 App。
+
+```text
+Base URL  http://127.0.0.1:64123/v1
+API Key   <首次启用时复制的 Bearer Token>
+Model     openusage/auto
+```
+
+`openusage/auto` 使用界面中选择的默认策略；也可以显式填写
+`openusage/reliable` 或 `openusage/<自定义策略 ID>`。代理最多尝试三个候选，仅在
+尚未向客户端发送流式字节时处理 408、429、网络失败和部分 5xx；第一个字节发出后
+目标即锁定，绝不会换模型续写。Prompt、响应、工具内容和请求头只在内存中转发，
+不会进入决策/尝试证据。
+
+命令行也可管理同一配置：
+
+```bash
+openusage-bar proxy status --format json
+openusage-bar proxy enable --format json
+openusage-bar proxy rotate --format json
+openusage-bar proxy disable --format json
+```
+
+`enable` 与 `rotate` 的输出包含一次性 `bearerToken`；请勿把该 JSON 写入日志。
+本地 Phase B 已通过覆盖率、隐私、故障注入、性能、签名、事务升级与安装态热轮换
+验收。公开版本仍保持 `0.6.0`，独立安全复核、真实回滚演练和外部资格完成后才会
+进入 0.8 发布流程。
 
 ## Provider 支持
 

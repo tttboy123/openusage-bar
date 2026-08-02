@@ -73,7 +73,7 @@ limits are frozen in the implementation specification before code lands.
 - A separate, explicitly enabled OpenAI-compatible loopback proxy may execute a
   Phase A decision.
 - It binds only to IPv4 loopback by default and requires a generated local
-  bearer credential stored in Keychain.
+  one-time bearer credential with only an irreversible private verifier persisted.
 - Request content exists only in bounded memory required for forwarding and is
   excluded from logs, facts, Runtime observations and decision history.
 - Provider credentials remain behind the existing Python/Keychain boundary.

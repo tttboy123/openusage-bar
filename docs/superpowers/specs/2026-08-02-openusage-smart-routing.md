@@ -87,7 +87,8 @@ symlink and validated before and after bind/connect using the existing Local API
 hardening pattern.
 
 Phase B is disabled by default. When enabled, it binds `127.0.0.1` only and
-requires a generated bearer token stored in Keychain. It never reuses the
+requires a generated bearer token whose raw value is returned once and never
+persisted; only an irreversible verifier is stored privately. It never reuses the
 Resource API's optional TCP listener.
 
 ### 4.2 Storage ownership and bounds

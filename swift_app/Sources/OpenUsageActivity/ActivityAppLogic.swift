@@ -578,10 +578,38 @@ struct ProviderMutationCommand: Sendable, Hashable {
         )
     }
 
+    static func resolveProxy(
+        action: RoutingProxyAction,
+        activityBundleURL: URL,
+        activityExecutableURL: URL,
+        isExecutable: (URL) -> Bool = { FileManager.default.isExecutableFile(atPath: $0.path) }
+    ) -> Self? {
+        resolve(
+            activityBundleURL: activityBundleURL,
+            activityExecutableURL: activityExecutableURL,
+            arguments: ["proxy", action.rawValue, "--format", "json"],
+            isExecutable: isExecutable
+        )
+    }
+
     private static func resolve(
         activityBundleURL: URL,
         activityExecutableURL: URL,
         subcommand: String,
+        isExecutable: (URL) -> Bool
+    ) -> Self? {
+        resolve(
+            activityBundleURL: activityBundleURL,
+            activityExecutableURL: activityExecutableURL,
+            arguments: [subcommand],
+            isExecutable: isExecutable
+        )
+    }
+
+    private static func resolve(
+        activityBundleURL: URL,
+        activityExecutableURL: URL,
+        arguments: [String],
         isExecutable: (URL) -> Bool
     ) -> Self? {
         let helperDirectory = activityBundleURL.pathExtension.lowercased() == "app"
@@ -591,13 +619,13 @@ struct ProviderMutationCommand: Sendable, Hashable {
             .appendingPathComponent("OpenUsage Provider Settings.app")
             .appendingPathComponent("Contents/MacOS/OpenUsage Provider Settings")
         if isExecutable(bundled) {
-            return Self(executableURL: bundled, arguments: [subcommand])
+            return Self(executableURL: bundled, arguments: arguments)
         }
         let fallbacks = ["OpenUsageSettings", "openusage_settings"].map {
             helperDirectory.appendingPathComponent($0)
         }
         guard let executable = fallbacks.first(where: isExecutable) else { return nil }
-        return Self(executableURL: executable, arguments: [subcommand])
+        return Self(executableURL: executable, arguments: arguments)
     }
 }
 

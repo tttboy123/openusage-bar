@@ -285,6 +285,31 @@ struct RoutingLogicTests {
         #expect(model.mutationFailure == nil)
     }
 
+    @Test("Optional chat proxy status and one-time token stay explicit")
+    func routingProxyManagement() async {
+        let proxy = RoutingProxyManagementFixture()
+        let model = RoutingViewModel(
+            client: RoutingClientFixture(),
+            proxyManagement: proxy
+        )
+        let command = ProviderMutationCommand(
+            executableURL: URL(fileURLWithPath: "/tmp/helper"),
+            arguments: ["proxy", "status", "--format", "json"]
+        )
+
+        await model.loadProxy(command: command)
+        #expect(model.proxyStatus?.enabled == false)
+        #expect(model.oneTimeProxyToken == nil)
+
+        await model.mutateProxy(action: .enable, command: command)
+        #expect(proxy.actions == [.status, .enable])
+        #expect(model.proxyStatus?.enabled == true)
+        #expect(model.oneTimeProxyToken == "generated-proxy-token-0123456789abcdef")
+
+        model.clearOneTimeProxyToken()
+        #expect(model.oneTimeProxyToken == nil)
+    }
+
     private func target(adapterAvailable: Bool = true) -> RoutingTarget {
         RoutingTarget.fixture(adapterAvailable: adapterAvailable)
     }
@@ -419,6 +444,29 @@ private final class RoutingPreferencesMutationFixture:
         return .success(.init(
             version: 1, ok: true, message: "Routing preferences saved",
             preferencesRevision: request.expectedRevision + 1
+        ))
+    }
+}
+
+private final class RoutingProxyManagementFixture:
+    RoutingProxyManaging, @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var captured: [RoutingProxyAction] = []
+    var actions: [RoutingProxyAction] { lock.withLock { captured } }
+
+    func run(
+        action: RoutingProxyAction,
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingProxyStatus, ProviderMutationFailure> {
+        lock.withLock { captured.append(action) }
+        return .success(.init(
+            enabled: action == .enable || action == .rotate,
+            endpoint: "http://127.0.0.1:64123/v1",
+            configurationRevision: Int64(actions.count),
+            restartRequired: false,
+            bearerToken: action.returnsNewToken
+                ? "generated-proxy-token-0123456789abcdef" : nil
         ))
     }
 }

@@ -110,5 +110,43 @@ The Resource API remains read-only and unchanged. Route Decision API schema
 `1.0` is a separate compatibility surface. Additive output fields may be ignored
 by clients; request fields remain closed and require a new schema revision.
 
-Phase A does not claim quota reservation or execution success. The optional
-loopback execution proxy is a later, separately enabled phase.
+Phase A does not claim quota reservation or execution success.
+
+## Optional loopback Chat Proxy
+
+Phase B is a separately enabled execution surface. It binds only IPv4
+`127.0.0.1` and implements these OpenAI-compatible routes:
+
+- `GET /v1/models`;
+- `POST /v1/chat/completions`, including connection-close-delimited SSE.
+
+Every route requires a high-entropy Bearer Token. The raw token is returned
+once by `proxy enable` or `proxy rotate` and is never persisted; private
+configuration stores only its irreversible SHA-256 verifier. `proxy status`
+never reads or returns the token. Configuration is mode `0600`, atomically
+replaced, revisioned and hot-loaded by the resident Collector.
+
+```bash
+openusage-bar proxy status --format json
+openusage-bar proxy enable --format json
+openusage-bar proxy rotate --format json
+openusage-bar proxy disable --format json
+```
+
+The default endpoint is `http://127.0.0.1:64123/v1`. Model
+`openusage/auto` uses the configured default policy. `openusage/reliable` and
+`openusage/<custom-policy-id>` select a policy explicitly; an exact Route
+Target ID constrains execution to that target.
+
+The proxy may try at most three policy-ranked candidates. Only transport,
+408, 429 and selected 5xx failures are retryable. Authentication, invalid
+requests and capability failures are permanent. Streaming is primed before
+headers are returned; after the first downstream byte, the selected target is
+locked and a failure terminates the stream instead of switching models.
+
+Prompt, response, message, tool and header content is forwarded in memory and
+is never written to routing evidence or logs. Attempt evidence contains only
+public target/decision identifiers, bounded status/reason codes, timestamps
+and provider-reported Token counters when available. HTTP/1.0, absolute-form
+targets, duplicate or folded headers, transfer encoding, oversized framing,
+slow clients and excess concurrency fail closed.

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import UsageCore
@@ -10,6 +11,9 @@ struct RoutingPage: View {
     @State private var editingPolicy: RoutingPolicyDraft?
     @State private var isImportingReplay = false
     @State private var localEvaluationFailure: String?
+    @State private var isShowingProxyToken = false
+    @State private var isProxyTokenRevealed = false
+    @State private var proxyTokenCopied = false
 
     var body: some View {
         ScrollView(.vertical) {
@@ -32,6 +36,7 @@ struct RoutingPage: View {
                             .accessibilityLabel(failure)
                     }
                     overview
+                    executionProxy
                     connections
                     targets
                     customPolicies
@@ -77,6 +82,9 @@ struct RoutingPage: View {
                     removePolicy(policyID)
                 }
             )
+        }
+        .sheet(isPresented: $isShowingProxyToken, onDismiss: clearProxyToken) {
+            proxyTokenSheet
         }
         .fileImporter(
             isPresented: $isImportingReplay,
@@ -234,6 +242,135 @@ struct RoutingPage: View {
             }
             .padding(6)
         }
+    }
+
+    private var executionProxy: some View {
+        GroupBox {
+            HStack(alignment: .center, spacing: 16) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.title2)
+                    .foregroundStyle(model.proxyStatus?.enabled == true ? .indigo : .secondary)
+                    .frame(width: 32, height: 32)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text("OpenAI-compatible chat proxy")
+                            .font(.headline)
+                        Text(proxyConfigurationLabel)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(model.proxyStatus?.enabled == true ? .indigo : .secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(
+                                (model.proxyStatus?.enabled == true ? Color.indigo : Color.secondary)
+                                    .opacity(0.12),
+                                in: Capsule()
+                            )
+                    }
+                    Text("Optional local execution endpoint for OpenAI-compatible clients")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let endpoint = model.proxyStatus?.endpoint {
+                        Text(endpoint)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    if model.proxyStatus?.restartRequired == true {
+                        Label("Relaunch OpenUsage Bar to apply this change", systemImage: "arrow.clockwise")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else if !model.decisionAPIEnabled {
+                        Text("Enable Decision API before enabling the chat proxy")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 16)
+                if model.proxyStatus?.enabled == true {
+                    Button("Rotate token") {
+                        mutateProxy(.rotate)
+                    }
+                    .buttonStyle(.bordered)
+                    Button("Disable proxy") {
+                        mutateProxy(.disable)
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Button("Enable proxy", systemImage: "lock.open") {
+                        mutateProxy(.enable)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.indigo)
+                    .disabled(!model.decisionAPIEnabled || model.proxyStatus == nil)
+                }
+            }
+            .padding(6)
+        }
+        .disabled(model.isManagingProxy)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var proxyTokenSheet: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Save your proxy token")
+                        .font(.title2.weight(.semibold))
+                    Text("This token is shown once and cannot be retrieved later.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "key.fill")
+                    .font(.title2)
+                    .foregroundStyle(.indigo)
+                    .accessibilityHidden(true)
+            }
+            HStack(spacing: 10) {
+                Text(isProxyTokenRevealed
+                     ? (model.oneTimeProxyToken ?? "")
+                     : String(repeating: "•", count: 28))
+                    .font(.body.monospaced())
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+                Button(isProxyTokenRevealed ? "Hide" : "Reveal") {
+                    isProxyTokenRevealed.toggle()
+                }
+                .buttonStyle(.bordered)
+            }
+            Text("Clipboard clears automatically after one minute.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                if proxyTokenCopied {
+                    Label("Copied", systemImage: "checkmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.green)
+                }
+                Spacer()
+                Button("Done") { isShowingProxyToken = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Copy token", systemImage: "doc.on.doc") {
+                    copyProxyToken()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.indigo)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 560)
+    }
+
+    private var proxyConfigurationLabel: String {
+        guard let status = model.proxyStatus else {
+            return AppLocalization.text("Unavailable")
+        }
+        return AppLocalization.text(status.enabled ? "Configured" : "Off")
     }
 
     private var targets: some View {
@@ -790,6 +927,45 @@ struct RoutingPage: View {
             await model.loadConnections(command: command)
             await model.loadCustomPolicies(command: command)
         }
+        if let command = proxyCommand(.status) {
+            await model.loadProxy(command: command)
+        }
+    }
+
+    private func mutateProxy(_ action: RoutingProxyAction) {
+        localMutationFailure = nil
+        guard let command = proxyCommand(action) else {
+            localMutationFailure = AppLocalization.text("Proxy management unavailable")
+            return
+        }
+        Task {
+            await model.mutateProxy(action: action, command: command)
+            if model.oneTimeProxyToken != nil {
+                isProxyTokenRevealed = false
+                proxyTokenCopied = false
+                isShowingProxyToken = true
+            }
+        }
+    }
+
+    private func copyProxyToken() {
+        guard let token = model.oneTimeProxyToken else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if pasteboard.setString(token, forType: .string) {
+            proxyTokenCopied = true
+            let changeCount = pasteboard.changeCount
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+                guard pasteboard.changeCount == changeCount else { return }
+                pasteboard.clearContents()
+            }
+        }
+    }
+
+    private func clearProxyToken() {
+        isProxyTokenRevealed = false
+        proxyTokenCopied = false
+        model.clearOneTimeProxyToken()
     }
 
     private func saveConnection(_ draft: RoutingConnectionDraft) {
@@ -899,6 +1075,17 @@ struct RoutingPage: View {
     private func routingCommand() -> ProviderMutationCommand? {
         guard let executable = Bundle.main.executableURL else { return nil }
         return ProviderMutationCommand.resolveRouting(
+            activityBundleURL: Bundle.main.bundleURL,
+            activityExecutableURL: executable
+        )
+    }
+
+    private func proxyCommand(
+        _ action: RoutingProxyAction
+    ) -> ProviderMutationCommand? {
+        guard let executable = Bundle.main.executableURL else { return nil }
+        return ProviderMutationCommand.resolveProxy(
+            action: action,
             activityBundleURL: Bundle.main.bundleURL,
             activityExecutableURL: executable
         )

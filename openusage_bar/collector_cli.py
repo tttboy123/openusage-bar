@@ -175,6 +175,17 @@ def _parser() -> SafeArgumentParser:
     shadow_history.add_argument("--socket", default=None)
     shadow_history.add_argument("--before")
     shadow_history.add_argument("--limit", type=int, default=50)
+    proxy = commands.add_parser("proxy")
+    proxy_commands = proxy.add_subparsers(dest="proxy_command", required=True)
+    proxy_status = proxy_commands.add_parser("status")
+    proxy_status.add_argument("--format", choices=("json",), required=True)
+    proxy_enable = proxy_commands.add_parser("enable")
+    proxy_enable.add_argument("--format", choices=("json",), required=True)
+    proxy_enable.add_argument("--port", type=int)
+    proxy_disable = proxy_commands.add_parser("disable")
+    proxy_disable.add_argument("--format", choices=("json",), required=True)
+    proxy_rotate = proxy_commands.add_parser("rotate")
+    proxy_rotate.add_argument("--format", choices=("json",), required=True)
     return parser
 
 
@@ -653,6 +664,7 @@ def _run_daemon_with_api(
     stderr: TextIO,
     catalog_monitor: Any | None = None,
     clock: Callable[[], datetime] | None = None,
+    proxy_server_factory: Callable[..., Any] | None = None,
 ) -> int:
     from .local_api import create_unix_server
 
@@ -687,6 +699,9 @@ def _run_daemon_with_api(
     routing_server = None
     routing_thread = None
     routing_store = None
+    proxy_supervisor = None
+    proxy_monitor_thread = None
+    proxy_monitor_stop = threading.Event()
     selected_router = (
         Path(router_socket).expanduser()
         if router_socket is not None
@@ -728,13 +743,16 @@ def _run_daemon_with_api(
                 connections=connection_store.load().connections,
             )
 
-        controller = RoutingController(
-            query=api_query,
-            target_loader=lambda: target_store.load(
+        def route_targets():
+            return target_store.load(
                 available_adapters=(
                     adapter.adapter_id for adapter in execution_adapters
                 )
-            ),
+            )
+
+        controller = RoutingController(
+            query=api_query,
+            target_loader=route_targets,
             evidence_store=routing_store,
             runtime_reader=lambda start, end: read_runtime_summary(
                 DEFAULT_RUNTIME_PATH, start, end, clock=clock
@@ -753,6 +771,49 @@ def _run_daemon_with_api(
             daemon=True,
         )
         routing_thread.start()
+        try:
+            from .routing_proxy import (
+                RoutingProxyConfigurationStore,
+                RoutingProxyController,
+                RoutingProxySupervisor,
+                create_routing_proxy_server,
+            )
+
+            proxy_supervisor = RoutingProxySupervisor(
+                configuration_store=RoutingProxyConfigurationStore(
+                    selected_router.with_name("routing-proxy.json")
+                ),
+                controller=RoutingProxyController(
+                    decision_controller=controller,
+                    target_loader=route_targets,
+                    registry_loader=execution_registry,
+                    evidence_store=routing_store,
+                    default_policy_loader=lambda: (
+                        preferences_store.load().default_policy_id
+                    ),
+                    clock=clock,
+                ),
+                server_factory=(
+                    proxy_server_factory or create_routing_proxy_server
+                ),
+                on_error=lambda: stderr.write(
+                    "routing proxy unavailable; continuing without proxy\n"
+                ),
+            )
+            proxy_monitor_thread = threading.Thread(
+                target=proxy_supervisor.run,
+                args=(proxy_monitor_stop,),
+                name="openusage-routing-proxy-monitor",
+                daemon=True,
+            )
+            proxy_monitor_thread.start()
+        except Exception:
+            if proxy_supervisor is not None:
+                proxy_supervisor.close()
+                proxy_supervisor = None
+            stderr.write(
+                "routing proxy unavailable; continuing without proxy\n"
+            )
     except Exception:
         if routing_server is not None:
             try:
@@ -772,13 +833,20 @@ def _run_daemon_with_api(
     finally:
         try:
             try:
-                if routing_server is not None:
-                    try:
-                        routing_server.shutdown()
-                    finally:
-                        routing_server.server_close()
-                if routing_thread is not None:
-                    routing_thread.join(5)
+                try:
+                    proxy_monitor_stop.set()
+                    if proxy_monitor_thread is not None:
+                        proxy_monitor_thread.join(5)
+                    if proxy_supervisor is not None:
+                        proxy_supervisor.close()
+                finally:
+                    if routing_server is not None:
+                        try:
+                            routing_server.shutdown()
+                        finally:
+                            routing_server.server_close()
+                    if routing_thread is not None:
+                        routing_thread.join(5)
             finally:
                 if routing_store is not None:
                     routing_store.close()
@@ -813,6 +881,9 @@ def main(
     refresh_entrypoint: Path | None = None,
     child_environment: dict[str, str] | None = None,
     catalog_monitor: Any | None = None,
+    proxy_server_factory: Callable[..., Any] | None = None,
+    proxy_config_store: Any | None = None,
+    proxy_token_factory: Callable[[], str] | None = None,
 ) -> int:
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
@@ -865,6 +936,17 @@ def main(
             args, stdin=stdin, stdout=stdout, stderr=stderr
         )
 
+    if args.command == "proxy":
+        from .routing_proxy import run_proxy_command
+
+        return run_proxy_command(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            config_store=proxy_config_store,
+            token_factory=proxy_token_factory,
+        )
+
     active_store: ActivityStore | None = store
     refresh_outcome: RefreshOutcome | None = None
     deferred_close = False
@@ -906,6 +988,7 @@ def main(
                 stderr=stderr,
                 catalog_monitor=catalog_monitor,
                 clock=clock,
+                proxy_server_factory=proxy_server_factory,
             )
 
         is_offline = offline or args.offline

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import hashlib
 import re
 import tempfile
 import threading
@@ -453,6 +454,58 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual((code, err, refresher.calls), (0, "", 0))
         self.assertTrue(out)
 
+    def test_proxy_cli_enables_disables_and_returns_bearer_only_once(self):
+        from openusage_bar.routing_proxy import RoutingProxyConfigurationStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            config_store = RoutingProxyConfigurationStore(
+                Path(directory) / "routing-proxy.json"
+            )
+            token = "generated-proxy-token-0123456789abcdef"
+
+            code, out, err = self.run_cli(
+                ["proxy", "status", "--format", "json"],
+                proxy_config_store=config_store,
+                proxy_token_factory=lambda: token,
+            )
+            self.assertEqual((code, err), (0, ""))
+            self.assertEqual(json.loads(out)["enabled"], False)
+            self.assertNotIn("token", out.casefold())
+
+            code, out, err = self.run_cli(
+                ["proxy", "enable", "--port", "64124", "--format", "json"],
+                proxy_config_store=config_store,
+                proxy_token_factory=lambda: token,
+            )
+            self.assertEqual((code, err), (0, ""))
+            enabled = json.loads(out)
+            self.assertEqual(enabled["endpoint"], "http://127.0.0.1:64124/v1")
+            self.assertEqual(enabled["bearerToken"], token)
+            self.assertFalse(enabled["restartRequired"])
+            self.assertTrue(config_store.load().enabled)
+            self.assertNotIn(token, config_store.path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                config_store.load().token_digest,
+                hashlib.sha256(token.encode()).hexdigest(),
+            )
+
+            code, out, err = self.run_cli(
+                ["proxy", "status", "--format", "json"],
+                proxy_config_store=config_store,
+            )
+            self.assertEqual((code, err), (0, ""))
+            self.assertTrue(json.loads(out)["enabled"])
+            self.assertNotIn(token, out)
+
+            code, out, err = self.run_cli(
+                ["proxy", "disable", "--format", "json"],
+                proxy_config_store=config_store,
+            )
+            self.assertEqual((code, err), (0, ""))
+            self.assertFalse(json.loads(out)["enabled"])
+            self.assertNotIn(token, out + err)
+            self.assertFalse(config_store.load().enabled)
+
     def test_daemon_serves_private_unix_api_and_cleans_socket_on_stop(self):
         with tempfile.TemporaryDirectory() as directory:
             socket_path = Path(directory) / "openusage.sock"
@@ -517,6 +570,181 @@ class CollectorCLITests(unittest.TestCase):
             self.assertEqual(result, [0])
             self.assertFalse(socket_path.exists())
             self.assertFalse(router_path.exists())
+
+    def test_daemon_starts_proxy_only_after_explicit_private_opt_in(self):
+        from openusage_bar.routing_proxy import (
+            RoutingProxyConfiguration,
+            RoutingProxyConfigurationStore,
+        )
+
+        class FakeProxyServer:
+            def __init__(self) -> None:
+                self.started = threading.Event()
+                self.stopped = threading.Event()
+                self.closed = False
+
+            def serve_forever(self) -> None:
+                self.started.set()
+                self.stopped.wait(3)
+
+            def shutdown(self) -> None:
+                self.stopped.set()
+
+            def server_close(self) -> None:
+                self.closed = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            socket_path = root / "openusage.sock"
+            router_path = root / "router.sock"
+            config_store = RoutingProxyConfigurationStore(
+                root / "routing-proxy.json"
+            )
+            digest = hashlib.sha256(b"proxy-token").hexdigest()
+            config_store.save(
+                RoutingProxyConfiguration(1, 1, True, 64124, digest)
+            )
+            proxy_server = FakeProxyServer()
+            factory = Mock(return_value=proxy_server)
+            stop = threading.Event()
+            result: list[int] = []
+
+            thread = threading.Thread(target=lambda: result.append(main(
+                [
+                    "daemon", "--interval", "60",
+                    "--api-socket", str(socket_path),
+                    "--router-socket", str(router_path),
+                ],
+                stderr=io.StringIO(), store=self.store, query=self.query,
+                refresher=FakeRefresher(), stop_event=stop, clock=lambda: NOW,
+                proxy_server_factory=factory,
+            )))
+            thread.start()
+            self.assertTrue(proxy_server.started.wait(3))
+            self.assertEqual(factory.call_args.kwargs["port"], 64124)
+            self.assertEqual(
+                factory.call_args.kwargs["bearer_token_digest"], digest
+            )
+            stop.set()
+            thread.join(3)
+
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result, [0])
+            self.assertTrue(proxy_server.closed)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stop = threading.Event()
+            factory = Mock()
+            thread = threading.Thread(target=lambda: main(
+                [
+                    "daemon", "--interval", "60",
+                    "--api-socket", str(root / "openusage.sock"),
+                    "--router-socket", str(root / "router.sock"),
+                ],
+                stderr=io.StringIO(), store=self.store, query=self.query,
+                refresher=FakeRefresher(), stop_event=stop, clock=lambda: NOW,
+                proxy_server_factory=factory,
+            ))
+            thread.start()
+            deadline = time.monotonic() + 3
+            while not (root / "router.sock").exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            stop.set()
+            thread.join(3)
+            factory.assert_not_called()
+
+    def test_daemon_hot_reloads_proxy_enable_and_disable_without_restart(self):
+        from openusage_bar.routing_proxy import (
+            RoutingProxyConfiguration,
+            RoutingProxyConfigurationStore,
+        )
+
+        class FakeProxyServer:
+            def __init__(self) -> None:
+                self.started = threading.Event()
+                self.stopped = threading.Event()
+                self.closed = threading.Event()
+                self.digests: list[str] = []
+
+            def serve_forever(self) -> None:
+                self.started.set()
+                self.stopped.wait(4)
+
+            def shutdown(self) -> None:
+                self.stopped.set()
+
+            def server_close(self) -> None:
+                self.closed.set()
+
+            def replace_bearer_token_digest(self, value: str) -> None:
+                self.digests.append(value)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            socket_path = root / "openusage.sock"
+            router_path = root / "router.sock"
+            config_store = RoutingProxyConfigurationStore(
+                root / "routing-proxy.json"
+            )
+            first_digest = hashlib.sha256(b"first").hexdigest()
+            second_digest = hashlib.sha256(b"second").hexdigest()
+            created: list[FakeProxyServer] = []
+
+            def factory(*args, **kwargs):
+                server = FakeProxyServer()
+                created.append(server)
+                return server
+
+            stop = threading.Event()
+            result: list[int] = []
+            thread = threading.Thread(target=lambda: result.append(main(
+                [
+                    "daemon", "--interval", "60",
+                    "--api-socket", str(socket_path),
+                    "--router-socket", str(router_path),
+                ],
+                stderr=io.StringIO(), store=self.store, query=self.query,
+                refresher=FakeRefresher(), stop_event=stop, clock=lambda: NOW,
+                proxy_server_factory=factory,
+            )))
+            thread.start()
+            try:
+                deadline = time.monotonic() + 3
+                while not router_path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(router_path.exists())
+                self.assertEqual(created, [])
+
+                config_store.save(RoutingProxyConfiguration(
+                    1, 1, True, 64124, first_digest
+                ))
+                deadline = time.monotonic() + 3
+                while not created and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertEqual(len(created), 1)
+                self.assertTrue(created[0].started.wait(2))
+
+                config_store.save(RoutingProxyConfiguration(
+                    1, 2, True, 64124, second_digest
+                ))
+                deadline = time.monotonic() + 3
+                while not created[0].digests and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertEqual(len(created), 1)
+                self.assertEqual(created[0].digests, [second_digest])
+                self.assertFalse(created[0].closed.is_set())
+
+                config_store.save(RoutingProxyConfiguration(
+                    1, 3, False, 64124, second_digest
+                ))
+                self.assertTrue(created[0].closed.wait(3))
+            finally:
+                stop.set()
+                thread.join(4)
+
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result, [0])
 
     def test_daemon_resource_api_reads_do_not_wait_for_writer_lock(self):
         with tempfile.TemporaryDirectory() as directory:

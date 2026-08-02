@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from openusage_bar.bounded_process import BoundedProcessError
 from openusage_bar.keychain import (
@@ -15,11 +15,30 @@ from openusage_bar.keychain import (
     KeychainAuthorizationState,
     KeychainError,
     MacOSKeychain,
+    _default_keychain_helper_command,
     run_native_keychain_write,
 )
 
 
 class KeychainTests(unittest.TestCase):
+    def test_frozen_keychain_helper_uses_app_entrypoint_not_bare_python(self):
+        with tempfile.TemporaryDirectory() as directory:
+            macos = Path(directory) / "Provider.app/Contents/MacOS"
+            macos.mkdir(parents=True)
+            python = macos / "python"
+            launcher = macos / "OpenUsage Provider Settings"
+            python.write_bytes(b"python")
+            launcher.write_bytes(b"launcher")
+            python.chmod(0o755)
+            launcher.chmod(0o755)
+
+            with patch.object(sys, "frozen", "macosx_app", create=True), patch.object(
+                sys, "executable", str(python)
+            ):
+                command = _default_keychain_helper_command()
+
+        self.assertEqual(command, (str(launcher),))
+
     def test_uses_fixed_service_and_provider_account(self):
         api = Mock()
         api.update.return_value = True
@@ -135,7 +154,7 @@ class KeychainTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     authorizer.authorize(service=service, account=account)
 
-    def test_native_helper_rejects_reads_and_only_writes_step_plan_token(self):
+    def test_native_helper_rejects_reads_and_writes_only_session_tokens(self):
         keychain = Mock()
         keychain.get.return_value = "密钥"
         output = io.BytesIO()
@@ -148,6 +167,22 @@ class KeychainTests(unittest.TestCase):
             keychain=keychain,
         )
 
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "version": 1, "ok": False,
+        })
+        keychain.get.assert_not_called()
+
+        output = io.BytesIO()
+        code = run_native_keychain_write(
+            io.BytesIO(json.dumps({
+                "version": 1,
+                "action": "get",
+                "account": "routing.proxy-token",
+            }).encode()),
+            output,
+            keychain=keychain,
+        )
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(output.getvalue()), {
             "version": 1, "ok": False,
@@ -172,6 +207,39 @@ class KeychainTests(unittest.TestCase):
         keychain.set.assert_called_once_with(
             "step-plan-main.oasis-token", "rotated-private-token"
         )
+
+        output = io.BytesIO()
+        code = run_native_keychain_write(
+            io.BytesIO(json.dumps({
+                "version": 1,
+                "action": "set",
+                "account": "routing.proxy-token",
+                "secret": "generated-local-proxy-token",
+            }).encode()),
+            output,
+            keychain=keychain,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "version": 1, "ok": False,
+        })
+        self.assertEqual(keychain.set.call_count, 1)
+
+        output = io.BytesIO()
+        code = run_native_keychain_write(
+            io.BytesIO(json.dumps({
+                "version": 1,
+                "action": "delete",
+                "account": "routing.proxy-token",
+            }).encode()),
+            output,
+            keychain=keychain,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "version": 1, "ok": False,
+        })
+        keychain.delete.assert_not_called()
 
         output = io.BytesIO()
         code = run_native_keychain_write(

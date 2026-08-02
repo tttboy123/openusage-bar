@@ -366,6 +366,7 @@ final class RoutingViewModel {
     private let connectionMutations: any RoutingConnectionMutationSubmitting
     private let policyMutations: any RoutingPolicyMutationSubmitting
     private let preferenceMutations: any RoutingPreferencesMutationSubmitting
+    private let proxyManagement: any RoutingProxyManaging
 
     private(set) var health: RoutingHealth?
     private(set) var policies: [RoutingPolicy] = []
@@ -392,6 +393,9 @@ final class RoutingViewModel {
     private(set) var policyDocumentRevision: Int64 = 0
     private(set) var preferencesRevision: Int64 = 0
     private(set) var decisionAPIEnabled = false
+    private(set) var proxyStatus: RoutingProxyStatus?
+    private(set) var oneTimeProxyToken: String?
+    private(set) var isManagingProxy = false
 
     var selectedPolicyID = "reliable"
     var taskKind = RoutingTaskKind.code
@@ -415,13 +419,50 @@ final class RoutingViewModel {
         policyMutations: any RoutingPolicyMutationSubmitting =
             RoutingPolicyMutationClient(),
         preferenceMutations: any RoutingPreferencesMutationSubmitting =
-            RoutingPreferencesMutationClient()
+            RoutingPreferencesMutationClient(),
+        proxyManagement: any RoutingProxyManaging =
+            RoutingProxyManagementClient()
     ) {
         self.client = client
         self.mutations = mutations
         self.connectionMutations = connectionMutations
         self.policyMutations = policyMutations
         self.preferenceMutations = preferenceMutations
+        self.proxyManagement = proxyManagement
+    }
+
+    func loadProxy(command: ProviderMutationCommand) async {
+        guard !isManagingProxy else { return }
+        isManagingProxy = true
+        defer { isManagingProxy = false }
+        switch await proxyManagement.run(action: .status, command: command) {
+        case let .success(status):
+            proxyStatus = status
+        case let .failure(error):
+            mutationFailure = Self.failure(for: error)
+        }
+    }
+
+    func mutateProxy(
+        action: RoutingProxyAction,
+        command: ProviderMutationCommand
+    ) async {
+        guard action != .status, !isManagingProxy else { return }
+        isManagingProxy = true
+        mutationFailure = nil
+        oneTimeProxyToken = nil
+        defer { isManagingProxy = false }
+        switch await proxyManagement.run(action: action, command: command) {
+        case let .success(status):
+            proxyStatus = status
+            oneTimeProxyToken = status.bearerToken
+        case let .failure(error):
+            mutationFailure = Self.failure(for: error)
+        }
+    }
+
+    func clearOneTimeProxyToken() {
+        oneTimeProxyToken = nil
     }
 
     func loadPreferences(command: ProviderMutationCommand) async {

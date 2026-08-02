@@ -14,6 +14,7 @@ from openusage_bar.routing_execution import (
     ExecutionAuthenticationError,
     ExecutionRegistry,
     ExecutionResolutionError,
+    ExecutionTransientError,
     OpenAICompatibleExecutionAdapter,
     credential_account,
 )
@@ -55,6 +56,37 @@ class FakeClient:
     ) -> dict[str, object]:
         self.calls.append((endpoint, headers, body))
         return {"id": "opaque", "model": body["model"], "choices": []}
+
+
+class FailingClient(FakeClient):
+    def __init__(self, error: BaseException) -> None:
+        super().__init__()
+        self.error = error
+
+    def post_json(
+        self,
+        endpoint: str,
+        headers: dict[str, str],
+        body: dict[str, object],
+    ) -> dict[str, object]:
+        raise self.error
+
+
+class FakeStreamClient(FakeClient):
+    def __init__(self, outcome: object) -> None:
+        super().__init__()
+        self.outcome = outcome
+
+    def post_stream(
+        self,
+        endpoint: str,
+        headers: dict[str, str],
+        body: dict[str, object],
+    ):
+        self.calls.append((endpoint, headers, body))
+        if isinstance(self.outcome, BaseException):
+            raise self.outcome
+        return iter(self.outcome)
 
 
 def connection(**overrides: object) -> ExecutionConnection:
@@ -260,6 +292,83 @@ class OpenAICompatibleExecutionAdapterTests(unittest.TestCase):
         for model_id, body in invalid:
             with self.subTest(model_id=model_id), self.assertRaises(ValueError):
                 adapter.execute_chat(connection(), model_id, body)
+
+    def test_maps_network_failures_to_sanitized_retry_classes(self) -> None:
+        from openusage_bar.network import (
+            AuthenticationRequired,
+            HTTPStatusError,
+            NetworkError,
+            RateLimited,
+        )
+
+        retryable = (
+            (RateLimited("private rate detail"), "http_429", "provider_rate_limited"),
+            (NetworkError("private transport detail"), "transport", "transport_error"),
+            (HTTPStatusError(408), "http_408", "provider_timeout"),
+            (HTTPStatusError(503), "http_5xx", "provider_unavailable"),
+        )
+        for error, status_class, reason_code in retryable:
+            adapter = OpenAICompatibleExecutionAdapter(
+                keychain=FakeKeychain("test-secret"),
+                client=FailingClient(error),
+            )
+            with self.subTest(error=type(error).__name__), self.assertRaises(
+                ExecutionTransientError
+            ) as raised:
+                adapter.execute_chat(connection(), "gpt-5", {"messages": []})
+            self.assertEqual(raised.exception.status_class, status_class)
+            self.assertEqual(raised.exception.reason_code, reason_code)
+            self.assertNotIn("private", str(raised.exception))
+
+        adapter = OpenAICompatibleExecutionAdapter(
+            keychain=FakeKeychain("test-secret"),
+            client=FailingClient(AuthenticationRequired("private auth detail")),
+        )
+        with self.assertRaises(ExecutionAuthenticationError) as raised:
+            adapter.execute_chat(connection(), "gpt-5", {"messages": []})
+        self.assertNotIn("private", str(raised.exception))
+
+        adapter = OpenAICompatibleExecutionAdapter(
+            keychain=FakeKeychain("test-secret"),
+            client=FailingClient(HTTPStatusError(400)),
+        )
+        with self.assertRaises(ValueError) as raised:
+            adapter.execute_chat(connection(), "gpt-5", {"messages": []})
+        self.assertNotIn("400", str(raised.exception))
+
+    def test_streams_sse_through_the_same_isolated_connection_boundary(self) -> None:
+        keychain = FakeKeychain("test-secret")
+        client = FakeStreamClient([
+            b'data: {"id":"one"}\n\n',
+            b'data: [DONE]\n\n',
+        ])
+        adapter = OpenAICompatibleExecutionAdapter(
+            keychain=keychain, client=client
+        )
+        body: dict[str, object] = {
+            "model": "openusage/reliable",
+            "messages": [{"role": "user", "content": "memory only"}],
+            "stream": True,
+        }
+
+        chunks = adapter.execute_chat_stream(connection(), "gpt-5", body)
+
+        self.assertEqual(
+            b"".join(chunks),
+            b'data: {"id":"one"}\n\ndata: [DONE]\n\n',
+        )
+        self.assertEqual(keychain.accounts, [credential_account(connection().connection_ref)])
+        endpoint, headers, sent = client.calls[0]
+        self.assertEqual(endpoint, "https://api.example.com/v1/chat/completions")
+        self.assertEqual(headers, {"Authorization": "Bearer test-secret"})
+        self.assertEqual(sent["model"], "gpt-5")
+        self.assertTrue(sent["stream"])
+        self.assertEqual(body["model"], "openusage/reliable")
+
+        with self.assertRaises(ValueError):
+            adapter.execute_chat_stream(
+                connection(), "gpt-5", {"messages": [], "stream": False}
+            )
 
 
 if __name__ == "__main__":
