@@ -31,6 +31,12 @@ from openusage_bar.collector_cli import _default_refresh_command
 from openusage_bar.daily_history import DAILY_TIMEOUT_SECONDS
 from openusage_bar.openusage_adapter import AUTO_TIMEOUT_SECONDS, DIRECT_TIMEOUT_SECONDS
 from openusage_bar.query import QueryService, to_wire
+from openusage_bar.routing_contract import RouteTarget
+from openusage_bar.routing_execution import (
+    ExecutionConnection,
+    ExecutionConnectionStore,
+)
+from openusage_bar.routing_targets import RouteTargetStore
 
 
 NOW = datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc)
@@ -511,6 +517,114 @@ class CollectorCLITests(unittest.TestCase):
             self.assertEqual(result, [0])
             self.assertFalse(socket_path.exists())
             self.assertFalse(router_path.exists())
+
+    def test_daemon_routes_only_through_installed_adapter_and_connection(self):
+        self.store.record_quota(QuotaObservation(
+            record_id="minimax.current", observed_at="2026-07-14T09:59:00Z",
+            provider_id="minimax", quota_name="Five hour", unit="percent",
+            used="20", quota_limit="100", remaining="80", remaining_ratio=0.8,
+            resets_at="2026-07-14T12:00:00Z", period_start=None, period_end=None,
+            state="ok", quality="direct", stale=False,
+        ))
+        self.store.record_source_success("minimax", "current.quota", NOW)
+        with tempfile.TemporaryDirectory() as directory:
+            socket_path = Path(directory) / "openusage.sock"
+            router_path = Path(directory) / "router.sock"
+            RouteTargetStore(router_path.with_name("route-targets.json")).save((
+                RouteTarget(
+                    target_id="minimax.work.minimax-m2",
+                    provider_id="minimax",
+                    account_ref="account-1",
+                    model_id="minimax-m2",
+                    connection_ref="conn_0123456789abcdef",
+                    execution_class="openai_compatible",
+                    execution_adapter_id="openai_compatible.direct",
+                    resource_mode="quota",
+                    fact_account_ref=None,
+                    runtime_scope_ref=None,
+                    balance_currency=None,
+                    cost_currency=None,
+                    input_cost_micros_per_million=None,
+                    output_cost_micros_per_million=None,
+                    enabled=True,
+                    adapter_available=False,
+                    regions=("global",),
+                    privacy_class="direct_provider",
+                    capabilities=("chat",),
+                    context_window_tokens=128_000,
+                    quality_tier=3,
+                ),
+            ), revision=1)
+            ExecutionConnectionStore(
+                router_path.with_name("execution-connections.json")
+            ).save((ExecutionConnection(
+                connection_ref="conn_0123456789abcdef",
+                provider_id="minimax",
+                account_ref="account-1",
+                execution_class="openai_compatible",
+                execution_adapter_id="openai_compatible.direct",
+                base_url="https://api.minimax.chat/v1",
+                enabled=True,
+                models=("minimax-m2",),
+            ),), revision=1)
+            stop = threading.Event()
+            result: list[int] = []
+            thread = threading.Thread(target=lambda: result.append(main(
+                [
+                    "daemon", "--interval", "60",
+                    "--api-socket", str(socket_path),
+                    "--router-socket", str(router_path),
+                ],
+                stderr=io.StringIO(), store=self.store, query=self.query,
+                refresher=FakeRefresher(), stop_event=stop, clock=lambda: NOW,
+            )))
+            thread.start()
+            deadline = time.monotonic() + 3
+            while not router_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(router_path.exists())
+
+            payload = {
+                "schemaVersion": "1.0",
+                "clientRequestRef": "req_0123456789abcdef",
+                "policyId": "reliable",
+                "task": {
+                    "kind": "chat", "requiredCapabilities": ["chat"],
+                    "estimatedInputTokens": 1000, "maxOutputTokens": 1000,
+                    "minimumContextWindowTokens": 2000,
+                    "privacy": "direct_provider", "regions": ["global"],
+                },
+                "constraints": {
+                    "allowProviders": [], "denyProviders": [],
+                    "allowTargets": [], "denyTargets": [],
+                    "maximumEstimatedCostMicrounits": None, "costCurrency": None,
+                },
+                "session": None,
+            }
+            encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(2)
+            client.connect(str(router_path))
+            client.sendall(
+                b"POST /v1/simulations HTTP/1.1\r\nHost: localhost\r\n"
+                + f"Content-Length: {len(encoded)}\r\n".encode("ascii")
+                + b"Content-Type: application/json\r\nConnection: close\r\n\r\n"
+                + encoded
+            )
+            response = b""
+            while True:
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                response += chunk
+            client.close()
+            self.assertIn(b"HTTP/1.1 200", response)
+            self.assertIn(b'"targetId":"minimax.work.minimax-m2"', response)
+
+            stop.set()
+            thread.join(3)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result, [0])
 
     def test_routing_start_failure_does_not_stop_collection_or_resource_api(self):
         with tempfile.TemporaryDirectory() as directory:

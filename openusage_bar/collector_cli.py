@@ -678,6 +678,11 @@ def _run_daemon_with_api(
     )
     try:
         from .routing_api import RoutingController, create_routing_unix_server
+        from .routing_execution import (
+            ExecutionConnectionStore,
+            ExecutionRegistry,
+            installed_execution_adapters,
+        )
         from .routing_store import RoutingStore
         from .routing_targets import RouteTargetStore
         from .runtime_store import read_runtime_summary
@@ -688,14 +693,31 @@ def _run_daemon_with_api(
         target_store = RouteTargetStore(
             selected_router.with_name("route-targets.json")
         )
+        connection_store = ExecutionConnectionStore(
+            selected_router.with_name("execution-connections.json")
+        )
+        execution_adapters = installed_execution_adapters()
+
+        def execution_registry() -> ExecutionRegistry:
+            return ExecutionRegistry(
+                adapters=execution_adapters,
+                connections=connection_store.load().connections,
+            )
+
         controller = RoutingController(
             query=query,
-            target_loader=lambda: target_store.load(available_adapters=()),
+            target_loader=lambda: target_store.load(
+                available_adapters=(
+                    adapter.adapter_id for adapter in execution_adapters
+                )
+            ),
             evidence_store=routing_store,
             runtime_reader=lambda start, end: read_runtime_summary(
                 DEFAULT_RUNTIME_PATH, start, end, clock=clock
             ),
-            available_connections=lambda: (),
+            available_connections=lambda: (
+                execution_registry().available_connection_refs()
+            ),
             clock=clock,
         )
         routing_server = create_routing_unix_server(selected_router, controller)
