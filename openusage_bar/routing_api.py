@@ -29,7 +29,7 @@ from .routing_contract import (
 )
 from .routing_engine import decide_route
 from .routing_facts import build_target_facts
-from .routing_policy import RoutePolicy, built_in_policies, built_in_policy
+from .routing_policy import RoutePolicy, built_in_policies
 from .routing_store import (
     DecisionEvidence,
     RoutingStore,
@@ -492,6 +492,7 @@ class RoutingController:
         evidence_store: RoutingStore,
         runtime_reader: Callable[[datetime, datetime], RuntimeSummary | None],
         available_connections: Callable[[], tuple[str, ...]],
+        policy_loader: Callable[[], tuple[RoutePolicy, ...]] | None = None,
         clock: Callable[[], datetime] | None = None,
         decision_ttl: timedelta = DEFAULT_DECISION_TTL,
         runtime_window: timedelta = DEFAULT_RUNTIME_WINDOW,
@@ -505,6 +506,7 @@ class RoutingController:
         self.evidence_store = evidence_store
         self.runtime_reader = runtime_reader
         self.available_connections = available_connections
+        self.policy_loader = policy_loader or (lambda: ())
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.decision_ttl = decision_ttl
         self.runtime_window = runtime_window
@@ -515,9 +517,16 @@ class RoutingController:
         except ValueError as error:
             raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.") from error
         try:
-            policy = built_in_policy(envelope.request.policy_id)
-        except ValueError as error:
+            policies = {
+                value.policy_id: value for value in self._policies()
+            }
+            policy = policies[envelope.request.policy_id]
+        except KeyError as error:
             raise RoutingAPIProblem(404, "policy_not_found", "Routing policy was not found.") from error
+        except Exception as error:
+            raise RoutingAPIProblem(
+                503, "facts_unavailable", "Routing policies are unavailable."
+            ) from error
         now = self.clock()
         if not isinstance(now, datetime) or now.tzinfo is None:
             raise RoutingAPIProblem(500, "internal_error", "Routing is unavailable.")
@@ -599,10 +608,26 @@ class RoutingController:
         return representation
 
     def policies(self) -> dict[str, object]:
+        try:
+            policies = self._policies()
+        except Exception as error:
+            raise RoutingAPIProblem(
+                503, "facts_unavailable", "Routing policies are unavailable."
+            ) from error
         return {
             "schemaVersion": SCHEMA_VERSION,
-            "policies": [_policy_wire(value) for value in built_in_policies()],
+            "policies": [_policy_wire(value) for value in policies],
         }
+
+    def _policies(self) -> tuple[RoutePolicy, ...]:
+        builtins = built_in_policies()
+        custom = tuple(self.policy_loader())
+        if any(not isinstance(value, RoutePolicy) for value in custom):
+            raise ValueError("routing policies are invalid")
+        ids = [value.policy_id for value in (*builtins, *custom)]
+        if len(ids) != len(set(ids)):
+            raise ValueError("routing policies are invalid")
+        return tuple(sorted((*builtins, *custom), key=lambda value: value.policy_id))
 
     def health(self) -> dict[str, object]:
         try:

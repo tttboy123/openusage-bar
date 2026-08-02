@@ -26,11 +26,28 @@ from openusage_bar.routing_api import (
     decode_decision_request,
 )
 from openusage_bar.routing_contract import RouteTarget
+from openusage_bar.routing_policy import RoutePolicy
 from openusage_bar.routing_store import RoutingStore
 from openusage_bar.routing_targets import RouteTargetConfiguration
 
 
 NOW = datetime(2026, 8, 2, 12, 0, tzinfo=timezone.utc)
+
+
+def custom_policy() -> RoutePolicy:
+    return RoutePolicy(
+        policy_id="custom_coding", revision=1,
+        reliability_weight=45, headroom_weight=25,
+        latency_weight=20, cost_weight=10,
+        min_headroom_bp=1_000, max_error_rate_bp=1_500,
+        min_runtime_samples=3, latency_reference_ms=8_000,
+        cost_reference_micros=2_000, cost_currency="USD",
+        min_balance_micros=2_000_000,
+        balance_reference_micros=25_000_000,
+        unknown_penalty=3_000, require_cost=False, require_runtime=False,
+        allowed_execution_classes=frozenset({"direct_api", "openai_compatible"}),
+        allowed_privacy_classes=frozenset({"direct_provider"}),
+    )
 
 
 def request_payload() -> dict[str, object]:
@@ -227,6 +244,47 @@ class RoutingControllerTests(unittest.TestCase):
         self.assertTrue(response["simulated"])
         self.assertFalse(response["evidenceStored"])
         self.assertEqual(self.store.decision_count(), 0)
+
+    def test_custom_policy_loader_drives_listing_and_decisions(self) -> None:
+        controller = RoutingController(
+            query=FakeQuery(),
+            target_loader=lambda: RouteTargetConfiguration(1, 7, (target(),)),
+            evidence_store=self.store,
+            runtime_reader=lambda _start, _end: None,
+            available_connections=lambda: ("connection-1",),
+            policy_loader=lambda: (custom_policy(),),
+            clock=lambda: NOW,
+        )
+        payload = request_payload()
+        payload["policyId"] = "custom_coding"
+
+        response = controller.decide(payload, simulated=True)
+        listed = controller.policies()["policies"]
+
+        self.assertEqual(response["policy"], {
+            "policyId": "custom_coding", "policyRevision": 1,
+        })
+        self.assertIn("custom_coding", [value["policyId"] for value in listed])
+
+    def test_invalid_custom_policy_configuration_fails_closed(self) -> None:
+        def invalid_loader():
+            raise OSError("private path")
+
+        controller = RoutingController(
+            query=FakeQuery(),
+            target_loader=lambda: RouteTargetConfiguration(1, 7, (target(),)),
+            evidence_store=self.store,
+            runtime_reader=lambda _start, _end: None,
+            available_connections=lambda: ("connection-1",),
+            policy_loader=invalid_loader,
+            clock=lambda: NOW,
+        )
+
+        with self.assertRaises(RoutingAPIProblem) as raised:
+            controller.decide(request_payload(), simulated=True)
+        self.assertEqual(raised.exception.status, 503)
+        self.assertEqual(raised.exception.code, "facts_unavailable")
+        self.assertNotIn("private", raised.exception.message)
 
     def test_no_route_is_a_409_with_bounded_rejections(self) -> None:
         payload = request_payload()

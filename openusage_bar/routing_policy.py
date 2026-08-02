@@ -9,6 +9,7 @@ from .routing_contract import (
     MAX_COUNTER,
     TARGET_PRIVACY_CLASSES,
     _currency,
+    _stable_id,
 )
 
 
@@ -35,6 +36,7 @@ class RoutePolicy:
     allowed_privacy_classes: frozenset[str] = TARGET_PRIVACY_CLASSES
 
     def __post_init__(self) -> None:
+        _stable_id("policy_id", self.policy_id)
         weights = (
             self.reliability_weight,
             self.headroom_weight,
@@ -147,3 +149,7 @@ def built_in_policy(policy_id: str) -> RoutePolicy:
 
 def built_in_policies() -> tuple[RoutePolicy, ...]:
     return tuple(_BUILT_INS[name] for name in sorted(_BUILT_INS))
+
+
+def built_in_policy_ids() -> frozenset[str]:
+    return frozenset(_BUILT_INS)
