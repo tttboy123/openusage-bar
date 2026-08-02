@@ -100,13 +100,13 @@ enum DetailsCopy {
 
 enum ActivityRouteLoadingPolicy {
     static func loadsLedgerOnAppear(_ route: UsageDetailsRoute) -> Bool {
-        route != .automation
+        route != .automation && route != .routing
     }
 
     static func loadsLedgerAfterSelection(
         from current: UsageDetailsRoute, to selected: UsageDetailsRoute
     ) -> Bool {
-        current == .automation && selected != .automation
+        current == .automation && selected != .automation && selected != .routing
     }
 }
 
