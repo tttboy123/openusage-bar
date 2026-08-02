@@ -10,6 +10,8 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
+from jsonschema import Draft202012Validator, ValidationError
+
 from openusage_bar.query import (
     CapacityProvider,
     ProviderInstanceItem,
@@ -21,9 +23,13 @@ from openusage_bar.query import (
 from openusage_bar.routing_api import (
     RoutingAPIProblem,
     ROUTING_API_SCHEMA,
+    ROUTING_REPLAY_SCHEMA,
+    ROUTING_SHADOW_SCHEMA,
     RoutingController,
     create_routing_unix_server,
     decode_decision_request,
+    decode_replay_request,
+    decode_shadow_request,
 )
 from openusage_bar.routing_contract import RouteTarget
 from openusage_bar.routing_policy import RoutePolicy
@@ -79,6 +85,77 @@ def request_payload() -> dict[str, object]:
             "reserveMicrounits": None,
             "budgetCurrency": None,
         },
+    }
+
+
+def shadow_payload(actual_target_id: str = "openai.work.gpt-5") -> dict[str, object]:
+    value = request_payload()
+    value["actualTargetId"] = actual_target_id
+    return value
+
+
+def replay_payload() -> dict[str, object]:
+    route_target = target()
+    return {
+        "schemaVersion": "1.0",
+        "policyId": "reliable",
+        "cases": [
+            {
+                "caseId": "case-one",
+                "actualTargetId": route_target.target_id,
+                "request": request_payload(),
+                "targets": [
+                    {
+                        "targetId": route_target.target_id,
+                        "providerId": route_target.provider_id,
+                        "accountRef": route_target.account_ref,
+                        "modelId": route_target.model_id,
+                        "connectionRef": route_target.connection_ref,
+                        "executionClass": route_target.execution_class,
+                        "executionAdapterId": route_target.execution_adapter_id,
+                        "resourceMode": route_target.resource_mode,
+                        "factAccountRef": route_target.fact_account_ref,
+                        "runtimeScopeRef": route_target.runtime_scope_ref,
+                        "balanceCurrency": route_target.balance_currency,
+                        "costCurrency": route_target.cost_currency,
+                        "inputCostMicrosPerMillion": route_target.input_cost_micros_per_million,
+                        "outputCostMicrosPerMillion": route_target.output_cost_micros_per_million,
+                        "enabled": route_target.enabled,
+                        "adapterAvailable": route_target.adapter_available,
+                        "regions": list(route_target.regions),
+                        "privacyClass": route_target.privacy_class,
+                        "capabilities": list(route_target.capabilities),
+                        "contextWindowTokens": route_target.context_window_tokens,
+                        "qualityTier": route_target.quality_tier,
+                    }
+                ],
+                "targetFacts": [
+                    {
+                        "targetId": route_target.target_id,
+                        "connectionState": "available",
+                        "sourceState": "ok",
+                        "resourceState": "complete",
+                        "resourceMode": "quota",
+                        "headroomBasisPoints": 8_000,
+                        "balanceMicrounits": None,
+                        "balanceCurrency": None,
+                        "runtimeState": "complete",
+                        "observationCount": 100,
+                        "errorCount": 1,
+                        "durationP95Milliseconds": 1_000,
+                        "ttftP95Milliseconds": 100,
+                        "estimatedCostMicrounits": 100,
+                        "estimatedCostCurrency": "USD",
+                    }
+                ],
+                "context": {
+                    "generatedAt": "2026-08-02T12:00:00Z",
+                    "expiresAt": "2026-08-02T12:00:30Z",
+                    "dataRevision": 11,
+                    "runtimeRevision": None,
+                },
+            }
+        ],
     }
 
 
@@ -171,14 +248,57 @@ class FakeQuery:
 
 class RoutingRequestContractTests(unittest.TestCase):
     def test_tracked_schema_matches_the_runtime_contract(self) -> None:
-        path = (
+        resources = (
             Path(__file__).parents[1]
             / "openusage_bar"
             / "resources"
-            / "routing-api-v1.schema.json"
         )
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), ROUTING_API_SCHEMA)
+        contracts = {
+            "routing-api-v1.schema.json": ROUTING_API_SCHEMA,
+            "routing-shadow-v1.schema.json": ROUTING_SHADOW_SCHEMA,
+            "routing-replay-v1.schema.json": ROUTING_REPLAY_SCHEMA,
+        }
+        for name, contract in contracts.items():
+            with self.subTest(name=name):
+                path = resources / name
+                self.assertEqual(
+                    json.loads(path.read_text(encoding="utf-8")), contract
+                )
+                self.assertFalse(contract["additionalProperties"])
         self.assertFalse(ROUTING_API_SCHEMA["additionalProperties"])
+
+    def test_schema_document_exposes_all_content_free_request_contracts(self) -> None:
+        controller = RoutingController(
+            query=FakeQuery(),
+            target_loader=lambda: RouteTargetConfiguration(1, 7, (target(),)),
+            evidence_store=RoutingStore(":memory:", clock=lambda: NOW),
+            runtime_reader=lambda _start, _end: None,
+            available_connections=lambda: ("connection-1",),
+            clock=lambda: NOW,
+        )
+        self.addCleanup(controller.evidence_store.close)
+
+        document = controller.schema()
+
+        self.assertEqual(document["schema"], ROUTING_API_SCHEMA)
+        self.assertEqual(document["shadowSchema"], ROUTING_SHADOW_SCHEMA)
+        self.assertEqual(document["replaySchema"], ROUTING_REPLAY_SCHEMA)
+
+    def test_frozen_schemas_validate_the_exact_request_fixtures(self) -> None:
+        fixtures = (
+            (ROUTING_API_SCHEMA, request_payload()),
+            (ROUTING_SHADOW_SCHEMA, shadow_payload()),
+            (ROUTING_REPLAY_SCHEMA, replay_payload()),
+        )
+        for schema, fixture in fixtures:
+            with self.subTest(schema=schema["$id"]):
+                Draft202012Validator.check_schema(schema)
+                Draft202012Validator(schema).validate(fixture)
+
+        private = replay_payload()
+        private["cases"][0]["request"]["messages"] = []
+        with self.assertRaises(ValidationError):
+            Draft202012Validator(ROUTING_REPLAY_SCHEMA).validate(private)
 
     def test_decodes_exact_content_free_request(self) -> None:
         envelope = decode_decision_request(request_payload())
@@ -207,6 +327,37 @@ class RoutingRequestContractTests(unittest.TestCase):
         for raw in (duplicate, encoded + "{}"):
             with self.subTest(raw=raw[-12:]), self.assertRaises(ValueError):
                 decode_decision_request(raw)
+
+    def test_shadow_request_adds_only_a_public_actual_target_identifier(self) -> None:
+        envelope, actual_target_id = decode_shadow_request(shadow_payload())
+        self.assertEqual(envelope.request.policy_id, "reliable")
+        self.assertEqual(actual_target_id, "openai.work.gpt-5")
+        for key in ("prompt", "messages", "headers", "apiKey", "outcomeBody"):
+            value = shadow_payload()
+            value[key] = "sentinel"
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                decode_shadow_request(value)
+
+    def test_replay_request_decodes_only_frozen_content_free_fixtures(self) -> None:
+        policy_id, cases = decode_replay_request(replay_payload())
+        self.assertEqual(policy_id, "reliable")
+        self.assertEqual(cases[0].case_id, "case-one")
+        self.assertEqual(cases[0].targets[0].target_id, "openai.work.gpt-5")
+        self.assertEqual(cases[0].target_facts[0].headroom_bp, 8_000)
+        for mutation in (
+            lambda value: value["cases"][0].__setitem__("prompt", "sentinel"),
+            lambda value: value["cases"][0]["request"].__setitem__("messages", []),
+            lambda value: value["cases"][0]["targets"][0].__setitem__("apiKey", "x"),
+        ):
+            value = replay_payload()
+            mutation(value)
+            with self.assertRaises(ValueError):
+                decode_replay_request(value)
+
+        empty = replay_payload()
+        empty["cases"] = []
+        with self.assertRaises(ValueError):
+            decode_replay_request(empty)
 
 
 class RoutingControllerTests(unittest.TestCase):
@@ -245,6 +396,69 @@ class RoutingControllerTests(unittest.TestCase):
         self.assertTrue(response["simulated"])
         self.assertFalse(response["evidenceStored"])
         self.assertEqual(self.store.decision_count(), 0)
+
+    def test_shadow_compares_actual_target_without_affecting_or_storing_a_route(self) -> None:
+        response = self.controller.shadow(shadow_payload())
+
+        self.assertRegex(response["shadowId"], r"^shadow_[0-9a-f]{32}$")
+        self.assertEqual(response["actualTargetId"], "openai.work.gpt-5")
+        self.assertEqual(response["recommendedTargetId"], "openai.work.gpt-5")
+        self.assertEqual(response["actualState"], "eligible")
+        self.assertTrue(response["agreement"])
+        self.assertTrue(response["evidenceStored"])
+        self.assertEqual(self.store.decision_count(), 0)
+        self.assertEqual(self.store.shadow_count(), 1)
+        stored = self.store.get_shadow(response["shadowId"])
+        self.assertTrue(stored.agreement)
+        self.assertEqual(stored.actual_target_id, "openai.work.gpt-5")
+        self.assertNotIn("accountRef", json.dumps(response))
+        self.assertNotIn("modelId", json.dumps(response))
+
+    def test_shadow_respects_master_switch_and_stores_no_evidence_when_disabled(self) -> None:
+        controller = RoutingController(
+            query=FakeQuery(),
+            target_loader=lambda: RouteTargetConfiguration(1, 7, (target(),)),
+            evidence_store=self.store,
+            runtime_reader=lambda _start, _end: None,
+            available_connections=lambda: ("connection-1",),
+            preference_loader=lambda: RoutingPreferences(1, False, "reliable"),
+            clock=lambda: NOW,
+        )
+        with self.assertRaises(RoutingAPIProblem) as raised:
+            controller.shadow(shadow_payload())
+        self.assertEqual(raised.exception.code, "router_disabled")
+        self.assertEqual(self.store.shadow_count(), 0)
+
+    def test_shadow_history_is_content_free_and_cursor_bounded(self) -> None:
+        first = self.controller.shadow(shadow_payload())
+        second = self.controller.shadow(shadow_payload("openai.external"))
+        page = self.controller.list_shadows(before=None, limit=1)
+        next_page = self.controller.list_shadows(
+            before=page["nextBefore"], limit=1
+        )
+
+        expected = sorted((first["shadowId"], second["shadowId"]), reverse=True)
+        self.assertEqual(page["shadows"][0]["shadowId"], expected[0])
+        self.assertEqual(next_page["shadows"][0]["shadowId"], expected[1])
+        encoded = json.dumps((page, next_page), sort_keys=True)
+        for forbidden in ("providerId", "accountRef", "modelId", "connectionRef"):
+            self.assertNotIn(forbidden, encoded)
+
+    def test_replay_uses_frozen_facts_without_writing_decision_or_shadow_evidence(self) -> None:
+        response = self.controller.replay(replay_payload())
+
+        self.assertEqual(response["policy"], {
+            "policyId": "reliable", "policyRevision": 1,
+        })
+        self.assertEqual(response["summary"]["caseCount"], 1)
+        self.assertEqual(response["summary"]["agreementBasisPoints"], 10_000)
+        self.assertEqual(response["cases"][0]["recommendedTargetId"],
+                         "openai.work.gpt-5")
+        self.assertEqual(self.store.decision_count(), 0)
+        self.assertEqual(self.store.shadow_count(), 0)
+        encoded = json.dumps(response)
+        for forbidden in ("accountRef", "modelId", "connectionRef", "providerId"):
+            self.assertNotIn(forbidden, encoded)
 
     def test_custom_policy_loader_drives_listing_and_decisions(self) -> None:
         controller = RoutingController(
@@ -462,6 +676,30 @@ class RoutingUnixAPITests(RoutingControllerTests):
                 encoded = json.dumps(body)
                 self.assertNotIn("accountRef", encoded)
                 self.assertNotIn("modelId", encoded)
+
+    def test_shadow_endpoint_records_only_content_free_comparison(self) -> None:
+        status, _, shadow = self.post("/v1/shadow-decisions", shadow_payload())
+        self.assertEqual(status, 200)
+        self.assertTrue(shadow["agreement"])
+        self.assertTrue(shadow["evidenceStored"])
+        self.assertEqual(self.store.decision_count(), 0)
+        self.assertEqual(self.store.shadow_count(), 1)
+        encoded = json.dumps(shadow)
+        for forbidden in ("providerId", "accountRef", "modelId", "connectionRef"):
+            self.assertNotIn(forbidden, encoded)
+        status, _, history = self.request(
+            b"GET /v1/shadow-decisions?limit=10 HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(history["shadows"][0]["shadowId"], shadow["shadowId"])
+
+    def test_replay_endpoint_returns_deterministic_content_free_report(self) -> None:
+        status, _, report = self.post("/v1/replays", replay_payload())
+        self.assertEqual(status, 200)
+        self.assertEqual(report["summary"]["caseCount"], 1)
+        self.assertEqual(report["summary"]["agreementBasisPoints"], 10_000)
+        self.assertEqual(self.store.decision_count(), 0)
+        self.assertEqual(self.store.shadow_count(), 0)
 
     def test_duplicate_trailing_oversized_chunked_and_wrong_http_fail_closed(self) -> None:
         encoded = json.dumps(request_payload(), separators=(",", ":"))

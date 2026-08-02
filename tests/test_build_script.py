@@ -74,6 +74,8 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("GeneratedActivitySchema.swift", source)
         self.assertIn("local-api-v1.schema.json", source)
         self.assertIn("routing-api-v1.schema.json", source)
+        self.assertIn("routing-shadow-v1.schema.json", source)
+        self.assertIn("routing-replay-v1.schema.json", source)
         self.assertIn("python_coverage_gate.py", source)
         self.assertIn("--module unittest discover -s tests -v", source)
         self.assertIn('--package-root "$ROOT/openusage_bar"', source)
@@ -81,6 +83,26 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertEqual(source.count("scripts/python_coverage_gate.py"), 2)
         self.assertNotIn("PYTHON_TOUCHED_MODULES", source)
         self.assertIn('actual=${SWIFT_LINE_COVERAGE}%', source)
+
+    def test_routing_schema_generator_covers_decision_shadow_and_replay(self):
+        generator = ROOT / "scripts/generate_routing_api_schema.py"
+        resources = ROOT / "openusage_bar/resources"
+
+        with tempfile.TemporaryDirectory() as temp:
+            for kind, name in (
+                ("decision", "routing-api-v1.schema.json"),
+                ("shadow", "routing-shadow-v1.schema.json"),
+                ("replay", "routing-replay-v1.schema.json"),
+            ):
+                output = Path(temp) / name
+                subprocess.run(
+                    [
+                        str(ROOT / ".build-venv/bin/python"), str(generator),
+                        "--kind", kind, "--output", str(output),
+                    ],
+                    cwd=ROOT, check=True,
+                )
+                self.assertEqual(output.read_bytes(), (resources / name).read_bytes())
 
     def test_ci_and_release_pin_the_same_xcode_toolchain_as_local_release_validation(self):
         for name in ("ci.yml", "release.yml"):

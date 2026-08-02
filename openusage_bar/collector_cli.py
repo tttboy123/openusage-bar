@@ -161,7 +161,7 @@ def _parser() -> SafeArgumentParser:
     runtime_summary.add_argument("--window-seconds", required=True)
     route = commands.add_parser("route")
     route_commands = route.add_subparsers(dest="route_command", required=True)
-    for name in ("decide", "simulate"):
+    for name in ("decide", "simulate", "shadow", "replay"):
         child = route_commands.add_parser(name)
         child.add_argument("--format", choices=("json",), required=True)
         child.add_argument("--socket", default=None)
@@ -170,6 +170,11 @@ def _parser() -> SafeArgumentParser:
     history.add_argument("--socket", default=None)
     history.add_argument("--before")
     history.add_argument("--limit", type=int, default=50)
+    shadow_history = route_commands.add_parser("shadow-history")
+    shadow_history.add_argument("--format", choices=("json",), required=True)
+    shadow_history.add_argument("--socket", default=None)
+    shadow_history.add_argument("--before")
+    shadow_history.add_argument("--limit", type=int, default=50)
     return parser
 
 

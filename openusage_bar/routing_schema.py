@@ -1,6 +1,7 @@
 """Data-only SQLite schema contract for content-free routing evidence."""
 
-SCHEMA_VERSION = 1
+LEGACY_SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 EXPECTED_SCHEMA = {
     "routing_meta": (
@@ -40,6 +41,25 @@ EXPECTED_SCHEMA = {
         ("cost_micros", "INTEGER", 0, None, 0),
         ("cost_currency", "TEXT", 0, None, 0),
     ),
+    "routing_shadow_evaluations": (
+        ("shadow_id", "TEXT", 0, None, 1),
+        ("created_at", "TEXT", 1, None, 0),
+        ("policy_id", "TEXT", 1, None, 0),
+        ("policy_revision", "INTEGER", 1, None, 0),
+        ("data_revision", "INTEGER", 1, None, 0),
+        ("runtime_revision", "INTEGER", 0, None, 0),
+        ("actual_target_id", "TEXT", 1, None, 0),
+        ("recommended_target_id", "TEXT", 0, None, 0),
+        ("actual_state", "TEXT", 1, None, 0),
+        ("actual_rejection_codes_json", "TEXT", 1, None, 0),
+        ("agreement", "INTEGER", 1, None, 0),
+        ("recommended_score", "INTEGER", 0, None, 0),
+        ("actual_score", "INTEGER", 0, None, 0),
+        ("score_advantage", "INTEGER", 0, None, 0),
+        ("estimated_cost_delta_micros", "INTEGER", 0, None, 0),
+        ("cost_currency", "TEXT", 0, None, 0),
+        ("estimated_latency_delta_ms", "INTEGER", 0, None, 0),
+    ),
 }
 
 EXPECTED_INDEXES = {
@@ -58,4 +78,22 @@ EXPECTED_INDEXES = {
         0,
         (("decision_id", 0), ("ordinal", 0)),
     ),
+    "routing_shadows_created": (
+        "routing_shadow_evaluations",
+        0,
+        (("created_at", 0), ("shadow_id", 0)),
+    ),
+}
+
+
+LEGACY_EXPECTED_SCHEMA = {
+    name: columns
+    for name, columns in EXPECTED_SCHEMA.items()
+    if name != "routing_shadow_evaluations"
+}
+
+LEGACY_EXPECTED_INDEXES = {
+    name: definition
+    for name, definition in EXPECTED_INDEXES.items()
+    if name != "routing_shadows_created"
 }

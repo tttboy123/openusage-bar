@@ -25,19 +25,33 @@ from .routing_contract import (
     RouteRequest,
     RouteSession,
     RouteTask,
+    RouteTarget,
     ScoredTarget,
+    TargetFacts,
 )
 from .routing_engine import decide_route
+from .routing_evaluation import (
+    MAX_REPLAY_CASES,
+    MAX_REPLAY_TARGETS,
+    ReplayCase,
+    ReplayReport,
+    ShadowComparison,
+    evaluate_shadow_case,
+    replay_cases,
+)
 from .routing_facts import build_target_facts
 from .routing_policy import RoutePolicy, built_in_policies
 from .routing_preferences import RoutingPreferences
 from .routing_store import (
     DecisionEvidence,
     RoutingStore,
+    ShadowEvaluationEvidence,
     StoredDecision,
     StoredRejectedTarget,
     StoredScoredTarget,
+    StoredShadowEvaluation,
     try_record_decision,
+    try_record_shadow,
 )
 from .routing_targets import RouteTargetConfiguration
 from .runtime_store import RuntimeSummary
@@ -62,11 +76,14 @@ MAX_HEADER_BYTES = 16 * 1024
 MAX_QUERY_BYTES = 4 * 1024
 
 _REQUEST_REF = re.compile(r"^req_[0-9a-f]{16,64}$")
+_STABLE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 _TOP_LEVEL_KEYS = frozenset(
     {"schemaVersion", "clientRequestRef", "policyId", "task", "constraints", "session"}
 )
 _TOP_LEVEL_REQUIRED = frozenset({"schemaVersion", "policyId", "task"})
+_SHADOW_TOP_LEVEL_KEYS = _TOP_LEVEL_KEYS | frozenset({"actualTargetId"})
+_SHADOW_TOP_LEVEL_REQUIRED = _TOP_LEVEL_REQUIRED | frozenset({"actualTargetId"})
 _TASK_KEYS = frozenset(
     {
         "kind",
@@ -90,6 +107,27 @@ _CONSTRAINT_KEYS = frozenset(
 )
 _SESSION_KEYS = frozenset(
     {"sessionRef", "remainingBudgetMicrounits", "reserveMicrounits", "budgetCurrency"}
+)
+_REPLAY_TOP_LEVEL_KEYS = frozenset({"schemaVersion", "policyId", "cases"})
+_REPLAY_CASE_KEYS = frozenset(
+    {"caseId", "actualTargetId", "request", "targets", "targetFacts", "context"}
+)
+_REPLAY_TARGET_KEYS = frozenset({
+    "targetId", "providerId", "accountRef", "modelId", "connectionRef",
+    "executionClass", "executionAdapterId", "resourceMode", "factAccountRef",
+    "runtimeScopeRef", "balanceCurrency", "costCurrency",
+    "inputCostMicrosPerMillion", "outputCostMicrosPerMillion", "enabled",
+    "adapterAvailable", "regions", "privacyClass", "capabilities",
+    "contextWindowTokens", "qualityTier",
+})
+_REPLAY_FACT_KEYS = frozenset({
+    "targetId", "connectionState", "sourceState", "resourceState", "resourceMode",
+    "headroomBasisPoints", "balanceMicrounits", "balanceCurrency", "runtimeState",
+    "observationCount", "errorCount", "durationP95Milliseconds",
+    "ttftP95Milliseconds", "estimatedCostMicrounits", "estimatedCostCurrency",
+})
+_REPLAY_CONTEXT_KEYS = frozenset(
+    {"generatedAt", "expiresAt", "dataRevision", "runtimeRevision"}
 )
 
 ROUTING_API_SCHEMA = {
@@ -178,6 +216,158 @@ ROUTING_API_SCHEMA = {
             "maxItems": 50,
             "uniqueItems": True,
             "items": {"$ref": "#/$defs/id"},
+        },
+    },
+}
+
+_SCHEMA_ID = {"$ref": "#/$defs/id"}
+_SCHEMA_COUNTER = {"$ref": "#/$defs/counter"}
+_SCHEMA_CURRENCY = {"$ref": "#/$defs/currency"}
+_SCHEMA_NULLABLE_COUNTER = {
+    "anyOf": [_SCHEMA_COUNTER, {"type": "null"}]
+}
+_SCHEMA_NULLABLE_CURRENCY = {
+    "anyOf": [_SCHEMA_CURRENCY, {"type": "null"}]
+}
+
+ROUTING_SHADOW_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://openusage.bar/schemas/routing-shadow-v1.schema.json",
+    "title": "OpenUsage Bar Shadow Decision Request",
+    "type": "object",
+    "additionalProperties": False,
+    "required": sorted(_SHADOW_TOP_LEVEL_REQUIRED),
+    "properties": {
+        **ROUTING_API_SCHEMA["properties"],
+        "actualTargetId": _SCHEMA_ID,
+    },
+    "$defs": ROUTING_API_SCHEMA["$defs"],
+}
+
+_REPLAY_DECISION_REQUEST_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ROUTING_API_SCHEMA["required"],
+    "properties": ROUTING_API_SCHEMA["properties"],
+}
+_REPLAY_TARGET_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": sorted(_REPLAY_TARGET_KEYS),
+    "properties": {
+        "targetId": _SCHEMA_ID,
+        "providerId": _SCHEMA_ID,
+        "accountRef": _SCHEMA_ID,
+        "modelId": _SCHEMA_ID,
+        "connectionRef": _SCHEMA_ID,
+        "executionClass": {
+            "enum": ["direct_api", "openai_compatible", "self_hosted", "subscription_cli"]
+        },
+        "executionAdapterId": _SCHEMA_ID,
+        "resourceMode": {"enum": ["balance", "quota"]},
+        "factAccountRef": {"anyOf": [_SCHEMA_ID, {"type": "null"}]},
+        "runtimeScopeRef": {
+            "anyOf": [
+                {"type": "string", "pattern": r"^anon_[0-9a-f]{16,64}$"},
+                {"type": "null"},
+            ]
+        },
+        "balanceCurrency": _SCHEMA_NULLABLE_CURRENCY,
+        "costCurrency": _SCHEMA_NULLABLE_CURRENCY,
+        "inputCostMicrosPerMillion": _SCHEMA_NULLABLE_COUNTER,
+        "outputCostMicrosPerMillion": _SCHEMA_NULLABLE_COUNTER,
+        "enabled": {"type": "boolean"},
+        "adapterAvailable": {"type": "boolean"},
+        "regions": {"$ref": "#/$defs/idList"},
+        "privacyClass": {"enum": ["direct_provider", "local_only", "proxy"]},
+        "capabilities": {"$ref": "#/$defs/idList"},
+        "contextWindowTokens": _SCHEMA_COUNTER,
+        "qualityTier": {"type": "integer", "minimum": 0, "maximum": 5},
+    },
+}
+_REPLAY_FACTS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": sorted(_REPLAY_FACT_KEYS),
+    "properties": {
+        "targetId": _SCHEMA_ID,
+        "connectionState": {"enum": ["available", "unavailable"]},
+        "sourceState": {
+            "enum": ["authentication_failed", "error", "ok", "unavailable", "unknown"]
+        },
+        "resourceState": {"enum": ["complete", "missing", "partial", "stale"]},
+        "resourceMode": {"enum": ["balance", "quota"]},
+        "headroomBasisPoints": {
+            "anyOf": [
+                {"type": "integer", "minimum": 0, "maximum": 10_000},
+                {"type": "null"},
+            ]
+        },
+        "balanceMicrounits": _SCHEMA_NULLABLE_COUNTER,
+        "balanceCurrency": _SCHEMA_NULLABLE_CURRENCY,
+        "runtimeState": {"enum": ["complete", "missing", "partial"]},
+        "observationCount": _SCHEMA_COUNTER,
+        "errorCount": _SCHEMA_COUNTER,
+        "durationP95Milliseconds": _SCHEMA_NULLABLE_COUNTER,
+        "ttftP95Milliseconds": _SCHEMA_NULLABLE_COUNTER,
+        "estimatedCostMicrounits": _SCHEMA_NULLABLE_COUNTER,
+        "estimatedCostCurrency": _SCHEMA_NULLABLE_CURRENCY,
+    },
+}
+
+ROUTING_REPLAY_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://openusage.bar/schemas/routing-replay-v1.schema.json",
+    "title": "OpenUsage Bar Routing Replay Request",
+    "type": "object",
+    "additionalProperties": False,
+    "required": sorted(_REPLAY_TOP_LEVEL_KEYS),
+    "properties": {
+        "schemaVersion": {"const": SCHEMA_VERSION},
+        "policyId": _SCHEMA_ID,
+        "cases": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": MAX_REPLAY_CASES,
+            "items": {"$ref": "#/$defs/replayCase"},
+        },
+    },
+    "$defs": {
+        **ROUTING_API_SCHEMA["$defs"],
+        "decisionRequest": _REPLAY_DECISION_REQUEST_SCHEMA,
+        "routeTarget": _REPLAY_TARGET_SCHEMA,
+        "targetFacts": _REPLAY_FACTS_SCHEMA,
+        "decisionContext": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": sorted(_REPLAY_CONTEXT_KEYS),
+            "properties": {
+                "generatedAt": {"type": "string", "format": "date-time", "pattern": "Z$"},
+                "expiresAt": {"type": "string", "format": "date-time", "pattern": "Z$"},
+                "dataRevision": _SCHEMA_COUNTER,
+                "runtimeRevision": _SCHEMA_NULLABLE_COUNTER,
+            },
+        },
+        "replayCase": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": sorted(_REPLAY_CASE_KEYS),
+            "properties": {
+                "caseId": _SCHEMA_ID,
+                "actualTargetId": _SCHEMA_ID,
+                "request": {"$ref": "#/$defs/decisionRequest"},
+                "targets": {
+                    "type": "array",
+                    "maxItems": MAX_REPLAY_TARGETS,
+                    "items": {"$ref": "#/$defs/routeTarget"},
+                },
+                "targetFacts": {
+                    "type": "array",
+                    "maxItems": MAX_REPLAY_TARGETS,
+                    "items": {"$ref": "#/$defs/targetFacts"},
+                },
+                "context": {"$ref": "#/$defs/decisionContext"},
+            },
         },
     },
 }
@@ -334,6 +524,116 @@ def decode_decision_request(
     return RoutingRequestEnvelope(client_ref, request)
 
 
+def decode_shadow_request(
+    payload: object,
+) -> tuple[RoutingRequestEnvelope, str]:
+    value = _json_value(payload) if isinstance(payload, (str, bytes)) else payload
+    raw = _exact_mapping(
+        value, _SHADOW_TOP_LEVEL_KEYS, _SHADOW_TOP_LEVEL_REQUIRED
+    )
+    actual_target_id = raw["actualTargetId"]
+    if (
+        not isinstance(actual_target_id, str)
+        or _STABLE_ID.fullmatch(actual_target_id) is None
+    ):
+        raise ValueError("routing request is invalid")
+    decision_payload = {
+        key: item for key, item in raw.items() if key != "actualTargetId"
+    }
+    return decode_decision_request(decision_payload), actual_target_id
+
+
+def _decode_replay_target(value: object) -> RouteTarget:
+    raw = _required_exact(value, _REPLAY_TARGET_KEYS)
+    return RouteTarget(
+        target_id=raw["targetId"],
+        provider_id=raw["providerId"],
+        account_ref=raw["accountRef"],
+        model_id=raw["modelId"],
+        connection_ref=raw["connectionRef"],
+        execution_class=raw["executionClass"],
+        execution_adapter_id=raw["executionAdapterId"],
+        resource_mode=raw["resourceMode"],
+        fact_account_ref=raw["factAccountRef"],
+        runtime_scope_ref=raw["runtimeScopeRef"],
+        balance_currency=raw["balanceCurrency"],
+        cost_currency=raw["costCurrency"],
+        input_cost_micros_per_million=raw["inputCostMicrosPerMillion"],
+        output_cost_micros_per_million=raw["outputCostMicrosPerMillion"],
+        enabled=raw["enabled"],
+        adapter_available=raw["adapterAvailable"],
+        regions=_id_list(raw["regions"]),
+        privacy_class=raw["privacyClass"],
+        capabilities=_id_list(raw["capabilities"]),
+        context_window_tokens=raw["contextWindowTokens"],
+        quality_tier=raw["qualityTier"],
+    )
+
+
+def _decode_replay_facts(value: object) -> TargetFacts:
+    raw = _required_exact(value, _REPLAY_FACT_KEYS)
+    return TargetFacts(
+        target_id=raw["targetId"],
+        connection_state=raw["connectionState"],
+        source_state=raw["sourceState"],
+        resource_state=raw["resourceState"],
+        resource_mode=raw["resourceMode"],
+        headroom_bp=raw["headroomBasisPoints"],
+        balance_micros=raw["balanceMicrounits"],
+        balance_currency=raw["balanceCurrency"],
+        runtime_state=raw["runtimeState"],
+        observation_count=raw["observationCount"],
+        error_count=raw["errorCount"],
+        duration_p95_ms=raw["durationP95Milliseconds"],
+        ttft_p95_ms=raw["ttftP95Milliseconds"],
+        estimated_cost_micros=raw["estimatedCostMicrounits"],
+        estimated_cost_currency=raw["estimatedCostCurrency"],
+    )
+
+
+def decode_replay_request(payload: object) -> tuple[str, tuple[ReplayCase, ...]]:
+    value = _json_value(payload) if isinstance(payload, (str, bytes)) else payload
+    raw = _required_exact(value, _REPLAY_TOP_LEVEL_KEYS)
+    if raw["schemaVersion"] != SCHEMA_VERSION:
+        raise ValueError("routing replay request is invalid")
+    policy_id = raw["policyId"]
+    if not isinstance(policy_id, str) or _STABLE_ID.fullmatch(policy_id) is None:
+        raise ValueError("routing replay request is invalid")
+    raw_cases = raw["cases"]
+    if (
+        not isinstance(raw_cases, list)
+        or not raw_cases
+        or len(raw_cases) > MAX_REPLAY_CASES
+    ):
+        raise ValueError("routing replay request is invalid")
+    cases: list[ReplayCase] = []
+    try:
+        for value in raw_cases:
+            case = _required_exact(value, _REPLAY_CASE_KEYS)
+            targets_raw = case["targets"]
+            facts_raw = case["targetFacts"]
+            if not isinstance(targets_raw, list) or not isinstance(facts_raw, list):
+                raise ValueError("routing replay request is invalid")
+            context_raw = _required_exact(case["context"], _REPLAY_CONTEXT_KEYS)
+            envelope = decode_decision_request(case["request"])
+            cases.append(ReplayCase(
+                case_id=case["caseId"],
+                actual_target_id=case["actualTargetId"],
+                request=envelope.request,
+                targets=tuple(_decode_replay_target(item) for item in targets_raw),
+                target_facts=tuple(_decode_replay_facts(item) for item in facts_raw),
+                context=DecisionContext(
+                    generated_at=context_raw["generatedAt"],
+                    expires_at=context_raw["expiresAt"],
+                    data_revision=context_raw["dataRevision"],
+                    runtime_revision=context_raw["runtimeRevision"],
+                ),
+            ))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("routing replay request is invalid") from error
+    return policy_id, tuple(cases)
+
+
 def _timestamp(value: datetime) -> str:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("routing clock is invalid")
@@ -419,6 +719,129 @@ def _decision_wire(
         "warnings": [],
         "evidenceStored": evidence_stored,
         "simulated": simulated,
+    }
+
+
+def _shadow_wire(
+    shadow_id: str,
+    decision: RouteDecision,
+    comparison: ShadowComparison,
+    *,
+    evidence_stored: bool,
+) -> dict[str, object]:
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "shadowId": shadow_id,
+        "createdAt": decision.generated_at,
+        "policy": {
+            "policyId": decision.policy_id,
+            "policyRevision": decision.policy_revision,
+        },
+        "facts": {
+            "dataRevision": decision.data_revision,
+            "runtimeRevision": decision.runtime_revision,
+        },
+        "actualTargetId": comparison.actual_target_id,
+        "recommendedTargetId": comparison.recommended_target_id,
+        "actualState": comparison.actual_state,
+        "actualRejectionCodes": list(comparison.actual_rejection_codes),
+        "agreement": comparison.agreement,
+        "recommendedScore": comparison.recommended_score,
+        "actualScore": comparison.actual_score,
+        "scoreAdvantage": comparison.score_advantage,
+        "estimatedCostDeltaMicrounits": comparison.estimated_cost_delta_micros,
+        "costCurrency": comparison.cost_currency,
+        "estimatedLatencyDeltaMilliseconds": comparison.estimated_latency_delta_ms,
+        "evidenceStored": evidence_stored,
+    }
+
+
+def stored_shadow_wire(value: StoredShadowEvaluation) -> dict[str, object]:
+    return {
+        "shadowId": value.shadow_id,
+        "createdAt": value.created_at,
+        "policy": {
+            "policyId": value.policy_id,
+            "policyRevision": value.policy_revision,
+        },
+        "facts": {
+            "dataRevision": value.data_revision,
+            "runtimeRevision": value.runtime_revision,
+        },
+        "actualTargetId": value.actual_target_id,
+        "recommendedTargetId": value.recommended_target_id,
+        "actualState": value.actual_state,
+        "actualRejectionCodes": list(value.actual_rejection_codes),
+        "agreement": value.agreement,
+        "recommendedScore": value.recommended_score,
+        "actualScore": value.actual_score,
+        "scoreAdvantage": value.score_advantage,
+        "estimatedCostDeltaMicrounits": value.estimated_cost_delta_micros,
+        "costCurrency": value.cost_currency,
+        "estimatedLatencyDeltaMilliseconds": value.estimated_latency_delta_ms,
+    }
+
+
+def replay_report_wire(value: ReplayReport) -> dict[str, object]:
+    summary = value.summary
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "policy": {
+            "policyId": value.policy_id,
+            "policyRevision": value.policy_revision,
+        },
+        "summary": {
+            "caseCount": summary.case_count,
+            "selectionCount": summary.selection_count,
+            "agreementCount": summary.agreement_count,
+            "agreementBasisPoints": summary.agreement_basis_points,
+            "noRouteCount": summary.no_route_count,
+            "noRouteBasisPoints": summary.no_route_basis_points,
+            "actualRejectedCount": summary.actual_rejected_count,
+            "actualRejectedBasisPoints": summary.actual_rejected_basis_points,
+            "comparableScoreCount": summary.comparable_score_count,
+            "meanScoreAdvantage": summary.mean_score_advantage,
+            "comparableLatencyCount": summary.comparable_latency_count,
+            "meanEstimatedLatencyDeltaMilliseconds": (
+                summary.mean_estimated_latency_delta_ms
+            ),
+            "costDeltas": [
+                {
+                    "currency": item.currency,
+                    "caseCount": item.case_count,
+                    "totalDeltaMicrounits": item.total_delta_micros,
+                    "meanDeltaMicrounits": item.mean_delta_micros,
+                }
+                for item in summary.cost_deltas
+            ],
+        },
+        "cases": [
+            {
+                "caseId": item.case_id,
+                "facts": {
+                    "dataRevision": item.decision.data_revision,
+                    "runtimeRevision": item.decision.runtime_revision,
+                },
+                "actualTargetId": item.comparison.actual_target_id,
+                "recommendedTargetId": item.comparison.recommended_target_id,
+                "actualState": item.comparison.actual_state,
+                "actualRejectionCodes": list(
+                    item.comparison.actual_rejection_codes
+                ),
+                "agreement": item.comparison.agreement,
+                "recommendedScore": item.comparison.recommended_score,
+                "actualScore": item.comparison.actual_score,
+                "scoreAdvantage": item.comparison.score_advantage,
+                "estimatedCostDeltaMicrounits": (
+                    item.comparison.estimated_cost_delta_micros
+                ),
+                "costCurrency": item.comparison.cost_currency,
+                "estimatedLatencyDeltaMilliseconds": (
+                    item.comparison.estimated_latency_delta_ms
+                ),
+            }
+            for item in value.results
+        ],
     }
 
 
@@ -516,7 +939,7 @@ class RoutingController:
         self.decision_ttl = decision_ttl
         self.runtime_window = runtime_window
 
-    def decide(self, payload: object, *, simulated: bool) -> dict[str, object]:
+    def _require_enabled(self) -> None:
         try:
             preferences = self._preferences()
         except Exception as error:
@@ -527,14 +950,18 @@ class RoutingController:
             raise RoutingAPIProblem(
                 503, "router_disabled", "Route decisions are disabled."
             )
+
+    def _evaluate(
+        self, envelope: RoutingRequestEnvelope
+    ) -> tuple[
+        RouteDecision,
+        tuple[TargetFacts, ...],
+        tuple[RouteTarget, ...],
+        RoutePolicy,
+        DecisionContext,
+    ]:
         try:
-            envelope = decode_decision_request(payload)
-        except ValueError as error:
-            raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.") from error
-        try:
-            policies = {
-                value.policy_id: value for value in self._policies()
-            }
+            policies = {value.policy_id: value for value in self._policies()}
             policy = policies[envelope.request.policy_id]
         except KeyError as error:
             raise RoutingAPIProblem(404, "policy_not_found", "Routing policy was not found.") from error
@@ -586,6 +1013,15 @@ class RoutingController:
             raise
         except Exception as error:
             raise RoutingAPIProblem(500, "internal_error", "Routing is unavailable.") from error
+        return decision, facts, configuration.targets, policy, context
+
+    def decide(self, payload: object, *, simulated: bool) -> dict[str, object]:
+        self._require_enabled()
+        try:
+            envelope = decode_decision_request(payload)
+        except ValueError as error:
+            raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.") from error
+        decision, _facts, _targets, _policy, _context = self._evaluate(envelope)
         decision_id = "route_" + secrets.token_hex(16)
         evidence_stored = False
         if not simulated:
@@ -621,6 +1057,66 @@ class RoutingController:
                 },
             )
         return representation
+
+    def shadow(self, payload: object) -> dict[str, object]:
+        self._require_enabled()
+        try:
+            envelope, actual_target_id = decode_shadow_request(payload)
+        except ValueError as error:
+            raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.") from error
+        _decision, facts, targets, policy, context = self._evaluate(envelope)
+        try:
+            decision, comparison = evaluate_shadow_case(
+                actual_target_id=actual_target_id,
+                route_request=envelope.request,
+                targets=targets,
+                target_facts=facts,
+                policy=policy,
+                context=context,
+            )
+        except Exception as error:
+            raise RoutingAPIProblem(500, "internal_error", "Routing is unavailable.") from error
+        shadow_id = "shadow_" + secrets.token_hex(16)
+        evidence_stored = try_record_shadow(
+            self.evidence_store,
+            ShadowEvaluationEvidence(
+                shadow_id=shadow_id,
+                created_at=decision.generated_at,
+                policy_id=decision.policy_id,
+                policy_revision=decision.policy_revision,
+                data_revision=decision.data_revision,
+                runtime_revision=decision.runtime_revision,
+                comparison=comparison,
+            ),
+        )
+        return _shadow_wire(
+            shadow_id, decision, comparison, evidence_stored=evidence_stored
+        )
+
+    def replay(self, payload: object) -> dict[str, object]:
+        self._require_enabled()
+        try:
+            policy_id, cases = decode_replay_request(payload)
+        except ValueError as error:
+            raise RoutingAPIProblem(400, "invalid_request", "Invalid replay request.") from error
+        try:
+            policies = {value.policy_id: value for value in self._policies()}
+            policy = policies[policy_id]
+        except KeyError as error:
+            raise RoutingAPIProblem(
+                404, "policy_not_found", "Routing policy was not found."
+            ) from error
+        except Exception as error:
+            raise RoutingAPIProblem(
+                503, "facts_unavailable", "Routing policies are unavailable."
+            ) from error
+        try:
+            report = replay_cases(cases, policy)
+        except ValueError as error:
+            raise RoutingAPIProblem(400, "invalid_request", "Invalid replay request.") from error
+        except Exception as error:
+            raise RoutingAPIProblem(500, "internal_error", "Routing is unavailable.") from error
+        return replay_report_wire(report)
 
     def policies(self) -> dict[str, object]:
         try:
@@ -675,7 +1171,12 @@ class RoutingController:
         }
 
     def schema(self) -> dict[str, object]:
-        return {"schemaVersion": SCHEMA_VERSION, "schema": ROUTING_API_SCHEMA}
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "schema": ROUTING_API_SCHEMA,
+            "shadowSchema": ROUTING_SHADOW_SCHEMA,
+            "replaySchema": ROUTING_REPLAY_SCHEMA,
+        }
 
     def targets(self) -> dict[str, object]:
         try:
@@ -728,6 +1229,25 @@ class RoutingController:
             "routingRevision": revision,
             "decisions": [stored_decision_wire(value) for value in values],
             "nextBefore": values[-1].decision_id if len(values) == limit else None,
+        }
+
+    def list_shadows(
+        self, *, before: str | None, limit: int
+    ) -> dict[str, object]:
+        try:
+            values = self.evidence_store.list_shadows(before=before, limit=limit)
+            revision = self.evidence_store.revision()
+        except (TypeError, ValueError) as error:
+            raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.") from error
+        except Exception as error:
+            raise RoutingAPIProblem(
+                503, "facts_unavailable", "Shadow history is unavailable."
+            ) from error
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "routingRevision": revision,
+            "shadows": [stored_shadow_wire(value) for value in values],
+            "nextBefore": values[-1].shadow_id if len(values) == limit else None,
         }
 
     def get_decision(self, decision_id: str) -> dict[str, object]:
@@ -817,6 +1337,19 @@ class RoutingAPIRouter:
                     value = self.controller.list_decisions(
                         before=parameters.get("before"), limit=limit
                     )
+                elif parsed.path == "/v1/shadow-decisions":
+                    if not set(parameters) <= {"before", "limit"}:
+                        raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.")
+                    limit_raw = parameters.get("limit", "50")
+                    try:
+                        limit = int(limit_raw)
+                    except (TypeError, ValueError) as error:
+                        raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.") from error
+                    if str(limit) != limit_raw or not 1 <= limit <= 100:
+                        raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.")
+                    value = self.controller.list_shadows(
+                        before=parameters.get("before"), limit=limit
+                    )
                 elif parsed.path.startswith("/v1/decisions/") and not parameters:
                     identifier = parsed.path.removeprefix("/v1/decisions/")
                     if not identifier or "/" in identifier:
@@ -831,6 +1364,10 @@ class RoutingAPIRouter:
                     value = self.controller.decide(body, simulated=False)
                 elif parsed.path == "/v1/simulations":
                     value = self.controller.decide(body, simulated=True)
+                elif parsed.path == "/v1/shadow-decisions":
+                    value = self.controller.shadow(body)
+                elif parsed.path == "/v1/replays":
+                    value = self.controller.replay(body)
                 else:
                     raise RoutingAPIProblem(404, "not_found", "Route was not found.")
             else:

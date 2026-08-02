@@ -519,6 +519,12 @@ Python uses standard library and existing dependencies before adding anything.
 ### Slice B2: evaluation and release
 
 - deterministic replay report and shadow-decision mode;
+- Shadow accepts the normal metadata-only request plus one public actual target
+  ID, writes a separate bounded comparison and never writes a normal decision;
+- Replay accepts 1–256 frozen, canonically ordered cases, rejects duplicate
+  case/target/fact identifiers, reads no live facts and writes no evidence;
+- the Decision, Shadow and Replay request contracts are separately frozen JSON
+  Schemas returned additively by the private schema endpoint;
 - CPU/memory/wakeup and p95 decision overhead baselines;
 - privacy/secret/dependency/full-history scans;
 - complete Python and Swift suites, product coverage at existing thresholds;

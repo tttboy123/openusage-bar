@@ -17,14 +17,20 @@ from .routing_contract import (
     MAX_ALTERNATIVES,
     MAX_COUNTER,
     MAX_REJECTED_TARGETS,
+    REJECTION_REASON_CODES,
+    REJECTION_REASON_ORDER,
     RejectedTarget,
     RouteDecision,
     ScoreComponents,
     ScoredTarget,
 )
+from .routing_evaluation import ShadowComparison
 from .routing_schema import (
     EXPECTED_INDEXES as _SCHEMA_INDEXES,
     EXPECTED_SCHEMA as _SCHEMA_COLUMNS,
+    LEGACY_EXPECTED_INDEXES as _LEGACY_SCHEMA_INDEXES,
+    LEGACY_EXPECTED_SCHEMA as _LEGACY_SCHEMA_COLUMNS,
+    LEGACY_SCHEMA_VERSION,
     SCHEMA_VERSION,
 )
 
@@ -32,13 +38,16 @@ from .routing_schema import (
 MAX_DATABASE_BYTES = 16 * 1024 * 1024
 MAX_DECISIONS = 10_000
 MAX_ATTEMPTS = 30_000
+MAX_SHADOWS = 10_000
 MAX_CANDIDATES_JSON_BYTES = 256 * 1024
+MAX_REJECTION_CODES_JSON_BYTES = 8 * 1024
 RETENTION = timedelta(days=7)
 MAX_FUTURE_SKEW = timedelta(minutes=5)
 MAX_PAGE_LIMIT = 100
 
 _ROUTE_ID = re.compile(r"^route_[0-9a-f]{16,64}$")
 _ATTEMPT_ID = re.compile(r"^attempt_[0-9a-f]{16,64}$")
+_SHADOW_ID = re.compile(r"^shadow_[0-9a-f]{16,64}$")
 _REQUEST_REF = re.compile(r"^req_[0-9a-f]{16,64}$")
 _ANON_REF = re.compile(r"^anon_[0-9a-f]{16,64}$")
 _STABLE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -78,14 +87,19 @@ ATTEMPT_REASON_CODES = frozenset(
     }
 )
 
-_TABLES = frozenset({"routing_meta", "routing_decisions", "routing_attempts"})
-_INDEXES = frozenset(_SCHEMA_INDEXES)
 _EXPECTED_COLUMNS = {
     table: tuple(
         (name, column_type, not_null, primary_key)
         for name, column_type, not_null, _default, primary_key in columns
     )
     for table, columns in _SCHEMA_COLUMNS.items()
+}
+_LEGACY_EXPECTED_COLUMNS = {
+    table: tuple(
+        (name, column_type, not_null, primary_key)
+        for name, column_type, not_null, _default, primary_key in columns
+    )
+    for table, columns in _LEGACY_SCHEMA_COLUMNS.items()
 }
 
 
@@ -159,6 +173,52 @@ class DecisionEvidence:
         _optional_match("session_ref", self.session_ref, _ANON_REF)
         if not isinstance(self.decision, RouteDecision):
             raise ValueError("decision is invalid")
+
+
+@dataclass(frozen=True)
+class ShadowEvaluationEvidence:
+    shadow_id: str
+    created_at: str
+    policy_id: str
+    policy_revision: int
+    data_revision: int
+    runtime_revision: int | None
+    comparison: ShadowComparison
+
+    def __post_init__(self) -> None:
+        _match("shadow_id", self.shadow_id, _SHADOW_ID)
+        _utc_timestamp("created_at", self.created_at)
+        _match("policy_id", self.policy_id, _STABLE_ID)
+        _integer("policy_revision", self.policy_revision)
+        _integer("data_revision", self.data_revision)
+        _optional_integer("runtime_revision", self.runtime_revision)
+        if not isinstance(self.comparison, ShadowComparison):
+            raise ValueError("shadow comparison is invalid")
+        value = self.comparison
+        if (value.recommended_target_id is None) != (value.recommended_score is None):
+            raise ValueError("shadow recommendation is inconsistent")
+        if value.actual_state == "eligible":
+            if value.actual_score is None or value.actual_rejection_codes:
+                raise ValueError("shadow actual target is inconsistent")
+        elif value.actual_score is not None:
+            raise ValueError("shadow actual target is inconsistent")
+        if value.actual_state == "rejected" and not value.actual_rejection_codes:
+            raise ValueError("shadow rejection evidence is missing")
+        if value.actual_state != "rejected" and value.actual_rejection_codes:
+            raise ValueError("shadow rejection evidence is inconsistent")
+        if value.agreement != (
+            value.recommended_target_id is not None
+            and value.recommended_target_id == value.actual_target_id
+        ):
+            raise ValueError("shadow agreement is inconsistent")
+        if (value.score_advantage is None) != (
+            value.recommended_score is None or value.actual_score is None
+        ):
+            raise ValueError("shadow score evidence is inconsistent")
+        if value.score_advantage is not None and value.score_advantage != (
+            value.recommended_score - value.actual_score
+        ):
+            raise ValueError("shadow score evidence is inconsistent")
 
 
 @dataclass(frozen=True)
@@ -279,6 +339,27 @@ class StoredAttempt:
 
 
 @dataclass(frozen=True)
+class StoredShadowEvaluation:
+    shadow_id: str
+    created_at: str
+    policy_id: str
+    policy_revision: int
+    data_revision: int
+    runtime_revision: int | None
+    actual_target_id: str
+    recommended_target_id: str | None
+    actual_state: str
+    actual_rejection_codes: tuple[str, ...]
+    agreement: bool
+    recommended_score: int | None
+    actual_score: int | None
+    score_advantage: int | None
+    estimated_cost_delta_micros: int | None
+    cost_currency: str | None
+    estimated_latency_delta_ms: int | None
+
+
+@dataclass(frozen=True)
 class EvidenceWriteResult:
     stored: bool
     duplicate: bool
@@ -288,9 +369,18 @@ class EvidenceWriteResult:
 
 
 @dataclass(frozen=True)
+class ShadowWriteResult:
+    stored: bool
+    duplicate: bool
+    pruned_shadows: int
+    revision: int
+
+
+@dataclass(frozen=True)
 class PruneResult:
     pruned_decisions: int
     pruned_attempts: int
+    pruned_shadows: int
     revision: int
 
 
@@ -347,6 +437,63 @@ def _decision_values(evidence: DecisionEvidence) -> tuple[object, ...]:
         None if value.selected is None else value.selected.target_id,
         None if value.selected is None else value.selected.score,
         _candidates_json(value),
+    )
+
+
+def _rejection_codes_json(values: tuple[str, ...]) -> str:
+    if not isinstance(values, tuple) or any(
+        not isinstance(value, str)
+        or value not in REJECTION_REASON_CODES
+        for value in values
+    ):
+        raise ValueError("shadow rejection codes are invalid")
+    canonical = tuple(code for code in REJECTION_REASON_ORDER if code in set(values))
+    if canonical != values:
+        raise ValueError("shadow rejection codes are not canonical")
+    encoded = json.dumps(values, sort_keys=True, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > MAX_REJECTION_CODES_JSON_BYTES:
+        raise RoutingStoreError("shadow rejection evidence is too large")
+    return encoded
+
+
+def _decode_rejection_codes(encoded: object) -> tuple[str, ...]:
+    if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > MAX_REJECTION_CODES_JSON_BYTES:
+        raise RoutingStoreError("shadow rejection evidence is incompatible")
+    try:
+        value = json.loads(encoded)
+    except (TypeError, ValueError) as error:
+        raise RoutingStoreError("shadow rejection evidence is incompatible") from error
+    if not isinstance(value, list):
+        raise RoutingStoreError("shadow rejection evidence is incompatible")
+    result = tuple(value)
+    try:
+        if _rejection_codes_json(result) != encoded:
+            raise ValueError("shadow rejection evidence is not canonical")
+    except (TypeError, ValueError) as error:
+        raise RoutingStoreError("shadow rejection evidence is incompatible") from error
+    return result
+
+
+def _shadow_values(evidence: ShadowEvaluationEvidence) -> tuple[object, ...]:
+    value = evidence.comparison
+    return (
+        evidence.shadow_id,
+        evidence.created_at,
+        evidence.policy_id,
+        evidence.policy_revision,
+        evidence.data_revision,
+        evidence.runtime_revision,
+        value.actual_target_id,
+        value.recommended_target_id,
+        value.actual_state,
+        _rejection_codes_json(value.actual_rejection_codes),
+        int(value.agreement),
+        value.recommended_score,
+        value.actual_score,
+        value.score_advantage,
+        value.estimated_cost_delta_micros,
+        value.cost_currency,
+        value.estimated_latency_delta_ms,
     )
 
 
@@ -477,12 +624,16 @@ class RoutingStore:
         clock: Callable[[], datetime] | None = None,
         max_decisions: int = MAX_DECISIONS,
         max_attempts: int = MAX_ATTEMPTS,
+        max_shadows: int = MAX_SHADOWS,
     ) -> None:
         self.max_decisions = _integer(
             "max_decisions", max_decisions, minimum=1, maximum=MAX_DECISIONS
         )
         self.max_attempts = _integer(
             "max_attempts", max_attempts, minimum=1, maximum=MAX_ATTEMPTS
+        )
+        self.max_shadows = _integer(
+            "max_shadows", max_shadows, minimum=1, maximum=MAX_SHADOWS
         )
         self.path = str(path)
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -518,9 +669,16 @@ class RoutingStore:
                     "WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%'"
                 ).fetchone()[0]
             )
-            self._validate_existing_schema(
-                require_all=version == SCHEMA_VERSION or object_count > 0
-            )
+            if version == LEGACY_SCHEMA_VERSION:
+                self._validate_existing_schema(
+                    require_all=True,
+                    expected_columns=_LEGACY_EXPECTED_COLUMNS,
+                    expected_indexes=_LEGACY_SCHEMA_INDEXES,
+                )
+            else:
+                self._validate_existing_schema(
+                    require_all=version == SCHEMA_VERSION or object_count > 0
+                )
             self._set_page_limit()
             self._initialize_schema()
             self._validate_existing_schema(require_all=True)
@@ -557,6 +715,59 @@ class RoutingStore:
         with self._lock:
             connection = self._required_connection()
             return int(connection.execute("SELECT COUNT(*) FROM routing_attempts").fetchone()[0])
+
+    def shadow_count(self) -> int:
+        with self._lock:
+            connection = self._required_connection()
+            return int(connection.execute(
+                "SELECT COUNT(*) FROM routing_shadow_evaluations"
+            ).fetchone()[0])
+
+    def record_shadow(self, evidence: ShadowEvaluationEvidence) -> ShadowWriteResult:
+        if not isinstance(evidence, ShadowEvaluationEvidence):
+            raise ValueError("shadow evaluation evidence is invalid")
+        values = _shadow_values(evidence)
+        now = _clock_value(self.clock)
+        created = _utc_timestamp("created_at", evidence.created_at)
+        if created < now - RETENTION or created > now + MAX_FUTURE_SKEW:
+            raise RoutingStoreError("shadow evaluation time is outside retention")
+        with self._lock:
+            connection = self._required_connection()
+            existing = connection.execute(
+                "SELECT shadow_id,created_at,policy_id,policy_revision,data_revision,"
+                "runtime_revision,actual_target_id,recommended_target_id,actual_state,"
+                "actual_rejection_codes_json,agreement,recommended_score,actual_score,"
+                "score_advantage,estimated_cost_delta_micros,cost_currency,"
+                "estimated_latency_delta_ms FROM routing_shadow_evaluations "
+                "WHERE shadow_id=?",
+                (evidence.shadow_id,),
+            ).fetchone()
+            if existing is not None:
+                if tuple(existing) != values:
+                    raise RoutingStoreError("shadow evaluation identifier conflicts")
+                return ShadowWriteResult(True, True, 0, self._revision_locked())
+            try:
+                with connection:
+                    connection.execute(
+                        "INSERT INTO routing_shadow_evaluations("
+                        "shadow_id,created_at,policy_id,policy_revision,data_revision,"
+                        "runtime_revision,actual_target_id,recommended_target_id,actual_state,"
+                        "actual_rejection_codes_json,agreement,recommended_score,actual_score,"
+                        "score_advantage,estimated_cost_delta_micros,cost_currency,"
+                        "estimated_latency_delta_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        values,
+                    )
+                    pruned = self._prune_shadows_locked(
+                        _canonical_timestamp(now - RETENTION)
+                    )
+                    revision = self._advance_revision_locked()
+            except sqlite3.Error as error:
+                raise RoutingStoreError("shadow evaluation evidence was not stored") from error
+            stored = connection.execute(
+                "SELECT 1 FROM routing_shadow_evaluations WHERE shadow_id=?",
+                (evidence.shadow_id,),
+            ).fetchone() is not None
+            return ShadowWriteResult(stored, False, pruned, revision)
 
     def record_decision(self, evidence: DecisionEvidence) -> EvidenceWriteResult:
         if not isinstance(evidence, DecisionEvidence):
@@ -710,6 +921,52 @@ class RoutingStore:
             ).fetchall()
             return tuple(self._stored_attempt(row) for row in rows)
 
+    def get_shadow(self, shadow_id: str) -> StoredShadowEvaluation | None:
+        _match("shadow_id", shadow_id, _SHADOW_ID)
+        with self._lock:
+            row = self._required_connection().execute(
+                "SELECT shadow_id,created_at,policy_id,policy_revision,data_revision,"
+                "runtime_revision,actual_target_id,recommended_target_id,actual_state,"
+                "actual_rejection_codes_json,agreement,recommended_score,actual_score,"
+                "score_advantage,estimated_cost_delta_micros,cost_currency,"
+                "estimated_latency_delta_ms FROM routing_shadow_evaluations "
+                "WHERE shadow_id=?",
+                (shadow_id,),
+            ).fetchone()
+            return None if row is None else self._stored_shadow(row)
+
+    def list_shadows(
+        self, *, before: str | None = None, limit: int = 50
+    ) -> tuple[StoredShadowEvaluation, ...]:
+        _integer("limit", limit, minimum=1, maximum=MAX_PAGE_LIMIT)
+        with self._lock:
+            connection = self._required_connection()
+            parameters: tuple[object, ...]
+            where = ""
+            if before is None:
+                parameters = (limit,)
+            else:
+                _match("before", before, _SHADOW_ID)
+                cursor = connection.execute(
+                    "SELECT created_at,shadow_id FROM routing_shadow_evaluations "
+                    "WHERE shadow_id=?",
+                    (before,),
+                ).fetchone()
+                if cursor is None:
+                    raise RoutingStoreError("shadow evaluation cursor is unavailable")
+                where = "WHERE created_at < ? OR (created_at = ? AND shadow_id < ?) "
+                parameters = (cursor[0], cursor[0], cursor[1], limit)
+            rows = connection.execute(
+                "SELECT shadow_id,created_at,policy_id,policy_revision,data_revision,"
+                "runtime_revision,actual_target_id,recommended_target_id,actual_state,"
+                "actual_rejection_codes_json,agreement,recommended_score,actual_score,"
+                "score_advantage,estimated_cost_delta_micros,cost_currency,"
+                "estimated_latency_delta_ms FROM routing_shadow_evaluations "
+                f"{where}ORDER BY created_at DESC,shadow_id DESC LIMIT ?",
+                parameters,
+            ).fetchall()
+            return tuple(self._stored_shadow(row) for row in rows)
+
     def prune(self) -> PruneResult:
         now = _clock_value(self.clock)
         with self._lock:
@@ -719,14 +976,17 @@ class RoutingStore:
                     decisions, attempts = self._prune_locked(
                         _canonical_timestamp(now - RETENTION)
                     )
+                    shadows = self._prune_shadows_locked(
+                        _canonical_timestamp(now - RETENTION)
+                    )
                     revision = (
                         self._advance_revision_locked()
-                        if decisions or attempts
+                        if decisions or attempts or shadows
                         else self._revision_locked()
                     )
             except sqlite3.Error as error:
                 raise RoutingStoreError("routing evidence pruning failed") from error
-            return PruneResult(decisions, attempts, revision)
+            return PruneResult(decisions, attempts, shadows, revision)
 
     def _stored_decision(self, row: sqlite3.Row) -> StoredDecision:
         selected, alternatives, rejected = _decode_candidates(row[11])
@@ -770,6 +1030,57 @@ class RoutingStore:
         except (TypeError, ValueError) as error:
             raise RoutingStoreError("routing attempt evidence is incompatible") from error
         return StoredAttempt(*_attempt_values(evidence))
+
+    @staticmethod
+    def _stored_shadow(row: sqlite3.Row) -> StoredShadowEvaluation:
+        try:
+            rejection_codes = _decode_rejection_codes(row[9])
+            agreement_value = row[10]
+            if isinstance(agreement_value, bool) or agreement_value not in (0, 1):
+                raise ValueError("shadow agreement is invalid")
+            comparison = ShadowComparison(
+                actual_target_id=row[6],
+                recommended_target_id=row[7],
+                actual_state=row[8],
+                actual_rejection_codes=rejection_codes,
+                agreement=bool(agreement_value),
+                recommended_score=row[11],
+                actual_score=row[12],
+                score_advantage=row[13],
+                estimated_cost_delta_micros=row[14],
+                cost_currency=row[15],
+                estimated_latency_delta_ms=row[16],
+            )
+            evidence = ShadowEvaluationEvidence(
+                shadow_id=row[0],
+                created_at=row[1],
+                policy_id=row[2],
+                policy_revision=row[3],
+                data_revision=row[4],
+                runtime_revision=row[5],
+                comparison=comparison,
+            )
+        except (TypeError, ValueError) as error:
+            raise RoutingStoreError("shadow evaluation evidence is incompatible") from error
+        return StoredShadowEvaluation(
+            shadow_id=evidence.shadow_id,
+            created_at=evidence.created_at,
+            policy_id=evidence.policy_id,
+            policy_revision=evidence.policy_revision,
+            data_revision=evidence.data_revision,
+            runtime_revision=evidence.runtime_revision,
+            actual_target_id=comparison.actual_target_id,
+            recommended_target_id=comparison.recommended_target_id,
+            actual_state=comparison.actual_state,
+            actual_rejection_codes=comparison.actual_rejection_codes,
+            agreement=comparison.agreement,
+            recommended_score=comparison.recommended_score,
+            actual_score=comparison.actual_score,
+            score_advantage=comparison.score_advantage,
+            estimated_cost_delta_micros=comparison.estimated_cost_delta_micros,
+            cost_currency=comparison.cost_currency,
+            estimated_latency_delta_ms=comparison.estimated_latency_delta_ms,
+        )
 
     def _required_connection(self) -> sqlite3.Connection:
         if self._connection is None:
@@ -838,6 +1149,32 @@ class RoutingStore:
         )
         return decisions_before - decisions_after, attempts_before - attempts_after
 
+    def _prune_shadows_locked(self, cutoff: str) -> int:
+        connection = self._required_connection()
+        before = int(connection.execute(
+            "SELECT COUNT(*) FROM routing_shadow_evaluations"
+        ).fetchone()[0])
+        connection.execute(
+            "DELETE FROM routing_shadow_evaluations WHERE created_at < ?", (cutoff,)
+        )
+        overflow = max(
+            0,
+            int(connection.execute(
+                "SELECT COUNT(*) FROM routing_shadow_evaluations"
+            ).fetchone()[0]) - self.max_shadows,
+        )
+        if overflow:
+            connection.execute(
+                "DELETE FROM routing_shadow_evaluations WHERE shadow_id IN ("
+                "SELECT shadow_id FROM routing_shadow_evaluations "
+                "ORDER BY created_at,rowid LIMIT ?)",
+                (overflow,),
+            )
+        after = int(connection.execute(
+            "SELECT COUNT(*) FROM routing_shadow_evaluations"
+        ).fetchone()[0])
+        return before - after
+
     @staticmethod
     def _prepare_path(path: Path) -> tuple[int, int]:
         if not path.is_absolute():
@@ -888,8 +1225,18 @@ class RoutingStore:
             raise RuntimeError("routing database exceeds its size limit")
         self.page_limit_bytes = actual * page_size
 
-    def _validate_existing_schema(self, *, require_all: bool = False) -> None:
+    def _validate_existing_schema(
+        self,
+        *,
+        require_all: bool = False,
+        expected_columns: dict[str, tuple[tuple[str, str, int, int], ...]] | None = None,
+        expected_indexes: dict[str, tuple[str, int, tuple[tuple[str, int], ...]]] | None = None,
+    ) -> None:
         connection = self._required_connection()
+        columns_contract = _EXPECTED_COLUMNS if expected_columns is None else expected_columns
+        indexes_contract = _SCHEMA_INDEXES if expected_indexes is None else expected_indexes
+        expected_tables = frozenset(columns_contract)
+        expected_index_names = frozenset(indexes_contract)
         forbidden_objects = connection.execute(
             "SELECT name FROM sqlite_master WHERE type IN ('view','trigger')"
         ).fetchall()
@@ -909,16 +1256,18 @@ class RoutingStore:
                 "WHERE type='index' AND name NOT LIKE 'sqlite_%'"
             ).fetchall()
         }
-        if tables - _TABLES or indexes - _INDEXES:
+        if tables - expected_tables or indexes - expected_index_names:
             raise RuntimeError("routing database schema is incompatible")
         for table in tables:
             actual = tuple(
                 (str(row[1]), str(row[2]).upper(), int(row[3]), int(row[5]))
                 for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
             )
-            if actual != _EXPECTED_COLUMNS[table]:
+            if actual != columns_contract[table]:
                 raise RuntimeError("routing database schema is incompatible")
-        if require_all and (tables != _TABLES or indexes != _INDEXES):
+        if require_all and (
+            tables != expected_tables or indexes != expected_index_names
+        ):
             raise RuntimeError("routing database schema is incomplete")
         if require_all:
             if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
@@ -954,7 +1303,7 @@ class RoutingStore:
                     unique_attempt_ordinals = True
             if not unique_attempt_ordinals:
                 raise RuntimeError("routing database constraints are incompatible")
-            for index_name, (_table, _unique, columns) in _SCHEMA_INDEXES.items():
+            for index_name, (_table, _unique, columns) in indexes_contract.items():
                 expected_columns = tuple(name for name, _descending in columns)
                 actual_columns = tuple(
                     row[2]
@@ -1008,6 +1357,17 @@ class RoutingStore:
                 "ON DELETE CASCADE,UNIQUE(decision_id,ordinal))"
             )
             connection.execute(
+                "CREATE TABLE IF NOT EXISTS routing_shadow_evaluations ("
+                "shadow_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
+                "policy_id TEXT NOT NULL,policy_revision INTEGER NOT NULL,"
+                "data_revision INTEGER NOT NULL,runtime_revision INTEGER,"
+                "actual_target_id TEXT NOT NULL,recommended_target_id TEXT,"
+                "actual_state TEXT NOT NULL,actual_rejection_codes_json TEXT NOT NULL,"
+                "agreement INTEGER NOT NULL,recommended_score INTEGER,actual_score INTEGER,"
+                "score_advantage INTEGER,estimated_cost_delta_micros INTEGER,"
+                "cost_currency TEXT,estimated_latency_delta_ms INTEGER)"
+            )
+            connection.execute(
                 "CREATE INDEX IF NOT EXISTS routing_decisions_created "
                 "ON routing_decisions(created_at,decision_id)"
             )
@@ -1018,6 +1378,10 @@ class RoutingStore:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS routing_attempts_decision "
                 "ON routing_attempts(decision_id,ordinal)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS routing_shadows_created "
+                "ON routing_shadow_evaluations(created_at,shadow_id)"
             )
             connection.execute(
                 "INSERT OR IGNORE INTO routing_meta(key,value) VALUES('revision',0)"
@@ -1031,6 +1395,15 @@ def try_record_decision(store: object, evidence: DecisionEvidence) -> bool:
     except Exception:
         return False
     return isinstance(result, EvidenceWriteResult) and result.stored
+
+
+def try_record_shadow(store: object, evidence: ShadowEvaluationEvidence) -> bool:
+    """Best-effort shadow logging that never changes or executes a route."""
+    try:
+        result = store.record_shadow(evidence)  # type: ignore[attr-defined]
+    except Exception:
+        return False
+    return isinstance(result, ShadowWriteResult) and result.stored
 
 
 def try_record_attempt(store: object, evidence: ExecutionAttemptEvidence) -> bool:

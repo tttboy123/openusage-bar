@@ -11,7 +11,7 @@ from openusage_bar.collector_cli import main
 from openusage_bar.routing_api import RoutingController, create_routing_unix_server
 from openusage_bar.routing_store import RoutingStore
 from openusage_bar.routing_targets import RouteTargetConfiguration
-from tests.test_routing_api import NOW, FakeQuery, request_payload, target
+from tests.test_routing_api import NOW, FakeQuery, replay_payload, request_payload, target
 
 
 class RoutingCLITests(unittest.TestCase):
@@ -118,6 +118,41 @@ class RoutingCLITests(unittest.TestCase):
         )
         self.assertEqual((code, error), (0, ""))
         self.assertEqual(json.loads(output)["decisions"], [])
+
+    def test_shadow_and_shadow_history_use_stable_json_without_route_execution(self) -> None:
+        payload = request_payload()
+        payload["actualTargetId"] = "openai.work.gpt-5"
+        code, output, error = self.run_cli(
+            ["route", "shadow", "--format", "json"], json.dumps(payload)
+        )
+        self.assertEqual((code, error), (0, ""))
+        shadow = json.loads(output)
+        self.assertTrue(shadow["agreement"])
+        self.assertTrue(shadow["evidenceStored"])
+        self.assertEqual(self.store.decision_count(), 0)
+        self.assertEqual(self.store.shadow_count(), 1)
+
+        code, output, error = self.run_cli(
+            ["route", "shadow-history", "--format", "json", "--limit", "10"]
+        )
+        self.assertEqual((code, error), (0, ""))
+        history = json.loads(output)
+        self.assertEqual(history["shadows"][0]["shadowId"], shadow["shadowId"])
+        material = json.dumps(history)
+        for forbidden in ("accountRef", "modelId", "connectionRef"):
+            self.assertNotIn(forbidden, material)
+
+    def test_replay_returns_policy_metrics_without_writing_evidence(self) -> None:
+        code, output, error = self.run_cli(
+            ["route", "replay", "--format", "json"],
+            json.dumps(replay_payload()),
+        )
+        self.assertEqual((code, error), (0, ""))
+        report = json.loads(output)
+        self.assertEqual(report["summary"]["caseCount"], 1)
+        self.assertEqual(report["summary"]["agreementBasisPoints"], 10_000)
+        self.assertEqual(self.store.decision_count(), 0)
+        self.assertEqual(self.store.shadow_count(), 0)
 
     def test_missing_socket_and_oversized_input_are_sanitized(self) -> None:
         code, output, error = self.run_cli(

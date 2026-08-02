@@ -213,12 +213,18 @@ fallback，完整 OpenUsage daily import 最长 60 秒。超时不会把未知�
 "$COLLECTOR" route decide --format json < route-request.json
 "$COLLECTOR" route simulate --format json < route-request.json
 "$COLLECTOR" route history --format json --limit 20
+"$COLLECTOR" route shadow --format json < shadow-request.json
+"$COLLECTOR" route replay --format json < replay-fixture.json
 ```
 
 Phase A 只返回可解释的 Provider/账号/模型选择，不发送模型请求，也不接收
 Prompt 或响应内容。显式 Route Target 和执行适配器仍需在后续 Provider Center
 切片中配置；自动发现 Provider 不会自动授予可执行路由能力。完整契约与退出码
 见 [Route Decision API v1](docs/routing-api-v1.md)。
+
+0.8 当前开发树还提供内容无关的 Shadow 比较与有界离线 Replay：前者比较实际
+目标和策略推荐，后者使用冻结事实评估策略；两者均不代理请求，Replay 也不写
+证据。当前安装版仍只包含已验证的 Phase A，评测界面与新构建完成后再替换。
 
 ## Provider 支持
 

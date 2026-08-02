@@ -181,16 +181,26 @@ def _write_json(stdout: TextIO, value: object) -> None:
 def run_route_command(args, *, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     try:
         socket_path = Path(args.socket).expanduser()
-        if args.route_command in {"decide", "simulate"}:
+        if args.route_command in {"decide", "simulate", "shadow", "replay"}:
             body = _read_input(stdin)
-            route = "/v1/decisions" if args.route_command == "decide" else "/v1/simulations"
+            route = {
+                "decide": "/v1/decisions",
+                "simulate": "/v1/simulations",
+                "shadow": "/v1/shadow-decisions",
+                "replay": "/v1/replays",
+            }[args.route_command]
             status, payload = request_routing_json(
                 socket_path, "POST", route, body=body
             )
-        elif args.route_command == "history":
+        elif args.route_command in {"history", "shadow-history"}:
             if isinstance(args.limit, bool) or not 1 <= args.limit <= 100:
                 raise RoutingCLIInputError("routing input is invalid")
-            route = "/v1/decisions?limit=" + str(args.limit)
+            base = (
+                "/v1/decisions"
+                if args.route_command == "history"
+                else "/v1/shadow-decisions"
+            )
+            route = base + "?limit=" + str(args.limit)
             if args.before is not None:
                 route += "&before=" + quote(args.before, safe="._-")
             status, payload = request_routing_json(socket_path, "GET", route)

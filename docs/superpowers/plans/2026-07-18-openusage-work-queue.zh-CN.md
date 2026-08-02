@@ -1024,8 +1024,11 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   429/5xx/timeout/stream 故障、隐私与依赖扫描、完整 Python/Swift/打包/安装/
   升级/回滚及独立安全复核。Learned Router 只有通过这些门禁后才能从 shadow
   候选进入明确授权的策略。**基础性能、隐私、兼容性、打包、安装与升级门禁
-  已由 Phase A 通过；下一项是实现内容无关的 Shadow 与有界 Replay，再进入
-  WQ-28 代理故障矩阵。**
+  已由 Phase A 通过。截至 2026-08-02，内容无关 Shadow 比较、有界 Shadow
+  证据、确定性冻结事实
+  Replay、独立 API/CLI 以及三份严格请求 Schema 已在开发工作树完成，相关
+  Python 路由与构建契约回归 150 项通过。下一门禁是 SwiftUI 策略评测界面、
+  全量构建与本机 0.8 新构建安装；完成前不得把这一切片标记为已发行。**
 
 WQ-25 通过前不得开始 WQ-26 产品代码；WQ-26 是 WQ-27 与 WQ-28 的共同依赖。
 WQ-28 不阻塞只使用 Decision API 的用户。0.8 的实现和发布不依赖 Loom X1。

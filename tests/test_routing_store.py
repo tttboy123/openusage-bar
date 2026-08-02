@@ -98,6 +98,33 @@ def attempt(
     )
 
 
+def shadow(index: int, *, created_at: datetime = NOW, actual_target_id: str = "openai.work.gpt-5-mini"):
+    from openusage_bar.routing_evaluation import ShadowComparison
+    from openusage_bar.routing_store import ShadowEvaluationEvidence
+
+    return ShadowEvaluationEvidence(
+        shadow_id=f"shadow_{index:032x}",
+        created_at=timestamp(created_at),
+        policy_id="reliable",
+        policy_revision=3,
+        data_revision=60_000 + index,
+        runtime_revision=120 + index,
+        comparison=ShadowComparison(
+            actual_target_id=actual_target_id,
+            recommended_target_id="openai.work.gpt-5",
+            actual_state="eligible",
+            actual_rejection_codes=(),
+            agreement=actual_target_id == "openai.work.gpt-5",
+            recommended_score=8_500,
+            actual_score=7_500,
+            score_advantage=1_000,
+            estimated_cost_delta_micros=-25,
+            cost_currency="USD",
+            estimated_latency_delta_ms=-400,
+        ),
+    )
+
+
 class RoutingStoreContractTests(unittest.TestCase):
     def test_evidence_values_reject_identity_content_and_unbounded_attempts(self):
         from openusage_bar.routing_store import DecisionEvidence, ExecutionAttemptEvidence
@@ -119,8 +146,108 @@ class RoutingStoreContractTests(unittest.TestCase):
         self.assertNotIn("error_body", inspect.signature(ExecutionAttemptEvidence).parameters)
         self.assertNotIn("endpoint", inspect.signature(ExecutionAttemptEvidence).parameters)
 
+    def test_shadow_evidence_rejects_content_identity_and_inconsistent_comparison(self):
+        from openusage_bar.routing_store import ShadowEvaluationEvidence
+
+        invalid = (
+            lambda: dataclasses.replace(shadow(1), shadow_id="shadow_customer@example.com"),
+            lambda: dataclasses.replace(shadow(1), policy_id="/private/policy"),
+            lambda: dataclasses.replace(shadow(1), created_at="not-a-time"),
+            lambda: ShadowEvaluationEvidence(
+                shadow_id="shadow_00000000000000000000000000000001",
+                created_at=timestamp(NOW),
+                policy_id="reliable",
+                policy_revision=3,
+                data_revision=1,
+                runtime_revision=None,
+                comparison=dataclasses.replace(
+                    shadow(1).comparison,
+                    recommended_target_id=None,
+                    recommended_score=8_500,
+                ),
+            ),
+        )
+        for case in invalid:
+            with self.subTest(case=case), self.assertRaises(ValueError):
+                case()
+
+        parameters = inspect.signature(ShadowEvaluationEvidence).parameters
+        for forbidden in ("prompt", "response", "message", "payload", "endpoint"):
+            self.assertNotIn(forbidden, parameters)
+
 
 class RoutingStorePersistenceTests(unittest.TestCase):
+    def test_version_one_database_migrates_without_losing_decisions(self):
+        from openusage_bar.routing_schema import SCHEMA_VERSION
+        from openusage_bar.routing_store import RoutingStore, _decision_values
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "routing.sqlite3"
+            connection = sqlite3.connect(path)
+            try:
+                connection.executescript(
+                    "CREATE TABLE routing_meta(key TEXT PRIMARY KEY,value INTEGER NOT NULL);"
+                    "CREATE TABLE routing_decisions("
+                    "decision_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
+                    "expires_at TEXT NOT NULL,policy_id TEXT NOT NULL,"
+                    "policy_revision INTEGER NOT NULL,data_revision INTEGER NOT NULL,"
+                    "runtime_revision INTEGER,client_request_ref TEXT,session_ref TEXT,"
+                    "selected_target_id TEXT,selected_score INTEGER,candidates_json TEXT NOT NULL);"
+                    "CREATE TABLE routing_attempts("
+                    "attempt_id TEXT PRIMARY KEY,decision_id TEXT NOT NULL,"
+                    "target_id TEXT NOT NULL,ordinal INTEGER NOT NULL,"
+                    "started_at TEXT NOT NULL,completed_at TEXT NOT NULL,"
+                    "outcome TEXT NOT NULL,status_class TEXT,reason_code TEXT,"
+                    "input_tokens INTEGER,output_tokens INTEGER,cache_read_tokens INTEGER,"
+                    "cache_creation_tokens INTEGER,reasoning_tokens INTEGER,total_tokens INTEGER,"
+                    "cost_micros INTEGER,cost_currency TEXT,"
+                    "FOREIGN KEY(decision_id) REFERENCES routing_decisions(decision_id) "
+                    "ON DELETE CASCADE,UNIQUE(decision_id,ordinal));"
+                    "CREATE INDEX routing_decisions_created "
+                    "ON routing_decisions(created_at,decision_id);"
+                    "CREATE INDEX routing_attempts_completed "
+                    "ON routing_attempts(completed_at,attempt_id);"
+                    "CREATE INDEX routing_attempts_decision "
+                    "ON routing_attempts(decision_id,ordinal);"
+                    "INSERT INTO routing_meta(key,value) VALUES('revision',7);"
+                    "PRAGMA user_version=1;"
+                )
+                connection.execute(
+                    "INSERT INTO routing_decisions("
+                    "decision_id,created_at,expires_at,policy_id,policy_revision,"
+                    "data_revision,runtime_revision,client_request_ref,session_ref,"
+                    "selected_target_id,selected_score,candidates_json) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    _decision_values(evidence(1)),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            path.chmod(0o600)
+
+            store = RoutingStore(path, clock=lambda: NOW)
+            try:
+                self.assertEqual(store.revision(), 7)
+                self.assertEqual(store.decision_count(), 1)
+                self.assertEqual(store.shadow_count(), 0)
+                self.assertIsNotNone(store.get_decision(
+                    "route_00000000000000000000000000000001"
+                ))
+            finally:
+                store.close()
+            connection = sqlite3.connect(path)
+            try:
+                self.assertEqual(
+                    connection.execute("PRAGMA user_version").fetchone()[0],
+                    SCHEMA_VERSION,
+                )
+                self.assertIsNotNone(connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name='routing_shadow_evaluations'"
+                ).fetchone())
+            finally:
+                connection.close()
+
     def test_round_trip_is_canonical_private_bounded_and_content_free(self):
         from openusage_bar.routing_store import MAX_DATABASE_BYTES, RoutingStore
 
@@ -155,7 +282,10 @@ class RoutingStorePersistenceTests(unittest.TestCase):
                 }
                 self.assertEqual(
                     tables,
-                    {"routing_meta", "routing_decisions", "routing_attempts"},
+                    {
+                        "routing_meta", "routing_decisions", "routing_attempts",
+                        "routing_shadow_evaluations",
+                    },
                 )
                 candidates_json = connection.execute(
                     "SELECT candidates_json FROM routing_decisions"
@@ -174,6 +304,60 @@ class RoutingStorePersistenceTests(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, all_columns.lower())
             self.assertNotIn("private_account_123", candidates_json)
+
+    def test_shadow_round_trip_is_bounded_canonical_and_separate_from_decisions(self):
+        from openusage_bar.routing_store import RoutingStore
+
+        store = RoutingStore(":memory:", clock=lambda: NOW, max_shadows=2)
+        try:
+            first = store.record_shadow(shadow(1, created_at=NOW - timedelta(hours=2)))
+            duplicate = store.record_shadow(shadow(1, created_at=NOW - timedelta(hours=2)))
+            store.record_shadow(shadow(2, created_at=NOW - timedelta(hours=1)))
+            store.record_shadow(shadow(3, created_at=NOW))
+
+            self.assertTrue(first.stored)
+            self.assertFalse(first.duplicate)
+            self.assertTrue(duplicate.duplicate)
+            self.assertEqual(store.decision_count(), 0)
+            self.assertEqual(store.shadow_count(), 2)
+            rows = store.list_shadows(limit=10)
+            self.assertEqual(tuple(row.shadow_id for row in rows), (
+                "shadow_00000000000000000000000000000003",
+                "shadow_00000000000000000000000000000002",
+            ))
+            self.assertEqual(rows[0].recommended_target_id, "openai.work.gpt-5")
+            self.assertEqual(rows[0].actual_target_id, "openai.work.gpt-5-mini")
+            self.assertEqual(rows[0].actual_state, "eligible")
+            self.assertEqual(rows[0].score_advantage, 1_000)
+            self.assertEqual(rows[0].estimated_cost_delta_micros, -25)
+            self.assertEqual(rows[0].estimated_latency_delta_ms, -400)
+        finally:
+            store.close()
+
+    def test_shadow_round_trip_preserves_engine_rejection_reason_order(self):
+        from openusage_bar.routing_store import RoutingStore
+
+        rejected = dataclasses.replace(
+            shadow(9),
+            comparison=dataclasses.replace(
+                shadow(9).comparison,
+                actual_state="rejected",
+                actual_rejection_codes=("target_disabled", "capability_missing"),
+                actual_score=None,
+                score_advantage=None,
+            ),
+        )
+        store = RoutingStore(":memory:", clock=lambda: NOW)
+        try:
+            store.record_shadow(rejected)
+            stored = store.get_shadow(rejected.shadow_id)
+            self.assertIsNotNone(stored)
+            self.assertEqual(
+                stored.actual_rejection_codes,
+                ("target_disabled", "capability_missing"),
+            )
+        finally:
+            store.close()
 
     def test_idempotency_mismatch_and_foreign_key_fail_closed(self):
         from openusage_bar.routing_store import RoutingStore, RoutingStoreError

@@ -35,10 +35,12 @@ cd "$ROOT"
 CATALOG_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-provider-catalog.XXXXXX")
 LOCAL_API_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-local-api-schema.XXXXXX")
 ROUTING_API_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-routing-api-schema.XXXXXX")
+ROUTING_SHADOW_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-routing-shadow-schema.XXXXXX")
+ROUTING_REPLAY_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-routing-replay-schema.XXXXXX")
 ACTIVITY_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-activity-schema.XXXXXX")
 PYTHON_COVERAGE_REPORT=$(mktemp "${TMPDIR:-/tmp}/openusage-python-coverage.XXXXXX")
 PYTHON_COVERAGE_DIR="${TMPDIR:-/tmp}/openusage-build-trace-$$"
-trap 'rm -f "$CATALOG_TMP" "$LOCAL_API_SCHEMA_TMP" "$ROUTING_API_SCHEMA_TMP" "$ACTIVITY_SCHEMA_TMP" "$PYTHON_COVERAGE_REPORT"; rm -rf "$PYTHON_COVERAGE_DIR"' EXIT
+trap 'rm -f "$CATALOG_TMP" "$LOCAL_API_SCHEMA_TMP" "$ROUTING_API_SCHEMA_TMP" "$ROUTING_SHADOW_SCHEMA_TMP" "$ROUTING_REPLAY_SCHEMA_TMP" "$ACTIVITY_SCHEMA_TMP" "$PYTHON_COVERAGE_REPORT"; rm -rf "$PYTHON_COVERAGE_DIR"' EXIT
 "$PYTHON" scripts/generate_swift_provider_catalog.py --output "$CATALOG_TMP"
 if ! cmp -s "$CATALOG_TMP" "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift"; then
   print -u2 "generated Swift provider catalog is stale"
@@ -55,6 +57,18 @@ fi
 if ! cmp -s "$ROUTING_API_SCHEMA_TMP" "$ROOT/openusage_bar/resources/routing-api-v1.schema.json"; then
   print -u2 "generated routing API schema is stale"
   diff -u "$ROOT/openusage_bar/resources/routing-api-v1.schema.json" "$ROUTING_API_SCHEMA_TMP" || true
+  exit 1
+fi
+"$PYTHON" scripts/generate_routing_api_schema.py --kind shadow --output "$ROUTING_SHADOW_SCHEMA_TMP"
+if ! cmp -s "$ROUTING_SHADOW_SCHEMA_TMP" "$ROOT/openusage_bar/resources/routing-shadow-v1.schema.json"; then
+  print -u2 "generated routing Shadow schema is stale"
+  diff -u "$ROOT/openusage_bar/resources/routing-shadow-v1.schema.json" "$ROUTING_SHADOW_SCHEMA_TMP" || true
+  exit 1
+fi
+"$PYTHON" scripts/generate_routing_api_schema.py --kind replay --output "$ROUTING_REPLAY_SCHEMA_TMP"
+if ! cmp -s "$ROUTING_REPLAY_SCHEMA_TMP" "$ROOT/openusage_bar/resources/routing-replay-v1.schema.json"; then
+  print -u2 "generated routing Replay schema is stale"
+  diff -u "$ROOT/openusage_bar/resources/routing-replay-v1.schema.json" "$ROUTING_REPLAY_SCHEMA_TMP" || true
   exit 1
 fi
 "$PYTHON" scripts/generate_swift_activity_schema.py --output "$ACTIVITY_SCHEMA_TMP"
@@ -83,6 +97,8 @@ PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
   "$ROOT/openusage_bar/resources/provider-catalog.v1.json" \
   "$ROOT/openusage_bar/resources/local-api-v1.schema.json" \
   "$ROOT/openusage_bar/resources/routing-api-v1.schema.json" \
+  "$ROOT/openusage_bar/resources/routing-shadow-v1.schema.json" \
+  "$ROOT/openusage_bar/resources/routing-replay-v1.schema.json" \
   "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift" \
   "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedActivitySchema.swift"
 swift test --package-path "$SWIFT_PACKAGE" --enable-code-coverage -Xswiftc -warnings-as-errors
