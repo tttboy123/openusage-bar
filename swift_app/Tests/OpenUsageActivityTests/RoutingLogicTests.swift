@@ -46,6 +46,30 @@ struct RoutingLogicTests {
         #expect(model.failure == nil)
     }
 
+    @Test("Shadow and replay evaluation stay content-free and expose compact metrics")
+    func evaluation() async {
+        let client = RoutingClientFixture()
+        let model = RoutingViewModel(client: client)
+        await model.load()
+
+        #expect(model.shadowHistory.count == 1)
+        #expect(model.evaluationSummary.sampleCount == 1)
+        #expect(model.evaluationSummary.agreementBasisPoints == 0)
+        #expect(model.evaluationSummary.meanScoreAdvantage == 1_550)
+        #expect(model.selectedActualTargetID == "openai.work.gpt-5")
+
+        await model.recordShadow()
+        #expect(model.shadowResult?.actualTargetID == "openai.work.gpt-5")
+        #expect(client.lastActualTargetID == "openai.work.gpt-5")
+        #expect(model.shadowHistory.first?.shadowID == model.shadowResult?.shadowID)
+
+        let fixture = Data(#"{"schemaVersion":"1.0","policyId":"reliable","cases":[{}]}"#.utf8)
+        await model.replay(fixture)
+        #expect(model.replayReport?.summary.caseCount == 1)
+        #expect(model.replayReport?.cases.count == model.replayReport?.summary.caseCount)
+        #expect(model.evaluationFailure == nil)
+    }
+
     @Test("Errors are sanitized into stable human states")
     func sanitizedFailures() async {
         let client = RoutingClientFixture(error: .serverUnavailable)
@@ -404,7 +428,9 @@ private final class RoutingClientFixture: RoutingAPIReading, @unchecked Sendable
     private let error: RoutingAPIClientError?
     private let lock = NSLock()
     private var capturedRequest: RoutingDecisionRequest?
+    private var capturedActualTargetID: String?
     var lastRequest: RoutingDecisionRequest? { lock.withLock { capturedRequest } }
+    var lastActualTargetID: String? { lock.withLock { capturedActualTargetID } }
 
     init(noRoute: Bool = false, error: RoutingAPIClientError? = nil) {
         self.noRoute = noRoute
@@ -435,6 +461,31 @@ private final class RoutingClientFixture: RoutingAPIReading, @unchecked Sendable
     func history(before: String?, limit: Int) async throws -> RoutingHistoryPage {
         if let error { throw error }
         return RoutingHistoryPage(revision: 1, decisions: [.fixture()], nextBefore: nil)
+    }
+
+    func shadow(
+        _ request: RoutingDecisionRequest, actualTargetID: String
+    ) async throws -> RoutingShadowEvaluation {
+        if let error { throw error }
+        lock.withLock {
+            capturedRequest = request
+            capturedActualTargetID = actualTargetID
+        }
+        return .fixture(actualTargetID: actualTargetID)
+    }
+
+    func shadowHistory(
+        before: String?, limit: Int
+    ) async throws -> RoutingShadowHistoryPage {
+        if let error { throw error }
+        return RoutingShadowHistoryPage(
+            revision: 1, shadows: [.fixture()], nextBefore: nil
+        )
+    }
+
+    func replay(_ fixture: Data) async throws -> RoutingReplayReport {
+        if let error { throw error }
+        return .fixture()
     }
 }
 
@@ -551,5 +602,24 @@ private extension RoutingRejectedTarget {
 private extension RoutingHistoryDecision {
     static func fixture() -> Self {
         try! JSONDecoder().decode(Self.self, from: Data(#"{"decisionId":"route_0123456789abcdef0123456789abcdef","generatedAt":"2026-08-02T10:00:00Z","expiresAt":"2026-08-02T10:01:00Z","policy":{"policyId":"reliable","policyRevision":1},"facts":{"dataRevision":1,"runtimeRevision":2},"clientRequestRef":null,"sessionRef":null,"selected":{"targetId":"openai.work.gpt-5","score":8750,"components":{"reliability":5000,"headroom":2500,"latency":750,"cost":500},"reasons":["healthy_source"]},"alternatives":[],"rejected":[]}"#.utf8))
+    }
+}
+
+private extension RoutingShadowEvaluation {
+    static func fixture(actualTargetID: String = "minimax.primary.m3") -> Self {
+        try! JSONDecoder().decode(Self.self, from: Data(#"{"shadowId":"shadow_0123456789abcdef0123456789abcdef","createdAt":"2026-08-02T10:00:00Z","policy":{"policyId":"reliable","policyRevision":1},"facts":{"dataRevision":1,"runtimeRevision":2},"actualTargetId":"\#(actualTargetID)","recommendedTargetId":"openai.work.gpt-5","actualState":"eligible","actualRejectionCodes":[],"agreement":false,"recommendedScore":8750,"actualScore":7200,"scoreAdvantage":1550,"estimatedCostDeltaMicrounits":-75,"costCurrency":"USD","estimatedLatencyDeltaMilliseconds":-600}"#.utf8))
+    }
+}
+
+private extension RoutingReplayReport {
+    static func fixture() -> Self {
+        let data = Data(#"{"schemaVersion":"1.0","policy":{"policyId":"reliable","policyRevision":1},"summary":{"caseCount":1,"selectionCount":1,"agreementCount":0,"agreementBasisPoints":0,"noRouteCount":0,"noRouteBasisPoints":0,"actualRejectedCount":0,"actualRejectedBasisPoints":0,"comparableScoreCount":1,"meanScoreAdvantage":1550,"comparableLatencyCount":1,"meanEstimatedLatencyDeltaMilliseconds":-600,"costDeltas":[]},"cases":[{"caseId":"case-one","facts":{"dataRevision":1,"runtimeRevision":2},"actualTargetId":"minimax.primary.m3","recommendedTargetId":"openai.work.gpt-5","actualState":"eligible","actualRejectionCodes":[],"agreement":false,"recommendedScore":8750,"actualScore":7200,"scoreAdvantage":1550,"estimatedCostDeltaMicrounits":-75,"costCurrency":"USD","estimatedLatencyDeltaMilliseconds":-600}]}"#.utf8)
+        struct Wire: Decodable {
+            let policy: RoutingPolicyReference
+            let summary: RoutingReplaySummary
+            let cases: [RoutingReplayCaseResult]
+        }
+        let wire = try! JSONDecoder().decode(Wire.self, from: data)
+        return Self(policy: wire.policy, summary: wire.summary, cases: wire.cases)
     }
 }

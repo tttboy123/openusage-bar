@@ -135,6 +135,32 @@ public struct RoutingDecisionRequest: Encodable, Hashable, Sendable {
     }
 }
 
+private struct RoutingShadowRequest: Encodable {
+    let schemaVersion: String
+    let clientRequestRef: String?
+    let policyID: String
+    let task: RoutingTask
+    let constraints: RoutingConstraints
+    let session: RoutingSession?
+    let actualTargetID: String
+
+    init(_ request: RoutingDecisionRequest, actualTargetID: String) {
+        schemaVersion = request.schemaVersion
+        clientRequestRef = request.clientRequestRef
+        policyID = request.policyID
+        task = request.task
+        constraints = request.constraints
+        session = request.session
+        self.actualTargetID = actualTargetID
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, clientRequestRef, task, constraints, session
+        case policyID = "policyId"
+        case actualTargetID = "actualTargetId"
+    }
+}
+
 public struct RoutingHealth: Sendable, Hashable {
     public let ok: Bool
     public let status: String
@@ -309,17 +335,120 @@ public struct RoutingHistoryPage: Sendable, Hashable {
     public let nextBefore: String?
 }
 
+public struct RoutingShadowEvaluation: Decodable, Sendable, Hashable, Identifiable {
+    public let shadowID: String
+    public let createdAt: String
+    public let policy: RoutingPolicyReference
+    public let facts: RoutingFactReference
+    public let actualTargetID: String
+    public let recommendedTargetID: String?
+    public let actualState: String
+    public let actualRejectionCodes: [String]
+    public let agreement: Bool
+    public let recommendedScore: Int?
+    public let actualScore: Int?
+    public let scoreAdvantage: Int?
+    public let estimatedCostDeltaMicrounits: Int64?
+    public let costCurrency: String?
+    public let estimatedLatencyDeltaMilliseconds: Int64?
+    public let evidenceStored: Bool?
+    public var id: String { shadowID }
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt, policy, facts, actualState, actualRejectionCodes, agreement
+        case recommendedScore, actualScore, scoreAdvantage
+        case estimatedCostDeltaMicrounits, costCurrency
+        case estimatedLatencyDeltaMilliseconds, evidenceStored
+        case shadowID = "shadowId"
+        case actualTargetID = "actualTargetId"
+        case recommendedTargetID = "recommendedTargetId"
+    }
+}
+
+public struct RoutingShadowHistoryPage: Sendable, Hashable {
+    public let revision: Int64
+    public let shadows: [RoutingShadowEvaluation]
+    public let nextBefore: String?
+}
+
+public struct RoutingReplayCostDelta: Decodable, Sendable, Hashable {
+    public let currency: String
+    public let caseCount: Int
+    public let totalDeltaMicrounits: Int64
+    public let meanDeltaMicrounits: Int64
+}
+
+public struct RoutingReplaySummary: Decodable, Sendable, Hashable {
+    public let caseCount: Int
+    public let selectionCount: Int
+    public let agreementCount: Int
+    public let agreementBasisPoints: Int
+    public let noRouteCount: Int
+    public let noRouteBasisPoints: Int
+    public let actualRejectedCount: Int
+    public let actualRejectedBasisPoints: Int
+    public let comparableScoreCount: Int
+    public let meanScoreAdvantage: Int?
+    public let comparableLatencyCount: Int
+    public let meanEstimatedLatencyDeltaMilliseconds: Int64?
+    public let costDeltas: [RoutingReplayCostDelta]
+}
+
+public struct RoutingReplayCaseResult: Decodable, Sendable, Hashable, Identifiable {
+    public let caseID: String
+    public let facts: RoutingFactReference
+    public let actualTargetID: String
+    public let recommendedTargetID: String?
+    public let actualState: String
+    public let actualRejectionCodes: [String]
+    public let agreement: Bool
+    public let recommendedScore: Int?
+    public let actualScore: Int?
+    public let scoreAdvantage: Int?
+    public let estimatedCostDeltaMicrounits: Int64?
+    public let costCurrency: String?
+    public let estimatedLatencyDeltaMilliseconds: Int64?
+    public var id: String { caseID }
+
+    enum CodingKeys: String, CodingKey {
+        case facts, actualState, actualRejectionCodes, agreement
+        case recommendedScore, actualScore, scoreAdvantage
+        case estimatedCostDeltaMicrounits, costCurrency
+        case estimatedLatencyDeltaMilliseconds
+        case caseID = "caseId"
+        case actualTargetID = "actualTargetId"
+        case recommendedTargetID = "recommendedTargetId"
+    }
+}
+
+public struct RoutingReplayReport: Sendable, Hashable {
+    public let policy: RoutingPolicyReference
+    public let summary: RoutingReplaySummary
+    public let cases: [RoutingReplayCaseResult]
+}
+
 public protocol RoutingAPIReading: Sendable {
     func health() async throws -> RoutingHealth
     func policies() async throws -> [RoutingPolicy]
     func targets() async throws -> RoutingTargetDocument
     func simulate(_ request: RoutingDecisionRequest) async throws -> RoutingDecision
     func history(before: String?, limit: Int) async throws -> RoutingHistoryPage
+    func shadow(
+        _ request: RoutingDecisionRequest, actualTargetID: String
+    ) async throws -> RoutingShadowEvaluation
+    func shadowHistory(
+        before: String?, limit: Int
+    ) async throws -> RoutingShadowHistoryPage
+    func replay(_ fixture: Data) async throws -> RoutingReplayReport
 }
 
 public extension RoutingAPIReading {
     func history(limit: Int) async throws -> RoutingHistoryPage {
         try await history(before: nil, limit: limit)
+    }
+
+    func shadowHistory(limit: Int) async throws -> RoutingShadowHistoryPage {
+        try await shadowHistory(before: nil, limit: limit)
     }
 }
 
@@ -411,6 +540,82 @@ public struct RoutingAPIClient: RoutingAPIReading, Sendable {
             decisions: wire.decisions,
             nextBefore: wire.nextBefore
         )
+    }
+
+    public func shadow(
+        _ request: RoutingDecisionRequest, actualTargetID: String
+    ) async throws -> RoutingShadowEvaluation {
+        guard Self.valid(request), Self.safeID(actualTargetID) else {
+            throw RoutingAPIClientError.invalidRequest
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let body = try? encoder.encode(
+            RoutingShadowRequest(request, actualTargetID: actualTargetID)
+        ), body.count <= 65_536 else {
+            throw RoutingAPIClientError.invalidRequest
+        }
+        let response = try await transport(
+            method: "POST", target: "/v1/shadow-decisions", body: body
+        )
+        if response.statusCode == 400 { throw RoutingAPIClientError.invalidRequest }
+        if response.statusCode == 503 { throw RoutingAPIClientError.serverUnavailable }
+        guard response.statusCode == 200 else {
+            throw RoutingAPIClientError.invalidResponse
+        }
+        let wire: ShadowWire = try decode(ShadowWire.self, from: response.body)
+        try requireSchema(wire.schemaVersion)
+        guard Self.validShadow(wire.value) else {
+            throw RoutingAPIClientError.invalidResponse
+        }
+        return wire.value
+    }
+
+    public func shadowHistory(
+        before: String? = nil, limit: Int
+    ) async throws -> RoutingShadowHistoryPage {
+        guard (1...100).contains(limit), before.map(Self.safeID) ?? true else {
+            throw RoutingAPIClientError.invalidRequest
+        }
+        let target = "/v1/shadow-decisions?limit=\(limit)"
+            + (before.map { "&before=\($0)" } ?? "")
+        let wire = try await get(ShadowHistoryWire.self, target: target)
+        try requireSchema(wire.schemaVersion)
+        guard wire.routingRevision >= 0, wire.shadows.count <= limit,
+              Set(wire.shadows.map(\.shadowID)).count == wire.shadows.count,
+              wire.nextBefore.map(Self.safeID) ?? true,
+              wire.shadows.allSatisfy(Self.validShadow)
+        else { throw RoutingAPIClientError.invalidResponse }
+        return RoutingShadowHistoryPage(
+            revision: wire.routingRevision,
+            shadows: wire.shadows,
+            nextBefore: wire.nextBefore
+        )
+    }
+
+    public func replay(_ fixture: Data) async throws -> RoutingReplayReport {
+        guard !fixture.isEmpty, fixture.count <= 65_536,
+              let object = try? JSONSerialization.jsonObject(with: fixture),
+              let root = object as? [String: Any],
+              root["schemaVersion"] as? String == "1.0",
+              let policyID = root["policyId"] as? String, Self.safeID(policyID),
+              let cases = root["cases"] as? [Any], (1...256).contains(cases.count),
+              !Self.containsForbiddenReplayKey(object)
+        else { throw RoutingAPIClientError.invalidRequest }
+        let response = try await transport(
+            method: "POST", target: "/v1/replays", body: fixture
+        )
+        if response.statusCode == 400 { throw RoutingAPIClientError.invalidRequest }
+        if response.statusCode == 503 { throw RoutingAPIClientError.serverUnavailable }
+        guard response.statusCode == 200 else {
+            throw RoutingAPIClientError.invalidResponse
+        }
+        let wire: ReplayWire = try decode(ReplayWire.self, from: response.body)
+        try requireSchema(wire.schemaVersion)
+        guard Self.validReplay(wire.value) else {
+            throw RoutingAPIClientError.invalidResponse
+        }
+        return wire.value
     }
 
     private func postDecision(
@@ -581,6 +786,112 @@ public struct RoutingAPIClient: RoutingAPIReading, Sendable {
             && value.rejected.allSatisfy(validRejected)
     }
 
+    private static func validShadow(_ value: RoutingShadowEvaluation) -> Bool {
+        let validState = ["eligible", "rejected", "unknown"].contains(value.actualState)
+        let recommendationPair = (value.recommendedTargetID == nil) == (value.recommendedScore == nil)
+        let costPair = (value.estimatedCostDeltaMicrounits == nil) == (value.costCurrency == nil)
+        let actualConsistent: Bool = switch value.actualState {
+        case "eligible": value.actualScore != nil && value.actualRejectionCodes.isEmpty
+        case "rejected": value.actualScore == nil && !value.actualRejectionCodes.isEmpty
+        case "unknown": value.actualScore == nil && value.actualRejectionCodes.isEmpty
+        default: false
+        }
+        let agreement = value.recommendedTargetID != nil
+            && value.recommendedTargetID == value.actualTargetID
+        let scorePair = (value.scoreAdvantage == nil)
+            == (value.recommendedScore == nil || value.actualScore == nil)
+        let scoreConsistent = value.scoreAdvantage.map { advantage in
+            guard let recommended = value.recommendedScore, let actual = value.actualScore else {
+                return false
+            }
+            return advantage == recommended - actual
+        } ?? true
+        return value.shadowID.hasPrefix("shadow_") && safeID(value.shadowID)
+            && safeTimestamp(value.createdAt)
+            && safeID(value.policy.policyID) && value.policy.revision > 0
+            && safeID(value.actualTargetID)
+            && value.recommendedTargetID.map(safeID) ?? true
+            && validState && value.actualRejectionCodes.count <= 16
+            && validIDs(value.actualRejectionCodes)
+            && value.recommendedScore.map { (0...10_000).contains($0) } ?? true
+            && value.actualScore.map { (0...10_000).contains($0) } ?? true
+            && value.scoreAdvantage.map { (-10_000...10_000).contains($0) } ?? true
+            && value.estimatedCostDeltaMicrounits.map(validSignedCounter) ?? true
+            && value.estimatedLatencyDeltaMilliseconds.map(validSignedCounter) ?? true
+            && value.costCurrency.map(safeCurrency) ?? true
+            && recommendationPair && costPair && actualConsistent
+            && value.agreement == agreement && scorePair && scoreConsistent
+    }
+
+    private static func validReplay(_ value: RoutingReplayReport) -> Bool {
+        let summary = value.summary
+        let count = summary.caseCount
+        let counts = [
+            summary.selectionCount, summary.agreementCount, summary.noRouteCount,
+            summary.actualRejectedCount, summary.comparableScoreCount,
+            summary.comparableLatencyCount,
+        ]
+        let basisPoints = [
+            summary.agreementBasisPoints, summary.noRouteBasisPoints,
+            summary.actualRejectedBasisPoints,
+        ]
+        let caseIDs = value.cases.map(\.caseID)
+        return safeID(value.policy.policyID) && value.policy.revision > 0
+            && (1...256).contains(count) && value.cases.count == count
+            && counts.allSatisfy { (0...count).contains($0) }
+            && summary.selectionCount + summary.noRouteCount == count
+            && basisPoints.allSatisfy { (0...10_000).contains($0) }
+            && summary.meanScoreAdvantage.map { (-10_000...10_000).contains($0) } ?? true
+            && summary.meanEstimatedLatencyDeltaMilliseconds.map(validSignedCounter) ?? true
+            && summary.costDeltas.count <= count
+            && summary.costDeltas.allSatisfy { delta in
+                safeCurrency(delta.currency) && (1...count).contains(delta.caseCount)
+                    && validSignedAggregate(delta.totalDeltaMicrounits)
+                    && validSignedCounter(delta.meanDeltaMicrounits)
+            }
+            && Set(caseIDs).count == caseIDs.count
+            && value.cases.allSatisfy(validReplayCase)
+    }
+
+    private static func validReplayCase(_ value: RoutingReplayCaseResult) -> Bool {
+        let shadow = RoutingShadowEvaluation(
+            shadowID: "shadow_0123456789abcdef",
+            createdAt: "2026-08-02T00:00:00Z",
+            policy: RoutingPolicyReference(policyID: "reliable", revision: 1),
+            facts: value.facts,
+            actualTargetID: value.actualTargetID,
+            recommendedTargetID: value.recommendedTargetID,
+            actualState: value.actualState,
+            actualRejectionCodes: value.actualRejectionCodes,
+            agreement: value.agreement,
+            recommendedScore: value.recommendedScore,
+            actualScore: value.actualScore,
+            scoreAdvantage: value.scoreAdvantage,
+            estimatedCostDeltaMicrounits: value.estimatedCostDeltaMicrounits,
+            costCurrency: value.costCurrency,
+            estimatedLatencyDeltaMilliseconds: value.estimatedLatencyDeltaMilliseconds,
+            evidenceStored: nil
+        )
+        return safeID(value.caseID) && validShadow(shadow)
+    }
+
+    private static func containsForbiddenReplayKey(_ value: Any) -> Bool {
+        let forbidden = Set([
+            "prompt", "messages", "headers", "apikey", "cookie", "authorization",
+            "response", "outcomebody", "toolbody",
+        ])
+        if let object = value as? [String: Any] {
+            if object.keys.contains(where: { forbidden.contains($0.lowercased()) }) {
+                return true
+            }
+            return object.values.contains(where: containsForbiddenReplayKey)
+        }
+        if let array = value as? [Any] {
+            return array.contains(where: containsForbiddenReplayKey)
+        }
+        return false
+    }
+
     private static func validScored(_ value: RoutingScoredTarget) -> Bool {
         let components = value.components
         return safeID(value.targetID) && value.providerID.map(safeID) ?? true
@@ -598,6 +909,14 @@ public struct RoutingAPIClient: RoutingAPIReading, Sendable {
 
     private static func validCounter(_ value: Int64) -> Bool {
         (0...1_000_000_000_000).contains(value)
+    }
+
+    private static func validSignedCounter(_ value: Int64) -> Bool {
+        (-1_000_000_000_000...1_000_000_000_000).contains(value)
+    }
+
+    private static func validSignedAggregate(_ value: Int64) -> Bool {
+        (-256_000_000_000_000...256_000_000_000_000).contains(value)
     }
 
     private static func validIDs(_ values: [String]) -> Bool {
@@ -708,4 +1027,66 @@ private struct HistoryWire: Decodable {
     let routingRevision: Int64
     let decisions: [RoutingHistoryDecision]
     let nextBefore: String?
+}
+
+private struct ShadowWire: Decodable {
+    let schemaVersion: String
+    let shadowID: String
+    let createdAt: String
+    let policy: RoutingPolicyReference
+    let facts: RoutingFactReference
+    let actualTargetID: String
+    let recommendedTargetID: String?
+    let actualState: String
+    let actualRejectionCodes: [String]
+    let agreement: Bool
+    let recommendedScore: Int?
+    let actualScore: Int?
+    let scoreAdvantage: Int?
+    let estimatedCostDeltaMicrounits: Int64?
+    let costCurrency: String?
+    let estimatedLatencyDeltaMilliseconds: Int64?
+    let evidenceStored: Bool?
+
+    var value: RoutingShadowEvaluation {
+        RoutingShadowEvaluation(
+            shadowID: shadowID, createdAt: createdAt, policy: policy, facts: facts,
+            actualTargetID: actualTargetID, recommendedTargetID: recommendedTargetID,
+            actualState: actualState, actualRejectionCodes: actualRejectionCodes,
+            agreement: agreement, recommendedScore: recommendedScore,
+            actualScore: actualScore, scoreAdvantage: scoreAdvantage,
+            estimatedCostDeltaMicrounits: estimatedCostDeltaMicrounits,
+            costCurrency: costCurrency,
+            estimatedLatencyDeltaMilliseconds: estimatedLatencyDeltaMilliseconds,
+            evidenceStored: evidenceStored
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, createdAt, policy, facts, actualState
+        case actualRejectionCodes, agreement, recommendedScore, actualScore
+        case scoreAdvantage, estimatedCostDeltaMicrounits, costCurrency
+        case estimatedLatencyDeltaMilliseconds, evidenceStored
+        case shadowID = "shadowId"
+        case actualTargetID = "actualTargetId"
+        case recommendedTargetID = "recommendedTargetId"
+    }
+}
+
+private struct ShadowHistoryWire: Decodable {
+    let schemaVersion: String
+    let routingRevision: Int64
+    let shadows: [RoutingShadowEvaluation]
+    let nextBefore: String?
+}
+
+private struct ReplayWire: Decodable {
+    let schemaVersion: String
+    let policy: RoutingPolicyReference
+    let summary: RoutingReplaySummary
+    let cases: [RoutingReplayCaseResult]
+
+    var value: RoutingReplayReport {
+        RoutingReplayReport(policy: policy, summary: summary, cases: cases)
+    }
 }

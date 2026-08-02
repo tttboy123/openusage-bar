@@ -15,6 +15,11 @@ This project follows [Semantic Versioning](https://semver.org/).
   validation boundary.
 - ADR 0001 freezes ownership of durable resource facts, bounded request
   telemetry, scheduler reservations, and policy decisions.
+- A standalone, deterministic Route Decision API now selects explicit execution
+  targets from quota, balance, freshness and runtime facts without receiving or
+  proxying model content. Native Provider Center controls, explainable dry runs,
+  content-free Shadow comparisons and bounded frozen-fact Replay reports share
+  the same private routing contract.
 
 ### Changed
 

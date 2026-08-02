@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import UsageCore
 
 struct RoutingPage: View {
@@ -7,6 +8,8 @@ struct RoutingPage: View {
     @State private var editingConnection: RoutingConnectionDraft?
     @State private var editingTarget: RoutingTargetDraft?
     @State private var editingPolicy: RoutingPolicyDraft?
+    @State private var isImportingReplay = false
+    @State private var localEvaluationFailure: String?
 
     var body: some View {
         ScrollView(.vertical) {
@@ -34,6 +37,7 @@ struct RoutingPage: View {
                     customPolicies
                     dryRun
                     decisionResult
+                    evaluation
                     history
                 }
             }
@@ -73,6 +77,22 @@ struct RoutingPage: View {
                     removePolicy(policyID)
                 }
             )
+        }
+        .fileImporter(
+            isPresented: $isImportingReplay,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case let .success(urls):
+                guard let url = urls.first else {
+                    localEvaluationFailure = AppLocalization.text("Replay file is unavailable")
+                    return
+                }
+                importReplay(url)
+            case .failure:
+                localEvaluationFailure = AppLocalization.text("Replay file could not be read")
+            }
         }
     }
 
@@ -487,6 +507,204 @@ struct RoutingPage: View {
         .accessibilityElement(children: .combine)
     }
 
+    private var evaluation: some View {
+        let summary = model.evaluationSummary
+        return VStack(alignment: .leading, spacing: 12) {
+            sectionTitle(
+                "Policy evaluation",
+                detail: "Compare actual choices with policy recommendations"
+            )
+            GroupBox {
+                HStack(alignment: .top, spacing: 28) {
+                    evaluationMetric(
+                        "Comparisons", value: "\(summary.sampleCount)"
+                    )
+                    evaluationMetric(
+                        "Agreement", value: basisPointPercent(summary.agreementBasisPoints)
+                    )
+                    evaluationMetric(
+                        "Actual rejected", value: "\(summary.actualRejectedCount)"
+                    )
+                    evaluationMetric(
+                        "Mean score advantage",
+                        value: signed(summary.meanScoreAdvantage)
+                    )
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 4)
+
+                Divider().padding(.vertical, 10)
+
+                HStack(spacing: 12) {
+                    Picker("Actual target", selection: $model.selectedActualTargetID) {
+                        ForEach(model.targets) { target in
+                            Text("\(target.modelID) · \(target.accountRef)")
+                                .tag(target.targetID)
+                        }
+                    }
+                    .frame(maxWidth: 300)
+                    .disabled(model.targets.isEmpty || model.isEvaluating)
+                    Button("Record Shadow", systemImage: "point.3.connected.trianglepath.dotted") {
+                        Task { await model.recordShadow() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.indigo)
+                    .disabled(
+                        model.targets.isEmpty || model.isEvaluating
+                            || !model.decisionAPIEnabled
+                    )
+                    .help("Compare this actual target with the current policy without sending a model request")
+                    Button("Import Replay", systemImage: "doc.badge.arrow.up") {
+                        localEvaluationFailure = nil
+                        isImportingReplay = true
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.isEvaluating || !model.decisionAPIEnabled)
+                    Spacer()
+                }
+
+                Text("Shadow stores only target IDs, scores, reason codes and fact revisions. Replay reads a frozen local JSON fixture and writes no evidence.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+
+                if let failure = model.evaluationFailure?.title ?? localEvaluationFailure {
+                    Label(failure, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .padding(.top, 8)
+                }
+            }
+
+            if model.shadowHistory.isEmpty {
+                Text("No policy comparisons have been recorded yet.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(18)
+                    .background(
+                        .quaternary.opacity(0.28),
+                        in: RoundedRectangle(cornerRadius: 12)
+                    )
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(
+                        Array(model.shadowHistory.prefix(6).enumerated()),
+                        id: \.element.id
+                    ) { index, item in
+                        shadowRow(item)
+                        if index < min(model.shadowHistory.count, 6) - 1 {
+                            Divider().padding(.leading, 38)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .background(
+                    .quaternary.opacity(0.28),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+            }
+
+            if let report = model.replayReport {
+                replayReport(report)
+            }
+        }
+    }
+
+    private func evaluationMetric(_ title: LocalizedStringKey, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.title3.monospacedDigit().weight(.semibold))
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func shadowRow(_ item: RoutingShadowEvaluation) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: item.agreement
+                  ? "checkmark.circle.fill"
+                  : item.actualState == "rejected"
+                    ? "exclamationmark.triangle.fill" : "arrow.triangle.branch")
+                .foregroundStyle(item.agreement ? .green : .orange)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(item.actualTargetID) → \(item.recommendedTargetID ?? AppLocalization.text("No eligible route"))")
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                Text(RoutingPresentation.policyTitle(item.policy.policyID))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(AppLocalization.text(item.agreement ? "Agreement" : "Different choice"))
+                    .font(.callout.weight(.medium))
+                Text(DateText.display(item.createdAt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func replayReport(_ report: RoutingReplayReport) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Replay report").font(.title2.weight(.semibold))
+                Text("\(RoutingPresentation.policyTitle(report.policy.policyID)) · \(AppLocalization.text("Frozen facts"))")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            GroupBox {
+                HStack(alignment: .top, spacing: 28) {
+                    evaluationMetric("Cases", value: "\(report.summary.caseCount)")
+                    evaluationMetric(
+                        "Agreement",
+                        value: basisPointPercent(report.summary.agreementBasisPoints)
+                    )
+                    evaluationMetric(
+                        "No route", value: "\(report.summary.noRouteCount)"
+                    )
+                    evaluationMetric(
+                        "Actual rejected",
+                        value: "\(report.summary.actualRejectedCount)"
+                    )
+                    Spacer(minLength: 0)
+                }
+                if !report.summary.costDeltas.isEmpty {
+                    Divider().padding(.vertical, 8)
+                    ForEach(report.summary.costDeltas, id: \.currency) { delta in
+                        HStack {
+                            Text(delta.currency).font(.callout.monospaced())
+                            Spacer()
+                            Text(AppLocalization.format(
+                                "%lld μ total · %lld μ mean",
+                                delta.totalDeltaMicrounits,
+                                delta.meanDeltaMicrounits
+                            ))
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+        }
+    }
+
+    private func basisPointPercent(_ value: Int) -> String {
+        let whole = value / 100
+        let tenth = value % 100 / 10
+        return tenth == 0 ? "\(whole)%" : "\(whole).\(tenth)%"
+    }
+
+    private func signed<T: BinaryInteger>(_ value: T?) -> String {
+        guard let value else { return "—" }
+        return value > 0 ? "+\(value)" : "\(value)"
+    }
+
     private var history: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionTitle("Recent decisions", detail: "Content-free evidence retained for seven days")
@@ -653,6 +871,28 @@ struct RoutingPage: View {
                 defaultPolicyID: policyID,
                 command: command
             )
+        }
+    }
+
+    private func importReplay(_ url: URL) {
+        localEvaluationFailure = nil
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer {
+            if scoped { url.stopAccessingSecurityScopedResource() }
+        }
+        do {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values.isRegularFile == true,
+                  let size = values.fileSize,
+                  (1...65_536).contains(size)
+            else {
+                localEvaluationFailure = AppLocalization.text("Replay file must be a JSON file no larger than 64 KiB")
+                return
+            }
+            let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+            Task { await model.replay(data) }
+        } catch {
+            localEvaluationFailure = AppLocalization.text("Replay file could not be read")
         }
     }
 

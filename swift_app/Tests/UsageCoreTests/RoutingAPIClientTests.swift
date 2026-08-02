@@ -85,6 +85,49 @@ struct RoutingAPIClientTests {
         #expect(server.request.contains("GET /v1/decisions?limit=20 HTTP/1.1"))
     }
 
+    @Test("Shadow evaluation posts only decision metadata and reads bounded history")
+    func evaluatesShadow() async throws {
+        let evaluation = #"{"schemaVersion":"1.0","shadowId":"shadow_0123456789abcdef0123456789abcdef","createdAt":"2026-08-02T10:00:00Z","policy":{"policyId":"reliable","policyRevision":1},"facts":{"dataRevision":7,"runtimeRevision":8},"actualTargetId":"minimax.primary.m3","recommendedTargetId":"openai.work.gpt-5","actualState":"eligible","actualRejectionCodes":[],"agreement":false,"recommendedScore":8750,"actualScore":7200,"scoreAdvantage":1550,"estimatedCostDeltaMicrounits":-75,"costCurrency":"USD","estimatedLatencyDeltaMilliseconds":-600,"evidenceStored":true}"#
+        let server = try RoutingFixtureServer(json: evaluation)
+
+        let result = try await RoutingAPIClient(socketURL: server.url).shadow(
+            .minimal(), actualTargetID: "minimax.primary.m3"
+        )
+
+        #expect(result.actualTargetID == "minimax.primary.m3")
+        #expect(result.recommendedTargetID == "openai.work.gpt-5")
+        #expect(result.scoreAdvantage == 1_550)
+        #expect(result.evidenceStored == true)
+        #expect(server.request.contains("POST /v1/shadow-decisions HTTP/1.1"))
+        #expect(server.request.contains("\"actualTargetId\":\"minimax.primary.m3\""))
+        #expect(!server.request.localizedCaseInsensitiveContains("prompt"))
+
+        let historyJSON = #"{"schemaVersion":"1.0","routingRevision":13,"shadows":[{"shadowId":"shadow_0123456789abcdef0123456789abcdef","createdAt":"2026-08-02T10:00:00Z","policy":{"policyId":"reliable","policyRevision":1},"facts":{"dataRevision":7,"runtimeRevision":8},"actualTargetId":"minimax.primary.m3","recommendedTargetId":"openai.work.gpt-5","actualState":"eligible","actualRejectionCodes":[],"agreement":false,"recommendedScore":8750,"actualScore":7200,"scoreAdvantage":1550,"estimatedCostDeltaMicrounits":-75,"costCurrency":"USD","estimatedLatencyDeltaMilliseconds":-600}],"nextBefore":null}"#
+        let historyServer = try RoutingFixtureServer(json: historyJSON)
+        let history = try await RoutingAPIClient(socketURL: historyServer.url)
+            .shadowHistory(before: nil, limit: 20)
+        #expect(history.revision == 13)
+        #expect(history.shadows.first?.agreement == false)
+        #expect(historyServer.request.contains(
+            "GET /v1/shadow-decisions?limit=20 HTTP/1.1"
+        ))
+    }
+
+    @Test("Replay sends one bounded frozen fixture and decodes aggregate evidence")
+    func replaysFrozenEvidence() async throws {
+        let reportJSON = #"{"schemaVersion":"1.0","policy":{"policyId":"reliable","policyRevision":1},"summary":{"caseCount":2,"selectionCount":2,"agreementCount":1,"agreementBasisPoints":5000,"noRouteCount":0,"noRouteBasisPoints":0,"actualRejectedCount":0,"actualRejectedBasisPoints":0,"comparableScoreCount":2,"meanScoreAdvantage":775,"comparableLatencyCount":2,"meanEstimatedLatencyDeltaMilliseconds":-300,"costDeltas":[{"currency":"USD","caseCount":2,"totalDeltaMicrounits":-75,"meanDeltaMicrounits":-37}]},"cases":[{"caseId":"case-one","facts":{"dataRevision":7,"runtimeRevision":8},"actualTargetId":"minimax.primary.m3","recommendedTargetId":"openai.work.gpt-5","actualState":"eligible","actualRejectionCodes":[],"agreement":false,"recommendedScore":8750,"actualScore":7200,"scoreAdvantage":1550,"estimatedCostDeltaMicrounits":-75,"costCurrency":"USD","estimatedLatencyDeltaMilliseconds":-600},{"caseId":"case-two","facts":{"dataRevision":7,"runtimeRevision":8},"actualTargetId":"openai.work.gpt-5","recommendedTargetId":"openai.work.gpt-5","actualState":"eligible","actualRejectionCodes":[],"agreement":true,"recommendedScore":8750,"actualScore":8750,"scoreAdvantage":0,"estimatedCostDeltaMicrounits":0,"costCurrency":"USD","estimatedLatencyDeltaMilliseconds":0}]}"#
+        let server = try RoutingFixtureServer(json: reportJSON)
+        let fixture = Data(#"{"schemaVersion":"1.0","policyId":"reliable","cases":[{}]}"#.utf8)
+
+        let report = try await RoutingAPIClient(socketURL: server.url).replay(fixture)
+
+        #expect(report.summary.caseCount == 2)
+        #expect(report.summary.agreementBasisPoints == 5_000)
+        #expect(report.summary.costDeltas.first?.totalDeltaMicrounits == -75)
+        #expect(report.cases.first?.caseID == "case-one")
+        #expect(server.request.contains("POST /v1/replays HTTP/1.1"))
+    }
+
     @Test("Schema drift oversized output and invalid requests fail closed")
     func failsClosed() async throws {
         let drift = try RoutingFixtureServer(json: #"{"schemaVersion":"2.0","health":{"ok":true,"status":"ok"},"decisionApiEnabled":true,"defaultPolicyId":"reliable","preferencesRevision":0,"targetRevision":1,"targetCount":0,"routingRevision":0}"#)

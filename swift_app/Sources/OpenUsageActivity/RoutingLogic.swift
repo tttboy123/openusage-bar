@@ -278,6 +278,29 @@ struct RoutingTargetStatus: Sendable, Equatable {
     let title: String
 }
 
+struct RoutingEvaluationSummary: Sendable, Equatable {
+    let sampleCount: Int
+    let agreementCount: Int
+    let agreementBasisPoints: Int
+    let actualRejectedCount: Int
+    let meanScoreAdvantage: Int?
+    let meanLatencyDeltaMilliseconds: Int64?
+
+    init(shadows: [RoutingShadowEvaluation]) {
+        sampleCount = shadows.count
+        agreementCount = shadows.filter(\.agreement).count
+        agreementBasisPoints = shadows.isEmpty
+            ? 0 : agreementCount * 10_000 / shadows.count
+        actualRejectedCount = shadows.count { $0.actualState == "rejected" }
+        let scores = shadows.compactMap(\.scoreAdvantage)
+        meanScoreAdvantage = scores.isEmpty
+            ? nil : scores.reduce(0, +) / scores.count
+        let latencies = shadows.compactMap(\.estimatedLatencyDeltaMilliseconds)
+        meanLatencyDeltaMilliseconds = latencies.isEmpty
+            ? nil : latencies.reduce(0, +) / Int64(latencies.count)
+    }
+}
+
 enum RoutingPresentation {
     static func readiness(_ target: RoutingTarget) -> RoutingTargetStatus {
         let state: RoutingTargetReadiness
@@ -349,12 +372,17 @@ final class RoutingViewModel {
     private(set) var targets: [RoutingTarget] = []
     private(set) var history: [RoutingHistoryDecision] = []
     private(set) var decision: RoutingDecision?
+    private(set) var shadowHistory: [RoutingShadowEvaluation] = []
+    private(set) var shadowResult: RoutingShadowEvaluation?
+    private(set) var replayReport: RoutingReplayReport?
     private(set) var connections: [RoutingExecutionConnection] = []
     private(set) var customPolicies: [RoutingCustomPolicy] = []
     private(set) var failure: RoutingFailure?
     private(set) var mutationFailure: RoutingFailure?
+    private(set) var evaluationFailure: RoutingFailure?
     private(set) var isLoading = false
     private(set) var isSimulating = false
+    private(set) var isEvaluating = false
     private(set) var isMutating = false
     private(set) var isLoadingConnections = false
     private(set) var isLoadingPolicies = false
@@ -373,6 +401,11 @@ final class RoutingViewModel {
     var requiresReasoning = true
     var requiresTools = true
     var privacy = RoutingPrivacy.directProvider
+    var selectedActualTargetID = ""
+
+    var evaluationSummary: RoutingEvaluationSummary {
+        RoutingEvaluationSummary(shadows: shadowHistory)
+    }
 
     init(
         client: any RoutingAPIReading = RoutingAPIClient(),
@@ -619,8 +652,9 @@ final class RoutingViewModel {
             async let loadedPolicies = client.policies()
             async let loadedTargets = client.targets()
             async let loadedHistory = client.history(before: nil, limit: 20)
+            async let loadedShadows = client.shadowHistory(before: nil, limit: 20)
             let values = try await (
-                loadedHealth, loadedPolicies, loadedTargets, loadedHistory
+                loadedHealth, loadedPolicies, loadedTargets, loadedHistory, loadedShadows
             )
             health = values.0
             decisionAPIEnabled = values.0.decisionAPIEnabled
@@ -629,10 +663,14 @@ final class RoutingViewModel {
             targets = values.2.targets
             targetRevision = values.2.revision
             history = values.3.decisions
+            shadowHistory = values.4.shadows
             selectedPolicyID = values.0.defaultPolicyID
             if !policies.contains(where: { $0.policyID == selectedPolicyID }),
                let first = policies.first {
                 selectedPolicyID = first.policyID
+            }
+            if !targets.contains(where: { $0.targetID == selectedActualTargetID }) {
+                selectedActualTargetID = targets.first?.targetID ?? ""
             }
         } catch {
             health = nil
@@ -640,6 +678,8 @@ final class RoutingViewModel {
             targets = []
             targetRevision = 0
             history = []
+            shadowHistory = []
+            selectedActualTargetID = ""
             failure = Self.failure(for: error)
         }
     }
@@ -739,10 +779,52 @@ final class RoutingViewModel {
         isSimulating = true
         failure = nil
         defer { isSimulating = false }
+        do {
+            decision = try await client.simulate(decisionRequest())
+        } catch {
+            decision = nil
+            failure = Self.failure(for: error)
+        }
+    }
+
+    func recordShadow() async {
+        guard !isEvaluating,
+              targets.contains(where: { $0.targetID == selectedActualTargetID })
+        else { return }
+        isEvaluating = true
+        evaluationFailure = nil
+        defer { isEvaluating = false }
+        do {
+            let result = try await client.shadow(
+                decisionRequest(), actualTargetID: selectedActualTargetID
+            )
+            shadowResult = result
+            shadowHistory.removeAll { $0.shadowID == result.shadowID }
+            shadowHistory.insert(result, at: 0)
+            if shadowHistory.count > 20 { shadowHistory.removeLast() }
+        } catch {
+            evaluationFailure = Self.failure(for: error)
+        }
+    }
+
+    func replay(_ fixture: Data) async {
+        guard !isEvaluating else { return }
+        isEvaluating = true
+        evaluationFailure = nil
+        defer { isEvaluating = false }
+        do {
+            replayReport = try await client.replay(fixture)
+        } catch {
+            replayReport = nil
+            evaluationFailure = Self.failure(for: error)
+        }
+    }
+
+    private func decisionRequest() -> RoutingDecisionRequest {
         var capabilities = [RoutingCapability.chat]
         if requiresReasoning { capabilities.append(.reasoning) }
         if requiresTools { capabilities.append(.tools) }
-        let request = RoutingDecisionRequest(
+        return RoutingDecisionRequest(
             policyID: selectedPolicyID,
             task: RoutingTask(
                 kind: taskKind,
@@ -754,12 +836,6 @@ final class RoutingViewModel {
                 regions: ["global"]
             )
         )
-        do {
-            decision = try await client.simulate(request)
-        } catch {
-            decision = nil
-            failure = Self.failure(for: error)
-        }
     }
 
     private static func failure(for error: Error) -> RoutingFailure {
