@@ -153,11 +153,23 @@ def _parser() -> SafeArgumentParser:
     daemon = commands.add_parser("daemon")
     daemon.add_argument("--interval", required=True)
     daemon.add_argument("--api-socket", default=str(DEFAULT_API_SOCKET_PATH))
+    daemon.add_argument("--router-socket")
     runtime_ingest = commands.add_parser("runtime-ingest")
     runtime_ingest.add_argument("--database", default=str(DEFAULT_RUNTIME_PATH))
     runtime_summary = commands.add_parser("runtime-summary")
     runtime_summary.add_argument("--database", default=str(DEFAULT_RUNTIME_PATH))
     runtime_summary.add_argument("--window-seconds", required=True)
+    route = commands.add_parser("route")
+    route_commands = route.add_subparsers(dest="route_command", required=True)
+    for name in ("decide", "simulate"):
+        child = route_commands.add_parser(name)
+        child.add_argument("--format", choices=("json",), required=True)
+        child.add_argument("--socket", default=None)
+    history = route_commands.add_parser("history")
+    history.add_argument("--format", choices=("json",), required=True)
+    history.add_argument("--socket", default=None)
+    history.add_argument("--before")
+    history.add_argument("--limit", type=int, default=50)
     return parser
 
 
@@ -629,6 +641,7 @@ def _run_daemon_with_api(
     refresher: Any,
     query: QueryService,
     api_socket: str,
+    router_socket: str | None,
     *,
     stop_event: threading.Event,
     waiter: Callable[[int], bool],
@@ -638,9 +651,10 @@ def _run_daemon_with_api(
 ) -> int:
     from .local_api import create_unix_server
 
+    api_path = Path(api_socket).expanduser()
     try:
         server = create_unix_server(
-            api_socket,
+            api_path,
             query,
             runtime_database=DEFAULT_RUNTIME_PATH,
             clock=clock,
@@ -654,15 +668,76 @@ def _run_daemon_with_api(
         daemon=True,
     )
     server_thread.start()
+    routing_server = None
+    routing_thread = None
+    routing_store = None
+    selected_router = (
+        Path(router_socket).expanduser()
+        if router_socket is not None
+        else api_path.with_name("router.sock")
+    )
+    try:
+        from .routing_api import RoutingController, create_routing_unix_server
+        from .routing_store import RoutingStore
+        from .routing_targets import RouteTargetStore
+        from .runtime_store import read_runtime_summary
+
+        routing_store = RoutingStore(
+            selected_router.with_name("routing.sqlite3"), clock=clock
+        )
+        target_store = RouteTargetStore(
+            selected_router.with_name("route-targets.json")
+        )
+        controller = RoutingController(
+            query=query,
+            target_loader=lambda: target_store.load(available_adapters=()),
+            evidence_store=routing_store,
+            runtime_reader=lambda start, end: read_runtime_summary(
+                DEFAULT_RUNTIME_PATH, start, end, clock=clock
+            ),
+            available_connections=lambda: (),
+            clock=clock,
+        )
+        routing_server = create_routing_unix_server(selected_router, controller)
+        routing_thread = threading.Thread(
+            target=routing_server.serve_forever,
+            name="openusage-routing-api",
+            daemon=True,
+        )
+        routing_thread.start()
+    except Exception:
+        if routing_server is not None:
+            try:
+                routing_server.server_close()
+            except Exception:
+                pass
+            routing_server = None
+        if routing_store is not None:
+            routing_store.close()
+            routing_store = None
+        stderr.write("routing API unavailable; continuing without routing\n")
     try:
         return _run_daemon(
             interval, refresher, stop_event=stop_event, waiter=waiter,
             stderr=stderr, catalog_monitor=catalog_monitor,
         )
     finally:
-        server.shutdown()
-        server.server_close()
-        server_thread.join(5)
+        try:
+            try:
+                if routing_server is not None:
+                    try:
+                        routing_server.shutdown()
+                    finally:
+                        routing_server.server_close()
+                if routing_thread is not None:
+                    routing_thread.join(5)
+            finally:
+                if routing_store is not None:
+                    routing_store.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join(5)
 
 
 def main(
@@ -729,6 +804,15 @@ def main(
             stderr.write("runtime observation unavailable\n")
             return 1
 
+    if args.command == "route":
+        from .routing_cli import DEFAULT_ROUTER_SOCKET_PATH, run_route_command
+
+        if args.socket is None:
+            args.socket = str(DEFAULT_ROUTER_SOCKET_PATH)
+        return run_route_command(
+            args, stdin=stdin, stdout=stdout, stderr=stderr
+        )
+
     active_store: ActivityStore | None = store
     refresh_outcome: RefreshOutcome | None = None
     deferred_close = False
@@ -764,6 +848,7 @@ def main(
                 refresher,
                 active_query,
                 args.api_socket,
+                args.router_socket,
                 stop_event=active_stop,
                 waiter=active_waiter,
                 stderr=stderr,

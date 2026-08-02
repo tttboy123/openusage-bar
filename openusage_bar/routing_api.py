@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
+import socket
+import socketserver
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from typing import Callable, Mapping
+from urllib.parse import parse_qsl, urlsplit
 
 from .query import QueryService
 from .routing_contract import (
@@ -33,6 +40,16 @@ from .routing_store import (
 )
 from .routing_targets import RouteTargetConfiguration
 from .runtime_store import RuntimeSummary
+from .local_api import (
+    DEFAULT_CLIENT_TIMEOUT,
+    DEFAULT_MAX_THREADS,
+    DEFAULT_REQUEST_DEADLINE,
+    MAX_REQUEST_LINE,
+    _BoundedThreads,
+    _peer_is_current_user,
+    _prepare_socket_path,
+    _unlink_socket_if,
+)
 
 
 SCHEMA_VERSION = "1.0"
@@ -40,6 +57,8 @@ DEFAULT_DECISION_TTL = timedelta(seconds=30)
 DEFAULT_RUNTIME_WINDOW = timedelta(minutes=15)
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
+MAX_HEADER_BYTES = 16 * 1024
+MAX_QUERY_BYTES = 4 * 1024
 
 _REQUEST_REF = re.compile(r"^req_[0-9a-f]{16,64}$")
 
@@ -71,6 +90,96 @@ _CONSTRAINT_KEYS = frozenset(
 _SESSION_KEYS = frozenset(
     {"sessionRef", "remainingBudgetMicrounits", "reserveMicrounits", "budgetCurrency"}
 )
+
+ROUTING_API_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://openusage.bar/schemas/routing-api-v1.schema.json",
+    "title": "OpenUsage Bar Route Decision API",
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["schemaVersion", "policyId", "task"],
+    "properties": {
+        "schemaVersion": {"const": SCHEMA_VERSION},
+        "clientRequestRef": {
+            "type": "string",
+            "pattern": r"^req_[0-9a-f]{16,64}$",
+        },
+        "policyId": {
+            "type": "string",
+            "pattern": r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+        },
+        "task": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": sorted(_TASK_KEYS),
+            "properties": {
+                "kind": {"enum": ["audio", "chat", "code", "embedding", "image", "other", "reasoning"]},
+                "requiredCapabilities": {"$ref": "#/$defs/idList"},
+                "estimatedInputTokens": {"$ref": "#/$defs/counter"},
+                "maxOutputTokens": {"$ref": "#/$defs/counter"},
+                "minimumContextWindowTokens": {"$ref": "#/$defs/counter"},
+                "privacy": {"enum": ["allow_proxy", "direct_provider", "local_only"]},
+                "regions": {"$ref": "#/$defs/idList"},
+            },
+        },
+        "constraints": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": sorted(_CONSTRAINT_KEYS),
+            "properties": {
+                "allowProviders": {"$ref": "#/$defs/idList"},
+                "denyProviders": {"$ref": "#/$defs/idList"},
+                "allowTargets": {"$ref": "#/$defs/idList"},
+                "denyTargets": {"$ref": "#/$defs/idList"},
+                "maximumEstimatedCostMicrounits": {
+                    "anyOf": [{"$ref": "#/$defs/counter"}, {"type": "null"}]
+                },
+                "costCurrency": {
+                    "anyOf": [{"$ref": "#/$defs/currency"}, {"type": "null"}]
+                },
+            },
+        },
+        "session": {
+            "anyOf": [
+                {"type": "null"},
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": sorted(_SESSION_KEYS),
+                    "properties": {
+                        "sessionRef": {
+                            "type": "string",
+                            "pattern": r"^anon_[0-9a-f]{16,64}$",
+                        },
+                        "remainingBudgetMicrounits": {
+                            "anyOf": [{"$ref": "#/$defs/counter"}, {"type": "null"}]
+                        },
+                        "reserveMicrounits": {
+                            "anyOf": [{"$ref": "#/$defs/counter"}, {"type": "null"}]
+                        },
+                        "budgetCurrency": {
+                            "anyOf": [{"$ref": "#/$defs/currency"}, {"type": "null"}]
+                        },
+                    },
+                },
+            ]
+        },
+    },
+    "$defs": {
+        "counter": {"type": "integer", "minimum": 0, "maximum": 1_000_000_000_000},
+        "currency": {"type": "string", "pattern": r"^[A-Z][A-Z0-9_]{2,7}$"},
+        "id": {
+            "type": "string",
+            "pattern": r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+        },
+        "idList": {
+            "type": "array",
+            "maxItems": 50,
+            "uniqueItems": True,
+            "items": {"$ref": "#/$defs/id"},
+        },
+    },
+}
 
 
 class RoutingAPIProblem(RuntimeError):
@@ -232,6 +341,30 @@ def _timestamp(value: datetime) -> str:
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z")
     )
+
+
+def _future_timestamp(value: object, now: datetime) -> datetime | None:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return None
+    parsed = parsed.astimezone(timezone.utc)
+    return parsed if parsed > now else None
+
+
+def _decision_expiry(now: datetime, ttl: timedelta, snapshot) -> datetime:
+    candidates = [now + ttl]
+    for source in snapshot.sources:
+        boundary = _future_timestamp(source.stale_at, now)
+        if boundary is not None:
+            candidates.append(boundary)
+    for quota in snapshot.quota_windows:
+        boundary = _future_timestamp(quota.resets_at, now)
+        if boundary is not None:
+            candidates.append(boundary)
+    return min(candidates)
 
 
 def _components_wire(value) -> dict[str, int]:
@@ -412,7 +545,9 @@ class RoutingController:
             )
             context = DecisionContext(
                 generated_at=_timestamp(now),
-                expires_at=_timestamp(now + self.decision_ttl),
+                expires_at=_timestamp(
+                    _decision_expiry(now, self.decision_ttl, snapshot)
+                ),
                 data_revision=snapshot.data_revision,
                 runtime_revision=(None if runtime is None else runtime.runtime_revision),
             )
@@ -469,6 +604,59 @@ class RoutingController:
             "policies": [_policy_wire(value) for value in built_in_policies()],
         }
 
+    def health(self) -> dict[str, object]:
+        try:
+            configuration = self.target_loader()
+            revision = self.evidence_store.revision()
+        except Exception as error:
+            raise RoutingAPIProblem(503, "facts_unavailable", "Routing is unavailable.") from error
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "health": {"ok": True, "status": "ok"},
+            "targetRevision": configuration.revision,
+            "targetCount": len(configuration.targets),
+            "routingRevision": revision,
+        }
+
+    def schema(self) -> dict[str, object]:
+        return {"schemaVersion": SCHEMA_VERSION, "schema": ROUTING_API_SCHEMA}
+
+    def targets(self) -> dict[str, object]:
+        try:
+            configuration = self.target_loader()
+        except Exception as error:
+            raise RoutingAPIProblem(503, "facts_unavailable", "Route targets are unavailable.") from error
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "targetRevision": configuration.revision,
+            "targets": [
+                {
+                    "targetId": value.target_id,
+                    "providerId": value.provider_id,
+                    "accountRef": value.account_ref,
+                    "modelId": value.model_id,
+                    "connectionRef": value.connection_ref,
+                    "executionClass": value.execution_class,
+                    "executionAdapterId": value.execution_adapter_id,
+                    "resourceMode": value.resource_mode,
+                    "factAccountRef": value.fact_account_ref,
+                    "runtimeScopeRef": value.runtime_scope_ref,
+                    "balanceCurrency": value.balance_currency,
+                    "costCurrency": value.cost_currency,
+                    "inputCostMicrosPerMillion": value.input_cost_micros_per_million,
+                    "outputCostMicrosPerMillion": value.output_cost_micros_per_million,
+                    "enabled": value.enabled,
+                    "adapterAvailable": value.adapter_available,
+                    "regions": list(value.regions),
+                    "privacyClass": value.privacy_class,
+                    "capabilities": list(value.capabilities),
+                    "contextWindowTokens": value.context_window_tokens,
+                    "qualityTier": value.quality_tier,
+                }
+                for value in configuration.targets
+            ],
+        }
+
     def list_decisions(
         self, *, before: str | None, limit: int
     ) -> dict[str, object]:
@@ -496,3 +684,308 @@ class RoutingController:
         if value is None:
             raise RoutingAPIProblem(404, "not_found", "Route decision was not found.")
         return {"schemaVersion": SCHEMA_VERSION, "decision": stored_decision_wire(value)}
+
+
+def _compact(value: object) -> bytes:
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise RoutingAPIProblem(500, "internal_error", "Routing is unavailable.") from error
+    if len(encoded) > MAX_OUTPUT_BYTES:
+        raise RoutingAPIProblem(500, "internal_error", "Routing is unavailable.")
+    return encoded
+
+
+def _problem_wire(value: RoutingAPIProblem) -> dict[str, object]:
+    error: dict[str, object] = {"code": value.code, "message": value.message}
+    if value.details:
+        error["details"] = value.details
+    return {"error": error}
+
+
+def _query_parameters(raw_query: str) -> dict[str, str]:
+    if len(raw_query.encode("utf-8")) > MAX_QUERY_BYTES:
+        raise RoutingAPIProblem(413, "request_too_large", "Request is too large.")
+    try:
+        pairs = parse_qsl(
+            raw_query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=3,
+        ) if raw_query else []
+    except ValueError as error:
+        raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.") from error
+    values: dict[str, str] = {}
+    for key, value in pairs:
+        if key in values:
+            raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.")
+        values[key] = value
+    return values
+
+
+class RoutingAPIRouter:
+    def __init__(self, controller: RoutingController) -> None:
+        self.controller = controller
+
+    def dispatch(self, method: str, target: str, body: bytes | None) -> tuple[int, bytes]:
+        try:
+            parsed = urlsplit(target)
+            if parsed.scheme or parsed.netloc or parsed.fragment:
+                raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.")
+            parameters = _query_parameters(parsed.query)
+            if method == "GET":
+                if parsed.path == "/v1/health" and not parameters:
+                    value = self.controller.health()
+                elif parsed.path == "/v1/schema.json" and not parameters:
+                    value = self.controller.schema()
+                elif parsed.path == "/v1/policies" and not parameters:
+                    value = self.controller.policies()
+                elif parsed.path == "/v1/targets" and not parameters:
+                    value = self.controller.targets()
+                elif parsed.path == "/v1/decisions":
+                    if not set(parameters) <= {"before", "limit"}:
+                        raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.")
+                    limit_raw = parameters.get("limit", "50")
+                    try:
+                        limit = int(limit_raw)
+                    except (TypeError, ValueError) as error:
+                        raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.") from error
+                    if str(limit) != limit_raw or not 1 <= limit <= 100:
+                        raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.")
+                    value = self.controller.list_decisions(
+                        before=parameters.get("before"), limit=limit
+                    )
+                elif parsed.path.startswith("/v1/decisions/") and not parameters:
+                    identifier = parsed.path.removeprefix("/v1/decisions/")
+                    if not identifier or "/" in identifier:
+                        raise RoutingAPIProblem(404, "not_found", "Route was not found.")
+                    value = self.controller.get_decision(identifier)
+                else:
+                    raise RoutingAPIProblem(404, "not_found", "Route was not found.")
+            elif method == "POST":
+                if parameters or body is None:
+                    raise RoutingAPIProblem(400, "invalid_request", "Invalid routing request.")
+                if parsed.path == "/v1/decisions":
+                    value = self.controller.decide(body, simulated=False)
+                elif parsed.path == "/v1/simulations":
+                    value = self.controller.decide(body, simulated=True)
+                else:
+                    raise RoutingAPIProblem(404, "not_found", "Route was not found.")
+            else:
+                raise RoutingAPIProblem(405, "method_not_allowed", "Method is not allowed.")
+            return 200, _compact(value)
+        except RoutingAPIProblem as problem:
+            return problem.status, _compact(_problem_wire(problem))
+        except Exception:
+            problem = RoutingAPIProblem(500, "internal_error", "Routing is unavailable.")
+            return problem.status, _compact(_problem_wire(problem))
+
+
+class RoutingHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server_version = "OpenUsageRouter/1"
+    sys_version = ""
+
+    def handle_one_request(self) -> None:
+        try:
+            self.raw_requestline = self.rfile.readline(MAX_REQUEST_LINE + 1)
+            if len(self.raw_requestline) > MAX_REQUEST_LINE:
+                self.requestline = ""
+                self.request_version = "HTTP/1.1"
+                self.command = ""
+                self._problem(413, "request_too_large", "Request is too large.")
+                return
+            if not self.raw_requestline:
+                self.close_connection = True
+                return
+            if not self.parse_request():
+                return
+            if self.request_version != "HTTP/1.1":
+                self.request_version = "HTTP/1.1"
+                self._problem(400, "invalid_request", "HTTP/1.1 is required.")
+                return
+            header_bytes = sum(
+                len(name.encode("utf-8")) + len(value.encode("utf-8")) + 4
+                for name, value in self.headers.raw_items()
+            )
+            if header_bytes > MAX_HEADER_BYTES:
+                self._problem(413, "request_too_large", "Request is too large.")
+                return
+            hosts = self.headers.get_all("Host", [])
+            if len(hosts) != 1 or hosts[0] != "localhost":
+                self._problem(400, "invalid_request", "Invalid routing request.")
+                return
+            method = getattr(self, "do_" + self.command, None)
+            if method is None:
+                self._problem(405, "method_not_allowed", "Method is not allowed.")
+                return
+            method()
+            self.wfile.flush()
+        except (ConnectionError, TimeoutError):
+            self.close_connection = True
+
+    def do_GET(self) -> None:
+        self._dispatch(None)
+
+    def do_POST(self) -> None:
+        if self.headers.get_all("Transfer-Encoding", []):
+            self._problem(400, "invalid_request", "Invalid routing request.")
+            return
+        lengths = self.headers.get_all("Content-Length", [])
+        content_types = self.headers.get_all("Content-Type", [])
+        if len(lengths) != 1 or len(content_types) != 1:
+            self._problem(400, "invalid_request", "Invalid routing request.")
+            return
+        if content_types[0].lower() not in {"application/json", "application/json; charset=utf-8"}:
+            self._problem(400, "invalid_request", "Invalid routing request.")
+            return
+        try:
+            length = int(lengths[0])
+        except (TypeError, ValueError):
+            self._problem(400, "invalid_request", "Invalid routing request.")
+            return
+        if str(length) != lengths[0] or length < 1:
+            self._problem(400, "invalid_request", "Invalid routing request.")
+            return
+        if length > MAX_REQUEST_BYTES:
+            self._problem(413, "request_too_large", "Request is too large.")
+            return
+        body = self.rfile.read(length)
+        if len(body) != length:
+            self._problem(400, "invalid_request", "Invalid routing request.")
+            return
+        self._dispatch(body)
+
+    def _dispatch(self, body: bytes | None) -> None:
+        status, payload = self.server.router.dispatch(self.command, self.path, body)
+        self._send(status, payload)
+
+    def _problem(self, status: int, code: str, message: str) -> None:
+        self._send(status, _compact(_problem_wire(RoutingAPIProblem(status, code, message))))
+
+    def _send(self, status: int, payload: bytes) -> None:
+        self.close_connection = True
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Connection", "close")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if payload:
+            self.wfile.write(payload)
+
+    def send_error(
+        self,
+        code: int,
+        message: str | None = None,
+        explain: str | None = None,
+    ) -> None:
+        del message, explain
+        status = 413 if code in {414, 431} else 400
+        self.request_version = "HTTP/1.1"
+        self._problem(
+            status,
+            "request_too_large" if status == 413 else "invalid_request",
+            "Request is too large." if status == 413 else "Invalid HTTP request.",
+        )
+
+    def log_message(self, _format: str, *args: object) -> None:
+        return
+
+
+class RoutingUnixHTTPServer(
+    _BoundedThreads, socketserver.ThreadingMixIn, socketserver.UnixStreamServer
+):
+    allow_reuse_address = False
+    request_queue_size = DEFAULT_MAX_THREADS
+
+    def __init__(
+        self,
+        path: Path,
+        router: RoutingAPIRouter,
+        *,
+        max_threads: int,
+        client_timeout: float,
+        request_deadline: float,
+    ) -> None:
+        self.path = path
+        self.router = router
+        self._created_identity: tuple[int, int] | None = None
+        _prepare_socket_path(path)
+        try:
+            super().__init__(str(path), RoutingHandler)
+            current = path.lstat()
+            self._created_identity = (current.st_dev, current.st_ino)
+            os.chmod(path, 0o600, follow_symlinks=False)
+            self._configure_threads(max_threads, client_timeout, request_deadline)
+        except Exception:
+            if self._created_identity is not None:
+                _unlink_socket_if(path, self._created_identity)
+            raise
+
+    def verify_request(self, request: socket.socket, client_address: object) -> bool:
+        return _peer_is_current_user(request)
+
+    def process_request(self, request, client_address) -> None:
+        if not self._thread_slots.acquire(blocking=False):
+            payload = _compact(
+                _problem_wire(
+                    RoutingAPIProblem(503, "router_busy", "Routing is busy.")
+                )
+            )
+            framed = (
+                b"HTTP/1.1 503 Service Unavailable\r\n"
+                b"Content-Type: application/json; charset=utf-8\r\n"
+                b"Cache-Control: no-store\r\nConnection: close\r\nContent-Length: "
+                + str(len(payload)).encode("ascii")
+                + b"\r\n\r\n"
+                + payload
+            )
+            try:
+                request.sendall(framed)
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            socketserver.ThreadingMixIn.process_request(self, request, client_address)
+        except Exception:
+            self._thread_slots.release()
+            raise
+
+    def server_close(self) -> None:
+        try:
+            super().server_close()
+        finally:
+            _unlink_socket_if(self.path, self._created_identity)
+            self._created_identity = None
+
+
+def create_routing_unix_server(
+    socket_path: str | Path,
+    controller: RoutingController,
+    *,
+    max_threads: int = DEFAULT_MAX_THREADS,
+    client_timeout: float = DEFAULT_CLIENT_TIMEOUT,
+    request_deadline: float = DEFAULT_REQUEST_DEADLINE,
+) -> RoutingUnixHTTPServer:
+    if isinstance(max_threads, bool) or not isinstance(max_threads, int) or not 1 <= max_threads <= 256:
+        raise ValueError("max_threads must be between 1 and 256")
+    if isinstance(client_timeout, bool) or not isinstance(client_timeout, (int, float)) or not 0.1 <= client_timeout <= 60:
+        raise ValueError("client_timeout must be between 0.1 and 60 seconds")
+    if isinstance(request_deadline, bool) or not isinstance(request_deadline, (int, float)) or not 0.05 <= request_deadline <= 300:
+        raise ValueError("request_deadline must be between 0.05 and 300 seconds")
+    return RoutingUnixHTTPServer(
+        Path(socket_path),
+        RoutingAPIRouter(controller),
+        max_threads=max_threads,
+        client_timeout=float(client_timeout),
+        request_deadline=float(request_deadline),
+    )

@@ -203,6 +203,23 @@ COLLECTOR="$APP/Contents/MacOS/OpenUsage Collector"
 fallback，完整 OpenUsage daily import 最长 60 秒。超时不会把未知额度写成
 0，而是继续提供 last-good ledger 并报告刷新不可用。
 
+### 本地自动策略路由（开发中）
+
+0.8 开发分支已加入独立的 `router.sock`。它复用常驻 Python Controller，
+但拥有单独的 Schema、Handler 和有界证据库；路由不可用不会停止事实采集或
+上面的只读 Resource API。
+
+```bash
+"$COLLECTOR" route decide --format json < route-request.json
+"$COLLECTOR" route simulate --format json < route-request.json
+"$COLLECTOR" route history --format json --limit 20
+```
+
+Phase A 只返回可解释的 Provider/账号/模型选择，不发送模型请求，也不接收
+Prompt 或响应内容。显式 Route Target 和执行适配器仍需在后续 Provider Center
+切片中配置；自动发现 Provider 不会自动授予可执行路由能力。完整契约与退出码
+见 [Route Decision API v1](docs/routing-api-v1.md)。
+
 ## Provider 支持
 
 OpenUsage Bar 是独立仓库和独立发布。OpenUsage.sh 是可选数据源，只通过受限 JSON 接入；它的 Go 内部实现、凭证和发布周期不会嵌入本项目。

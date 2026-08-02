@@ -998,7 +998,10 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   独立有界的 `routing.sqlite3` 决策证据库均已完成本地实现。证据库只保存公开
   Target ID、分数、原因码和 revision，实行 7 天、10,000 个决策、30,000 个
   尝试与 16 MiB 上限；Prompt、响应、凭证、请求头、端点和直接账号身份不会
-  入库。Decision API 和 CLI 仍在 WQ-26 内继续。**
+  入库。严格的第二 Unix Socket Decision API、冻结 JSON Schema 和
+  `route decide|simulate|history --format json` CLI 也已本地实现并接入现有
+  常驻 Controller；路由启动失败不会停止事实采集或 Resource API。WQ-26 的
+  剩余工作是兼容性、性能、故障注入与完整发布门禁。**
 - **WQ-27：接入 Provider Center。** 支持显式 Route Target、内置/自定义策略、
   中英文、Dry Run、选择/备选/排除原因和内容无关的近期决策历史。自动发现只
   证明 Provider 存在，不会自动授予可执行路由能力。

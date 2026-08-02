@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import socket
+import stat
 import tempfile
+import threading
+import time
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +20,9 @@ from openusage_bar.query import (
 )
 from openusage_bar.routing_api import (
     RoutingAPIProblem,
+    ROUTING_API_SCHEMA,
     RoutingController,
+    create_routing_unix_server,
     decode_decision_request,
 )
 from openusage_bar.routing_contract import RouteTarget
@@ -146,6 +152,16 @@ class FakeQuery:
 
 
 class RoutingRequestContractTests(unittest.TestCase):
+    def test_tracked_schema_matches_the_runtime_contract(self) -> None:
+        path = (
+            Path(__file__).parents[1]
+            / "openusage_bar"
+            / "resources"
+            / "routing-api-v1.schema.json"
+        )
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), ROUTING_API_SCHEMA)
+        self.assertFalse(ROUTING_API_SCHEMA["additionalProperties"])
+
     def test_decodes_exact_content_free_request(self) -> None:
         envelope = decode_decision_request(request_payload())
         self.assertEqual(envelope.client_request_ref, "req_0123456789abcdef")
@@ -232,6 +248,168 @@ class RoutingControllerTests(unittest.TestCase):
         encoded = json.dumps(page, sort_keys=True)
         for forbidden in ("providerId", "accountRef", "modelId", "connectionRef"):
             self.assertNotIn(forbidden, encoded)
+
+
+def raw_unix_request(path: Path, request: bytes) -> tuple[int, dict[str, str], bytes]:
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(2)
+    client.connect(str(path))
+    try:
+        try:
+            client.sendall(request)
+        except BrokenPipeError:
+            pass
+        try:
+            client.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        chunks: list[bytes] = []
+        while True:
+            chunk = client.recv(64 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    finally:
+        client.close()
+    head, body = b"".join(chunks).split(b"\r\n\r\n", 1)
+    lines = head.decode("ascii").split("\r\n")
+    status = int(lines[0].split(" ", 2)[1])
+    headers = {
+        name.lower(): value.strip()
+        for name, value in (line.split(":", 1) for line in lines[1:])
+    }
+    return status, headers, body
+
+
+class RoutingUnixAPITests(RoutingControllerTests):
+    def setUp(self) -> None:
+        super().setUp()
+        self.socket_path = Path(self.temp.name) / "router.sock"
+        self.server = create_routing_unix_server(
+            self.socket_path,
+            self.controller,
+            max_threads=4,
+            client_timeout=1,
+            request_deadline=2,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.running = True
+        self.addCleanup(self._stop_server)
+
+    def _stop_server(self) -> None:
+        if not self.running:
+            return
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(2)
+        self.running = False
+
+    def request(self, request: bytes) -> tuple[int, dict[str, str], object]:
+        status, headers, body = raw_unix_request(self.socket_path, request)
+        return status, headers, json.loads(body)
+
+    def post(self, route: str, payload: object) -> tuple[int, dict[str, str], object]:
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        return self.request(
+            f"POST {route} HTTP/1.1\r\nHost: localhost\r\n"
+            f"Content-Type: application/json\r\nContent-Length: {len(body)}\r\n\r\n".encode()
+            + body
+        )
+
+    def test_socket_is_private_and_health_schema_policies_targets_are_bounded(self) -> None:
+        self.assertEqual(stat.S_IMODE(self.socket_path.stat().st_mode), 0o600)
+        for route in ("/v1/health", "/v1/schema.json", "/v1/policies", "/v1/targets"):
+            with self.subTest(route=route):
+                status, headers, body = self.request(
+                    f"GET {route} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode()
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+                self.assertLessEqual(len(json.dumps(body).encode()), 256 * 1024)
+
+    def test_decide_simulate_history_and_detail_share_one_contract(self) -> None:
+        status, _, decided = self.post("/v1/decisions", request_payload())
+        self.assertEqual(status, 200)
+        status, _, simulated = self.post("/v1/simulations", request_payload())
+        self.assertEqual(status, 200)
+        self.assertTrue(simulated["simulated"])
+        decision_id = decided["decisionId"]
+        for route in ("/v1/decisions?limit=10", f"/v1/decisions/{decision_id}"):
+            with self.subTest(route=route):
+                status, _, body = self.request(
+                    f"GET {route} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode()
+                )
+                self.assertEqual(status, 200)
+                encoded = json.dumps(body)
+                self.assertNotIn("accountRef", encoded)
+                self.assertNotIn("modelId", encoded)
+
+    def test_duplicate_trailing_oversized_chunked_and_wrong_http_fail_closed(self) -> None:
+        encoded = json.dumps(request_payload(), separators=(",", ":"))
+        duplicate = encoded.replace(
+            '"policyId":"reliable"',
+            '"policyId":"reliable","policyId":"fast"',
+        ).encode()
+        cases = (
+            (
+                b"POST /v1/decisions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: "
+                + str(len(duplicate)).encode() + b"\r\n\r\n" + duplicate,
+                400,
+            ),
+            (
+                b"POST /v1/decisions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 4\r\n\r\n{}{}",
+                400,
+            ),
+            (
+                b"POST /v1/decisions HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+                400,
+            ),
+            (
+                b"POST /v1/decisions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 65537\r\n\r\n",
+                413,
+            ),
+            (b"GET /v1/health HTTP/1.0\r\nHost: localhost\r\n\r\n", 400),
+        )
+        for request, expected in cases:
+            with self.subTest(expected=expected, prefix=request[:30]):
+                status, _, body = self.request(request)
+                self.assertEqual(status, expected)
+                self.assertIn("error", body)
+                self.assertNotIn(str(self.socket_path), json.dumps(body))
+
+    def test_server_close_removes_only_its_socket(self) -> None:
+        self._stop_server()
+        self.assertFalse(self.socket_path.exists())
+
+    def test_bounded_concurrency_returns_router_busy(self) -> None:
+        self._stop_server()
+        self.server = create_routing_unix_server(
+            self.socket_path,
+            self.controller,
+            max_threads=1,
+            client_timeout=2,
+            request_deadline=3,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.running = True
+        held = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        held.settimeout(2)
+        held.connect(str(self.socket_path))
+        held.sendall(b"GET /v1/health HTTP/1.1\r\n")
+        deadline = time.monotonic() + 1
+        while self.server.active_deadline_count != 1 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        self.assertEqual(self.server.active_deadline_count, 1)
+        try:
+            status, _, body = self.request(
+                b"GET /v1/health HTTP/1.1\r\nHost: localhost\r\n\r\n"
+            )
+        finally:
+            held.close()
+        self.assertEqual(status, 503)
+        self.assertEqual(body["error"]["code"], "router_busy")
 
 
 if __name__ == "__main__":

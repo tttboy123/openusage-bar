@@ -450,22 +450,32 @@ class CollectorCLITests(unittest.TestCase):
     def test_daemon_serves_private_unix_api_and_cleans_socket_on_stop(self):
         with tempfile.TemporaryDirectory() as directory:
             socket_path = Path(directory) / "openusage.sock"
+            router_path = Path(directory) / "router.sock"
             stop = threading.Event()
             result = []
 
             thread = threading.Thread(
                 target=lambda: result.append(main(
-                    ["daemon", "--interval", "60", "--api-socket", str(socket_path)],
+                    [
+                        "daemon", "--interval", "60",
+                        "--api-socket", str(socket_path),
+                        "--router-socket", str(router_path),
+                    ],
                     stderr=io.StringIO(), store=self.store, query=self.query,
                     refresher=FakeRefresher(), stop_event=stop,
                 ))
             )
             thread.start()
             deadline = time.monotonic() + 3
-            while not socket_path.exists() and time.monotonic() < deadline:
+            while (
+                (not socket_path.exists() or not router_path.exists())
+                and time.monotonic() < deadline
+            ):
                 time.sleep(0.01)
             self.assertTrue(socket_path.exists())
             self.assertEqual(socket_path.stat().st_mode & 0o777, 0o600)
+            self.assertTrue(router_path.exists())
+            self.assertEqual(router_path.stat().st_mode & 0o777, 0o600)
 
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             client.settimeout(2)
@@ -481,11 +491,78 @@ class CollectorCLITests(unittest.TestCase):
             self.assertIn(b"HTTP/1.1 200", response)
             self.assertIn(b'"schemaVersion":"1.0"', response)
 
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(2)
+            client.connect(str(router_path))
+            client.sendall(b"GET /v1/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            routing_response = b""
+            while True:
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                routing_response += chunk
+            client.close()
+            self.assertIn(b"HTTP/1.1 200", routing_response)
+            self.assertIn(b'"targetCount":0', routing_response)
+
             stop.set()
             thread.join(3)
             self.assertFalse(thread.is_alive())
             self.assertEqual(result, [0])
             self.assertFalse(socket_path.exists())
+            self.assertFalse(router_path.exists())
+
+    def test_routing_start_failure_does_not_stop_collection_or_resource_api(self):
+        with tempfile.TemporaryDirectory() as directory:
+            socket_path = Path(directory) / "openusage.sock"
+            router_path = Path(directory) / "router.sock"
+            router_path.write_text("occupied", encoding="utf-8")
+            stop = threading.Event()
+            result = []
+            stderr = io.StringIO()
+            thread = threading.Thread(
+                target=lambda: result.append(main(
+                    [
+                        "daemon", "--interval", "60",
+                        "--api-socket", str(socket_path),
+                        "--router-socket", str(router_path),
+                    ],
+                    stderr=stderr,
+                    store=self.store,
+                    query=self.query,
+                    refresher=FakeRefresher(),
+                    stop_event=stop,
+                ))
+            )
+            thread.start()
+            deadline = time.monotonic() + 3
+            while not socket_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(socket_path.exists())
+            self.assertEqual(router_path.read_text(encoding="utf-8"), "occupied")
+
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(2)
+            client.connect(str(socket_path))
+            client.sendall(b"GET /v1/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            response = b""
+            while True:
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                response += chunk
+            client.close()
+            self.assertIn(b"HTTP/1.1 200", response)
+
+            stop.set()
+            thread.join(3)
+            self.assertEqual(result, [0])
+            self.assertIn(
+                "routing API unavailable; continuing without routing\n",
+                stderr.getvalue(),
+            )
+            self.assertFalse(socket_path.exists())
+            self.assertEqual(router_path.read_text(encoding="utf-8"), "occupied")
 
     def test_fresh_timeout_is_real_and_returns_last_good_without_sleep(self):
         blocker = threading.Event()
