@@ -288,7 +288,9 @@ def decide_route(
     rejected: list[RejectedTarget] = []
     for target_id in sorted(target_map):
         target = target_map[target_id]
-        value = facts_map.get(target_id, _missing_facts(target_id))
+        value = facts_map.get(target_id)
+        if value is None:
+            value = _missing_facts(target_id)
         codes = _rejection_codes(route_request, target, value, policy)
         if codes:
             rejected.append(RejectedTarget(target_id, codes))

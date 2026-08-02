@@ -1009,7 +1009,10 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   Decision API 总开关、Dry Run、解释与近期历史均已完成本地实现；凭证只经
   stdin 写入 Keychain。总开关关闭时健康与配置读取仍可用，但决策/模拟以
   `router_disabled` fail closed。Python 路由相关 110 项与 Swift 全量 283 项
-  已通过。本项剩余键盘/VoiceOver 实机审查、完整发行门禁及本机 0.8 部署。**
+  已通过。128 个显式目标、500 次实测中，纯引擎 p95 为 0.742 ms，私有 Unix
+  Socket API p95 为 1.673 ms，分别低于 5 ms 与 50 ms 门限；测量同时修复了
+  完整事实仍提前构造缺失 fallback 的热路径。本项剩余键盘/VoiceOver 实机
+  审查、打包安装门禁及本机 0.8 部署。**
 - **WQ-28：实现 Phase B 可选代理。** 独立显式开启的 IPv4 loopback
   OpenAI-compatible Chat Completions Proxy；Keychain Bearer、本地内存转发、
   有界重试/回退，流式输出开始后禁止透明换目标。关闭代理不影响菜单栏、账本、

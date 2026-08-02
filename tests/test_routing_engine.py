@@ -1,5 +1,6 @@
 import dataclasses
 import unittest
+from unittest.mock import patch
 
 
 def target(
@@ -282,6 +283,18 @@ class RoutingContractTests(unittest.TestCase):
 
 
 class RoutingEngineTests(unittest.TestCase):
+    def test_complete_fact_map_does_not_construct_missing_fact_fallbacks(self):
+        route_target = target("openai.work.gpt-5")
+        target_facts = facts(route_target.target_id)
+
+        with patch(
+            "openusage_bar.routing_engine._missing_facts",
+            side_effect=AssertionError("unexpected missing fallback"),
+        ):
+            decision = decide(request(), [route_target], [target_facts])
+
+        self.assertEqual(decision.selected.target_id, route_target.target_id)
+
     def test_reliability_first_prefers_healthier_target_over_cheaper_target(self):
         healthy = facts(
             "openai.work.gpt-5",
