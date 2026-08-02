@@ -30,7 +30,21 @@ bug bounty program.
   the user's global launchd environment.
 - The SQLite ledger and exported JSON exclude credentials, prompts, responses,
   and direct account identity.
+- The optional execution proxy is disabled by default, binds only to IPv4
+  loopback, requires a one-time high-entropy Bearer capability, and persists
+  only its SHA-256 verifier. Request and response content is forwarded in
+  memory and is excluded from routing evidence, logs, diagnostics and the
+  usage ledger.
+- Execution credentials are isolated per routing connection in Keychain.
+  Reusing a Provider Center credential requires an explicit foreground action;
+  the fixed Provider endpoint and secret never cross into SwiftUI or JSON.
 - Releases must pass the repository and Git-history secret scanner.
+
+The current 0.8 routing security pre-review packet, trust boundaries, residual
+risks and reproducible evidence commands are recorded in
+[`docs/security/0.8-routing-review.md`](docs/security/0.8-routing-review.md).
+That packet is not an independent approval and does not make a local candidate
+a public release.
 
 ## Canary diagnostics
 
