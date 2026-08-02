@@ -137,6 +137,21 @@ HELPER="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/Ope
 "$HELPER" doctor --format json --offline
 ```
 
+## Local smart routing (development)
+
+The 0.8 development branch adds a separate content-free Route Decision API and
+an optional, disabled-by-default loopback chat proxy. OpenUsage Bar remains
+fully usable as a menu-bar resource console when both surfaces are disabled;
+neither feature depends on Loom.
+
+Provider Center can explicitly reuse inference credentials already managed for
+MiniMax, Kimi/Moonshot, and Step Plan. The Python Controller owns the fixed
+China/international endpoint and copies the secret into an isolated routing
+Keychain account only after confirmation. SwiftUI submits only the Provider,
+model IDs, and enabled state; it never receives a credential. OpenAI
+organization admin keys, quota-only generic Providers, and daily usage feeds
+are excluded from inference reuse. See [Route Decision API v1](docs/routing-api-v1.md).
+
 ## Provider support
 
 OpenUsage Bar is an independent repository and release. OpenUsage.sh is an optional CLI data source consumed through validated JSON only; its Go internals, credentials, and release lifecycle are not embedded here.

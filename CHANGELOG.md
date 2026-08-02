@@ -20,14 +20,32 @@ This project follows [Semantic Versioning](https://semver.org/).
   proxying model content. Native Provider Center controls, explainable dry runs,
   content-free Shadow comparisons and bounded frozen-fact Replay reports share
   the same private routing contract.
+- Provider Center can explicitly reuse inference credentials already managed for
+  MiniMax, Kimi/Moonshot and Step Plan. The Controller owns the site-specific
+  endpoint, copies the credential into an isolated routing Keychain account only
+  after confirmation, and never returns the credential to SwiftUI or JSON.
 
 ### Changed
 
 - Provider source contracts are OS-neutral; the OpenUsage Bar distribution
   separately verifies that every source registered in its shipped catalog
   supports macOS.
+- The native routing connection flow now distinguishes manual connections from
+  Provider Center reuse, offers conservative model suggestions and optional
+  quota-target creation, and fails closed when native Keychain access is not
+  available.
 - The public roadmap now reports the released v0.6.0 RC baseline and keeps the
   0 / 5 external Canary state distinct from repository test results.
+
+### Fixed
+
+- Visible Usage Details windows opened on the Smart Routing route are now part
+  of the installer's exact process allowlist, so transactional upgrades stop
+  and reopen the helper instead of leaving an old image across the bundle swap.
+- Provider execution template discovery uses the bounded read-only Keychain
+  path and no longer waits on an invisible native authorization prompt. A
+  failed read marks only that credential unavailable and keeps the template
+  list usable.
 
 ## 0.6.0 - 2026-07-30
 

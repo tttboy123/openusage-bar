@@ -5,7 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from openusage_bar.routing_commands import _decode_target, run_routing_mutation
 from openusage_bar.routing_execution import (
@@ -16,6 +16,12 @@ from openusage_bar.routing_execution import (
 from openusage_bar.routing_targets import RouteTargetStore
 from openusage_bar.routing_policy_store import RoutingPolicyStore
 from openusage_bar.routing_preferences import RoutingPreferencesStore
+from openusage_bar.config import (
+    MiniMaxConfig,
+    OpenAIOrganizationConfig,
+    ProviderConfigStore,
+    StepPlanConfig,
+)
 
 
 def target_payload(**changes: object) -> dict[str, object]:
@@ -65,6 +71,8 @@ class RoutingMutationCommandTests(unittest.TestCase):
         self.policy_store = RoutingPolicyStore(self.policy_path)
         self.preferences_path = Path(self.temporary.name) / "routing-preferences.json"
         self.preferences_store = RoutingPreferencesStore(self.preferences_path)
+        self.provider_path = Path(self.temporary.name) / "providers.json"
+        self.provider_store = ProviderConfigStore(self.provider_path)
         self.keychain = Mock()
 
     def tearDown(self) -> None:
@@ -77,6 +85,7 @@ class RoutingMutationCommandTests(unittest.TestCase):
             connection_store=self.connection_store, keychain=self.keychain,
             policy_store=self.policy_store,
             preferences_store=self.preferences_store,
+            provider_store=self.provider_store,
         )
         return status, json.loads(output.getvalue())
 
@@ -307,6 +316,182 @@ class RoutingMutationCommandTests(unittest.TestCase):
             self.connection_store.load().connections[0].models,
             tuple(sorted(models)),
         )
+
+    def test_lists_only_explicit_provider_center_inference_templates_without_secrets(self) -> None:
+        self.provider_store.save([
+            MiniMaxConfig("minimax-cn", "MiniMax CN", site="china"),
+            StepPlanConfig("step-global", "Step Global", site="international"),
+            OpenAIOrganizationConfig("openai-admin", "OpenAI Admin"),
+        ])
+        self.keychain.get.side_effect = lambda account: (
+            "minimax-private-value" if account == "minimax-cn" else None
+        )
+
+        status, result = self.mutate(json.dumps({
+            "version": 1, "action": "list_provider_execution_templates",
+        }))
+
+        self.assertEqual(status, 0)
+        self.assertEqual(result["message"], "Provider execution templates loaded")
+        self.assertEqual(
+            [item["providerId"] for item in result["providerExecutionTemplates"]],
+            ["minimax-cn", "step-global"],
+        )
+        self.assertEqual(
+            result["providerExecutionTemplates"][0],
+            {
+                "providerId": "minimax-cn",
+                "familyId": "minimax",
+                "displayName": "MiniMax CN",
+                "site": "china",
+                "baseURL": "https://api.minimaxi.com/v1",
+                "suggestedModels": ["MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
+                "credentialAvailable": True,
+                "factAccountRef": None,
+            },
+        )
+        encoded = json.dumps(result)
+        self.assertNotIn("minimax-private-value", encoded)
+        self.assertNotIn("openai-admin", encoded)
+
+    def test_imports_provider_key_into_isolated_routing_account_without_exposing_it(self) -> None:
+        self.provider_store.save([
+            StepPlanConfig(
+                "step-main", "Step Plan", site="china", account_ref="step-work"
+            ),
+        ])
+        self.keychain.get.side_effect = lambda account: {
+            "step-main": "step-private-value",
+            credential_account("conn_step_main"): None,
+        }.get(account)
+
+        status, result = self.mutate(json.dumps({
+            "version": 1,
+            "action": "import_provider_execution_connection",
+            "expectedRevision": 0,
+            "providerId": "step-main",
+            "connectionRef": "conn_step_main",
+            "models": ["step-3.5-flash", "step-router-v1"],
+            "enabled": True,
+        }))
+
+        self.assertEqual(status, 0)
+        self.assertEqual(result, {
+            "version": 1, "ok": True,
+            "message": "Provider execution connection imported",
+            "connectionRevision": 1,
+        })
+        connection = self.connection_store.load().connections[0]
+        self.assertEqual(connection.provider_id, "step-main")
+        self.assertEqual(connection.account_ref, "step-work")
+        self.assertEqual(connection.base_url, "https://api.stepfun.com/step_plan/v1")
+        self.assertEqual(connection.models, ("step-3.5-flash", "step-router-v1"))
+        self.keychain.set.assert_called_once_with(
+            credential_account("conn_step_main"), "step-private-value"
+        )
+        self.assertNotIn("step-private-value", self.connection_path.read_text())
+        self.assertNotIn("step-private-value", json.dumps(result))
+
+    def test_import_fails_closed_for_missing_or_ineligible_provider_credentials(self) -> None:
+        self.provider_store.save([
+            MiniMaxConfig("minimax-main", "MiniMax", site="china"),
+            OpenAIOrganizationConfig("openai-admin", "OpenAI Admin"),
+        ])
+        self.keychain.get.return_value = None
+        cases = [
+            ("minimax-main", "Provider inference credential unavailable"),
+            ("openai-admin", "Provider execution import is unavailable"),
+            ("missing", "Provider execution import is unavailable"),
+        ]
+        for provider_id, message in cases:
+            with self.subTest(provider=provider_id):
+                status, result = self.mutate(json.dumps({
+                    "version": 1,
+                    "action": "import_provider_execution_connection",
+                    "expectedRevision": 0,
+                    "providerId": provider_id,
+                    "connectionRef": "conn_import_test",
+                    "models": ["safe-model"],
+                    "enabled": True,
+                }))
+                self.assertEqual(status, 1)
+                self.assertEqual(result["message"], message)
+                self.assertFalse(self.connection_path.exists())
+                self.keychain.set.assert_not_called()
+
+    def test_provider_template_listing_survives_unavailable_native_keychain(self) -> None:
+        self.provider_store.save([
+            MiniMaxConfig("minimax-main", "MiniMax", site="china"),
+        ])
+        output = io.StringIO()
+        readonly = Mock()
+        readonly.get.return_value = "bounded-private-value"
+
+        with patch(
+            "openusage_bar.routing_commands.MacOSKeychain",
+            side_effect=ModuleNotFoundError("No module named 'Security'"),
+        ) as native, patch(
+            "openusage_bar.routing_commands.BoundedReadOnlyKeychain",
+            return_value=readonly,
+        ) as bounded:
+            status = run_routing_mutation(
+                io.StringIO(json.dumps({
+                    "version": 1,
+                    "action": "list_provider_execution_templates",
+                })),
+                output,
+                store=self.store,
+                connection_store=self.connection_store,
+                policy_store=self.policy_store,
+                preferences_store=self.preferences_store,
+                provider_store=self.provider_store,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(status, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            result["providerExecutionTemplates"][0]["credentialAvailable"],
+            True,
+        )
+        bounded.assert_called_once_with()
+        readonly.get.assert_called_once_with("minimax-main")
+        native.assert_not_called()
+        self.assertNotIn("bounded-private-value", output.getvalue())
+
+    def test_provider_import_reports_unavailable_native_keychain_without_leaking_details(self) -> None:
+        self.provider_store.save([
+            MiniMaxConfig("minimax-main", "MiniMax", site="china"),
+        ])
+        output = io.StringIO()
+
+        with patch(
+            "openusage_bar.routing_commands.MacOSKeychain",
+            side_effect=ModuleNotFoundError("sensitive native failure"),
+        ):
+            status = run_routing_mutation(
+                io.StringIO(json.dumps({
+                    "version": 1,
+                    "action": "import_provider_execution_connection",
+                    "expectedRevision": 0,
+                    "providerId": "minimax-main",
+                    "connectionRef": "conn_minimax_main",
+                    "models": ["MiniMax-M2.7"],
+                    "enabled": True,
+                })),
+                output,
+                store=self.store,
+                connection_store=self.connection_store,
+                policy_store=self.policy_store,
+                preferences_store=self.preferences_store,
+                provider_store=self.provider_store,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(status, 1)
+        self.assertEqual(result["message"], "Provider inference credential unavailable")
+        self.assertNotIn("sensitive native failure", output.getvalue())
+        self.assertFalse(self.connection_path.exists())
 
     def test_custom_policy_lifecycle_uses_document_and_policy_revisions(self) -> None:
         status, result = self.mutate(self.policy_request())

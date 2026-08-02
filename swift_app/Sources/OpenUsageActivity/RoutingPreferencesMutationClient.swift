@@ -102,6 +102,7 @@ struct RoutingPreferencesMutationClient: RoutingPreferencesMutationSubmitting, S
                       response.connections == nil,
                       response.policyDocumentRevision == nil,
                       response.customPolicies == nil,
+                      response.providerExecutionTemplates == nil,
                       response.ok == (response.preferencesRevision != nil),
                       response.preferencesRevision.map({ list ? $0 >= 0 : $0 > 0 }) ?? true
                 else { return .failure(.invalidResponse) }

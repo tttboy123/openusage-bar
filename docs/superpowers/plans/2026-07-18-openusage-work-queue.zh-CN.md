@@ -1016,6 +1016,21 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   打包安装、升级事务、签名、LaunchAgent、双 `0600` Unix Socket、CLI、
   Decision API 健康及隐私扫描均已在本机 0.8.0 (12) 开发版验证；公开发布版本
   仍保持 0.6.0。WQ-27 的本地 Phase A 工作完成。**
+- **WQ-27B：复用 Provider Center 推理凭证。** 在不把密钥交给 SwiftUI 的
+  前提下，将已显式管理的 Provider 连接安全升级为可执行连接。第一批仅允许
+  MiniMax、Kimi/Moonshot 与 Step Plan；中国站/国际站 Endpoint 由 Python
+  Controller 固定，用户只选择模型并明确确认 Keychain 内复制。目标凭证写入
+  独立 `routing.<connectionRef>` 账号，OpenAI Organization Admin Key、通用
+  额度 Provider 与 Daily Usage Feed 均排除。MiniMax 与 Step Plan 可选择同时
+  生成保守的额度 Route Target；Kimi 余额目标仍要求显式币种与成本配置。源码
+  环境缺少 PyObjC Security 时，模板列表降级为凭证不可用，导入失败关闭，不再
+  把整个路由配置误报为保存失败。**已完成：最终源码门禁为 Python 1,162 项、
+  Swift 293 项通过，新模板模块覆盖率 96%，Swift 产品行覆盖率 87.52%，源码/
+  历史密钥与两轮隐私扫描均为 0。128 目标、500 次性能测量的引擎/API/代理 p95
+  分别为 1.010/4.670/0.032 ms。模板列表实机 0.425 秒返回 2 个配置且不含密钥；
+  本机 `0.8.2 (19)` 已完成事务安装、深度签名、Local API、代理默认关闭和中文
+  SwiftUI 可见验收。验收同时补齐 `--route routing` 安装进程白名单，避免升级时
+  遗留旧 Activity 映像。**
 - **WQ-28：实现 Phase B 可选代理。** 独立显式开启的 IPv4 loopback
   OpenAI-compatible Chat Completions Proxy；一次性 Bearer 与私有不可逆 verifier、本地内存转发、
   有界重试/回退，流式输出开始后禁止透明换目标。关闭代理不影响菜单栏、账本、

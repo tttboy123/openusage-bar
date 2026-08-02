@@ -202,6 +202,44 @@ struct ProviderMutationClientTests {
         #expect(object["credentialMaterial"] == nil)
     }
 
+    @Test("Provider Center inference templates import without exposing the saved key")
+    func providerExecutionImport() async throws {
+        let templateScript = #"read payload; printf '{"version":1,"ok":true,"message":"Provider execution templates loaded","providerExecutionTemplates":[{"providerId":"step-main","familyId":"step_plan","displayName":"Step Plan","site":"china","baseURL":"https://api.stepfun.com/step_plan/v1","suggestedModels":["step-3.5-flash"],"credentialAvailable":true}]}'"#
+        let client = RoutingConnectionMutationClient(
+            limits: .init(timeout: .seconds(1), maximumResponseBytes: 8_192),
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/Users/tester"]
+        )
+        let command = ProviderMutationCommand(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", templateScript]
+        )
+
+        let loaded = try await client.loadProviderExecutionTemplates(
+            command: command
+        ).get()
+        let template = try #require(loaded.providerExecutionTemplates?.first)
+        #expect(template.providerID == "step-main")
+        #expect(template.familyID == "step_plan")
+        #expect(template.credentialAvailable)
+        #expect(template.suggestedModels == ["step-3.5-flash"])
+
+        let request = RoutingProviderExecutionImportRequest(
+            expectedRevision: 2,
+            providerID: template.providerID,
+            connectionRef: "conn_step_main",
+            models: template.suggestedModels,
+            enabled: true
+        )
+        let object = try #require(JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(request)
+        ) as? [String: Any])
+        #expect(object["action"] as? String == "import_provider_execution_connection")
+        #expect(object["providerId"] as? String == "step-main")
+        #expect(object["baseURL"] == nil)
+        #expect(object["secret"] == nil)
+        #expect(object["apiKey"] == nil)
+    }
+
     @Test("Custom routing policies mutate without credential fields")
     func routingPolicies() async throws {
         let script = #"read payload; printf '{"version":1,"ok":true,"message":"Custom routing policies loaded","policyDocumentRevision":0,"customPolicies":[]}'"#

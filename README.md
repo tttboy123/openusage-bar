@@ -222,6 +222,12 @@ Prompt 或响应内容。显式 Execution Connection、Route Target 和自定义
 Provider Center 的“智能路由”页面配置；自动发现 Provider 不会自动授予可执行
 路由能力。完整契约与退出码见 [Route Decision API v1](docs/routing-api-v1.md)。
 
+对于已经在 Provider Center 中显式配置的 MiniMax、Kimi/Moonshot 和 Step Plan，
+“复用 Provider Center”可以在用户确认后创建执行连接。站点对应的 Endpoint 由
+Controller 固定，SwiftUI 只提交 Provider、模型与启用状态；凭证在 Keychain 内
+复制到独立的路由账号，不会回显，也不会进入配置文件、命令参数或 JSON。OpenAI
+Organization Admin Key、额度 Feed 和通用额度接口不会被当作推理密钥复用。
+
 0.8 当前开发树还提供内容无关的 Shadow 比较与有界离线 Replay：前者比较实际
 目标和策略推荐，后者使用冻结事实评估策略；Replay 不读取实时事实，也不写
 证据。原生评测界面已经接入 Shadow 历史、紧凑汇总指标和本地 Replay JSON

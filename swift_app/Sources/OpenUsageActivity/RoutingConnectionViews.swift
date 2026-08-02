@@ -96,3 +96,93 @@ struct RoutingConnectionEditor: View {
         .frame(minWidth: 620, minHeight: 540)
     }
 }
+
+struct RoutingProviderExecutionImportEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: RoutingProviderExecutionImportDraft
+    let isSaving: Bool
+    let onImport: (RoutingProviderExecutionImportDraft) -> Void
+
+    init(
+        draft: RoutingProviderExecutionImportDraft,
+        isSaving: Bool,
+        onImport: @escaping (RoutingProviderExecutionImportDraft) -> Void
+    ) {
+        _draft = State(initialValue: draft)
+        self.isSaving = isSaving
+        self.onImport = onImport
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Reuse Provider credential")
+                        .font(.title2.weight(.semibold))
+                    Text("Create an isolated execution connection without displaying the key")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Import") {
+                    onImport(draft)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!draft.canImport || isSaving)
+            }
+            .padding(20)
+            Divider()
+            Form {
+                Section("Provider Center connection") {
+                    LabeledContent("Provider") {
+                        Text(draft.template.displayName)
+                    }
+                    LabeledContent("Region") {
+                        Text(draft.template.site == "china" ? "China" : "International")
+                    }
+                    LabeledContent("Fixed endpoint") {
+                        Text(draft.template.baseURL)
+                            .font(.callout.monospaced())
+                            .textSelection(.enabled)
+                    }
+                    LabeledContent("Models") {
+                        TextField("model-a, model-b", text: $draft.modelsText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 380)
+                    }
+                }
+                Section("Authorization") {
+                    Toggle(
+                        "Copy this Provider credential into an isolated routing Keychain item",
+                        isOn: $draft.confirmsLocalCopy
+                    )
+                    Text("The key stays on this Mac. It is not returned to the app UI, command output, logs, or routing configuration.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !draft.template.credentialAvailable {
+                        Label(
+                            "No readable inference credential is saved for this connection",
+                            systemImage: "key.slash"
+                        )
+                        .foregroundStyle(.orange)
+                    }
+                    if ["minimax", "step_plan"].contains(draft.template.familyID) {
+                        Toggle(
+                            "Create routing targets for the selected models",
+                            isOn: $draft.createsRoutingTargets
+                        )
+                        Text("Generated targets use conservative defaults and can be edited before enabling the local proxy.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("This Provider uses balance facts. Add routing targets separately so cost and currency remain explicit.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+        .frame(minWidth: 650, minHeight: 500)
+    }
+}

@@ -112,6 +112,23 @@ by clients; request fields remain closed and require a new schema revision.
 
 Phase A does not claim quota reservation or execution success.
 
+## Provider Center connection bootstrap
+
+Execution-connection mutation remains a private stdin protocol of the bundled
+Provider Settings Controller; it is intentionally not a Route Decision API
+endpoint. The native app may list server-produced templates and request an
+import by Provider ID, connection reference, model IDs and enabled state. It
+cannot submit an endpoint or credential in this flow.
+
+The first allowlist covers explicitly managed MiniMax, Kimi/Moonshot and Step
+Plan credentials. The Controller selects the site-specific HTTPS endpoint,
+reads the fixed Provider Keychain account, and copies the value to the isolated
+`routing.<connectionRef>` account. JSON includes only a boolean credential
+availability signal. OpenAI organization admin keys, quota-only generic
+Providers and daily usage feeds are excluded. If native Keychain access is
+missing, listing remains available with `credentialAvailable=false` and import
+fails closed without exposing the underlying error.
+
 ## Optional loopback Chat Proxy
 
 Phase B is a separately enabled execution surface. It binds only IPv4

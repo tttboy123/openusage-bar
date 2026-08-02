@@ -54,6 +54,90 @@ struct RoutingConnectionDraft: Sendable, Hashable, Identifiable {
     }
 }
 
+struct RoutingProviderExecutionImportDraft: Sendable, Hashable, Identifiable {
+    let id: String
+    let template: RoutingProviderExecutionTemplate
+    var modelsText: String
+    var confirmsLocalCopy = false
+    var createsRoutingTargets: Bool
+
+    init(
+        template: RoutingProviderExecutionTemplate,
+        generatedRef: String = "conn_" + UUID().uuidString
+            .replacingOccurrences(of: "-", with: "").lowercased()
+    ) {
+        id = generatedRef
+        self.template = template
+        modelsText = template.suggestedModels.joined(separator: ", ")
+        createsRoutingTargets = ["minimax", "step_plan"].contains(
+            template.familyID
+        )
+    }
+
+    var models: [String] {
+        let separators = CharacterSet.whitespacesAndNewlines.union(
+            CharacterSet(charactersIn: ",;")
+        )
+        return Array(Set(
+            modelsText.components(separatedBy: separators).filter { !$0.isEmpty }
+        )).sorted()
+    }
+
+    var canImport: Bool {
+        template.isValid
+            && template.credentialAvailable
+            && confirmsLocalCopy
+            && RoutingProviderExecutionImportRequest(
+                expectedRevision: 0,
+                providerID: template.providerID,
+                connectionRef: id,
+                models: models,
+                enabled: true
+            ).isValid
+    }
+
+    func targetMutations(
+        connection: RoutingExecutionConnection
+    ) -> [RoutingTargetMutationValue]? {
+        guard createsRoutingTargets,
+              connection.connectionRef == id,
+              connection.providerID == template.providerID,
+              Set(connection.models) == Set(models)
+        else { return nil }
+        let values = models.compactMap { model -> RoutingTargetMutationValue? in
+            var target = RoutingTargetDraft(
+                connection: connection,
+                generatedRef: Self.targetID(
+                    connectionRef: connection.connectionRef, modelID: model
+                )
+            )
+            target.modelID = model
+            target.resourceMode = "quota"
+            target.factAccountRef = template.factAccountRef ?? ""
+            target.regionsText = template.site == "china" ? "cn" : "global"
+            target.privacyClass = "direct_provider"
+            target.capabilities = ["chat", "reasoning", "tools"]
+            target.contextWindowTokens = 128_000
+            target.qualityTier = 3
+            return target.mutationValue(connections: [connection])
+        }
+        guard values.count == models.count,
+              Set(values.map(\.targetID)).count == values.count
+        else { return nil }
+        return values
+    }
+
+    private static func targetID(
+        connectionRef: String, modelID: String
+    ) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in (connectionRef + "\u{0}" + modelID).utf8 {
+            hash = (hash ^ UInt64(byte)) &* 1_099_511_628_211
+        }
+        return "target_" + String(hash, radix: 16)
+    }
+}
+
 struct RoutingTargetDraft: Sendable, Hashable, Identifiable {
     let id: String
     let isNew: Bool
@@ -377,6 +461,7 @@ final class RoutingViewModel {
     private(set) var shadowResult: RoutingShadowEvaluation?
     private(set) var replayReport: RoutingReplayReport?
     private(set) var connections: [RoutingExecutionConnection] = []
+    private(set) var providerExecutionTemplates: [RoutingProviderExecutionTemplate] = []
     private(set) var customPolicies: [RoutingCustomPolicy] = []
     private(set) var failure: RoutingFailure?
     private(set) var mutationFailure: RoutingFailure?
@@ -386,6 +471,7 @@ final class RoutingViewModel {
     private(set) var isEvaluating = false
     private(set) var isMutating = false
     private(set) var isLoadingConnections = false
+    private(set) var isLoadingProviderTemplates = false
     private(set) var isLoadingPolicies = false
     private(set) var isLoadingPreferences = false
     private(set) var targetRevision: Int64 = 0
@@ -625,6 +711,89 @@ final class RoutingViewModel {
         }
     }
 
+    func loadProviderExecutionTemplates(
+        command: ProviderMutationCommand
+    ) async {
+        guard !isLoadingProviderTemplates else { return }
+        isLoadingProviderTemplates = true
+        mutationFailure = nil
+        defer { isLoadingProviderTemplates = false }
+        switch await connectionMutations.loadProviderExecutionTemplates(
+            command: command
+        ) {
+        case let .success(response):
+            guard response.ok,
+                  let templates = response.providerExecutionTemplates
+            else {
+                providerExecutionTemplates = []
+                mutationFailure = .invalidData
+                return
+            }
+            providerExecutionTemplates = templates.sorted {
+                $0.displayName.localizedStandardCompare($1.displayName)
+                    == .orderedAscending
+            }
+        case let .failure(error):
+            providerExecutionTemplates = []
+            mutationFailure = Self.failure(for: error)
+        }
+    }
+
+    func importProviderExecutionConnection(
+        providerID: String,
+        connectionRef: String,
+        models: [String],
+        createTargets: Bool = false,
+        command: ProviderMutationCommand
+    ) async {
+        let request = RoutingProviderExecutionImportRequest(
+            expectedRevision: connectionRevision,
+            providerID: providerID,
+            connectionRef: connectionRef,
+            models: models,
+            enabled: true
+        )
+        guard !isMutating,
+              request.isValid,
+              let template = providerExecutionTemplates.first(where: {
+                  $0.providerID == providerID && $0.credentialAvailable
+              })
+        else { return }
+        isMutating = true
+        mutationFailure = nil
+        let result = await connectionMutations.importProviderExecutionConnection(
+            request, command: command
+        )
+        isMutating = false
+        switch result {
+        case let .success(response):
+            guard response.ok else {
+                mutationFailure = .invalidData
+                return
+            }
+            await loadConnections(command: command)
+            guard createTargets,
+                  let connection = connections.first(where: {
+                      $0.connectionRef == connectionRef
+                  })
+            else { return }
+            var draft = RoutingProviderExecutionImportDraft(
+                template: template, generatedRef: connectionRef
+            )
+            draft.modelsText = models.joined(separator: ", ")
+            draft.confirmsLocalCopy = true
+            draft.createsRoutingTargets = true
+            guard let generated = draft.targetMutations(connection: connection)
+            else {
+                mutationFailure = .invalidData
+                return
+            }
+            await upsertTargets(generated, command: command)
+        case let .failure(error):
+            mutationFailure = Self.failure(for: error)
+        }
+    }
+
     func upsertConnection(
         _ connection: RoutingExecutionConnection,
         secret: String,
@@ -770,6 +939,29 @@ final class RoutingViewModel {
         } else {
             guard values.count < 128 else { return }
             values.append(target)
+        }
+        await replaceTargets(values, command: command)
+    }
+
+    func upsertTargets(
+        _ additions: [RoutingTargetMutationValue],
+        command: ProviderMutationCommand
+    ) async {
+        guard !isMutating,
+              !additions.isEmpty,
+              additions.count <= 128,
+              Set(additions.map(\.targetID)).count == additions.count
+        else { return }
+        var values = targets.map { RoutingTargetMutationValue(target: $0) }
+        for target in additions {
+            if let index = values.firstIndex(where: {
+                $0.targetID == target.targetID
+            }) {
+                values[index] = target
+            } else {
+                guard values.count < 128 else { return }
+                values.append(target)
+            }
         }
         await replaceTargets(values, command: command)
     }

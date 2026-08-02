@@ -126,6 +126,41 @@ struct RoutingLogicTests {
         #expect(model.mutationFailure == nil)
     }
 
+    @Test("Managed Provider credentials require an explicit import and refresh connections")
+    func managedProviderImport() async {
+        let connections = RoutingConnectionMutationFixture()
+        let targets = RoutingMutationFixture()
+        let model = RoutingViewModel(
+            client: RoutingClientFixture(),
+            mutations: targets,
+            connectionMutations: connections
+        )
+        let command = ProviderMutationCommand(
+            executableURL: URL(fileURLWithPath: "/tmp/helper"),
+            arguments: ["routing-mutate"]
+        )
+
+        await model.loadConnections(command: command)
+        await model.loadProviderExecutionTemplates(command: command)
+        #expect(model.providerExecutionTemplates.map(\.providerID) == ["step-main"])
+        #expect(model.providerExecutionTemplates.first?.credentialAvailable == true)
+
+        await model.importProviderExecutionConnection(
+            providerID: "step-main",
+            connectionRef: "conn_step_main",
+            models: ["step-3.5-flash"],
+            createTargets: true,
+            command: command
+        )
+        #expect(connections.lastImport?.expectedRevision == 2)
+        #expect(connections.lastImport?.providerID == "step-main")
+        #expect(connections.lastImport?.models == ["step-3.5-flash"])
+        #expect(targets.lastRequest?.targets.contains(where: {
+            $0.providerID == "step-main"
+        }) == true)
+        #expect(model.mutationFailure == nil)
+    }
+
     @Test("Connection drafts require an inference key only when first created")
     func connectionDraft() {
         var draft = RoutingConnectionDraft(
@@ -143,6 +178,32 @@ struct RoutingLogicTests {
         let existing = RoutingConnectionDraft(connection: .fixture())
         #expect(existing.secret.isEmpty)
         #expect(existing.canSave)
+    }
+
+    @Test("Provider import drafts can generate conservative quota targets")
+    func providerImportDraft() throws {
+        var draft = RoutingProviderExecutionImportDraft(
+            template: .fixture(), generatedRef: "conn_step_main"
+        )
+        #expect(!draft.canImport)
+        draft.confirmsLocalCopy = true
+        #expect(draft.canImport)
+        #expect(draft.createsRoutingTargets)
+
+        let connection = RoutingExecutionConnection(
+            connectionRef: "conn_step_main", providerID: "step-main",
+            accountRef: "step-main", executionClass: "openai_compatible",
+            executionAdapterID: "openai_compatible.direct",
+            baseURL: "https://api.stepfun.com/step_plan/v1",
+            enabled: true, models: ["step-3.5-flash"]
+        )
+        let targets = try #require(draft.targetMutations(connection: connection))
+        #expect(targets.count == 1)
+        #expect(targets[0].providerID == "step-main")
+        #expect(targets[0].factAccountRef == nil)
+        #expect(targets[0].resourceMode == "quota")
+        #expect(targets[0].capabilities == ["chat", "reasoning", "tools"])
+        #expect(targets[0].regions == ["cn"])
     }
 
     @Test("Target drafts bind execution identity and explicit resource facts")
@@ -320,18 +381,37 @@ private final class RoutingConnectionMutationFixture:
 {
     private let lock = NSLock()
     private var capturedUpsert: RoutingConnectionMutationRequest?
+    private var capturedImport: RoutingProviderExecutionImportRequest?
     var lastUpsert: RoutingConnectionMutationRequest? {
         lock.withLock { capturedUpsert }
+    }
+    var lastImport: RoutingProviderExecutionImportRequest? {
+        lock.withLock { capturedImport }
     }
 
     func loadConnections(
         command: ProviderMutationCommand
     ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
-        let isFirstLoad = lock.withLock { capturedUpsert == nil }
+        let state = lock.withLock { (capturedUpsert, capturedImport) }
+        let loadedConnections: [RoutingExecutionConnection]
+        if let imported = state.1 {
+            loadedConnections = [RoutingExecutionConnection(
+                connectionRef: imported.connectionRef,
+                providerID: imported.providerID,
+                accountRef: imported.providerID,
+                executionClass: "openai_compatible",
+                executionAdapterID: "openai_compatible.direct",
+                baseURL: "https://api.stepfun.com/step_plan/v1",
+                enabled: true,
+                models: imported.models
+            )]
+        } else {
+            loadedConnections = [.fixture()]
+        }
         return .success(.init(
             version: 1, ok: true, message: "Execution connections loaded",
-            connectionRevision: isFirstLoad ? 2 : 3,
-            connections: [.fixture()]
+            connectionRevision: state.0 == nil && state.1 == nil ? 2 : 3,
+            connections: loadedConnections
         ))
     }
 
@@ -352,6 +432,28 @@ private final class RoutingConnectionMutationFixture:
     ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
         .success(.init(
             version: 1, ok: true, message: "Execution connection removed",
+            connectionRevision: request.expectedRevision + 1
+        ))
+    }
+
+    func loadProviderExecutionTemplates(
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        .success(.init(
+            version: 1, ok: true,
+            message: "Provider execution templates loaded",
+            providerExecutionTemplates: [.fixture()]
+        ))
+    }
+
+    func importProviderExecutionConnection(
+        _ request: RoutingProviderExecutionImportRequest,
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        lock.withLock { capturedImport = request }
+        return .success(.init(
+            version: 1, ok: true,
+            message: "Provider execution connection imported",
             connectionRevision: request.expectedRevision + 1
         ))
     }
@@ -556,6 +658,18 @@ private extension RoutingExecutionConnection {
             executionAdapterID: "openai_compatible.direct",
             baseURL: "https://api.example.com/v1",
             enabled: true, models: ["gpt-5"]
+        )
+    }
+}
+
+private extension RoutingProviderExecutionTemplate {
+    static func fixture() -> Self {
+        Self(
+            providerID: "step-main", familyID: "step_plan",
+            displayName: "Step Plan", site: "china",
+            baseURL: "https://api.stepfun.com/step_plan/v1",
+            suggestedModels: ["step-3.5-flash"], credentialAvailable: true,
+            factAccountRef: nil
         )
     }
 }

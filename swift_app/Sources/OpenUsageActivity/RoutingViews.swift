@@ -7,6 +7,7 @@ struct RoutingPage: View {
     @State private var model = RoutingViewModel()
     @State private var localMutationFailure: String?
     @State private var editingConnection: RoutingConnectionDraft?
+    @State private var importingProvider: RoutingProviderExecutionImportDraft?
     @State private var editingTarget: RoutingTargetDraft?
     @State private var editingPolicy: RoutingPolicyDraft?
     @State private var isImportingReplay = false
@@ -60,6 +61,13 @@ struct RoutingPage: View {
                 onRemove: draft.isNew ? nil : { connectionRef in
                     removeConnection(connectionRef)
                 }
+            )
+        }
+        .sheet(item: $importingProvider) { draft in
+            RoutingProviderExecutionImportEditor(
+                draft: draft,
+                isSaving: model.isMutating,
+                onImport: importProviderExecutionConnection
             )
         }
         .sheet(item: $editingTarget) { draft in
@@ -129,6 +137,24 @@ struct RoutingPage: View {
                     detail: "Inference credentials stay in Keychain"
                 )
                 Spacer()
+                if !model.providerExecutionTemplates.isEmpty {
+                    Menu("Reuse Provider Center", systemImage: "key.horizontal") {
+                        ForEach(model.providerExecutionTemplates) { template in
+                            Button {
+                                importingProvider = .init(template: template)
+                            } label: {
+                                Label(
+                                    template.displayName,
+                                    systemImage: template.credentialAvailable
+                                        ? "key.fill" : "key.slash"
+                                )
+                            }
+                            .disabled(!template.credentialAvailable)
+                        }
+                    }
+                    .menuStyle(.button)
+                    .help("Reuse an eligible inference key already managed in Provider Center")
+                }
                 Button("Add connection", systemImage: "plus") {
                     editingConnection = RoutingConnectionDraft()
                 }
@@ -925,10 +951,32 @@ struct RoutingPage: View {
         if let command = routingCommand() {
             await model.loadPreferences(command: command)
             await model.loadConnections(command: command)
+            await model.loadProviderExecutionTemplates(command: command)
             await model.loadCustomPolicies(command: command)
         }
         if let command = proxyCommand(.status) {
             await model.loadProxy(command: command)
+        }
+    }
+
+    private func importProviderExecutionConnection(
+        _ draft: RoutingProviderExecutionImportDraft
+    ) {
+        localMutationFailure = nil
+        guard draft.canImport, let command = routingCommand() else {
+            localMutationFailure = AppLocalization.text(
+                "Provider credential import is unavailable"
+            )
+            return
+        }
+        Task {
+            await model.importProviderExecutionConnection(
+                providerID: draft.template.providerID,
+                connectionRef: draft.id,
+                models: draft.models,
+                createTargets: draft.createsRoutingTargets,
+                command: command
+            )
         }
     }
 

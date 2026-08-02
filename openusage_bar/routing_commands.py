@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, TextIO
 
-from .keychain import MacOSKeychain
+from .config import ProviderConfigStore
+from .keychain import BoundedReadOnlyKeychain, MacOSKeychain
 from .routing_contract import RouteTarget
 from .routing_execution import (
     ExecutionConnection,
@@ -25,6 +26,10 @@ from .routing_preferences import (
     RoutingPreferencesConfigError,
     RoutingPreferencesStore,
 )
+from .routing_provider_templates import (
+    ProviderExecutionTemplate,
+    template_for_provider,
+)
 
 
 MAX_REQUEST_BYTES = 256 * 1024
@@ -36,6 +41,11 @@ _REMOVE_CONNECTION_REQUEST_KEYS = frozenset({
     "version", "action", "expectedRevision", "connectionRef",
 })
 _LIST_CONNECTION_REQUEST_KEYS = frozenset({"version", "action"})
+_LIST_PROVIDER_TEMPLATE_REQUEST_KEYS = frozenset({"version", "action"})
+_IMPORT_PROVIDER_CONNECTION_REQUEST_KEYS = frozenset({
+    "version", "action", "expectedRevision", "providerId", "connectionRef",
+    "models", "enabled",
+})
 _POLICY_REQUEST_KEYS = frozenset({
     "version", "action", "expectedRevision", "policy",
 })
@@ -117,6 +127,14 @@ class _TargetConnectionMismatch(ValueError):
 
 
 class _ConnectionSaveFailure(RuntimeError):
+    pass
+
+
+class _ProviderExecutionUnavailable(ValueError):
+    pass
+
+
+class _ProviderCredentialUnavailable(RuntimeError):
     pass
 
 
@@ -270,6 +288,10 @@ def _default_preferences_store() -> RoutingPreferencesStore:
     )
 
 
+def _default_provider_store() -> ProviderConfigStore:
+    return ProviderConfigStore()
+
+
 def _compatible(target: RouteTarget, connection: ExecutionConnection) -> bool:
     return (
         target.provider_id == connection.provider_id
@@ -290,6 +312,23 @@ def _connection_wire(value: ExecutionConnection) -> dict[str, object]:
         "baseURL": value.base_url,
         "enabled": value.enabled,
         "models": list(value.models),
+    }
+
+
+def _provider_template_wire(
+    value: ProviderExecutionTemplate,
+    *,
+    credential_available: bool,
+) -> dict[str, object]:
+    return {
+        "providerId": value.provider_id,
+        "familyId": value.family_id,
+        "displayName": value.display_name,
+        "site": value.site,
+        "factAccountRef": value.fact_account_ref,
+        "baseURL": value.base_url,
+        "suggestedModels": list(value.suggested_models),
+        "credentialAvailable": credential_available,
     }
 
 
@@ -343,6 +382,7 @@ def _write(
     custom_policies: tuple[RoutePolicy, ...] | None = None,
     preferences_revision: int | None = None,
     routing_preferences: RoutingPreferences | None = None,
+    provider_execution_templates: tuple[dict[str, object], ...] | None = None,
 ) -> int:
     payload: dict[str, object] = {"version": 1, "ok": ok, "message": message}
     if target_revision is not None:
@@ -362,6 +402,8 @@ def _write(
             "decisionApiEnabled": routing_preferences.decision_api_enabled,
             "defaultPolicyId": routing_preferences.default_policy_id,
         }
+    if provider_execution_templates is not None:
+        payload["providerExecutionTemplates"] = list(provider_execution_templates)
     output.write(json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n")
     output.flush()
     return 0 if ok else 1
@@ -376,12 +418,14 @@ def run_routing_mutation(
     keychain: MacOSKeychain | None = None,
     policy_store: RoutingPolicyStore | None = None,
     preferences_store: RoutingPreferencesStore | None = None,
+    provider_store: ProviderConfigStore | None = None,
 ) -> int:
     """Mutate bounded route configuration from one private stdin document."""
     resolved = store or _default_store()
     resolved_connections = connection_store or _default_connection_store()
     resolved_policies = policy_store or _default_policy_store()
     resolved_preferences = preferences_store or _default_preferences_store()
+    resolved_providers = provider_store or _default_provider_store()
     resolved_keychain = keychain
 
     def mutation_keychain() -> MacOSKeychain:
@@ -446,6 +490,132 @@ def run_routing_mutation(
                 output_stream, True, "Execution connections loaded",
                 connection_revision=configuration.revision,
                 connections=configuration.connections,
+            )
+        if action == "list_provider_execution_templates":
+            _exact(payload, _LIST_PROVIDER_TEMPLATE_REQUEST_KEYS)
+            templates = tuple(sorted(
+                (
+                    template
+                    for configured in resolved_providers.load()
+                    if (template := template_for_provider(configured)) is not None
+                ),
+                key=lambda value: value.provider_id,
+            ))
+            try:
+                active_keychain = (
+                    resolved_keychain
+                    if resolved_keychain is not None
+                    else BoundedReadOnlyKeychain()
+                )
+            except Exception:
+                active_keychain = None
+            rows: list[dict[str, object]] = []
+            for template in templates:
+                try:
+                    secret = (
+                        active_keychain.get(template.source_credential_account)
+                        if active_keychain is not None
+                        else None
+                    )
+                    available = (
+                        isinstance(secret, str)
+                        and bool(secret)
+                        and len(secret.encode("utf-8")) <= 65_536
+                        and "\r" not in secret
+                        and "\n" not in secret
+                    )
+                except Exception:
+                    available = False
+                rows.append(_provider_template_wire(
+                    template, credential_available=available
+                ))
+            return _write(
+                output_stream, True, "Provider execution templates loaded",
+                provider_execution_templates=tuple(rows),
+            )
+        if action == "import_provider_execution_connection":
+            request = _exact(payload, _IMPORT_PROVIDER_CONNECTION_REQUEST_KEYS)
+            expected = request["expectedRevision"]
+            provider_id = request["providerId"]
+            connection_ref = request["connectionRef"]
+            enabled = request["enabled"]
+            if (
+                isinstance(expected, bool) or not isinstance(expected, int)
+                or expected < 0 or not isinstance(provider_id, str)
+                or not isinstance(connection_ref, str)
+                or not isinstance(enabled, bool)
+            ):
+                raise ValueError("invalid provider execution import")
+            models = _models(request["models"])
+            matches = tuple(
+                template
+                for configured in resolved_providers.load()
+                if (template := template_for_provider(configured)) is not None
+                and template.provider_id == provider_id
+            )
+            if len(matches) != 1:
+                raise _ProviderExecutionUnavailable()
+            template = matches[0]
+            connection = ExecutionConnection(
+                connection_ref=connection_ref,
+                provider_id=template.provider_id,
+                account_ref=template.account_ref,
+                execution_class="openai_compatible",
+                execution_adapter_id="openai_compatible.direct",
+                base_url=template.base_url,
+                enabled=enabled,
+                models=models,
+            )
+            configuration = resolved_connections.load()
+            if configuration.revision != expected:
+                raise _StaleConnectionRevision()
+            targets = resolved.load(available_adapters=()).targets
+            if any(
+                value.connection_ref == connection.connection_ref
+                and not _compatible(value, connection)
+                for value in targets
+            ):
+                raise _ConnectionConflict()
+            try:
+                active_keychain = mutation_keychain()
+                source_secret = active_keychain.get(
+                    template.source_credential_account
+                )
+            except Exception as error:
+                raise _ProviderCredentialUnavailable() from error
+            if (
+                not isinstance(source_secret, str)
+                or not source_secret
+                or len(source_secret.encode("utf-8")) > 65_536
+                or "\r" in source_secret
+                or "\n" in source_secret
+            ):
+                raise _ProviderCredentialUnavailable()
+            destination = credential_account(connection.connection_ref)
+            try:
+                previous = active_keychain.get(destination)
+                active_keychain.set(destination, source_secret)
+            except Exception as error:
+                raise _ConnectionSaveFailure() from error
+            existing = next((
+                value for value in configuration.connections
+                if value.connection_ref == connection.connection_ref
+            ), None)
+            updated = tuple(
+                connection if value.connection_ref == connection.connection_ref else value
+                for value in configuration.connections
+            )
+            if existing is None:
+                updated = (*updated, connection)
+            revision = expected + 1
+            try:
+                resolved_connections.save(updated, revision=revision)
+            except Exception as error:
+                _restore_secret(active_keychain, destination, previous)
+                raise _ConnectionSaveFailure() from error
+            return _write(
+                output_stream, True, "Provider execution connection imported",
+                connection_revision=revision,
             )
         if action == "replace_targets":
             request = _exact(payload, _REQUEST_KEYS)
@@ -680,6 +850,14 @@ def run_routing_mutation(
             output_stream, False,
             "Execution connection could not be saved",
         )
+    except _ProviderExecutionUnavailable:
+        return _write(
+            output_stream, False, "Provider execution import is unavailable",
+        )
+    except _ProviderCredentialUnavailable:
+        return _write(
+            output_stream, False, "Provider inference credential unavailable",
+        )
     except (
         json.JSONDecodeError, UnicodeError, TypeError, ValueError,
         RouteTargetConfigError, ExecutionConnectionConfigError,
@@ -693,7 +871,16 @@ def run_routing_mutation(
                 "Custom routing policy request is invalid"
                 if isinstance(payload, dict)
                 and payload.get("action") in {"upsert_policy", "remove_policy"}
-                else "Routing target request is invalid"
+                else (
+                    "Provider execution import request is invalid"
+                    if isinstance(payload, dict)
+                    and payload.get("action")
+                    in {
+                        "list_provider_execution_templates",
+                        "import_provider_execution_connection",
+                    }
+                    else "Routing target request is invalid"
+                )
             )
         )
         return _write(output_stream, False, message)

@@ -418,11 +418,20 @@ Add a `Routing` section with:
 - master toggle for Decision API;
 - built-in policy selector and custom policy editor;
 - route targets grouped by Provider and account;
+- an explicit Provider Center reuse flow for managed inference credentials;
 - missing execution adapter/capability/fact warnings;
 - dry-run form with selected, alternative and rejected explanations;
 - recent content-free decision history;
 - separate, unmistakable Phase B proxy toggle and local endpoint/token reset;
 - Chinese and English strings, keyboard navigation and VoiceOver labels.
+
+Provider credential reuse is allowlisted by concrete Provider type. The
+Controller, not SwiftUI, owns each China/international endpoint and reads the
+source Keychain account only after explicit confirmation. It copies the value
+to an isolated routing Keychain account; neither the source nor copied value is
+returned over JSON. Billing/admin keys and custom usage feeds are never inferred
+to be inference credentials. Missing native Keychain access reports unavailable
+state and cannot silently create a connection.
 
 The menu bar remains a quick resource view. It may show the current default
 policy and latest no-route health badge, but it must not add a dense routing

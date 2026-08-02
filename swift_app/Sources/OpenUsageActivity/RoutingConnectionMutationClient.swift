@@ -61,6 +61,67 @@ struct RoutingConnectionRemoveRequest: Encodable, Sendable, Hashable {
     let connectionRef: String
 }
 
+struct RoutingProviderExecutionTemplate: Codable, Sendable, Hashable, Identifiable {
+    let providerID: String
+    let familyID: String
+    let displayName: String
+    let site: String
+    let baseURL: String
+    let suggestedModels: [String]
+    let credentialAvailable: Bool
+    let factAccountRef: String?
+
+    var id: String { providerID }
+
+    enum CodingKeys: String, CodingKey {
+        case displayName, site, baseURL, suggestedModels, credentialAvailable
+        case factAccountRef
+        case providerID = "providerId"
+        case familyID = "familyId"
+    }
+
+    var isValid: Bool {
+        RoutingExecutionConnection.isStableID(providerID)
+            && RoutingExecutionConnection.isStableID(familyID)
+            && !displayName.isEmpty && displayName.utf8.count <= 160
+            && displayName.unicodeScalars.allSatisfy {
+                $0.value >= 0x20 && $0.value != 0x7f
+            }
+            && ["china", "international"].contains(site)
+            && factAccountRef.map(RoutingExecutionConnection.isStableID) ?? true
+            && RoutingExecutionConnection(
+                connectionRef: "validation", providerID: providerID,
+                accountRef: "validation", executionClass: "openai_compatible",
+                executionAdapterID: "openai_compatible.direct", baseURL: baseURL,
+                enabled: true, models: suggestedModels
+            ).isValid
+    }
+}
+
+struct RoutingProviderExecutionImportRequest: Encodable, Sendable, Hashable {
+    let version = 1
+    let action = "import_provider_execution_connection"
+    let expectedRevision: Int64
+    let providerID: String
+    let connectionRef: String
+    let models: [String]
+    let enabled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case version, action, expectedRevision, connectionRef, models, enabled
+        case providerID = "providerId"
+    }
+
+    var isValid: Bool {
+        expectedRevision >= 0
+            && RoutingExecutionConnection.isStableID(providerID)
+            && RoutingExecutionConnection.isStableID(connectionRef)
+            && !models.isEmpty && models.count <= 256
+            && Set(models).count == models.count
+            && models.allSatisfy(RoutingExecutionConnection.isStableID)
+    }
+}
+
 private struct RoutingConnectionListRequest: Encodable {
     let version = 1
     let action = "list_connections"
@@ -78,6 +139,15 @@ protocol RoutingConnectionMutationSubmitting: Sendable {
 
     func removeConnection(
         _ request: RoutingConnectionRemoveRequest,
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure>
+
+    func loadProviderExecutionTemplates(
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure>
+
+    func importProviderExecutionConnection(
+        _ request: RoutingProviderExecutionImportRequest,
         command: ProviderMutationCommand
     ) async -> Result<RoutingMutationResponse, ProviderMutationFailure>
 }
@@ -128,7 +198,30 @@ struct RoutingConnectionMutationClient: RoutingConnectionMutationSubmitting, Sen
         return await submit(request, mode: .mutation, command: command)
     }
 
-    private enum ResponseMode { case list, mutation }
+    func loadProviderExecutionTemplates(
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        await submit(
+            RoutingProviderExecutionTemplateListRequest(),
+            mode: .providerTemplates,
+            command: command
+        )
+    }
+
+    func importProviderExecutionConnection(
+        _ request: RoutingProviderExecutionImportRequest,
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        guard request.isValid else { return .failure(.invalidResponse) }
+        return await submit(request, mode: .mutation, command: command)
+    }
+
+    private struct RoutingProviderExecutionTemplateListRequest: Encodable {
+        let version = 1
+        let action = "list_provider_execution_templates"
+    }
+
+    private enum ResponseMode { case list, mutation, providerTemplates }
 
     private func submit<Request: Encodable & Sendable>(
         _ request: Request,
@@ -172,12 +265,23 @@ struct RoutingConnectionMutationClient: RoutingConnectionMutationSubmitting, Sen
                           let connections = response.connections,
                           connections.count <= 128,
                           connections.allSatisfy(\.isValid),
-                          Set(connections.map(\.connectionRef)).count == connections.count
+                          Set(connections.map(\.connectionRef)).count == connections.count,
+                          response.providerExecutionTemplates == nil
                     else { return .failure(.invalidResponse) }
                 case .mutation:
                     guard response.ok == (response.connectionRevision != nil),
                           response.connectionRevision.map({ $0 > 0 }) ?? true,
-                          response.connections == nil
+                          response.connections == nil,
+                          response.providerExecutionTemplates == nil
+                    else { return .failure(.invalidResponse) }
+                case .providerTemplates:
+                    guard response.ok,
+                          response.connectionRevision == nil,
+                          response.connections == nil,
+                          let templates = response.providerExecutionTemplates,
+                          templates.count <= 128,
+                          templates.allSatisfy(\.isValid),
+                          Set(templates.map(\.providerID)).count == templates.count
                     else { return .failure(.invalidResponse) }
                 }
                 return .success(response)
