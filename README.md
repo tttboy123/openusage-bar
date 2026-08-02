@@ -99,8 +99,13 @@ xattr -dr com.apple.quarantine "/Applications/OpenUsage Bar.app"
 
 1. 点击菜单栏里的 **OpenUsage Bar**。
 2. 进入 **Open Usage Details** 查看账本。
-3. 进入 **Settings / Providers** 添加或编辑 Provider。
-4. 后续通常只需查看菜单栏；登录后自动启动，采集器每五分钟刷新。
+3. 进入 **Usage Details > Providers**，点击右上角 **新增 Provider**。
+4. 从完整目录选择服务商；MiniMax、Kimi/Moonshot、StepFun Step Plan 和
+   OpenAI Organization 使用内置连接器，其他 API 服务商会明确要求配置只读
+   HTTPS 字段映射。本机客户端与订阅应用由应用自动发现。
+5. 目录之外的服务选择 **自定义 Provider**；每日 Token 数据选择
+   **自定义每日用量 Feed**。凭证只写入 Keychain，保存后不会回显。
+6. 后续通常只需查看菜单栏；登录后自动启动，采集器每五分钟刷新。
 
 更多细节、SHA-256 校验和高级修复脚本见[安装指南](docs/release-quick-start.md)。
 

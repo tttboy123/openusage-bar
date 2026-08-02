@@ -1,4 +1,142 @@
 import Foundation
+import UsageCore
+
+enum ProviderAddConnectionKind: String, Sendable, Hashable {
+    case minimax
+    case moonshot
+    case stepPlan = "step_plan"
+    case openAIOrganization = "openai_organization"
+    case generic
+    case dailyUsageFeed = "daily_usage_feed"
+
+    init?(familyID: String) {
+        switch familyID {
+        case "minimax": self = .minimax
+        case "moonshot": self = .moonshot
+        case "step_plan": self = .stepPlan
+        case "openai": self = .openAIOrganization
+        default: return nil
+        }
+    }
+
+    var isBuiltIn: Bool {
+        ![Self.generic, .dailyUsageFeed].contains(self)
+    }
+}
+
+struct ProviderAddOption: Identifiable, Sendable, Hashable {
+    enum Origin: Sendable, Hashable {
+        case catalog
+        case customProvider
+        case customUsageFeed
+    }
+
+    let id: String
+    let descriptor: ProviderDisplayDescriptor
+    let connectionKind: ProviderAddConnectionKind
+    let origin: Origin
+    let defaultProviderID: String
+
+    var searchTerms: [String] {
+        [id, descriptor.familyID, descriptor.displayName] + descriptor.aliases
+    }
+}
+
+struct ProviderAddCatalog: Sendable, Equatable {
+    let serviceOptions: [ProviderAddOption]
+    let automaticDescriptors: [ProviderDisplayDescriptor]
+    let customOptions: [ProviderAddOption]
+
+    init(descriptors: [ProviderDisplayDescriptor]) {
+        let sorted = descriptors.sorted(by: Self.sortDescriptors)
+        serviceOptions = sorted.compactMap { descriptor in
+            if let nativeKind = ProviderAddConnectionKind(familyID: descriptor.familyID) {
+                return ProviderAddOption(
+                    id: descriptor.familyID,
+                    descriptor: descriptor,
+                    connectionKind: nativeKind,
+                    origin: .catalog,
+                    defaultProviderID: descriptor.familyID
+                )
+            }
+            guard descriptor.category == .api else { return nil }
+            return ProviderAddOption(
+                id: descriptor.familyID,
+                descriptor: descriptor,
+                connectionKind: .generic,
+                origin: .catalog,
+                defaultProviderID: descriptor.familyID
+            )
+        }
+        let serviceIDs = Set(serviceOptions.map(\.descriptor.familyID))
+        automaticDescriptors = sorted.filter { !serviceIDs.contains($0.familyID) }
+        customOptions = Self.makeCustomOptions()
+    }
+
+    func filteredServiceOptions(query: String) -> [ProviderAddOption] {
+        Self.filter(serviceOptions, query: query, terms: \.searchTerms)
+    }
+
+    func filteredCustomOptions(query: String) -> [ProviderAddOption] {
+        Self.filter(customOptions, query: query, terms: \.searchTerms)
+    }
+
+    func filteredAutomaticDescriptors(query: String) -> [ProviderDisplayDescriptor] {
+        Self.filter(automaticDescriptors, query: query) { descriptor in
+            [descriptor.familyID, descriptor.displayName] + descriptor.aliases
+        }
+    }
+
+    private static func makeCustomOptions() -> [ProviderAddOption] {
+        let quota = ProviderCatalog.descriptor(
+            for: "custom-provider", familyID: "custom",
+            displayName: "Custom Provider", category: .api
+        )
+        let daily = ProviderCatalog.descriptor(
+            for: "custom-daily-usage", familyID: "custom",
+            displayName: "Custom Daily Usage Feed", category: .api
+        )
+        return [
+            ProviderAddOption(
+                id: "custom-provider", descriptor: quota,
+                connectionKind: .generic, origin: .customProvider,
+                defaultProviderID: "custom-provider"
+            ),
+            ProviderAddOption(
+                id: "custom-daily-usage", descriptor: daily,
+                connectionKind: .dailyUsageFeed, origin: .customUsageFeed,
+                defaultProviderID: "custom-daily-usage"
+            ),
+        ]
+    }
+
+    private static func filter<Value>(
+        _ values: [Value], query: String,
+        terms: KeyPath<Value, [String]>
+    ) -> [Value] {
+        filter(values, query: query) { $0[keyPath: terms] }
+    }
+
+    private static func filter<Value>(
+        _ values: [Value], query: String,
+        terms: (Value) -> [String]
+    ) -> [Value] {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return values }
+        return values.filter { value in
+            terms(value).contains { $0.lowercased().contains(normalized) }
+        }
+    }
+
+    private static func sortDescriptors(
+        _ left: ProviderDisplayDescriptor, _ right: ProviderDisplayDescriptor
+    ) -> Bool {
+        let order = left.displayName.localizedStandardCompare(right.displayName)
+        return order == .orderedSame
+            ? left.familyID < right.familyID
+            : order == .orderedAscending
+    }
+}
 
 enum ProviderMutationAction: String, Encodable, Sendable, Equatable {
     case createConnection = "create_connection"

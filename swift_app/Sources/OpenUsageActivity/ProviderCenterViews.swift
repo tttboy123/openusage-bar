@@ -13,6 +13,11 @@ struct ProvidersPage: View {
     @State private var searchText = ""
     @State private var configuredConnections: [ProviderConnectionSummary] = []
     @State private var discoveredConnections: [ProviderInstanceRecord] = []
+    @State private var showingAddProvider = false
+
+    private var addCatalog: ProviderAddCatalog {
+        ProviderAddCatalog(descriptors: ProviderCatalog.allDescriptors)
+    }
 
     private var providerInstances: [ProviderInstanceRecord] {
         discoveredConnections.isEmpty ? data.providerInstances : discoveredConnections
@@ -101,6 +106,13 @@ struct ProvidersPage: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 260)
                     .accessibilityLabel("Search providers or clients")
+                Button("Add Provider", systemImage: "plus") {
+                    showingAddProvider = true
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .accessibilityHint("Choose a built-in service or configure a custom data source")
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 20)
@@ -143,6 +155,16 @@ struct ProvidersPage: View {
         .onChange(of: selectedCategory) { synchronizeSelection() }
         .onChange(of: searchText) { synchronizeSelection() }
         .onChange(of: selectedFamilyID) { _, _ in synchronizeRegion() }
+        .sheet(isPresented: $showingAddProvider) {
+            ProviderAddFlowSheet(
+                catalog: addCatalog,
+                onSaved: { option in
+                    showingAddProvider = false
+                    loadConfiguredConnections(selecting: option.descriptor.familyID)
+                    reload()
+                }
+            )
+        }
     }
 
     private var providerList: some View {
@@ -231,7 +253,7 @@ struct ProvidersPage: View {
         }
     }
 
-    private func loadConfiguredConnections() {
+    private func loadConfiguredConnections(selecting preferredFamilyID: String? = nil) {
         Task { @MainActor in
             let loaded = await Task.detached(priority: .utility) { () -> (
                 [ProviderConnectionSummary], [ProviderInstanceRecord]
@@ -244,8 +266,227 @@ struct ProvidersPage: View {
             }.value
             configuredConnections = loaded.0
             discoveredConnections = loaded.1
-            synchronizeSelection()
+            if let preferredFamilyID {
+                selectedCategory = .all
+                searchText = ""
+                selectedFamilyID = preferredFamilyID
+                synchronizeRegion()
+            } else {
+                synchronizeSelection()
+            }
         }
+    }
+}
+
+private struct ProviderAddFlowSheet: View {
+    let catalog: ProviderAddCatalog
+    let onSaved: (ProviderAddOption) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+    @State private var selectedOption: ProviderAddOption?
+
+    var body: some View {
+        Group {
+            if let selectedOption {
+                NativeProviderConnectionSheet(
+                    option: selectedOption,
+                    selectedSite: selectedOption.descriptor.regions.sorted().first,
+                    onCancel: { self.selectedOption = nil },
+                    onSaved: { onSaved(selectedOption) }
+                )
+            } else {
+                chooser
+            }
+        }
+    }
+
+    private var chooser: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Add Provider").font(.title2.weight(.semibold))
+                    Text("Choose a service, or connect your own quota or daily usage endpoint.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(24)
+
+            TextField("Search service providers", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Search service providers")
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
+
+            Divider()
+
+            List {
+                if !customOptions.isEmpty {
+                    Section("Custom Sources") {
+                        ForEach(customOptions) { option in
+                            optionButton(option)
+                        }
+                    }
+                }
+                if !builtInOptions.isEmpty {
+                    Section("Built-in Connections") {
+                        ForEach(builtInOptions) { option in
+                            optionButton(option)
+                        }
+                    }
+                }
+                if !endpointOptions.isEmpty {
+                    Section("Service Provider Catalog") {
+                        ForEach(endpointOptions) { option in
+                            optionButton(option)
+                        }
+                    }
+                }
+                if !automaticDescriptors.isEmpty {
+                    Section {
+                        ForEach(automaticDescriptors, id: \.familyID) { descriptor in
+                            ProviderAutomaticDiscoveryRow(descriptor: descriptor)
+                        }
+                    } header: {
+                        Text("Automatically Discovered")
+                    } footer: {
+                        Text("Local clients and subscription apps appear after they are used on this Mac; no credential setup is required here.")
+                    }
+                }
+                if customOptions.isEmpty && builtInOptions.isEmpty
+                    && endpointOptions.isEmpty && automaticDescriptors.isEmpty
+                {
+                    ContentUnavailableView.search(text: searchText)
+                }
+            }
+            .listStyle(.inset)
+        }
+        .frame(width: 680, height: 720)
+    }
+
+    private var filteredServices: [ProviderAddOption] {
+        catalog.filteredServiceOptions(query: searchText)
+    }
+
+    private var builtInOptions: [ProviderAddOption] {
+        filteredServices.filter(\.connectionKind.isBuiltIn)
+    }
+
+    private var endpointOptions: [ProviderAddOption] {
+        filteredServices.filter { !$0.connectionKind.isBuiltIn }
+    }
+
+    private var customOptions: [ProviderAddOption] {
+        catalog.filteredCustomOptions(query: searchText)
+    }
+
+    private var automaticDescriptors: [ProviderDisplayDescriptor] {
+        catalog.filteredAutomaticDescriptors(query: searchText)
+    }
+
+    private func optionButton(_ option: ProviderAddOption) -> some View {
+        Button {
+            selectedOption = option
+        } label: {
+            ProviderAddOptionRow(option: option)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ProviderAddOptionRow: View {
+    let option: ProviderAddOption
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 34, height: 34)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(AppLocalization.text(option.descriptor.displayName))
+                    .font(.body.weight(.medium))
+                Text(detail)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(kindLabel)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(tint.opacity(0.1), in: Capsule())
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var symbol: String {
+        switch option.origin {
+        case .customProvider: "slider.horizontal.3"
+        case .customUsageFeed: "chart.bar.doc.horizontal"
+        case .catalog: option.connectionKind.isBuiltIn ? "checkmark.seal" : "network"
+        }
+    }
+
+    private var tint: Color {
+        option.origin == .catalog && option.connectionKind.isBuiltIn ? .green : .accentColor
+    }
+
+    private var detail: String {
+        switch option.origin {
+        case .customProvider:
+            AppLocalization.text("Map any HTTPS quota response to capacity facts.")
+        case .customUsageFeed:
+            AppLocalization.text("Import daily model and Token records from an HTTPS feed.")
+        case .catalog where option.connectionKind.isBuiltIn:
+            AppLocalization.text("Validated built-in connector with managed credentials.")
+        case .catalog:
+            AppLocalization.text("Provider identity is ready; an HTTPS endpoint mapping is required.")
+        }
+    }
+
+    private var kindLabel: String {
+        switch option.origin {
+        case .customProvider: AppLocalization.text("Custom")
+        case .customUsageFeed: AppLocalization.text("Usage Feed")
+        case .catalog where option.connectionKind.isBuiltIn: AppLocalization.text("Built in")
+        case .catalog: AppLocalization.text("Custom endpoint")
+        }
+    }
+}
+
+private struct ProviderAutomaticDiscoveryRow: View {
+    let descriptor: ProviderDisplayDescriptor
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "desktopcomputer")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+                .background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(descriptor.displayName).font(.body.weight(.medium))
+                Text("Detected from local app data; no manual connection is needed.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("Automatic")
+                .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -829,6 +1070,8 @@ private struct ProviderConnectionDetail: View {
 private struct NativeProviderConnectionSheet: View {
     let descriptor: ProviderDisplayDescriptor
     let selectedSite: String?
+    let optionOrigin: ProviderAddOption.Origin?
+    let onCancel: (() -> Void)?
     let onSaved: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -863,26 +1106,46 @@ private struct NativeProviderConnectionSheet: View {
     ) {
         self.descriptor = descriptor
         self.selectedSite = selectedSite
+        optionOrigin = nil
+        onCancel = nil
         self.onSaved = onSaved
-        let initialKind = switch descriptor.familyID {
-        case "minimax": "minimax"
-        case "moonshot": "moonshot"
-        case "step_plan": "step_plan"
-        case "openai": "openai_organization"
-        default: "generic"
-        }
-        _kind = State(initialValue: initialKind)
+        let connectionKind = ProviderAddConnectionKind(familyID: descriptor.familyID) ?? .generic
+        _kind = State(initialValue: connectionKind.rawValue)
         _providerID = State(initialValue: descriptor.familyID)
         _name = State(initialValue: descriptor.displayName)
         _site = State(initialValue: selectedSite == "cn" ? "china" : selectedSite ?? "china")
         _familyID = State(initialValue: descriptor.familyID)
     }
 
+    init(
+        option: ProviderAddOption, selectedSite: String?,
+        onCancel: @escaping () -> Void,
+        onSaved: @escaping () -> Void
+    ) {
+        descriptor = option.descriptor
+        self.selectedSite = selectedSite
+        optionOrigin = option.origin
+        self.onCancel = onCancel
+        self.onSaved = onSaved
+        _kind = State(initialValue: option.connectionKind.rawValue)
+        _providerID = State(initialValue: option.defaultProviderID)
+        _name = State(initialValue: option.descriptor.displayName)
+        _site = State(initialValue: selectedSite == "cn" ? "china" : selectedSite ?? "china")
+        _familyID = State(initialValue: option.descriptor.familyID)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
+                if onCancel != nil {
+                    Button("Back", systemImage: "chevron.left", action: cancel)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .disabled(isSaving)
+                        .accessibilityHint("Return to the Provider catalog")
+                }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Add Connection").font(.title2.weight(.semibold))
+                    Text(sheetTitle).font(.title2.weight(.semibold))
                     Text("Credentials are written to Keychain and never displayed again.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
@@ -891,6 +1154,12 @@ private struct NativeProviderConnectionSheet: View {
             .padding(24)
             Divider()
             Form {
+                if let setupNote {
+                    Label(setupNote, systemImage: "info.circle")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .accessibilityElement(children: .combine)
+                }
                 Picker("Connection type", selection: $kind) {
                     Text("Quota API").tag("generic")
                     Text("Daily Usage Feed").tag("daily_usage_feed")
@@ -947,7 +1216,7 @@ private struct NativeProviderConnectionSheet: View {
             Divider()
             HStack {
                 Spacer()
-                Button("Cancel") { clearSecrets(); dismiss() }
+                Button(onCancel == nil ? "Cancel" : "Back") { cancel() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(isSaving)
                 Button("Add Connection") { submit() }
@@ -959,6 +1228,32 @@ private struct NativeProviderConnectionSheet: View {
         }
         .frame(width: 620, height: 680)
         .onDisappear(perform: clearSecrets)
+    }
+
+    private var sheetTitle: String {
+        switch optionOrigin {
+        case .customProvider: AppLocalization.text("Add Custom Provider")
+        case .customUsageFeed: AppLocalization.text("Add Daily Usage Feed")
+        case .catalog: AppLocalization.format("Connect %@", descriptor.displayName)
+        case nil: AppLocalization.text("Add Connection")
+        }
+    }
+
+    private var setupNote: String? {
+        switch optionOrigin {
+        case .catalog where ProviderAddConnectionKind(familyID: descriptor.familyID) == nil:
+            AppLocalization.text("This catalog entry does not have a built-in connector yet. Configure a read-only HTTPS endpoint and response field mapping.")
+        case .customProvider:
+            AppLocalization.text("Use a stable HTTPS endpoint that returns quota, balance, credits, or remaining capacity.")
+        case .customUsageFeed:
+            AppLocalization.text("Use a stable HTTPS endpoint that returns daily records. Official and fallback sources are never summed together.")
+        default: nil
+        }
+    }
+
+    private func cancel() {
+        clearSecrets()
+        if let onCancel { onCancel() } else { dismiss() }
     }
 
     private func submit() {

@@ -147,6 +147,56 @@ struct ProviderCenterPresentationTests {
         #expect(ProviderCenterPresentation.canMutate(kind: "moonshot"))
         #expect(ProviderCenterPresentation.canMutate(kind: "daily_usage_feed"))
     }
+
+    @Test("Add Provider catalog exposes every family in the correct setup path")
+    func addProviderCatalogCoverage() {
+        let catalog = ProviderAddCatalog(descriptors: ProviderCatalog.allDescriptors)
+        let catalogIDs = Set(ProviderCatalog.allDescriptors.map(\.familyID))
+        let presentedIDs = Set(
+            catalog.serviceOptions.map(\.descriptor.familyID)
+                + catalog.automaticDescriptors.map(\.familyID)
+        )
+
+        #expect(presentedIDs == catalogIDs)
+        #expect(catalog.serviceOptions.allSatisfy { option in
+            option.descriptor.category == .api || option.connectionKind.isBuiltIn
+        })
+        #expect(catalog.automaticDescriptors.allSatisfy { descriptor in
+            descriptor.category != .api
+                && ProviderAddConnectionKind(familyID: descriptor.familyID) == nil
+        })
+    }
+
+    @Test("Add Provider catalog distinguishes native and custom connections")
+    func addProviderConnectionKinds() {
+        let catalog = ProviderAddCatalog(descriptors: ProviderCatalog.allDescriptors)
+        let native = Dictionary(uniqueKeysWithValues: catalog.serviceOptions.compactMap { option in
+            option.connectionKind.isBuiltIn
+                ? (option.descriptor.familyID, option.connectionKind)
+                : nil
+        })
+
+        #expect(native == [
+            "minimax": .minimax,
+            "moonshot": .moonshot,
+            "openai": .openAIOrganization,
+            "step_plan": .stepPlan,
+        ])
+        #expect(catalog.customOptions.map(\.connectionKind) == [.generic, .dailyUsageFeed])
+        #expect(catalog.customOptions.map(\.id) == ["custom-provider", "custom-daily-usage"])
+        #expect(catalog.serviceOptions.first { $0.descriptor.familyID == "anthropic" }?.connectionKind == .generic)
+    }
+
+    @Test("Add Provider search covers names aliases identifiers and custom entries")
+    func addProviderSearch() {
+        let catalog = ProviderAddCatalog(descriptors: ProviderCatalog.allDescriptors)
+
+        #expect(catalog.filteredServiceOptions(query: "Moonshot").map(\.descriptor.familyID) == ["moonshot"])
+        #expect(catalog.filteredServiceOptions(query: "智谱").map(\.descriptor.familyID).contains("zai"))
+        #expect(catalog.filteredCustomOptions(query: "custom").count == 2)
+        #expect(catalog.filteredCustomOptions(query: "daily").map(\.id) == ["custom-daily-usage"])
+        #expect(catalog.filteredAutomaticDescriptors(query: "codex").map(\.familyID) == ["codex"])
+    }
     @Test("Browse categories separate cloud services from API providers")
     func categories() throws {
         #expect(ProviderBrowseCategory.classify(try descriptor("minimax")) == .subscription)

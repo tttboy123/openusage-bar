@@ -77,6 +77,34 @@ struct LocalizationContractTests {
         #expect(AppLocalization.format("Collected %@", "Jul 18") == "Collected Jul 18")
         #expect(AppLocalization.format("%lld days", Int64(3)) == "3 days")
     }
+
+    @Test("Add Provider flow is complete in both languages")
+    func addProviderFlowCopy() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let resources = root.appendingPathComponent("swift_app/Resources")
+        let english = try Catalog(
+            url: resources.appendingPathComponent("en.lproj/Localizable.strings")
+        )
+        let chinese = try Catalog(
+            url: resources.appendingPathComponent("zh-Hans.lproj/Localizable.strings")
+        )
+        let requiredKeys = [
+            "Add Provider",
+            "Built-in Connections",
+            "Service Provider Catalog",
+            "Custom Provider",
+            "Custom Daily Usage Feed",
+            "Automatically Discovered",
+            "This catalog entry does not have a built-in connector yet. Configure a read-only HTTPS endpoint and response field mapping.",
+        ]
+
+        for key in requiredKeys {
+            #expect(english.values[key] != nil)
+            #expect(chinese.values[key] != nil)
+        }
+    }
 }
 
 private struct Catalog {
