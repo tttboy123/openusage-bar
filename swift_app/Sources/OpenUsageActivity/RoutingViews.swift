@@ -5,6 +5,7 @@ struct RoutingPage: View {
     @State private var model = RoutingViewModel()
     @State private var localMutationFailure: String?
     @State private var editingConnection: RoutingConnectionDraft?
+    @State private var editingTarget: RoutingTargetDraft?
 
     var body: some View {
         ScrollView(.vertical) {
@@ -46,6 +47,17 @@ struct RoutingPage: View {
                 onSave: saveConnection,
                 onRemove: draft.isNew ? nil : { connectionRef in
                     removeConnection(connectionRef)
+                }
+            )
+        }
+        .sheet(item: $editingTarget) { draft in
+            RoutingTargetEditor(
+                draft: draft,
+                connections: model.connections,
+                isSaving: model.isMutating,
+                onSave: saveTarget,
+                onRemove: draft.isNew ? nil : { targetID in
+                    removeTarget(targetID)
                 }
             )
         }
@@ -172,7 +184,21 @@ struct RoutingPage: View {
 
     private var targets: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("Routing targets", detail: "Only explicit, execution-capable targets are eligible")
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                sectionTitle(
+                    "Routing targets",
+                    detail: "Only explicit, execution-capable targets are eligible"
+                )
+                Spacer()
+                Button("Add target", systemImage: "plus") {
+                    guard let connection = model.connections.first(where: \.enabled)
+                            ?? model.connections.first
+                    else { return }
+                    editingTarget = RoutingTargetDraft(connection: connection)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.connections.isEmpty)
+            }
             if model.targets.isEmpty {
                 ContentUnavailableView(
                     "No routing targets",
@@ -222,6 +248,14 @@ struct RoutingPage: View {
             .accessibilityLabel(
                 "\(target.enabled ? AppLocalization.text("Disable") : AppLocalization.text("Enable")) \(target.modelID)"
             )
+            Button("Edit") {
+                editingTarget = RoutingTargetDraft(target: target)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.indigo)
+            .controlSize(.small)
+            .disabled(model.isMutating)
+            .accessibilityLabel(AppLocalization.format("Edit %@", target.modelID))
         }
         .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
@@ -454,6 +488,26 @@ struct RoutingPage: View {
         Task {
             await model.removeConnection(connectionRef, command: command)
         }
+    }
+
+    private func saveTarget(_ draft: RoutingTargetDraft) {
+        localMutationFailure = nil
+        guard let command = routingCommand(),
+              let value = draft.mutationValue(connections: model.connections)
+        else {
+            localMutationFailure = AppLocalization.text("Routing target update unavailable")
+            return
+        }
+        Task { await model.upsertTarget(value, command: command) }
+    }
+
+    private func removeTarget(_ targetID: String) {
+        localMutationFailure = nil
+        guard let command = routingCommand() else {
+            localMutationFailure = AppLocalization.text("Routing target update unavailable")
+            return
+        }
+        Task { await model.removeTarget(targetID, command: command) }
     }
 
     private func routingCommand() -> ProviderMutationCommand? {

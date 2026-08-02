@@ -46,6 +46,13 @@ struct LocalizationContractTests {
             "Inference API key",
             "Leave blank to keep the current key",
             "%lld models",
+            "Add routing target",
+            "Edit routing target",
+            "Execution and model",
+            "Resource facts",
+            "Model profile",
+            "Optional cost metadata",
+            "Remove routing target",
         ]
 
         for key in requiredKeys {

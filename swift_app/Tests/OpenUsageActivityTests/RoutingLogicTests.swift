@@ -121,6 +121,72 @@ struct RoutingLogicTests {
         #expect(existing.canSave)
     }
 
+    @Test("Target drafts bind execution identity and explicit resource facts")
+    func targetDraft() throws {
+        let connection = RoutingExecutionConnection.fixture()
+        var draft = RoutingTargetDraft(
+            connection: connection,
+            generatedRef: "target_0123456789abcdef"
+        )
+        #expect(draft.connectionRef == connection.connectionRef)
+        #expect(draft.modelID == "gpt-5")
+        #expect(draft.factAccountRef == "account-1")
+        #expect(draft.canSave(connections: [connection]))
+
+        draft.costCurrency = "USD"
+        draft.inputCostPerMillion = "3.25"
+        #expect(!draft.canSave(connections: [connection]))
+        draft.outputCostPerMillion = "15"
+        let value = try #require(draft.mutationValue(connections: [connection]))
+        #expect(value.providerID == "openai")
+        #expect(value.executionClass == "openai_compatible")
+        #expect(value.executionAdapterID == "openai_compatible.direct")
+        #expect(value.inputCostMicrosPerMillion == 3_250_000)
+        #expect(value.outputCostMicrosPerMillion == 15_000_000)
+
+        draft.resourceMode = "balance"
+        draft.balanceCurrency = "EUR"
+        #expect(!draft.canSave(connections: [connection]))
+        draft.costCurrency = "EUR"
+        #expect(draft.canSave(connections: [connection]))
+
+        var balanceOnly = RoutingTargetDraft(
+            connection: connection,
+            generatedRef: "target_abcdef0123456789"
+        )
+        balanceOnly.resourceMode = "balance"
+        balanceOnly.balanceCurrency = "USD"
+        #expect(!balanceOnly.canSave(connections: [connection]))
+        balanceOnly.costCurrency = "USD"
+        balanceOnly.inputCostPerMillion = "1"
+        balanceOnly.outputCostPerMillion = "2"
+        #expect(balanceOnly.canSave(connections: [connection]))
+    }
+
+    @Test("Target save and removal replace the complete document optimistically")
+    func targetLifecycle() async throws {
+        let mutations = RoutingMutationFixture()
+        let model = RoutingViewModel(
+            client: RoutingClientFixture(), mutations: mutations
+        )
+        await model.load()
+        let command = ProviderMutationCommand(
+            executableURL: URL(fileURLWithPath: "/tmp/helper"),
+            arguments: ["routing-mutate"]
+        )
+        let replacement = RoutingTargetMutationValue(
+            target: RoutingTarget.fixture(qualityTier: 5)
+        )
+
+        await model.upsertTarget(replacement, command: command)
+        #expect(mutations.lastRequest?.expectedRevision == 1)
+        #expect(mutations.lastRequest?.targets.count == 1)
+        #expect(mutations.lastRequest?.targets.first?.qualityTier == 5)
+
+        await model.removeTarget("openai.work.gpt-5", command: command)
+        #expect(mutations.lastRequest?.targets.isEmpty == true)
+    }
+
     private func target(adapterAvailable: Bool = true) -> RoutingTarget {
         RoutingTarget.fixture(adapterAvailable: adapterAvailable)
     }
@@ -268,8 +334,8 @@ private extension RoutingPolicy {
 }
 
 private extension RoutingTarget {
-    static func fixture(adapterAvailable: Bool = true) -> Self {
-        try! JSONDecoder().decode(Self.self, from: Data(#"{"targetId":"openai.work.gpt-5","providerId":"openai","accountRef":"account-1","modelId":"gpt-5","connectionRef":"connection-1","executionClass":"direct_api","executionAdapterId":"openai.direct","resourceMode":"quota","factAccountRef":"account-1","runtimeScopeRef":null,"balanceCurrency":null,"costCurrency":"USD","inputCostMicrosPerMillion":3000000,"outputCostMicrosPerMillion":3000000,"enabled":true,"adapterAvailable":\#(adapterAvailable),"regions":["global"],"privacyClass":"direct_provider","capabilities":["chat","reasoning","tools"],"contextWindowTokens":400000,"qualityTier":4}"#.utf8))
+    static func fixture(adapterAvailable: Bool = true, qualityTier: Int = 4) -> Self {
+        try! JSONDecoder().decode(Self.self, from: Data(#"{"targetId":"openai.work.gpt-5","providerId":"openai","accountRef":"account-1","modelId":"gpt-5","connectionRef":"connection-1","executionClass":"direct_api","executionAdapterId":"openai.direct","resourceMode":"quota","factAccountRef":"account-1","runtimeScopeRef":null,"balanceCurrency":null,"costCurrency":"USD","inputCostMicrosPerMillion":3000000,"outputCostMicrosPerMillion":3000000,"enabled":true,"adapterAvailable":\#(adapterAvailable),"regions":["global"],"privacyClass":"direct_provider","capabilities":["chat","reasoning","tools"],"contextWindowTokens":400000,"qualityTier":\#(qualityTier)}"#.utf8))
     }
 }
 

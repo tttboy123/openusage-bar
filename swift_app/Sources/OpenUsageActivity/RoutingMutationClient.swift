@@ -23,6 +23,50 @@ struct RoutingTargetMutationValue: Encodable, Sendable, Hashable {
     let contextWindowTokens: Int64
     let qualityTier: Int
 
+    init(
+        targetID: String,
+        providerID: String,
+        accountRef: String,
+        modelID: String,
+        connectionRef: String,
+        executionClass: String,
+        executionAdapterID: String,
+        resourceMode: String,
+        factAccountRef: String?,
+        runtimeScopeRef: String?,
+        balanceCurrency: String?,
+        costCurrency: String?,
+        inputCostMicrosPerMillion: Int64?,
+        outputCostMicrosPerMillion: Int64?,
+        enabled: Bool,
+        regions: [String],
+        privacyClass: String,
+        capabilities: [String],
+        contextWindowTokens: Int64,
+        qualityTier: Int
+    ) {
+        self.targetID = targetID
+        self.providerID = providerID
+        self.accountRef = accountRef
+        self.modelID = modelID
+        self.connectionRef = connectionRef
+        self.executionClass = executionClass
+        self.executionAdapterID = executionAdapterID
+        self.resourceMode = resourceMode
+        self.factAccountRef = factAccountRef
+        self.runtimeScopeRef = runtimeScopeRef
+        self.balanceCurrency = balanceCurrency
+        self.costCurrency = costCurrency
+        self.inputCostMicrosPerMillion = inputCostMicrosPerMillion
+        self.outputCostMicrosPerMillion = outputCostMicrosPerMillion
+        self.enabled = enabled
+        self.regions = regions
+        self.privacyClass = privacyClass
+        self.capabilities = capabilities
+        self.contextWindowTokens = contextWindowTokens
+        self.qualityTier = qualityTier
+    }
+
     init(target: RoutingTarget, enabled: Bool? = nil) {
         targetID = target.targetID
         providerID = target.providerID

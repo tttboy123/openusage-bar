@@ -70,6 +70,10 @@ class _ConnectionInUse(ValueError):
     pass
 
 
+class _TargetConnectionMismatch(ValueError):
+    pass
+
+
 class _ConnectionSaveFailure(RuntimeError):
     pass
 
@@ -286,6 +290,16 @@ def run_routing_mutation(
             targets = tuple(_decode_target(value) for value in values)
             if len({value.target_id for value in targets}) != len(targets):
                 raise ValueError("duplicate target")
+            connections = {
+                value.connection_ref: value
+                for value in resolved_connections.load().connections
+            }
+            if any(
+                target.connection_ref not in connections
+                or not _compatible(target, connections[target.connection_ref])
+                for target in targets
+            ):
+                raise _TargetConnectionMismatch()
             current = resolved.load(available_adapters=()).revision
             if current != expected:
                 raise _StaleRevision()
@@ -416,6 +430,11 @@ def run_routing_mutation(
         return _write(
             output_stream, False,
             "Execution connection is used by routing targets",
+        )
+    except _TargetConnectionMismatch:
+        return _write(
+            output_stream, False,
+            "Routing target does not match an execution connection",
         )
     except _ConnectionSaveFailure:
         return _write(

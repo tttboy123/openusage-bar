@@ -37,7 +37,7 @@ struct RoutingExecutionConnection: Codable, Sendable, Hashable, Identifiable {
         return true
     }
 
-    private static func isStableID(_ value: String) -> Bool {
+    static func isStableID(_ value: String) -> Bool {
         value.utf8.count <= 128
             && value.range(
                 of: #"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"#,
