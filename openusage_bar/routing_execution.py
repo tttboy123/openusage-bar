@@ -416,6 +416,7 @@ class OpenAICompatibleExecutionAdapter:
                 timeout=120.0,
                 max_bytes=4 * 1024 * 1024,
                 allowed_redirect_hosts=frozenset(),
+                pin_resolved_address=True,
             )
         self.keychain = keychain
         self.client = client

@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import patch
 
 from openusage_bar.routing_contract import RouteTarget
 from openusage_bar.routing_execution import (
@@ -252,6 +253,18 @@ class ExecutionRegistryTests(unittest.TestCase):
 
 
 class OpenAICompatibleExecutionAdapterTests(unittest.TestCase):
+    def test_default_execution_client_pins_the_validated_provider_address(self) -> None:
+        with patch("openusage_bar.network.BoundedHTTPClient") as client:
+            adapter = OpenAICompatibleExecutionAdapter(keychain=FakeKeychain("test"))
+
+        client.assert_called_once_with(
+            timeout=120.0,
+            max_bytes=4 * 1024 * 1024,
+            allowed_redirect_hosts=frozenset(),
+            pin_resolved_address=True,
+        )
+        self.assertIs(adapter.client, client.return_value)
+
     def test_executes_one_nonstreaming_request_with_isolated_keychain_account(self) -> None:
         keychain = FakeKeychain("test-secret")
         client = FakeClient()

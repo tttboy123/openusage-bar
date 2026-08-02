@@ -39,6 +39,10 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Execution requests now pin one already validated public numeric address for
+  the TCP connection while retaining the original Provider hostname for TLS
+  SNI and certificate verification. This removes the DNS validation/connection
+  rebinding window without changing non-execution Provider collection.
 - Active Usage Details and Provider Settings helpers are now stopped and
   reopened across an explicit rollback, preventing an already visible window
   from continuing to run the replaced app image. Rollback cleanup first
