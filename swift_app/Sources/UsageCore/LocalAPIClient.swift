@@ -449,12 +449,29 @@ private struct ActivityWire: Decodable {
     let coverage: [Coverage]
 }
 
-private struct UnixHTTPTransport: Sendable {
+struct UnixHTTPResponse: Sendable {
+    let statusCode: Int
+    let body: Data
+}
+
+struct UnixHTTPTransport: Sendable {
     let socketURL: URL
     let timeoutSeconds: Double
     let maximumBodyBytes: Int
 
     func get(_ target: String) throws -> Data {
+        let response = try request(method: "GET", target: target)
+        guard response.statusCode == 200 else { throw LocalAPIClientError.invalidResponse }
+        return response.body
+    }
+
+    func request(method: String, target: String, body: Data? = nil) throws -> UnixHTTPResponse {
+        guard ["GET", "POST"].contains(method),
+              target.hasPrefix("/v1/"),
+              !target.contains("\r"), !target.contains("\n"),
+              body?.count ?? 0 <= 65_536,
+              method == "POST" || body == nil
+        else { throw LocalAPIClientError.invalidResponse }
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw LocalAPIClientError.unavailable }
         defer { close(descriptor) }
@@ -468,9 +485,14 @@ private struct UnixHTTPTransport: Sendable {
         else { throw LocalAPIClientError.unavailable }
         let deadline = ProcessInfo.processInfo.systemUptime + timeoutSeconds
         try connect(descriptor, deadline: deadline)
-        let request = Data(
-            "GET \(target) HTTP/1.1\r\nHost: localhost\r\nAccept: application/json\r\nConnection: close\r\n\r\n".utf8
+        var request = Data(
+            "\(method) \(target) HTTP/1.1\r\nHost: localhost\r\nAccept: application/json\r\n".utf8
         )
+        if let body {
+            request.append(Data("Content-Type: application/json\r\nContent-Length: \(body.count)\r\n".utf8))
+        }
+        request.append(Data("Connection: close\r\n\r\n".utf8))
+        if let body { request.append(body) }
         try writeAll(request, to: descriptor, deadline: deadline)
         return try readResponse(from: descriptor, deadline: deadline)
     }
@@ -510,9 +532,11 @@ private struct UnixHTTPTransport: Sendable {
         }
     }
 
-    private func readResponse(from descriptor: Int32, deadline: Double) throws -> Data {
+    private func readResponse(
+        from descriptor: Int32, deadline: Double
+    ) throws -> UnixHTTPResponse {
         var response = Data()
-        var parsedHeader: (bodyStart: Int, length: Int)?
+        var parsedHeader: (bodyStart: Int, length: Int, statusCode: Int)?
         var buffer = [UInt8](repeating: 0, count: 16_384)
         while true {
             let count = Darwin.read(descriptor, &buffer, buffer.count)
@@ -531,7 +555,10 @@ private struct UnixHTTPTransport: Sendable {
                         throw LocalAPIClientError.invalidResponse
                     }
                     if bodyCount == parsedHeader.length {
-                        return response.subdata(in: parsedHeader.bodyStart..<response.count)
+                        return UnixHTTPResponse(
+                            statusCode: parsedHeader.statusCode,
+                            body: response.subdata(in: parsedHeader.bodyStart..<response.count)
+                        )
                     }
                 }
             } else if count == 0 {
@@ -546,16 +573,28 @@ private struct UnixHTTPTransport: Sendable {
         }
     }
 
-    private func parseHeader(_ data: Data) throws -> (bodyStart: Int, length: Int)? {
+    private func parseHeader(
+        _ data: Data
+    ) throws -> (bodyStart: Int, length: Int, statusCode: Int)? {
         let delimiter = Data("\r\n\r\n".utf8)
         guard let range = data.range(of: delimiter) else { return nil }
         guard let text = String(data: data[..<range.lowerBound], encoding: .utf8) else {
             throw LocalAPIClientError.invalidResponse
         }
         let lines = text.components(separatedBy: "\r\n")
-        guard lines.first == "HTTP/1.1 200 OK" else {
+        guard let statusLine = lines.first else {
             throw LocalAPIClientError.invalidResponse
         }
+        let statusParts = statusLine.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
+        guard statusParts.count == 3,
+              statusParts[0] == "HTTP/1.1",
+              statusParts[1].count == 3,
+              statusParts[1].allSatisfy(\.isNumber),
+              let statusCode = Int(statusParts[1]),
+              (100...599).contains(statusCode),
+              !statusParts[2].isEmpty,
+              statusParts[2].unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7f })
+        else { throw LocalAPIClientError.invalidResponse }
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             guard let colon = line.firstIndex(of: ":") else {
@@ -574,7 +613,7 @@ private struct UnixHTTPTransport: Sendable {
               !rawLength.isEmpty, rawLength.allSatisfy(\.isNumber),
               let length = Int(rawLength), length >= 0
         else { throw LocalAPIClientError.invalidResponse }
-        return (range.upperBound, length)
+        return (range.upperBound, length, statusCode)
     }
 
     private func wait(_ descriptor: Int32, events: Int16, deadline: Double) throws {
