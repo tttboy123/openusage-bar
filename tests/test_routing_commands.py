@@ -5,8 +5,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
-from openusage_bar.routing_commands import run_routing_mutation
+from openusage_bar.routing_commands import _decode_target, run_routing_mutation
+from openusage_bar.routing_execution import (
+    ExecutionConnection,
+    ExecutionConnectionStore,
+    credential_account,
+)
 from openusage_bar.routing_targets import RouteTargetStore
 
 
@@ -51,14 +57,47 @@ class RoutingMutationCommandTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.path = Path(self.temporary.name) / "route-targets.json"
         self.store = RouteTargetStore(self.path)
+        self.connection_path = Path(self.temporary.name) / "execution-connections.json"
+        self.connection_store = ExecutionConnectionStore(self.connection_path)
+        self.keychain = Mock()
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
     def mutate(self, raw: str) -> tuple[int, dict[str, object]]:
         output = io.StringIO()
-        status = run_routing_mutation(io.StringIO(raw), output, store=self.store)
+        status = run_routing_mutation(
+            io.StringIO(raw), output, store=self.store,
+            connection_store=self.connection_store, keychain=self.keychain,
+        )
         return status, json.loads(output.getvalue())
+
+    def connection_request(
+        self,
+        *,
+        action: str = "upsert_connection",
+        expected_revision: int = 0,
+        secret: str = "private-key",
+        **changes: object,
+    ) -> str:
+        connection: dict[str, object] = {
+            "connectionRef": "conn_0123456789abcdef",
+            "providerId": "openai",
+            "accountRef": "account-1",
+            "executionClass": "openai_compatible",
+            "executionAdapterId": "openai_compatible.direct",
+            "baseURL": "https://api.example.com/v1",
+            "enabled": True,
+            "models": ["gpt-5", "gpt-5-mini"],
+        }
+        connection.update(changes)
+        return json.dumps({
+            "version": 1,
+            "action": action,
+            "expectedRevision": expected_revision,
+            "connection": connection,
+            "secret": secret,
+        })
 
     def test_replaces_targets_with_monotonic_revision_and_private_file(self) -> None:
         status, result = self.mutate(request(expected_revision=0, targets=[target_payload()]))
@@ -142,6 +181,129 @@ class RoutingMutationCommandTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertFalse(result["ok"])
         self.assertFalse(self.path.exists())
+
+    def test_creates_execution_connection_and_keeps_secret_only_in_keychain(self) -> None:
+        self.keychain.get.return_value = None
+
+        status, result = self.mutate(self.connection_request())
+
+        self.assertEqual(status, 0)
+        self.assertEqual(result, {
+            "version": 1, "ok": True,
+            "message": "Execution connection saved", "connectionRevision": 1,
+        })
+        saved = self.connection_store.load().connections[0]
+        self.assertEqual(saved.connection_ref, "conn_0123456789abcdef")
+        self.keychain.set.assert_called_once_with(
+            credential_account(saved.connection_ref), "private-key"
+        )
+        self.assertNotIn("private-key", self.connection_path.read_text())
+
+        status, listed = self.mutate(json.dumps({
+            "version": 1, "action": "list_connections",
+        }))
+        self.assertEqual(status, 0)
+        self.assertEqual(listed["connectionRevision"], 1)
+        self.assertEqual(listed["connections"], [{
+            "connectionRef": "conn_0123456789abcdef",
+            "providerId": "openai",
+            "accountRef": "account-1",
+            "executionClass": "openai_compatible",
+            "executionAdapterId": "openai_compatible.direct",
+            "baseURL": "https://api.example.com/v1",
+            "enabled": True,
+            "models": ["gpt-5", "gpt-5-mini"],
+        }])
+        self.assertNotIn("private-key", json.dumps(listed))
+
+    def test_execution_connection_accepts_the_store_limit_of_256_models(self) -> None:
+        self.keychain.get.return_value = None
+        models = [f"model-{index}" for index in range(256)]
+
+        status, result = self.mutate(self.connection_request(models=models))
+
+        self.assertEqual(status, 0)
+        self.assertEqual(result["connectionRevision"], 1)
+        self.assertEqual(
+            self.connection_store.load().connections[0].models,
+            tuple(sorted(models)),
+        )
+
+    def test_update_can_retain_secret_but_cannot_orphan_an_existing_target(self) -> None:
+        existing = ExecutionConnection(
+            "conn_0123456789abcdef", "openai", "account-1",
+            "openai_compatible", "openai_compatible.direct",
+            "https://api.example.com/v1", True, ("gpt-5", "gpt-5-mini"),
+        )
+        self.connection_store.save((existing,), revision=1)
+        self.store.save((
+            _decode_target(target_payload(
+                connectionRef=existing.connection_ref,
+                executionClass=existing.execution_class,
+                executionAdapterId=existing.execution_adapter_id,
+            )),
+        ), revision=1)
+
+        status, result = self.mutate(self.connection_request(
+            expected_revision=1, secret="", models=["gpt-5"]
+        ))
+        self.assertEqual(status, 0)
+        self.assertEqual(result["connectionRevision"], 2)
+        self.keychain.set.assert_not_called()
+
+        before = self.connection_path.read_bytes()
+        status, result = self.mutate(self.connection_request(
+            expected_revision=2, secret="", models=["gpt-5-mini"]
+        ))
+        self.assertEqual(status, 1)
+        self.assertEqual(result["message"], "Execution connection conflicts with routing targets")
+        self.assertEqual(self.connection_path.read_bytes(), before)
+
+    def test_remove_rejects_referenced_connection_and_rolls_back_keychain_on_save_failure(self) -> None:
+        existing = ExecutionConnection(
+            "conn_0123456789abcdef", "openai", "account-1",
+            "openai_compatible", "openai_compatible.direct",
+            "https://api.example.com/v1", True, ("gpt-5",),
+        )
+        self.connection_store.save((existing,), revision=1)
+        self.store.save((
+            _decode_target(target_payload(
+                connectionRef=existing.connection_ref,
+                executionClass=existing.execution_class,
+                executionAdapterId=existing.execution_adapter_id,
+            )),
+        ), revision=1)
+        remove = json.dumps({
+            "version": 1, "action": "remove_connection",
+            "expectedRevision": 1, "connectionRef": existing.connection_ref,
+        })
+        status, result = self.mutate(remove)
+        self.assertEqual(status, 1)
+        self.assertEqual(result["message"], "Execution connection is used by routing targets")
+        self.keychain.delete.assert_not_called()
+
+        self.store.save((), revision=2)
+
+        class FailingStore:
+            def load(inner_self):
+                return self.connection_store.load()
+
+            def save(inner_self, connections: object, *, revision: int):
+                raise OSError("private failure")
+
+        self.keychain.get.return_value = "old-secret"
+        output = io.StringIO()
+        status = run_routing_mutation(
+            io.StringIO(remove), output, store=self.store,
+            connection_store=FailingStore(), keychain=self.keychain,
+        )
+        self.assertEqual(status, 1)
+        self.keychain.delete.assert_called_once_with(
+            credential_account(existing.connection_ref)
+        )
+        self.keychain.set.assert_called_once_with(
+            credential_account(existing.connection_ref), "old-secret"
+        )
 
 
 if __name__ == "__main__":

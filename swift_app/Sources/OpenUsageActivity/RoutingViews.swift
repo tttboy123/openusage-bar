@@ -4,9 +4,10 @@ import UsageCore
 struct RoutingPage: View {
     @State private var model = RoutingViewModel()
     @State private var localMutationFailure: String?
+    @State private var editingConnection: RoutingConnectionDraft?
 
     var body: some View {
-        ScrollView {
+        ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 24) {
                 header
                 if let failure = model.failure, model.health == nil {
@@ -16,6 +17,7 @@ struct RoutingPage: View {
                         description: Text("The local Decision API did not return verified routing data.")
                     )
                     .frame(maxWidth: .infinity, minHeight: 240)
+                    connections
                 } else {
                     if let failure = model.mutationFailure?.title ?? localMutationFailure {
                         Label(failure, systemImage: "exclamationmark.triangle.fill")
@@ -24,6 +26,7 @@ struct RoutingPage: View {
                             .accessibilityLabel(failure)
                     }
                     overview
+                    connections
                     targets
                     dryRun
                     decisionResult
@@ -35,7 +38,17 @@ struct RoutingPage: View {
             .padding(.vertical, 28)
         }
         .background(.background)
-        .task { await model.load() }
+        .task { await refreshData() }
+        .sheet(item: $editingConnection) { draft in
+            RoutingConnectionEditor(
+                draft: draft,
+                isSaving: model.isMutating,
+                onSave: saveConnection,
+                onRemove: draft.isNew ? nil : { connectionRef in
+                    removeConnection(connectionRef)
+                }
+            )
+        }
     }
 
     private var header: some View {
@@ -47,12 +60,83 @@ struct RoutingPage: View {
             }
             Spacer()
             Button("Refresh", systemImage: "arrow.clockwise") {
-                Task { await model.load() }
+                Task { await refreshData() }
             }
             .disabled(model.isLoading)
             .keyboardShortcut("r", modifiers: [.command])
             .accessibilityHint("Reload routing health, policies, targets, and history")
         }
+    }
+
+    private var connections: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                sectionTitle(
+                    "Execution connections",
+                    detail: "Inference credentials stay in Keychain"
+                )
+                Spacer()
+                Button("Add connection", systemImage: "plus") {
+                    editingConnection = RoutingConnectionDraft()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            if model.connections.isEmpty {
+                ContentUnavailableView(
+                    "No execution connections",
+                    systemImage: "network.slash",
+                    description: Text("Add an explicit inference endpoint before creating routing targets.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 150)
+                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(model.connections.enumerated()), id: \.element.id) { index, item in
+                        connectionRow(item)
+                        if index < model.connections.count - 1 {
+                            Divider().padding(.leading, 42)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+
+    private func connectionRow(_ connection: RoutingExecutionConnection) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: connection.enabled ? "network" : "pause.circle")
+                .foregroundStyle(connection.enabled ? .green : .secondary)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(DisplayText.provider(connection.providerID))
+                    .font(.body.weight(.medium))
+                Text(connection.accountRef)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(URLComponents(string: connection.baseURL)?.host ?? connection.baseURL)
+                    .font(.callout.monospaced()).lineLimit(1)
+                Text(AppLocalization.format(
+                    "%lld models", Int64(connection.models.count)
+                ))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Button("Edit") {
+                editingConnection = RoutingConnectionDraft(connection: connection)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.indigo)
+            .controlSize(.small)
+            .accessibilityLabel(AppLocalization.format(
+                "Edit %@", DisplayText.provider(connection.providerID)
+            ))
+        }
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
     }
 
     private var overview: some View {
@@ -328,12 +412,7 @@ struct RoutingPage: View {
 
     private func mutate(_ target: RoutingTarget, enabled: Bool) {
         localMutationFailure = nil
-        guard let executable = Bundle.main.executableURL,
-              let command = ProviderMutationCommand.resolveRouting(
-                  activityBundleURL: Bundle.main.bundleURL,
-                  activityExecutableURL: executable
-              )
-        else {
+        guard let command = routingCommand() else {
             localMutationFailure = AppLocalization.text("Routing target update unavailable")
             return
         }
@@ -344,5 +423,44 @@ struct RoutingPage: View {
                 command: command
             )
         }
+    }
+
+    private func refreshData() async {
+        await model.load()
+        if let command = routingCommand() {
+            await model.loadConnections(command: command)
+        }
+    }
+
+    private func saveConnection(_ draft: RoutingConnectionDraft) {
+        localMutationFailure = nil
+        guard let command = routingCommand(), draft.canSave else {
+            localMutationFailure = AppLocalization.text("Routing target update unavailable")
+            return
+        }
+        Task {
+            await model.upsertConnection(
+                draft.connection, secret: draft.secret, command: command
+            )
+        }
+    }
+
+    private func removeConnection(_ connectionRef: String) {
+        localMutationFailure = nil
+        guard let command = routingCommand() else {
+            localMutationFailure = AppLocalization.text("Routing target update unavailable")
+            return
+        }
+        Task {
+            await model.removeConnection(connectionRef, command: command)
+        }
+    }
+
+    private func routingCommand() -> ProviderMutationCommand? {
+        guard let executable = Bundle.main.executableURL else { return nil }
+        return ProviderMutationCommand.resolveRouting(
+            activityBundleURL: Bundle.main.bundleURL,
+            activityExecutableURL: executable
+        )
     }
 }

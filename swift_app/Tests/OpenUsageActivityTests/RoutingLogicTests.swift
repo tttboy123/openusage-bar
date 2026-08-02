@@ -78,8 +78,93 @@ struct RoutingLogicTests {
         #expect(model.mutationFailure == nil)
     }
 
+    @Test("Execution connections load and save without exposing stored credentials")
+    func connectionManagement() async {
+        let connections = RoutingConnectionMutationFixture()
+        let model = RoutingViewModel(
+            client: RoutingClientFixture(),
+            mutations: RoutingMutationFixture(),
+            connectionMutations: connections
+        )
+        let command = ProviderMutationCommand(
+            executableURL: URL(fileURLWithPath: "/tmp/helper"),
+            arguments: ["routing-mutate"]
+        )
+        await model.loadConnections(command: command)
+        #expect(model.connectionRevision == 2)
+        #expect(model.connections.map(\.connectionRef) == ["conn_0123456789abcdef"])
+
+        await model.upsertConnection(
+            model.connections[0], secret: "replacement", command: command
+        )
+        #expect(connections.lastUpsert?.expectedRevision == 2)
+        #expect(connections.lastUpsert?.secret == "replacement")
+        #expect(model.mutationFailure == nil)
+    }
+
+    @Test("Connection drafts require an inference key only when first created")
+    func connectionDraft() {
+        var draft = RoutingConnectionDraft(
+            generatedRef: "conn_0123456789abcdef"
+        )
+        draft.providerID = "glm"
+        draft.accountRef = "account-1"
+        draft.baseURL = "https://open.bigmodel.cn/api/paas/v4"
+        draft.modelsText = "glm-4.5, glm-4.5-air"
+        #expect(!draft.canSave)
+        draft.secret = "replacement"
+        #expect(draft.canSave)
+        #expect(draft.connection.models == ["glm-4.5", "glm-4.5-air"])
+
+        let existing = RoutingConnectionDraft(connection: .fixture())
+        #expect(existing.secret.isEmpty)
+        #expect(existing.canSave)
+    }
+
     private func target(adapterAvailable: Bool = true) -> RoutingTarget {
         RoutingTarget.fixture(adapterAvailable: adapterAvailable)
+    }
+}
+
+private final class RoutingConnectionMutationFixture:
+    RoutingConnectionMutationSubmitting, @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var capturedUpsert: RoutingConnectionMutationRequest?
+    var lastUpsert: RoutingConnectionMutationRequest? {
+        lock.withLock { capturedUpsert }
+    }
+
+    func loadConnections(
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        let isFirstLoad = lock.withLock { capturedUpsert == nil }
+        return .success(.init(
+            version: 1, ok: true, message: "Execution connections loaded",
+            connectionRevision: isFirstLoad ? 2 : 3,
+            connections: [.fixture()]
+        ))
+    }
+
+    func upsertConnection(
+        _ request: RoutingConnectionMutationRequest,
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        lock.withLock { capturedUpsert = request }
+        return .success(.init(
+            version: 1, ok: true, message: "Execution connection saved",
+            connectionRevision: request.expectedRevision + 1
+        ))
+    }
+
+    func removeConnection(
+        _ request: RoutingConnectionRemoveRequest,
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        .success(.init(
+            version: 1, ok: true, message: "Execution connection removed",
+            connectionRevision: request.expectedRevision + 1
+        ))
     }
 }
 
@@ -142,6 +227,19 @@ private final class RoutingClientFixture: RoutingAPIReading, @unchecked Sendable
 private extension RoutingHealth {
     static func fixture() -> Self {
         Self(ok: true, status: "ok", targetRevision: 1, targetCount: 1, routingRevision: 1)
+    }
+}
+
+private extension RoutingExecutionConnection {
+    static func fixture() -> Self {
+        Self(
+            connectionRef: "conn_0123456789abcdef",
+            providerID: "openai", accountRef: "account-1",
+            executionClass: "openai_compatible",
+            executionAdapterID: "openai_compatible.direct",
+            baseURL: "https://api.example.com/v1",
+            enabled: true, models: ["gpt-5"]
+        )
     }
 }
 

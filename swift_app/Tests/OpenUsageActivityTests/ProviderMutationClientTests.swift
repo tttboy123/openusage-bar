@@ -99,4 +99,33 @@ struct ProviderMutationClientTests {
         #expect(wire["apiKey"] == nil)
         #expect(wire["endpoint"] == nil)
     }
+
+    @Test("Routing connection configuration loads and mutates through private stdin")
+    func routingConnections() async throws {
+        let script = #"read payload; printf '{"version":1,"ok":true,"message":"Execution connections loaded","connectionRevision":2,"connections":[{"connectionRef":"conn_0123456789abcdef","providerId":"openai","accountRef":"account-1","executionClass":"openai_compatible","executionAdapterId":"openai_compatible.direct","baseURL":"https://api.example.com/v1","enabled":true,"models":["gpt-5"]}]}'"#
+        let client = RoutingConnectionMutationClient(
+            limits: .init(timeout: .seconds(1), maximumResponseBytes: 4_096),
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/Users/tester"]
+        )
+        let response = await client.loadConnections(command: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", script]
+        ))
+        let loaded = try response.get()
+        #expect(loaded.connectionRevision == 2)
+        #expect(loaded.connections?.first?.connectionRef == "conn_0123456789abcdef")
+        #expect(loaded.connections?.first?.models == ["gpt-5"])
+
+        let request = RoutingConnectionMutationRequest(
+            expectedRevision: 2,
+            connection: try #require(loaded.connections?.first),
+            secret: "replacement-secret"
+        )
+        let object = try #require(JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(request)
+        ) as? [String: Any])
+        #expect(object["action"] as? String == "upsert_connection")
+        #expect(object["secret"] as? String == "replacement-secret")
+        #expect(object["credentialMaterial"] == nil)
+    }
 }

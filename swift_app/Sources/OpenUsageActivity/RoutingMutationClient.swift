@@ -74,6 +74,24 @@ struct RoutingMutationResponse: Decodable, Sendable, Hashable {
     let ok: Bool
     let message: String
     let targetRevision: Int64?
+    let connectionRevision: Int64?
+    let connections: [RoutingExecutionConnection]?
+
+    init(
+        version: Int,
+        ok: Bool,
+        message: String,
+        targetRevision: Int64? = nil,
+        connectionRevision: Int64? = nil,
+        connections: [RoutingExecutionConnection]? = nil
+    ) {
+        self.version = version
+        self.ok = ok
+        self.message = message
+        self.targetRevision = targetRevision
+        self.connectionRevision = connectionRevision
+        self.connections = connections
+    }
 }
 
 protocol RoutingMutationSubmitting: Sendable {
@@ -124,7 +142,9 @@ struct RoutingMutationClient: RoutingMutationSubmitting, Sendable {
                           $0.value >= 0x20 && $0.value != 0x7f
                       }),
                       response.ok == (response.targetRevision != nil),
-                      response.targetRevision.map({ $0 > 0 }) ?? true
+                      response.targetRevision.map({ $0 > 0 }) ?? true,
+                      response.connectionRevision == nil,
+                      response.connections == nil
                 else { return .failure(.invalidResponse) }
                 return .success(response)
             }

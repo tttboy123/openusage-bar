@@ -25,6 +25,35 @@ struct LocalizationContractTests {
         }
     }
 
+    @Test("Routing connection editor copy is available in both languages")
+    func routingConnectionEditorCopy() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let resources = root.appendingPathComponent("swift_app/Resources")
+        let english = try Catalog(
+            url: resources.appendingPathComponent("en.lproj/Localizable.strings")
+        )
+        let chinese = try Catalog(
+            url: resources.appendingPathComponent("zh-Hans.lproj/Localizable.strings")
+        )
+        let requiredKeys = [
+            "Add execution connection",
+            "Edit execution connection",
+            "Execution connections",
+            "Add connection",
+            "No execution connections",
+            "Inference API key",
+            "Leave blank to keep the current key",
+            "%lld models",
+        ]
+
+        for key in requiredKeys {
+            #expect(english.values[key] != nil)
+            #expect(chinese.values[key] != nil)
+        }
+    }
+
     @Test("Parameterized copy has a deterministic English fallback")
     func formattedFallback() {
         #expect(AppLocalization.format("Collected %@", "Jul 18") == "Collected Jul 18")

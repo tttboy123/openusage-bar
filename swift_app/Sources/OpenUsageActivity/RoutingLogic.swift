@@ -2,6 +2,58 @@ import Foundation
 import Observation
 import UsageCore
 
+struct RoutingConnectionDraft: Sendable, Hashable, Identifiable {
+    let id: String
+    let isNew: Bool
+    var providerID: String
+    var accountRef: String
+    var baseURL: String
+    var modelsText: String
+    var enabled: Bool
+    var secret: String
+
+    init(
+        connection: RoutingExecutionConnection? = nil,
+        generatedRef: String = "conn_" + UUID().uuidString
+            .replacingOccurrences(of: "-", with: "").lowercased()
+    ) {
+        id = connection?.connectionRef ?? generatedRef
+        isNew = connection == nil
+        providerID = connection?.providerID ?? ""
+        accountRef = connection?.accountRef ?? ""
+        baseURL = connection?.baseURL ?? ""
+        modelsText = connection?.models.joined(separator: ", ") ?? ""
+        enabled = connection?.enabled ?? true
+        secret = ""
+    }
+
+    var connection: RoutingExecutionConnection {
+        let separators = CharacterSet.whitespacesAndNewlines.union(
+            CharacterSet(charactersIn: ",;")
+        )
+        let models = Array(Set(
+            modelsText.components(separatedBy: separators).filter { !$0.isEmpty }
+        )).sorted()
+        return RoutingExecutionConnection(
+            connectionRef: id,
+            providerID: providerID.trimmingCharacters(in: .whitespacesAndNewlines),
+            accountRef: accountRef.trimmingCharacters(in: .whitespacesAndNewlines),
+            executionClass: "openai_compatible",
+            executionAdapterID: "openai_compatible.direct",
+            baseURL: baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            enabled: enabled,
+            models: models
+        )
+    }
+
+    var canSave: Bool {
+        connection.isValid
+            && secret.utf8.count <= 65_536
+            && !secret.contains("\r") && !secret.contains("\n")
+            && (!isNew || !secret.isEmpty)
+    }
+}
+
 enum RoutingFailure: Sendable, Equatable {
     case serviceUnavailable
     case timedOut
@@ -105,18 +157,22 @@ enum RoutingPresentation {
 final class RoutingViewModel {
     private let client: any RoutingAPIReading
     private let mutations: any RoutingMutationSubmitting
+    private let connectionMutations: any RoutingConnectionMutationSubmitting
 
     private(set) var health: RoutingHealth?
     private(set) var policies: [RoutingPolicy] = []
     private(set) var targets: [RoutingTarget] = []
     private(set) var history: [RoutingHistoryDecision] = []
     private(set) var decision: RoutingDecision?
+    private(set) var connections: [RoutingExecutionConnection] = []
     private(set) var failure: RoutingFailure?
     private(set) var mutationFailure: RoutingFailure?
     private(set) var isLoading = false
     private(set) var isSimulating = false
     private(set) var isMutating = false
+    private(set) var isLoadingConnections = false
     private(set) var targetRevision: Int64 = 0
+    private(set) var connectionRevision: Int64 = 0
 
     var selectedPolicyID = "reliable"
     var taskKind = RoutingTaskKind.code
@@ -129,10 +185,96 @@ final class RoutingViewModel {
 
     init(
         client: any RoutingAPIReading = RoutingAPIClient(),
-        mutations: any RoutingMutationSubmitting = RoutingMutationClient()
+        mutations: any RoutingMutationSubmitting = RoutingMutationClient(),
+        connectionMutations: any RoutingConnectionMutationSubmitting =
+            RoutingConnectionMutationClient()
     ) {
         self.client = client
         self.mutations = mutations
+        self.connectionMutations = connectionMutations
+    }
+
+    func loadConnections(command: ProviderMutationCommand) async {
+        guard !isLoadingConnections else { return }
+        isLoadingConnections = true
+        mutationFailure = nil
+        defer { isLoadingConnections = false }
+        switch await connectionMutations.loadConnections(command: command) {
+        case let .success(response):
+            guard response.ok,
+                  let revision = response.connectionRevision,
+                  let loaded = response.connections
+            else {
+                connections = []
+                connectionRevision = 0
+                mutationFailure = .invalidData
+                return
+            }
+            connections = loaded.sorted { $0.connectionRef < $1.connectionRef }
+            connectionRevision = revision
+        case let .failure(error):
+            connections = []
+            connectionRevision = 0
+            mutationFailure = Self.failure(for: error)
+        }
+    }
+
+    func upsertConnection(
+        _ connection: RoutingExecutionConnection,
+        secret: String,
+        command: ProviderMutationCommand
+    ) async {
+        guard !isMutating, connection.isValid else { return }
+        isMutating = true
+        mutationFailure = nil
+        let result = await connectionMutations.upsertConnection(
+            RoutingConnectionMutationRequest(
+                expectedRevision: connectionRevision,
+                connection: connection,
+                secret: secret
+            ),
+            command: command
+        )
+        isMutating = false
+        switch result {
+        case let .success(response):
+            guard response.ok else {
+                mutationFailure = .invalidData
+                return
+            }
+            await loadConnections(command: command)
+        case let .failure(error):
+            mutationFailure = Self.failure(for: error)
+        }
+    }
+
+    func removeConnection(
+        _ connectionRef: String,
+        command: ProviderMutationCommand
+    ) async {
+        guard !isMutating,
+              connections.contains(where: { $0.connectionRef == connectionRef })
+        else { return }
+        isMutating = true
+        mutationFailure = nil
+        let result = await connectionMutations.removeConnection(
+            RoutingConnectionRemoveRequest(
+                expectedRevision: connectionRevision,
+                connectionRef: connectionRef
+            ),
+            command: command
+        )
+        isMutating = false
+        switch result {
+        case let .success(response):
+            guard response.ok else {
+                mutationFailure = .invalidData
+                return
+            }
+            await loadConnections(command: command)
+        case let .failure(error):
+            mutationFailure = Self.failure(for: error)
+        }
     }
 
     func load() async {
@@ -197,11 +339,7 @@ final class RoutingViewModel {
             }
             await load()
         case let .failure(error):
-            mutationFailure = switch error {
-            case .timedOut: .timedOut
-            case .unavailable, .couldNotLaunch: .serviceUnavailable
-            case .responseTooLarge, .invalidResponse: .invalidData
-            }
+            mutationFailure = Self.failure(for: error)
         }
     }
 
@@ -239,6 +377,14 @@ final class RoutingViewModel {
         case .unavailable, .serverUnavailable: .serviceUnavailable
         case .timedOut: .timedOut
         case .responseTooLarge, .invalidRequest, .invalidResponse, .schemaMismatch: .invalidData
+        }
+    }
+
+    private static func failure(for error: ProviderMutationFailure) -> RoutingFailure {
+        switch error {
+        case .timedOut: .timedOut
+        case .unavailable, .couldNotLaunch: .serviceUnavailable
+        case .responseTooLarge, .invalidResponse: .invalidData
         }
     }
 }
