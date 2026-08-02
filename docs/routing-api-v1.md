@@ -29,6 +29,14 @@ Summary, applies hard safety filters before deterministic scoring, and stores
 only bounded content-free evidence. `POST /v1/simulations` uses the same engine
 but never writes evidence.
 
+`GET /v1/health` also reports `decisionApiEnabled`, `defaultPolicyId` and the
+monotonic `preferencesRevision`. The master switch is stored in a private,
+atomically replaced `routing-preferences.json` document. Disabling decisions
+keeps health, policy, target and content-free history reads available so the
+native app can explain and re-enable the feature without restarting the
+collector. Decision and simulation writes then fail with the stable
+`router_disabled` error and write no evidence.
+
 The authoritative request schema is available at `/v1/schema.json` and tracked
 in `openusage_bar/resources/routing-api-v1.schema.json`. Unknown fields,
 duplicate JSON keys, trailing JSON values, booleans in numeric fields and
@@ -58,6 +66,9 @@ Exit codes are stable:
 - `1`: local API or routing facts unavailable;
 - `2`: invalid request;
 - `3`: no eligible route.
+
+`router_disabled` uses exit code `1`; callers must not silently route around a
+deliberate local disable.
 
 ## Evidence and compatibility
 

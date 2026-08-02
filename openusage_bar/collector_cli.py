@@ -685,6 +685,7 @@ def _run_daemon_with_api(
         )
         from .routing_store import RoutingStore
         from .routing_policy_store import RoutingPolicyStore
+        from .routing_preferences import RoutingPreferencesStore
         from .routing_targets import RouteTargetStore
         from .runtime_store import read_runtime_summary
 
@@ -696,6 +697,9 @@ def _run_daemon_with_api(
         )
         policy_store = RoutingPolicyStore(
             selected_router.with_name("routing-policies.json")
+        )
+        preferences_store = RoutingPreferencesStore(
+            selected_router.with_name("routing-preferences.json")
         )
         connection_store = ExecutionConnectionStore(
             selected_router.with_name("execution-connections.json")
@@ -723,6 +727,7 @@ def _run_daemon_with_api(
                 execution_registry().available_connection_refs()
             ),
             policy_loader=lambda: policy_store.load().policies,
+            preference_loader=preferences_store.load,
             clock=clock,
         )
         routing_server = create_routing_unix_server(selected_router, controller)

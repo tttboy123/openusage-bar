@@ -7,12 +7,21 @@ import Testing
 struct RoutingAPIClientTests {
     @Test("Health policies and targets decode through the private router socket")
     func readsControlPlane() async throws {
-        let healthServer = try RoutingFixtureServer(json: #"{"schemaVersion":"1.0","health":{"ok":true,"status":"ok"},"targetRevision":4,"targetCount":1,"routingRevision":9}"#)
+        let healthServer = try RoutingFixtureServer(json: #"{"schemaVersion":"1.0","health":{"ok":true,"status":"disabled"},"decisionApiEnabled":false,"defaultPolicyId":"balanced","preferencesRevision":3,"targetRevision":4,"targetCount":1,"routingRevision":9}"#)
         let health = try await RoutingAPIClient(socketURL: healthServer.url).health()
         #expect(health.ok)
+        #expect(!health.decisionAPIEnabled)
+        #expect(health.defaultPolicyID == "balanced")
+        #expect(health.preferencesRevision == 3)
         #expect(health.targetRevision == 4)
         #expect(health.targetCount == 1)
         #expect(healthServer.request.contains("GET /v1/health HTTP/1.1"))
+
+        let previousServer = try RoutingFixtureServer(json: #"{"schemaVersion":"1.0","health":{"ok":true,"status":"ok"},"targetRevision":3,"targetCount":0,"routingRevision":8}"#)
+        let previous = try await RoutingAPIClient(socketURL: previousServer.url).health()
+        #expect(previous.decisionAPIEnabled)
+        #expect(previous.defaultPolicyID == "reliable")
+        #expect(previous.preferencesRevision == 0)
 
         let policiesServer = try RoutingFixtureServer(json: #"{"schemaVersion":"1.0","policies":[{"policyId":"reliable","policyRevision":1,"weights":{"reliability":50,"headroom":25,"latency":15,"cost":10},"requirements":{"minimumHeadroomBasisPoints":1000,"maximumErrorRateBasisPoints":2500,"minimumRuntimeSamples":0,"requireCost":false,"requireRuntime":false}}]}"#)
         let policies = try await RoutingAPIClient(socketURL: policiesServer.url).policies()
@@ -78,7 +87,7 @@ struct RoutingAPIClientTests {
 
     @Test("Schema drift oversized output and invalid requests fail closed")
     func failsClosed() async throws {
-        let drift = try RoutingFixtureServer(json: #"{"schemaVersion":"2.0","health":{"ok":true,"status":"ok"},"targetRevision":1,"targetCount":0,"routingRevision":0}"#)
+        let drift = try RoutingFixtureServer(json: #"{"schemaVersion":"2.0","health":{"ok":true,"status":"ok"},"decisionApiEnabled":true,"defaultPolicyId":"reliable","preferencesRevision":0,"targetRevision":1,"targetCount":0,"routingRevision":0}"#)
         await #expect(throws: RoutingAPIClientError.schemaMismatch) {
             try await RoutingAPIClient(socketURL: drift.url).health()
         }

@@ -455,6 +455,9 @@
 "The local Decision API did not return verified routing data." = "The local Decision API did not return verified routing data.";
 "Reload routing health, policies, targets, and history" = "Reload routing health, policies, targets, and history";
 "Decision API" = "Decision API";
+"Default policy" = "Default policy";
+"Enable or disable local route decisions" = "Enable or disable local route decisions";
+"Choose the policy used by automatic routing" = "Choose the policy used by automatic routing";
 "Available" = "Available";
 "Configured targets" = "Configured targets";
 "Evidence revision" = "Evidence revision";

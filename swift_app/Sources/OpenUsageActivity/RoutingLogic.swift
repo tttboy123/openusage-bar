@@ -342,6 +342,7 @@ final class RoutingViewModel {
     private let mutations: any RoutingMutationSubmitting
     private let connectionMutations: any RoutingConnectionMutationSubmitting
     private let policyMutations: any RoutingPolicyMutationSubmitting
+    private let preferenceMutations: any RoutingPreferencesMutationSubmitting
 
     private(set) var health: RoutingHealth?
     private(set) var policies: [RoutingPolicy] = []
@@ -357,9 +358,12 @@ final class RoutingViewModel {
     private(set) var isMutating = false
     private(set) var isLoadingConnections = false
     private(set) var isLoadingPolicies = false
+    private(set) var isLoadingPreferences = false
     private(set) var targetRevision: Int64 = 0
     private(set) var connectionRevision: Int64 = 0
     private(set) var policyDocumentRevision: Int64 = 0
+    private(set) var preferencesRevision: Int64 = 0
+    private(set) var decisionAPIEnabled = false
 
     var selectedPolicyID = "reliable"
     var taskKind = RoutingTaskKind.code
@@ -376,12 +380,69 @@ final class RoutingViewModel {
         connectionMutations: any RoutingConnectionMutationSubmitting =
             RoutingConnectionMutationClient(),
         policyMutations: any RoutingPolicyMutationSubmitting =
-            RoutingPolicyMutationClient()
+            RoutingPolicyMutationClient(),
+        preferenceMutations: any RoutingPreferencesMutationSubmitting =
+            RoutingPreferencesMutationClient()
     ) {
         self.client = client
         self.mutations = mutations
         self.connectionMutations = connectionMutations
         self.policyMutations = policyMutations
+        self.preferenceMutations = preferenceMutations
+    }
+
+    func loadPreferences(command: ProviderMutationCommand) async {
+        guard !isLoadingPreferences else { return }
+        isLoadingPreferences = true
+        defer { isLoadingPreferences = false }
+        switch await preferenceMutations.loadPreferences(command: command) {
+        case let .success(response):
+            guard response.ok,
+                  let revision = response.preferencesRevision,
+                  let preferences = response.routingPreferences
+            else {
+                mutationFailure = .invalidData
+                return
+            }
+            preferencesRevision = revision
+            decisionAPIEnabled = preferences.decisionAPIEnabled
+            selectedPolicyID = preferences.defaultPolicyID
+        case let .failure(error):
+            mutationFailure = Self.failure(for: error)
+        }
+    }
+
+    func savePreferences(
+        decisionAPIEnabled: Bool,
+        defaultPolicyID: String,
+        command: ProviderMutationCommand
+    ) async {
+        guard !isMutating,
+              RoutingExecutionConnection.isStableID(defaultPolicyID)
+        else { return }
+        isMutating = true
+        mutationFailure = nil
+        defer { isMutating = false }
+        let result = await preferenceMutations.savePreferences(
+            RoutingPreferencesMutationRequest(
+                expectedRevision: preferencesRevision,
+                decisionAPIEnabled: decisionAPIEnabled,
+                defaultPolicyID: defaultPolicyID
+            ),
+            command: command
+        )
+        switch result {
+        case let .success(response):
+            guard response.ok, let revision = response.preferencesRevision else {
+                mutationFailure = .invalidData
+                return
+            }
+            preferencesRevision = revision
+            self.decisionAPIEnabled = decisionAPIEnabled
+            selectedPolicyID = defaultPolicyID
+        case let .failure(error):
+            mutationFailure = Self.failure(for: error)
+        }
     }
 
     func loadCustomPolicies(command: ProviderMutationCommand) async {
@@ -562,10 +623,13 @@ final class RoutingViewModel {
                 loadedHealth, loadedPolicies, loadedTargets, loadedHistory
             )
             health = values.0
+            decisionAPIEnabled = values.0.decisionAPIEnabled
+            preferencesRevision = values.0.preferencesRevision
             policies = values.1
             targets = values.2.targets
             targetRevision = values.2.revision
             history = values.3.decisions
+            selectedPolicyID = values.0.defaultPolicyID
             if !policies.contains(where: { $0.policyID == selectedPolicyID }),
                let first = policies.first {
                 selectedPolicyID = first.policyID

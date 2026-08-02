@@ -69,7 +69,7 @@ struct RoutingPage: View {
                 draft: draft,
                 isSaving: model.isMutating,
                 onSave: savePolicy,
-                onRemove: draft.isNew ? nil : { policyID in
+                onRemove: draft.isNew || draft.id == model.selectedPolicyID ? nil : { policyID in
                     removePolicy(policyID)
                 }
             )
@@ -167,18 +167,38 @@ struct RoutingPage: View {
     private var overview: some View {
         GroupBox {
             HStack(alignment: .center, spacing: 24) {
-                Label {
+                Toggle(isOn: Binding(
+                    get: { model.decisionAPIEnabled },
+                    set: { savePreferences(enabled: $0, policyID: model.selectedPolicyID) }
+                )) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Decision API").font(.headline)
-                        Text(model.health?.ok == true ? "Online" : "Unavailable")
+                        Text(decisionAPIStatus)
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                } icon: {
-                    Image(systemName: model.health?.ok == true
-                          ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                        .foregroundStyle(model.health?.ok == true ? .green : .orange)
                 }
+                .toggleStyle(.switch)
+                .disabled(model.isMutating || model.health == nil)
+                .help("Enable or disable local route decisions")
                 Spacer()
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Default policy").font(.caption).foregroundStyle(.secondary)
+                    Picker("Default policy", selection: Binding(
+                        get: { model.selectedPolicyID },
+                        set: { savePreferences(
+                            enabled: model.decisionAPIEnabled, policyID: $0
+                        ) }
+                    )) {
+                        ForEach(model.policies) { policy in
+                            Text(RoutingPresentation.policyTitle(policy.policyID))
+                                .tag(policy.policyID)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 180)
+                    .disabled(model.isMutating || model.policies.isEmpty)
+                    .help("Choose the policy used by automatic routing")
+                }
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Configured targets").font(.caption).foregroundStyle(.secondary)
                     Text("\(model.health?.targetCount ?? model.targets.count)")
@@ -396,7 +416,10 @@ struct RoutingPage: View {
                         Task { await model.simulate() }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(model.isSimulating || model.policies.isEmpty)
+                    .disabled(
+                        model.isSimulating || model.policies.isEmpty
+                            || !model.decisionAPIEnabled
+                    )
                     .keyboardShortcut(.return, modifiers: [.command])
                 }
                 .padding(.top, 12)
@@ -544,6 +567,7 @@ struct RoutingPage: View {
     private func refreshData() async {
         await model.load()
         if let command = routingCommand() {
+            await model.loadPreferences(command: command)
             await model.loadConnections(command: command)
             await model.loadCustomPolicies(command: command)
         }
@@ -609,6 +633,26 @@ struct RoutingPage: View {
             return
         }
         Task { await model.removeCustomPolicy(policyID, command: command) }
+    }
+
+    private var decisionAPIStatus: String {
+        guard model.health != nil else { return AppLocalization.text("Unavailable") }
+        return AppLocalization.text(model.decisionAPIEnabled ? "Online" : "Disabled")
+    }
+
+    private func savePreferences(enabled: Bool, policyID: String) {
+        localMutationFailure = nil
+        guard let command = routingCommand() else {
+            localMutationFailure = AppLocalization.text("Routing target update unavailable")
+            return
+        }
+        Task {
+            await model.savePreferences(
+                decisionAPIEnabled: enabled,
+                defaultPolicyID: policyID,
+                command: command
+            )
+        }
     }
 
     private func routingCommand() -> ProviderMutationCommand? {

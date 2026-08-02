@@ -20,6 +20,11 @@ from .routing_policy_store import (
     RoutingPolicyConfigError,
     RoutingPolicyStore,
 )
+from .routing_preferences import (
+    RoutingPreferences,
+    RoutingPreferencesConfigError,
+    RoutingPreferencesStore,
+)
 
 
 MAX_REQUEST_BYTES = 256 * 1024
@@ -38,6 +43,11 @@ _REMOVE_POLICY_REQUEST_KEYS = frozenset({
     "version", "action", "expectedRevision", "policyId",
 })
 _LIST_POLICY_REQUEST_KEYS = frozenset({"version", "action"})
+_GET_PREFERENCES_REQUEST_KEYS = frozenset({"version", "action"})
+_SET_PREFERENCES_REQUEST_KEYS = frozenset({
+    "version", "action", "expectedRevision", "decisionApiEnabled",
+    "defaultPolicyId",
+})
 _CONNECTION_KEYS = frozenset({
     "connectionRef", "providerId", "accountRef", "executionClass",
     "executionAdapterId", "baseURL", "enabled", "models",
@@ -83,6 +93,14 @@ class _StaleConnectionRevision(ValueError):
 
 
 class _StalePolicyRevision(ValueError):
+    pass
+
+
+class _StalePreferencesRevision(ValueError):
+    pass
+
+
+class _DefaultPolicyInUse(ValueError):
     pass
 
 
@@ -245,6 +263,13 @@ def _default_policy_store() -> RoutingPolicyStore:
     )
 
 
+def _default_preferences_store() -> RoutingPreferencesStore:
+    return RoutingPreferencesStore(
+        Path.home() / ".local" / "state" / "openusage-bar"
+        / "routing-preferences.json"
+    )
+
+
 def _compatible(target: RouteTarget, connection: ExecutionConnection) -> bool:
     return (
         target.provider_id == connection.provider_id
@@ -316,6 +341,8 @@ def _write(
     connections: tuple[ExecutionConnection, ...] | None = None,
     policy_document_revision: int | None = None,
     custom_policies: tuple[RoutePolicy, ...] | None = None,
+    preferences_revision: int | None = None,
+    routing_preferences: RoutingPreferences | None = None,
 ) -> int:
     payload: dict[str, object] = {"version": 1, "ok": ok, "message": message}
     if target_revision is not None:
@@ -328,6 +355,13 @@ def _write(
         payload["policyDocumentRevision"] = policy_document_revision
     if custom_policies is not None:
         payload["customPolicies"] = [_policy_wire(value) for value in custom_policies]
+    if preferences_revision is not None:
+        payload["preferencesRevision"] = preferences_revision
+    if routing_preferences is not None:
+        payload["routingPreferences"] = {
+            "decisionApiEnabled": routing_preferences.decision_api_enabled,
+            "defaultPolicyId": routing_preferences.default_policy_id,
+        }
     output.write(json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n")
     output.flush()
     return 0 if ok else 1
@@ -341,11 +375,13 @@ def run_routing_mutation(
     connection_store: ExecutionConnectionStore | None = None,
     keychain: MacOSKeychain | None = None,
     policy_store: RoutingPolicyStore | None = None,
+    preferences_store: RoutingPreferencesStore | None = None,
 ) -> int:
     """Mutate bounded route configuration from one private stdin document."""
     resolved = store or _default_store()
     resolved_connections = connection_store or _default_connection_store()
     resolved_policies = policy_store or _default_policy_store()
+    resolved_preferences = preferences_store or _default_preferences_store()
     resolved_keychain = keychain
 
     def mutation_keychain() -> MacOSKeychain:
@@ -362,6 +398,39 @@ def run_routing_mutation(
         if not isinstance(payload, dict) or payload.get("version") != 1:
             raise ValueError("invalid request")
         action = payload.get("action")
+        if action == "get_preferences":
+            _exact(payload, _GET_PREFERENCES_REQUEST_KEYS)
+            preferences = resolved_preferences.load()
+            return _write(
+                output_stream, True, "Routing preferences loaded",
+                preferences_revision=preferences.revision,
+                routing_preferences=preferences,
+            )
+        if action == "set_preferences":
+            request = _exact(payload, _SET_PREFERENCES_REQUEST_KEYS)
+            expected = request["expectedRevision"]
+            enabled = request["decisionApiEnabled"]
+            policy_id = request["defaultPolicyId"]
+            if (
+                isinstance(expected, bool) or not isinstance(expected, int)
+                or expected < 0 or not isinstance(enabled, bool)
+                or not isinstance(policy_id, str)
+            ):
+                raise ValueError("invalid routing preferences")
+            current = resolved_preferences.load()
+            if current.revision != expected:
+                raise _StalePreferencesRevision()
+            available_policy_ids = built_in_policy_ids() | {
+                value.policy_id for value in resolved_policies.load().policies
+            }
+            if policy_id not in available_policy_ids:
+                raise ValueError("invalid routing preferences")
+            preferences = RoutingPreferences(expected + 1, enabled, policy_id)
+            resolved_preferences.save(preferences)
+            return _write(
+                output_stream, True, "Routing preferences saved",
+                preferences_revision=preferences.revision,
+            )
         if action == "list_policies":
             _exact(payload, _LIST_POLICY_REQUEST_KEYS)
             configuration = resolved_policies.load()
@@ -551,6 +620,8 @@ def run_routing_mutation(
             configuration = resolved_policies.load()
             if configuration.revision != expected:
                 raise _StalePolicyRevision()
+            if resolved_preferences.load().default_policy_id == policy_id:
+                raise _DefaultPolicyInUse()
             if not any(value.policy_id == policy_id for value in configuration.policies):
                 raise ValueError("custom policy missing")
             revision = expected + 1
@@ -579,6 +650,16 @@ def run_routing_mutation(
             output_stream, False,
             "Routing policies changed; reload before saving",
         )
+    except _StalePreferencesRevision:
+        return _write(
+            output_stream, False,
+            "Routing preferences changed; reload before saving",
+        )
+    except _DefaultPolicyInUse:
+        return _write(
+            output_stream, False,
+            "Default routing policy cannot be removed",
+        )
     except _ConnectionConflict:
         return _write(
             output_stream, False,
@@ -602,13 +683,18 @@ def run_routing_mutation(
     except (
         json.JSONDecodeError, UnicodeError, TypeError, ValueError,
         RouteTargetConfigError, ExecutionConnectionConfigError,
-        RoutingPolicyConfigError,
+        RoutingPolicyConfigError, RoutingPreferencesConfigError,
     ):
         message = (
-            "Custom routing policy request is invalid"
+            "Routing preferences request is invalid"
             if isinstance(payload, dict)
-            and payload.get("action") in {"upsert_policy", "remove_policy"}
-            else "Routing target request is invalid"
+            and payload.get("action") in {"get_preferences", "set_preferences"}
+            else (
+                "Custom routing policy request is invalid"
+                if isinstance(payload, dict)
+                and payload.get("action") in {"upsert_policy", "remove_policy"}
+                else "Routing target request is invalid"
+            )
         )
         return _write(output_stream, False, message)
     except Exception:

@@ -158,7 +158,11 @@ struct RoutingConnectionMutationClient: RoutingConnectionMutationSubmitting, Sen
                       response.message.unicodeScalars.allSatisfy({
                           $0.value >= 0x20 && $0.value != 0x7f
                       }),
-                      response.targetRevision == nil
+                      response.targetRevision == nil,
+                      response.policyDocumentRevision == nil,
+                      response.customPolicies == nil,
+                      response.preferencesRevision == nil,
+                      response.routingPreferences == nil
                 else { return .failure(.invalidResponse) }
                 switch mode {
                 case .list:

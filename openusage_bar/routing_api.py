@@ -30,6 +30,7 @@ from .routing_contract import (
 from .routing_engine import decide_route
 from .routing_facts import build_target_facts
 from .routing_policy import RoutePolicy, built_in_policies
+from .routing_preferences import RoutingPreferences
 from .routing_store import (
     DecisionEvidence,
     RoutingStore,
@@ -493,6 +494,7 @@ class RoutingController:
         runtime_reader: Callable[[datetime, datetime], RuntimeSummary | None],
         available_connections: Callable[[], tuple[str, ...]],
         policy_loader: Callable[[], tuple[RoutePolicy, ...]] | None = None,
+        preference_loader: Callable[[], RoutingPreferences] | None = None,
         clock: Callable[[], datetime] | None = None,
         decision_ttl: timedelta = DEFAULT_DECISION_TTL,
         runtime_window: timedelta = DEFAULT_RUNTIME_WINDOW,
@@ -507,11 +509,24 @@ class RoutingController:
         self.runtime_reader = runtime_reader
         self.available_connections = available_connections
         self.policy_loader = policy_loader or (lambda: ())
+        self.preference_loader = preference_loader or (
+            lambda: RoutingPreferences(0, True, "reliable")
+        )
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.decision_ttl = decision_ttl
         self.runtime_window = runtime_window
 
     def decide(self, payload: object, *, simulated: bool) -> dict[str, object]:
+        try:
+            preferences = self._preferences()
+        except Exception as error:
+            raise RoutingAPIProblem(
+                503, "facts_unavailable", "Routing preferences are unavailable."
+            ) from error
+        if not preferences.decision_api_enabled:
+            raise RoutingAPIProblem(
+                503, "router_disabled", "Route decisions are disabled."
+            )
         try:
             envelope = decode_decision_request(payload)
         except ValueError as error:
@@ -629,15 +644,31 @@ class RoutingController:
             raise ValueError("routing policies are invalid")
         return tuple(sorted((*builtins, *custom), key=lambda value: value.policy_id))
 
+    def _preferences(self) -> RoutingPreferences:
+        value = self.preference_loader()
+        if not isinstance(value, RoutingPreferences):
+            raise ValueError("routing preferences are invalid")
+        policy_ids = {policy.policy_id for policy in self._policies()}
+        if value.default_policy_id not in policy_ids:
+            raise ValueError("routing preferences are invalid")
+        return value
+
     def health(self) -> dict[str, object]:
         try:
             configuration = self.target_loader()
             revision = self.evidence_store.revision()
+            preferences = self._preferences()
         except Exception as error:
             raise RoutingAPIProblem(503, "facts_unavailable", "Routing is unavailable.") from error
         return {
             "schemaVersion": SCHEMA_VERSION,
-            "health": {"ok": True, "status": "ok"},
+            "health": {
+                "ok": True,
+                "status": "ok" if preferences.decision_api_enabled else "disabled",
+            },
+            "decisionApiEnabled": preferences.decision_api_enabled,
+            "defaultPolicyId": preferences.default_policy_id,
+            "preferencesRevision": preferences.revision,
             "targetRevision": configuration.revision,
             "targetCount": len(configuration.targets),
             "routingRevision": revision,

@@ -177,4 +177,48 @@ struct ProviderMutationClientTests {
 
         #expect(response == .failure(.invalidResponse))
     }
+
+    @Test("Routing preferences expose only the master toggle and default policy")
+    func routingPreferences() async throws {
+        let script = #"read payload; printf '{"version":1,"ok":true,"message":"Routing preferences loaded","preferencesRevision":2,"routingPreferences":{"decisionApiEnabled":false,"defaultPolicyId":"balanced"}}'"#
+        let client = RoutingPreferencesMutationClient(
+            limits: .init(timeout: .seconds(1), maximumResponseBytes: 4_096),
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/Users/tester"]
+        )
+        let response = await client.loadPreferences(command: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", script]
+        ))
+        let loaded = try response.get()
+        #expect(loaded.preferencesRevision == 2)
+        #expect(loaded.routingPreferences == .init(
+            decisionAPIEnabled: false, defaultPolicyID: "balanced"
+        ))
+
+        let request = RoutingPreferencesMutationRequest(
+            expectedRevision: 2,
+            decisionAPIEnabled: true,
+            defaultPolicyID: "reliable"
+        )
+        let object = try #require(JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(request)
+        ) as? [String: Any])
+        #expect(object["action"] as? String == "set_preferences")
+        #expect(object["decisionApiEnabled"] as? Bool == true)
+        #expect(object["defaultPolicyId"] as? String == "reliable")
+        #expect(object["secret"] == nil)
+    }
+
+    @Test("Routing mutation clients reject fields owned by another response mode")
+    func routingResponseIsolation() async {
+        let command = ProviderMutationCommand(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", #"read payload; printf '{"version":1,"ok":true,"message":"Execution connections loaded","connectionRevision":0,"connections":[],"preferencesRevision":1}'"#]
+        )
+        let response = await RoutingConnectionMutationClient(
+            limits: .init(timeout: .seconds(1), maximumResponseBytes: 4_096),
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/Users/tester"]
+        ).loadConnections(command: command)
+        #expect(response == .failure(.invalidResponse))
+    }
 }

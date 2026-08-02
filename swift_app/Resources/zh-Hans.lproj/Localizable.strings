@@ -456,6 +456,9 @@
 "The local Decision API did not return verified routing data." = "本地决策 API 未返回可验证的路由数据。";
 "Reload routing health, policies, targets, and history" = "重新载入路由健康、策略、目标和历史";
 "Decision API" = "决策 API";
+"Default policy" = "默认策略";
+"Enable or disable local route decisions" = "启用或关闭本地路由决策";
+"Choose the policy used by automatic routing" = "选择自动路由使用的策略";
 "Online" = "在线";
 "Configured targets" = "已配置目标";
 "Evidence revision" = "证据版本";

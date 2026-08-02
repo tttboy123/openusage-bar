@@ -15,6 +15,7 @@ from openusage_bar.routing_execution import (
 )
 from openusage_bar.routing_targets import RouteTargetStore
 from openusage_bar.routing_policy_store import RoutingPolicyStore
+from openusage_bar.routing_preferences import RoutingPreferencesStore
 
 
 def target_payload(**changes: object) -> dict[str, object]:
@@ -62,6 +63,8 @@ class RoutingMutationCommandTests(unittest.TestCase):
         self.connection_store = ExecutionConnectionStore(self.connection_path)
         self.policy_path = Path(self.temporary.name) / "routing-policies.json"
         self.policy_store = RoutingPolicyStore(self.policy_path)
+        self.preferences_path = Path(self.temporary.name) / "routing-preferences.json"
+        self.preferences_store = RoutingPreferencesStore(self.preferences_path)
         self.keychain = Mock()
 
     def tearDown(self) -> None:
@@ -73,6 +76,7 @@ class RoutingMutationCommandTests(unittest.TestCase):
             io.StringIO(raw), output, store=self.store,
             connection_store=self.connection_store, keychain=self.keychain,
             policy_store=self.policy_store,
+            preferences_store=self.preferences_store,
         )
         return status, json.loads(output.getvalue())
 
@@ -348,6 +352,91 @@ class RoutingMutationCommandTests(unittest.TestCase):
             result["message"], "Routing policies changed; reload before saving"
         )
         self.assertEqual(self.policy_path.read_bytes(), before)
+
+    def test_preferences_toggle_and_default_policy_are_atomic_and_bounded(self) -> None:
+        status, listed = self.mutate(json.dumps({
+            "version": 1, "action": "get_preferences",
+        }))
+        self.assertEqual(status, 0)
+        self.assertEqual(listed, {
+            "version": 1,
+            "ok": True,
+            "message": "Routing preferences loaded",
+            "preferencesRevision": 0,
+            "routingPreferences": {
+                "decisionApiEnabled": True,
+                "defaultPolicyId": "reliable",
+            },
+        })
+
+        status, result = self.mutate(json.dumps({
+            "version": 1,
+            "action": "set_preferences",
+            "expectedRevision": 0,
+            "decisionApiEnabled": False,
+            "defaultPolicyId": "balanced",
+        }))
+        self.assertEqual(status, 0)
+        self.assertEqual(result["preferencesRevision"], 1)
+        self.assertEqual(self.preferences_store.load().default_policy_id, "balanced")
+        self.assertFalse(self.preferences_store.load().decision_api_enabled)
+
+        before = self.preferences_path.read_bytes()
+        status, result = self.mutate(json.dumps({
+            "version": 1,
+            "action": "set_preferences",
+            "expectedRevision": 0,
+            "decisionApiEnabled": True,
+            "defaultPolicyId": "reliable",
+        }))
+        self.assertEqual(status, 1)
+        self.assertEqual(
+            result["message"],
+            "Routing preferences changed; reload before saving",
+        )
+        self.assertEqual(self.preferences_path.read_bytes(), before)
+
+    def test_preferences_require_an_existing_policy_and_strict_boolean(self) -> None:
+        cases = [
+            {
+                "version": 1, "action": "set_preferences",
+                "expectedRevision": 0, "decisionApiEnabled": 1,
+                "defaultPolicyId": "reliable",
+            },
+            {
+                "version": 1, "action": "set_preferences",
+                "expectedRevision": 0, "decisionApiEnabled": True,
+                "defaultPolicyId": "missing_policy",
+            },
+        ]
+        for value in cases:
+            with self.subTest(value=value):
+                status, result = self.mutate(json.dumps(value))
+                self.assertEqual(status, 1)
+                self.assertEqual(
+                    result["message"], "Routing preferences request is invalid"
+                )
+                self.assertFalse(self.preferences_path.exists())
+
+    def test_default_custom_policy_cannot_be_removed_until_default_changes(self) -> None:
+        self.mutate(self.policy_request())
+        status, _ = self.mutate(json.dumps({
+            "version": 1,
+            "action": "set_preferences",
+            "expectedRevision": 0,
+            "decisionApiEnabled": True,
+            "defaultPolicyId": "custom_coding",
+        }))
+        self.assertEqual(status, 0)
+
+        remove = json.dumps({
+            "version": 1, "action": "remove_policy",
+            "expectedRevision": 1, "policyId": "custom_coding",
+        })
+        status, result = self.mutate(remove)
+        self.assertEqual(status, 1)
+        self.assertEqual(result["message"], "Default routing policy cannot be removed")
+        self.assertEqual(self.policy_store.load().policies[0].policy_id, "custom_coding")
 
     def test_update_can_retain_secret_but_cannot_orphan_an_existing_target(self) -> None:
         existing = ExecutionConnection(

@@ -138,6 +138,9 @@ public struct RoutingDecisionRequest: Encodable, Hashable, Sendable {
 public struct RoutingHealth: Sendable, Hashable {
     public let ok: Bool
     public let status: String
+    public let decisionAPIEnabled: Bool
+    public let defaultPolicyID: String
+    public let preferencesRevision: Int64
     public let targetRevision: Int64
     public let targetCount: Int
     public let routingRevision: Int64
@@ -346,11 +349,19 @@ public struct RoutingAPIClient: RoutingAPIReading, Sendable {
     public func health() async throws -> RoutingHealth {
         let wire = try await get(HealthWire.self, target: "/v1/health")
         try requireSchema(wire.schemaVersion)
+        let decisionAPIEnabled = wire.decisionAPIEnabled ?? true
+        let defaultPolicyID = wire.defaultPolicyID ?? "reliable"
+        let preferencesRevision = wire.preferencesRevision ?? 0
         guard wire.targetRevision >= 0, wire.targetCount >= 0, wire.targetCount <= 128,
-              wire.routingRevision >= 0, Self.safeID(wire.health.status)
+              wire.routingRevision >= 0, preferencesRevision >= 0,
+              Self.safeID(wire.health.status), Self.safeID(defaultPolicyID),
+              wire.health.status == (decisionAPIEnabled ? "ok" : "disabled")
         else { throw RoutingAPIClientError.invalidResponse }
         return RoutingHealth(
             ok: wire.health.ok, status: wire.health.status,
+            decisionAPIEnabled: decisionAPIEnabled,
+            defaultPolicyID: defaultPolicyID,
+            preferencesRevision: preferencesRevision,
             targetRevision: wire.targetRevision, targetCount: wire.targetCount,
             routingRevision: wire.routingRevision
         )
@@ -611,9 +622,19 @@ private struct HealthWire: Decodable {
     struct Health: Decodable { let ok: Bool; let status: String }
     let schemaVersion: String
     let health: Health
+    let decisionAPIEnabled: Bool?
+    let defaultPolicyID: String?
+    let preferencesRevision: Int64?
     let targetRevision: Int64
     let targetCount: Int
     let routingRevision: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, health, preferencesRevision, targetRevision
+        case targetCount, routingRevision
+        case decisionAPIEnabled = "decisionApiEnabled"
+        case defaultPolicyID = "defaultPolicyId"
+    }
 }
 
 private struct PoliciesWire: Decodable {

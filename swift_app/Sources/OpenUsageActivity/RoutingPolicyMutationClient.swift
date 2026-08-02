@@ -312,6 +312,8 @@ struct RoutingPolicyMutationClient: RoutingPolicyMutationSubmitting, Sendable {
                    response.targetRevision == nil,
                    response.connectionRevision == nil,
                    response.connections == nil,
+                   response.preferencesRevision == nil,
+                   response.routingPreferences == nil,
                    response.ok == (response.policyDocumentRevision != nil),
                    response.policyDocumentRevision.map({ list ? $0 >= 0 : $0 > 0 }) ?? true
                 else { return .failure(.invalidResponse) }

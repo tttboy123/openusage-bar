@@ -1004,7 +1004,12 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   剩余工作是兼容性、性能、故障注入与完整发布门禁。**
 - **WQ-27：接入 Provider Center。** 支持显式 Route Target、内置/自定义策略、
   中英文、Dry Run、选择/备选/排除原因和内容无关的近期决策历史。自动发现只
-  证明 Provider 存在，不会自动授予可执行路由能力。
+  证明 Provider 存在，不会自动授予可执行路由能力。**截至 2026-08-02，原生
+  Execution Connection、显式 Route Target、内置/自定义策略、默认策略、
+  Decision API 总开关、Dry Run、解释与近期历史均已完成本地实现；凭证只经
+  stdin 写入 Keychain。总开关关闭时健康与配置读取仍可用，但决策/模拟以
+  `router_disabled` fail closed。Python 路由相关 110 项与 Swift 全量 283 项
+  已通过。本项剩余键盘/VoiceOver 实机审查、完整发行门禁及本机 0.8 部署。**
 - **WQ-28：实现 Phase B 可选代理。** 独立显式开启的 IPv4 loopback
   OpenAI-compatible Chat Completions Proxy；Keychain Bearer、本地内存转发、
   有界重试/回退，流式输出开始后禁止透明换目标。关闭代理不影响菜单栏、账本、

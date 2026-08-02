@@ -231,6 +231,36 @@ struct RoutingLogicTests {
         #expect(model.mutationFailure == nil)
     }
 
+    @Test("Master toggle and default policy persist through isolated preferences")
+    func routingPreferences() async {
+        let preferences = RoutingPreferencesMutationFixture()
+        let model = RoutingViewModel(
+            client: RoutingClientFixture(),
+            mutations: RoutingMutationFixture(),
+            connectionMutations: RoutingConnectionMutationFixture(),
+            policyMutations: RoutingPolicyMutationFixture(),
+            preferenceMutations: preferences
+        )
+        await model.load()
+        let command = ProviderMutationCommand(
+            executableURL: URL(fileURLWithPath: "/tmp/helper"),
+            arguments: ["routing-mutate"]
+        )
+
+        await model.savePreferences(
+            decisionAPIEnabled: false,
+            defaultPolicyID: "reliable",
+            command: command
+        )
+
+        #expect(preferences.lastRequest?.expectedRevision == 1)
+        #expect(preferences.lastRequest?.decisionAPIEnabled == false)
+        #expect(preferences.lastRequest?.defaultPolicyID == "reliable")
+        #expect(model.decisionAPIEnabled == false)
+        #expect(model.preferencesRevision == 2)
+        #expect(model.mutationFailure == nil)
+    }
+
     private func target(adapterAvailable: Bool = true) -> RoutingTarget {
         RoutingTarget.fixture(adapterAvailable: adapterAvailable)
     }
@@ -336,6 +366,39 @@ private final class RoutingMutationFixture: RoutingMutationSubmitting, @unchecke
     }
 }
 
+private final class RoutingPreferencesMutationFixture:
+    RoutingPreferencesMutationSubmitting, @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var capturedRequest: RoutingPreferencesMutationRequest?
+    var lastRequest: RoutingPreferencesMutationRequest? {
+        lock.withLock { capturedRequest }
+    }
+
+    func loadPreferences(
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        .success(.init(
+            version: 1, ok: true, message: "Routing preferences loaded",
+            preferencesRevision: 1,
+            routingPreferences: .init(
+                decisionAPIEnabled: true, defaultPolicyID: "reliable"
+            )
+        ))
+    }
+
+    func savePreferences(
+        _ request: RoutingPreferencesMutationRequest,
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        lock.withLock { capturedRequest = request }
+        return .success(.init(
+            version: 1, ok: true, message: "Routing preferences saved",
+            preferencesRevision: request.expectedRevision + 1
+        ))
+    }
+}
+
 private final class RoutingClientFixture: RoutingAPIReading, @unchecked Sendable {
     private let noRoute: Bool
     private let error: RoutingAPIClientError?
@@ -377,7 +440,11 @@ private final class RoutingClientFixture: RoutingAPIReading, @unchecked Sendable
 
 private extension RoutingHealth {
     static func fixture() -> Self {
-        Self(ok: true, status: "ok", targetRevision: 1, targetCount: 1, routingRevision: 1)
+        Self(
+            ok: true, status: "ok", decisionAPIEnabled: true,
+            defaultPolicyID: "reliable", preferencesRevision: 1,
+            targetRevision: 1, targetCount: 1, routingRevision: 1
+        )
     }
 }
 

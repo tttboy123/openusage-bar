@@ -27,6 +27,7 @@ from openusage_bar.routing_api import (
 )
 from openusage_bar.routing_contract import RouteTarget
 from openusage_bar.routing_policy import RoutePolicy
+from openusage_bar.routing_preferences import RoutingPreferences
 from openusage_bar.routing_store import RoutingStore
 from openusage_bar.routing_targets import RouteTargetConfiguration
 
@@ -285,6 +286,65 @@ class RoutingControllerTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 503)
         self.assertEqual(raised.exception.code, "facts_unavailable")
         self.assertNotIn("private", raised.exception.message)
+
+    def test_health_reports_preferences_and_fails_if_policy_state_is_invalid(self) -> None:
+        controller = RoutingController(
+            query=FakeQuery(),
+            target_loader=lambda: RouteTargetConfiguration(1, 7, (target(),)),
+            evidence_store=self.store,
+            runtime_reader=lambda _start, _end: None,
+            available_connections=lambda: ("connection-1",),
+            policy_loader=lambda: (custom_policy(),),
+            preference_loader=lambda: RoutingPreferences(
+                3, False, "custom_coding"
+            ),
+            clock=lambda: NOW,
+        )
+
+        self.assertEqual(controller.health(), {
+            "schemaVersion": "1.0",
+            "health": {"ok": True, "status": "disabled"},
+            "decisionApiEnabled": False,
+            "defaultPolicyId": "custom_coding",
+            "preferencesRevision": 3,
+            "targetRevision": 7,
+            "targetCount": 1,
+            "routingRevision": 0,
+        })
+
+        invalid = RoutingController(
+            query=FakeQuery(),
+            target_loader=lambda: RouteTargetConfiguration(1, 7, (target(),)),
+            evidence_store=self.store,
+            runtime_reader=lambda _start, _end: None,
+            available_connections=lambda: ("connection-1",),
+            policy_loader=lambda: (),
+            preference_loader=lambda: RoutingPreferences(1, True, "missing"),
+            clock=lambda: NOW,
+        )
+        with self.assertRaises(RoutingAPIProblem) as raised:
+            invalid.health()
+        self.assertEqual(raised.exception.status, 503)
+        self.assertEqual(raised.exception.code, "facts_unavailable")
+
+    def test_disabled_decision_api_rejects_decisions_without_writing_evidence(self) -> None:
+        controller = RoutingController(
+            query=FakeQuery(),
+            target_loader=lambda: RouteTargetConfiguration(1, 7, (target(),)),
+            evidence_store=self.store,
+            runtime_reader=lambda _start, _end: None,
+            available_connections=lambda: ("connection-1",),
+            preference_loader=lambda: RoutingPreferences(1, False, "reliable"),
+            clock=lambda: NOW,
+        )
+        for simulated in (False, True):
+            with self.subTest(simulated=simulated), self.assertRaises(
+                RoutingAPIProblem
+            ) as raised:
+                controller.decide(request_payload(), simulated=simulated)
+            self.assertEqual(raised.exception.status, 503)
+            self.assertEqual(raised.exception.code, "router_disabled")
+        self.assertEqual(self.store.decision_count(), 0)
 
     def test_no_route_is_a_409_with_bounded_rejections(self) -> None:
         payload = request_payload()
