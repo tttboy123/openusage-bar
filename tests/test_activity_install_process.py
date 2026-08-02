@@ -74,12 +74,14 @@ class ActivityInstallProcessTests(unittest.TestCase):
         )
         return executable
 
-    def run_helper(self, body: str) -> subprocess.CompletedProcess[str]:
+    def run_helper(
+        self, body: str, *, timeout: float = 30
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["/bin/zsh", "-c", f'source "{HELPER}"\n{body}'],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout,
         )
 
     def wait_for_command(self, process: subprocess.Popen, expected: str) -> None:
@@ -467,7 +469,13 @@ class ActivityInstallProcessTests(unittest.TestCase):
             thread = threading.Thread(target=respawn)
             thread.start()
             try:
-                result = self.run_helper(f'stop_exact_activity_processes "{target}" 20 0.01')
+                # Six rounds still exercise TERM, KILL, replacement
+                # re-enumeration, and the two empty snapshots without making
+                # the fixture depend on the host-wide ``ps`` scan duration.
+                result = self.run_helper(
+                    f'stop_exact_activity_processes "{target}" 6 0.01',
+                    timeout=60,
+                )
                 thread.join(timeout=2)
                 self.assertFalse(thread.is_alive())
                 self.assertEqual(result.returncode, 0, result.stderr)
