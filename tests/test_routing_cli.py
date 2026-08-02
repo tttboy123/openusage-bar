@@ -90,6 +90,35 @@ class RoutingCLITests(unittest.TestCase):
         self.assertEqual(json.loads(output)["error"]["code"], "invalid_request")
         self.assertEqual(self.store.decision_count(), 0)
 
+    def test_no_route_uses_conflict_exit_code_and_history_accepts_cursor(self) -> None:
+        payload = request_payload()
+        payload["constraints"]["denyTargets"] = ["openai.work.gpt-5"]
+        code, output, error = self.run_cli(
+            ["route", "simulate", "--format", "json"], json.dumps(payload)
+        )
+        self.assertEqual((code, error), (3, ""))
+        self.assertEqual(json.loads(output)["error"]["code"], "no_route")
+
+        code, output, error = self.run_cli(
+            ["route", "decide", "--format", "json"], json.dumps(request_payload())
+        )
+        self.assertEqual((code, error), (0, ""))
+        decision_id = json.loads(output)["decisionId"]
+        code, output, error = self.run_cli(
+            [
+                "route",
+                "history",
+                "--format",
+                "json",
+                "--limit",
+                "10",
+                "--before",
+                decision_id,
+            ]
+        )
+        self.assertEqual((code, error), (0, ""))
+        self.assertEqual(json.loads(output)["decisions"], [])
+
     def test_missing_socket_and_oversized_input_are_sanitized(self) -> None:
         code, output, error = self.run_cli(
             ["route", "decide", "--format", "json"], "x" * (64 * 1024 + 1)
