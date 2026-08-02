@@ -44,6 +44,16 @@ class RouteTargetStoreTests(unittest.TestCase):
             self.assertEqual(payload["targets"][0]["executionAdapterId"], "openai.direct")
             self.assertEqual(payload["targets"][0]["resourceMode"], "quota")
             self.assertEqual(payload["targets"][0]["factAccountRef"], "account-1")
+            self.assertIsNone(payload["targets"][0]["balanceCurrency"])
+            self.assertEqual(payload["targets"][0]["costCurrency"], "USD")
+            self.assertEqual(
+                payload["targets"][0]["inputCostMicrosPerMillion"],
+                3_000_000,
+            )
+            self.assertEqual(
+                payload["targets"][0]["outputCostMicrosPerMillion"],
+                3_000_000,
+            )
             self.assertEqual(
                 payload["targets"][0]["runtimeScopeRef"],
                 "anon_0123456789abcdef",
@@ -71,6 +81,10 @@ class RouteTargetStoreTests(unittest.TestCase):
                 "resourceMode": "quota",
                 "runtimeScopeRef": "anon_0123456789abcdef",
                 "factAccountRef": "account-1",
+                "balanceCurrency": None,
+                "costCurrency": "USD",
+                "inputCostMicrosPerMillion": 3000000,
+                "outputCostMicrosPerMillion": 3000000,
                 "enabled": True,
                 "regions": ["global"],
                 "privacyClass": "direct_provider",

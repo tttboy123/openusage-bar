@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation, ROUND_CEILING
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 from typing import Iterable
 
-from .query import CapacityProvider, ResourceSnapshotResult, SourceStatusItem
+from .query import BalanceItem, CapacityProvider, ResourceSnapshotResult, SourceStatusItem
 from .routing_contract import (
     MAX_COUNTER,
     RouteRequest,
@@ -92,10 +92,11 @@ def _source_status(value: SourceStatusItem | None) -> str:
 
 
 def _combined_source_state(
-    quotas: tuple[CapacityProvider, ...],
+    provider_id: str,
+    source_ids: tuple[str, ...],
     statuses: tuple[SourceStatusItem, ...],
 ) -> str:
-    if not quotas:
+    if not source_ids:
         return "unknown"
     index: dict[tuple[str, str], SourceStatusItem | None] = {}
     duplicates: set[tuple[str, str]] = set()
@@ -106,54 +107,96 @@ def _combined_source_state(
         else:
             index[key] = status
     values = []
-    for source_id in sorted({row.source_id for row in quotas}):
-        key = (quotas[0].provider_id, source_id)
+    for source_id in sorted(set(source_ids)):
+        key = (provider_id, source_id)
         values.append(
             "unknown" if key in duplicates else _source_status(index.get(key))
         )
     return max(values, key=lambda value: _SOURCE_PRECEDENCE[value])
 
 
-def _price_cost_micros(
-    quotas: tuple[CapacityProvider, ...], total_tokens: int
-) -> int | None:
-    rates: list[Decimal] = []
-    for row in quotas:
-        raw = row.estimated_cost_per_million_tokens
-        if raw is None:
-            continue
-        try:
-            rate = Decimal(raw)
-        except (InvalidOperation, TypeError, ValueError):
-            continue
-        if not rate.is_finite() or rate < 0:
-            continue
-        rates.append(rate)
-    if not rates:
-        return None
-    value = (max(rates) * total_tokens).to_integral_value(rounding=ROUND_CEILING)
+def _declared_cost_micros(
+    target: RouteTarget,
+    route_request: RouteRequest,
+) -> tuple[int | None, str | None]:
+    if target.cost_currency is None:
+        return None, None
+    assert target.input_cost_micros_per_million is not None
+    assert target.output_cost_micros_per_million is not None
+    value = (
+        Decimal(target.input_cost_micros_per_million)
+        * route_request.task.estimated_input_tokens
+        + Decimal(target.output_cost_micros_per_million)
+        * route_request.task.max_output_tokens
+    ) / 1_000_000
+    value = value.to_integral_value(rounding=ROUND_CEILING)
     if value > MAX_COUNTER:
-        return None
-    return int(value)
+        return None, None
+    return int(value), target.cost_currency
 
 
 def _runtime_cost_micros(
     group: RuntimeSummaryGroup, total_tokens: int
-) -> int | None:
+) -> tuple[int | None, str | None]:
     if (
         group.cost_coverage_state != "complete"
         or group.total_tokens <= 0
         or len(group.costs) != 1
     ):
-        return None
+        return None, None
     value = (
         Decimal(group.costs[0].cost_micros)
         * total_tokens
         / group.total_tokens
     ).to_integral_value(rounding=ROUND_CEILING)
     if value > MAX_COUNTER:
+        return None, None
+    return int(value), group.costs[0].currency.upper()
+
+
+def _balance_applies(value: BalanceItem, target: RouteTarget) -> bool:
+    return (
+        value.provider_id == target.provider_id
+        and value.account_ref == target.fact_account_ref
+        and value.currency == target.balance_currency
+    )
+
+
+def _balance_micros(value: object) -> int | None:
+    if not isinstance(value, str):
         return None
-    return int(value)
+    try:
+        decimal = Decimal(value)
+    except (InvalidOperation, ValueError):
+        return None
+    if not decimal.is_finite() or decimal < 0:
+        return None
+    micros = (decimal * 1_000_000).to_integral_value(rounding=ROUND_FLOOR)
+    if micros > MAX_COUNTER:
+        return None
+    return int(micros)
+
+
+def _balance_state(
+    balances: tuple[BalanceItem, ...],
+) -> tuple[str, int | None]:
+    if not balances:
+        return "missing", None
+    known = tuple(
+        value
+        for value in (_balance_micros(row.available) for row in balances)
+        if value is not None
+    )
+    balance = min(known) if known else None
+    if any(row.stale or row.state == "stale" for row in balances):
+        return "stale", balance
+    unusable = any(
+        row.state != "ok" or _balance_micros(row.available) is None
+        for row in balances
+    )
+    if len(balances) != 1 or unusable:
+        return ("partial" if known else "missing"), balance
+    return "complete", balance
 
 
 def _runtime_values(
@@ -237,14 +280,35 @@ def build_target_facts(
             for row in resource_snapshot.quota_windows
             if _quota_applies(row, target)
         )
+        balances = tuple(
+            row
+            for row in resource_snapshot.balances
+            if _balance_applies(row, target)
+        )
+        estimated_cost, estimated_cost_currency = _declared_cost_micros(
+            target,
+            route_request,
+        )
         if target.resource_mode == "quota":
             resource_state, headroom = _resource_state(quotas)
-            source_state = _combined_source_state(quotas, resource_snapshot.sources)
-            estimated_cost = _price_cost_micros(quotas, total_tokens)
+            balance_micros = None
+            balance_currency = None
+            source_state = _combined_source_state(
+                target.provider_id,
+                tuple(row.source_id for row in quotas),
+                resource_snapshot.sources,
+            )
         else:
-            resource_state, headroom = "missing", None
-            source_state = "unknown"
-            estimated_cost = None
+            resource_state, balance_micros = _balance_state(balances)
+            balance_currency = (
+                target.balance_currency if balance_micros is not None else None
+            )
+            headroom = None
+            source_state = _combined_source_state(
+                target.provider_id,
+                tuple(row.source_id for row in balances),
+                resource_snapshot.sources,
+            )
         (
             runtime_state,
             observation_count,
@@ -254,7 +318,16 @@ def build_target_facts(
             runtime_group,
         ) = _runtime_values(target, runtime_summary)
         if estimated_cost is None and runtime_group is not None:
-            estimated_cost = _runtime_cost_micros(runtime_group, total_tokens)
+            estimated_cost, estimated_cost_currency = _runtime_cost_micros(
+                runtime_group,
+                total_tokens,
+            )
+        if (
+            target.resource_mode == "balance"
+            and estimated_cost_currency != target.balance_currency
+        ):
+            estimated_cost = None
+            estimated_cost_currency = None
         result.append(TargetFacts(
             target_id=target.target_id,
             connection_state=(
@@ -264,12 +337,16 @@ def build_target_facts(
             ),
             source_state=source_state,
             resource_state=resource_state,
+            resource_mode=target.resource_mode,
             headroom_bp=headroom,
+            balance_micros=balance_micros,
+            balance_currency=balance_currency,
             runtime_state=runtime_state,
             observation_count=observation_count,
             error_count=error_count,
             duration_p95_ms=duration_p95_ms,
             ttft_p95_ms=ttft_p95_ms,
             estimated_cost_micros=estimated_cost,
+            estimated_cost_currency=estimated_cost_currency,
         ))
     return tuple(result)

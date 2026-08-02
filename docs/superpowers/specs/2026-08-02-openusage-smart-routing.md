@@ -137,6 +137,10 @@ A route target is a non-secret execution-capable reference:
   "resourceMode": "quota",
   "factAccountRef": "account-1",
   "runtimeScopeRef": "anon_0123456789abcdef",
+  "balanceCurrency": null,
+  "costCurrency": "USD",
+  "inputCostMicrosPerMillion": 3000000,
+  "outputCostMicrosPerMillion": 3000000,
   "enabled": true,
   "regions": ["global"],
   "privacyClass": "direct_provider",
@@ -162,6 +166,12 @@ Rules:
   does not make that adapter or its connection available.
 - `resourceMode` is `quota` or `balance`. A mode without a complete compatible
   fact adapter remains unavailable rather than being treated as unmetered.
+- `balanceCurrency` is null for quota targets and the exact uppercase native
+  currency for balance targets. Balances are never converted using an implicit
+  or network-fetched exchange rate.
+- cost metadata is either entirely absent or declares one uppercase currency
+  plus input and output price microunits per million tokens. It is versioned
+  with the target document and contains no credential material.
 - capability tags are from a versioned allowlist; unknown tags fail closed.
 - context window and quality tier are declared metadata with source/revision,
   not inferred from a recent request.
@@ -197,6 +207,8 @@ Every policy has:
 - maximum source age;
 - maximum recent error rate;
 - required Runtime sample count, if any;
+- one comparison currency, minimum native-currency balance reserve and balance
+  score reference;
 - per-window reserve floors;
 - allowed execution/privacy classes, Providers and targets;
 - retry/fallback attempt limits used by Phase B.
@@ -224,12 +236,14 @@ Every policy has:
     "denyProviders": [],
     "allowTargets": [],
     "denyTargets": [],
-    "maximumEstimatedCostMicrounits": null
+    "maximumEstimatedCostMicrounits": null,
+    "costCurrency": null
   },
   "session": {
     "sessionRef": "anon_0123456789abcdef",
     "remainingBudgetMicrounits": null,
-    "reserveMicrounits": null
+    "reserveMicrounits": null,
+    "budgetCurrency": null
   }
 }
 ```
@@ -245,6 +259,12 @@ references rather than free text. A content-bearing key is therefore an unknown
 field and fails schema validation; content, credentials, authorization headers,
 direct identity and Provider payload fields have no representable wire field.
 The public API documents that clients pass task metadata only.
+
+Cost limits require `costCurrency`; session budget and reserve require one
+matching `budgetCurrency`. A target cost expressed in another currency is
+Unknown for that comparison and fails closed. Built-in cross-target cost scores
+use USD only; native CNY or credit balances can still pass their own reserve
+check under reliability policies but are not silently compared as USD.
 
 ## 8. Eligibility and scoring
 
@@ -325,6 +345,13 @@ one missing window makes coverage partial, and any stale applicable window
 makes the target stale. Ratios convert to basis points by flooring, so a value
 just below a reserve boundary cannot round upward into eligibility. Runtime
 quality joins only on the explicit Provider/model/anonymous scope tuple.
+
+For balance targets, normalization selects only the exact
+Provider/account/currency scope and never sums overlapping records. Decimal
+balances floor to native-currency microunits. The target is eligible only when
+the request cost is known in the same currency and the post-request balance is
+at or above the policy reserve. Missing, duplicate, stale or mismatched-currency
+facts remain missing, partial or stale rather than becoming zero or unlimited.
 
 ## 9. Decision response
 

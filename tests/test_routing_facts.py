@@ -64,7 +64,38 @@ def source(
     )
 
 
-def snapshot(*, quotas=(), sources=()):
+def balance(
+    record_id: str,
+    *,
+    provider_id: str = "openai",
+    account_ref: str | None = "account-1",
+    currency: str = "CNY",
+    available: str | None = "5.00",
+    state: str = "ok",
+    stale: bool = False,
+    source_id: str = "openai.balance",
+):
+    from openusage_bar.query import BalanceItem
+
+    return BalanceItem(
+        record_id=record_id,
+        provider_id=provider_id,
+        account_ref=account_ref,
+        currency=currency,
+        available=available,
+        voucher=None,
+        cash=None,
+        observed_at="2026-08-02T12:00:00Z",
+        freshness_seconds=300,
+        state=state,
+        quality="provider_reported",
+        stale=stale,
+        revision=1,
+        source_id=source_id,
+    )
+
+
+def snapshot(*, quotas=(), balances=(), sources=()):
     from openusage_bar.query import ResourceSnapshotResult, SnapshotSummary
 
     return ResourceSnapshotResult(
@@ -73,7 +104,7 @@ def snapshot(*, quotas=(), sources=()):
         generated_at="2026-08-02T12:00:00Z",
         local_day="2026-08-02",
         summary=SnapshotSummary(None, 0, 0),
-        balances=(),
+        balances=tuple(balances),
         quota_windows=tuple(quotas),
         providers=(),
         sources=tuple(sources),
@@ -252,6 +283,65 @@ class RoutingFactTests(unittest.TestCase):
 
         self.assertEqual([value.target_id for value in values], ["a-target", "z-target"])
         self.assertTrue(all(value.source_state == "authentication_failed" for value in values))
+
+    def test_balance_mode_preserves_native_currency_and_floors_microunits(self):
+        from openusage_bar.routing_facts import build_target_facts
+
+        values = build_target_facts(
+            targets=(target(
+                "moonshot.main.kimi",
+                resource_mode="balance",
+                balance_currency="CNY",
+                cost_currency="CNY",
+                input_cost_micros_per_million=2_000_000,
+                output_cost_micros_per_million=8_000_000,
+            ),),
+            route_request=request(),
+            resource_snapshot=snapshot(
+                balances=(balance("moonshot.balance", available="5.0000009"),),
+                sources=(source("openai.balance"),),
+            ),
+            runtime_summary=None,
+            available_connections={"connection-1"},
+        )
+
+        value = values[0]
+        self.assertEqual(value.resource_mode, "balance")
+        self.assertEqual(value.resource_state, "complete")
+        self.assertIsNone(value.headroom_bp)
+        self.assertEqual(value.balance_micros, 5_000_000)
+        self.assertEqual(value.balance_currency, "CNY")
+        self.assertEqual(value.estimated_cost_micros, 56_000)
+        self.assertEqual(value.estimated_cost_currency, "CNY")
+        self.assertEqual(value.source_state, "ok")
+
+    def test_balance_unknown_stale_duplicate_or_wrong_currency_fails_closed(self):
+        from openusage_bar.routing_facts import build_target_facts
+
+        cases = (
+            ((balance("unknown", available=None, state="unknown"),), "missing"),
+            ((balance("stale", stale=True),), "stale"),
+            ((balance("a"), balance("b")), "partial"),
+            ((balance("usd", currency="USD"),), "missing"),
+        )
+        for balances, expected in cases:
+            with self.subTest(expected=expected):
+                values = build_target_facts(
+                    targets=(target(
+                        "balance-target",
+                        resource_mode="balance",
+                        balance_currency="CNY",
+                        cost_currency="CNY",
+                    ),),
+                    route_request=request(),
+                    resource_snapshot=snapshot(
+                        balances=balances,
+                        sources=tuple(source(row.source_id) for row in balances),
+                    ),
+                    runtime_summary=None,
+                    available_connections={"connection-1"},
+                )
+                self.assertEqual(values[0].resource_state, expected)
 
 
 if __name__ == "__main__":

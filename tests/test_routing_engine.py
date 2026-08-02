@@ -16,6 +16,10 @@ def target(
     resource_mode: str = "quota",
     runtime_scope_ref: str | None = "anon_0123456789abcdef",
     fact_account_ref: str | None = "account-1",
+    balance_currency: str | None = None,
+    cost_currency: str | None = "USD",
+    input_cost_micros_per_million: int | None = 3_000_000,
+    output_cost_micros_per_million: int | None = 3_000_000,
 ):
     from openusage_bar.routing_contract import RouteTarget
 
@@ -30,6 +34,14 @@ def target(
         resource_mode=resource_mode,
         runtime_scope_ref=runtime_scope_ref,
         fact_account_ref=fact_account_ref,
+        balance_currency=(
+            balance_currency
+            if balance_currency is not None or resource_mode != "balance"
+            else "USD"
+        ),
+        cost_currency=cost_currency,
+        input_cost_micros_per_million=input_cost_micros_per_million,
+        output_cost_micros_per_million=output_cost_micros_per_million,
         enabled=enabled,
         adapter_available=adapter_available,
         regions=regions,
@@ -53,6 +65,10 @@ def facts(
     duration_p95_ms: int | None = 1_000,
     ttft_p95_ms: int | None = 100,
     estimated_cost_micros: int | None = 100,
+    estimated_cost_currency: str | None = "USD",
+    resource_mode: str = "quota",
+    balance_micros: int | None = None,
+    balance_currency: str | None = None,
 ):
     from openusage_bar.routing_contract import TargetFacts
 
@@ -61,13 +77,21 @@ def facts(
         connection_state=connection_state,
         source_state=source_state,
         resource_state=resource_state,
+        resource_mode=resource_mode,
         headroom_bp=headroom_bp,
+        balance_micros=balance_micros,
+        balance_currency=balance_currency,
         runtime_state=runtime_state,
         observation_count=observation_count,
         error_count=error_count,
         duration_p95_ms=duration_p95_ms,
         ttft_p95_ms=ttft_p95_ms,
         estimated_cost_micros=estimated_cost_micros,
+        estimated_cost_currency=(
+            estimated_cost_currency
+            if estimated_cost_micros is not None
+            else None
+        ),
     )
 
 
@@ -158,6 +182,10 @@ class RoutingContractTests(unittest.TestCase):
             lambda: RouteTarget(**{
                 **dataclasses.asdict(target("valid")),
                 "runtime_scope_ref": "customer@example.com",
+            }),
+            lambda: RouteTarget(**{
+                **dataclasses.asdict(target("valid")),
+                "cost_currency": None,
             }),
             lambda: RouteTask(**{
                 **dataclasses.asdict(request().task),
@@ -329,11 +357,15 @@ class RoutingEngineTests(unittest.TestCase):
         route_request = RouteRequest(
             policy_id=base.policy_id,
             task=base.task,
-            constraints=RouteConstraints(maximum_estimated_cost_micros=300),
+            constraints=RouteConstraints(
+                maximum_estimated_cost_micros=300,
+                cost_currency="USD",
+            ),
             session=RouteSession(
                 session_ref="anon_0123456789abcdef",
                 remaining_budget_micros=500,
                 reserve_micros=250,
+                budget_currency="USD",
             ),
         )
         decision = decide(
@@ -352,6 +384,82 @@ class RoutingEngineTests(unittest.TestCase):
         self.assertIn("cost_limit_exceeded", reasons["too-expensive"])
         self.assertIn("session_budget_exceeded", reasons["too-expensive"])
         self.assertIn("cost_unknown", reasons["unknown-cost"])
+
+    def test_balance_targets_require_post_request_reserve_and_matching_currency(self):
+        safe = facts(
+            "safe",
+            resource_mode="balance",
+            headroom_bp=None,
+            balance_micros=2_000_000,
+            balance_currency="USD",
+            estimated_cost_micros=500_000,
+            estimated_cost_currency="USD",
+        )
+        below_reserve = facts(
+            "below-reserve",
+            resource_mode="balance",
+            headroom_bp=None,
+            balance_micros=1_400_000,
+            balance_currency="USD",
+            estimated_cost_micros=500_000,
+            estimated_cost_currency="USD",
+        )
+        unknown_cost = facts(
+            "unknown-cost",
+            resource_mode="balance",
+            headroom_bp=None,
+            balance_micros=5_000_000,
+            balance_currency="CNY",
+            estimated_cost_micros=None,
+            estimated_cost_currency=None,
+        )
+
+        decision = decide(
+            request(),
+            [
+                target("safe", resource_mode="balance"),
+                target("below-reserve", resource_mode="balance"),
+                target(
+                    "unknown-cost",
+                    resource_mode="balance",
+                    balance_currency="CNY",
+                    cost_currency="CNY",
+                ),
+            ],
+            [safe, below_reserve, unknown_cost],
+        )
+
+        self.assertEqual(decision.selected.target_id, "safe")
+        rejected = {value.target_id: value.reason_codes for value in decision.rejected}
+        self.assertIn("balance_reserve_exceeded", rejected["below-reserve"])
+        self.assertIn("cost_unknown", rejected["unknown-cost"])
+
+    def test_cost_limit_and_session_budget_reject_currency_mismatch(self):
+        from openusage_bar.routing_contract import RouteConstraints, RouteRequest, RouteSession
+
+        base = request()
+        route_request = RouteRequest(
+            policy_id=base.policy_id,
+            task=base.task,
+            constraints=RouteConstraints(
+                maximum_estimated_cost_micros=1_000_000,
+                cost_currency="USD",
+            ),
+            session=RouteSession(
+                session_ref="anon_0123456789abcdef",
+                remaining_budget_micros=2_000_000,
+                reserve_micros=1_000_000,
+                budget_currency="USD",
+            ),
+        )
+        decision = decide(
+            route_request,
+            [target("cny", cost_currency="CNY")],
+            [facts("cny", estimated_cost_currency="CNY")],
+        )
+
+        self.assertIsNone(decision.selected)
+        self.assertIn("cost_unknown", decision.rejected[0].reason_codes)
 
     def test_runtime_error_threshold_applies_only_after_minimum_samples(self):
         decision = decide(

@@ -13,6 +13,7 @@ MAX_IDS = 50
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ANON_REF = re.compile(r"^anon_[0-9a-f]{16,64}$")
+_CURRENCY = re.compile(r"^[A-Z][A-Z0-9_]{2,7}$")
 
 TASK_KINDS = frozenset({"chat", "code", "reasoning", "embedding", "image", "audio", "other"})
 PRIVACY_LEVELS = frozenset({"local_only", "direct_provider", "allow_proxy"})
@@ -33,6 +34,12 @@ def _stable_id(name: str, value: object) -> str:
 
 def _enum(name: str, value: object, allowed: frozenset[str]) -> str:
     if not isinstance(value, str) or value not in allowed:
+        raise ValueError(f"{name} is invalid")
+    return value
+
+
+def _currency(name: str, value: object) -> str:
+    if not isinstance(value, str) or _CURRENCY.fullmatch(value) is None:
         raise ValueError(f"{name} is invalid")
     return value
 
@@ -82,6 +89,10 @@ class RouteTarget:
     resource_mode: str
     fact_account_ref: str | None
     runtime_scope_ref: str | None
+    balance_currency: str | None
+    cost_currency: str | None
+    input_cost_micros_per_million: int | None
+    output_cost_micros_per_million: int | None
     enabled: bool
     adapter_available: bool
     regions: tuple[str, ...]
@@ -109,6 +120,29 @@ class RouteTarget:
             )
         ):
             raise ValueError("runtime_scope_ref must be anonymous")
+        if self.balance_currency is not None:
+            _currency("balance_currency", self.balance_currency)
+        if (self.resource_mode == "balance") != (self.balance_currency is not None):
+            raise ValueError("balance currency does not match resource mode")
+        cost_values = (
+            self.cost_currency,
+            self.input_cost_micros_per_million,
+            self.output_cost_micros_per_million,
+        )
+        if any(value is None for value in cost_values) != all(
+            value is None for value in cost_values
+        ):
+            raise ValueError("target cost metadata is incomplete")
+        if self.cost_currency is not None:
+            _currency("cost_currency", self.cost_currency)
+            _optional_integer(
+                "input_cost_micros_per_million",
+                self.input_cost_micros_per_million,
+            )
+            _optional_integer(
+                "output_cost_micros_per_million",
+                self.output_cost_micros_per_million,
+            )
         if not isinstance(self.enabled, bool) or not isinstance(self.adapter_available, bool):
             raise ValueError("target flags must be booleans")
         object.__setattr__(self, "regions", _ids("regions", self.regions))
@@ -150,6 +184,7 @@ class RouteConstraints:
     allow_targets: tuple[str, ...] = ()
     deny_targets: tuple[str, ...] = ()
     maximum_estimated_cost_micros: int | None = None
+    cost_currency: str | None = None
 
     def __post_init__(self) -> None:
         for name in ("allow_providers", "deny_providers", "allow_targets", "deny_targets"):
@@ -158,6 +193,10 @@ class RouteConstraints:
             "maximum_estimated_cost_micros",
             self.maximum_estimated_cost_micros,
         )
+        if (self.maximum_estimated_cost_micros is None) != (self.cost_currency is None):
+            raise ValueError("cost limit and currency must be supplied together")
+        if self.cost_currency is not None:
+            _currency("cost_currency", self.cost_currency)
 
 
 @dataclass(frozen=True)
@@ -165,6 +204,7 @@ class RouteSession:
     session_ref: str
     remaining_budget_micros: int | None
     reserve_micros: int | None
+    budget_currency: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.session_ref, str) or _ANON_REF.fullmatch(self.session_ref) is None:
@@ -173,6 +213,10 @@ class RouteSession:
         reserve = _optional_integer("reserve_micros", self.reserve_micros)
         if (remaining is None) != (reserve is None):
             raise ValueError("session budget and reserve must be supplied together")
+        if (remaining is None) != (self.budget_currency is None):
+            raise ValueError("session budget and currency must be supplied together")
+        if self.budget_currency is not None:
+            _currency("budget_currency", self.budget_currency)
 
 
 @dataclass(frozen=True)
@@ -198,21 +242,37 @@ class TargetFacts:
     connection_state: str
     source_state: str
     resource_state: str
+    resource_mode: str
     headroom_bp: int | None
+    balance_micros: int | None
+    balance_currency: str | None
     runtime_state: str
     observation_count: int
     error_count: int
     duration_p95_ms: int | None
     ttft_p95_ms: int | None
     estimated_cost_micros: int | None
+    estimated_cost_currency: str | None
 
     def __post_init__(self) -> None:
         _stable_id("target_id", self.target_id)
         _enum("connection_state", self.connection_state, CONNECTION_STATES)
         _enum("source_state", self.source_state, SOURCE_STATES)
         _enum("resource_state", self.resource_state, FACT_STATES)
+        _enum("resource_mode", self.resource_mode, RESOURCE_MODES)
         _enum("runtime_state", self.runtime_state, RUNTIME_STATES)
         _optional_integer("headroom_bp", self.headroom_bp, maximum=10_000)
+        _optional_integer("balance_micros", self.balance_micros)
+        if (self.balance_micros is None) != (self.balance_currency is None):
+            raise ValueError("balance amount and currency must be supplied together")
+        if self.balance_currency is not None:
+            _currency("balance_currency", self.balance_currency)
+        if self.resource_mode == "quota" and (
+            self.balance_micros is not None or self.balance_currency is not None
+        ):
+            raise ValueError("quota facts cannot carry a balance")
+        if self.resource_mode == "balance" and self.headroom_bp is not None:
+            raise ValueError("balance facts cannot carry quota headroom")
         observations = _integer("observation_count", self.observation_count)
         errors = _integer("error_count", self.error_count)
         if errors > observations:
@@ -220,6 +280,12 @@ class TargetFacts:
         _optional_integer("duration_p95_ms", self.duration_p95_ms)
         _optional_integer("ttft_p95_ms", self.ttft_p95_ms)
         _optional_integer("estimated_cost_micros", self.estimated_cost_micros)
+        if (self.estimated_cost_micros is None) != (
+            self.estimated_cost_currency is None
+        ):
+            raise ValueError("estimated cost and currency must be supplied together")
+        if self.estimated_cost_currency is not None:
+            _currency("estimated_cost_currency", self.estimated_cost_currency)
 
 
 @dataclass(frozen=True)

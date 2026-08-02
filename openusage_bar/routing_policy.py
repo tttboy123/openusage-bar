@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .routing_contract import EXECUTION_CLASSES, MAX_COUNTER, TARGET_PRIVACY_CLASSES
+from .routing_contract import (
+    EXECUTION_CLASSES,
+    MAX_COUNTER,
+    TARGET_PRIVACY_CLASSES,
+    _currency,
+)
 
 
 @dataclass(frozen=True)
@@ -20,6 +25,9 @@ class RoutePolicy:
     min_runtime_samples: int
     latency_reference_ms: int
     cost_reference_micros: int
+    cost_currency: str
+    min_balance_micros: int
+    balance_reference_micros: int
     unknown_penalty: int
     require_cost: bool = False
     require_runtime: bool = False
@@ -44,12 +52,20 @@ class RoutePolicy:
             ("min_runtime_samples", self.min_runtime_samples, MAX_COUNTER),
             ("latency_reference_ms", self.latency_reference_ms, MAX_COUNTER),
             ("cost_reference_micros", self.cost_reference_micros, MAX_COUNTER),
+            ("min_balance_micros", self.min_balance_micros, MAX_COUNTER),
+            ("balance_reference_micros", self.balance_reference_micros, MAX_COUNTER),
             ("unknown_penalty", self.unknown_penalty, 10_000),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
                 raise ValueError(f"{name} is invalid")
-        if self.revision == 0 or self.latency_reference_ms == 0 or self.cost_reference_micros == 0:
+        if (
+            self.revision == 0
+            or self.latency_reference_ms == 0
+            or self.cost_reference_micros == 0
+            or self.balance_reference_micros == 0
+        ):
             raise ValueError("routing policy references must be positive")
+        _currency("cost_currency", self.cost_currency)
         if not isinstance(self.require_cost, bool) or not isinstance(self.require_runtime, bool):
             raise ValueError("routing policy flags must be booleans")
         executions = frozenset(self.allowed_execution_classes)
@@ -69,6 +85,9 @@ _COMMON = {
     "min_runtime_samples": 5,
     "latency_reference_ms": 10_000,
     "cost_reference_micros": 1_000,
+    "cost_currency": "USD",
+    "min_balance_micros": 1_000_000,
+    "balance_reference_micros": 20_000_000,
     "unknown_penalty": 4_000,
 }
 
@@ -128,4 +147,3 @@ def built_in_policy(policy_id: str) -> RoutePolicy:
 
 def built_in_policies() -> tuple[RoutePolicy, ...]:
     return tuple(_BUILT_INS[name] for name in sorted(_BUILT_INS))
-
