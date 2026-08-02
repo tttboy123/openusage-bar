@@ -42,6 +42,12 @@ class RouteTargetStoreTests(unittest.TestCase):
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(payload["schemaVersion"], 1)
             self.assertEqual(payload["targets"][0]["executionAdapterId"], "openai.direct")
+            self.assertEqual(payload["targets"][0]["resourceMode"], "quota")
+            self.assertEqual(payload["targets"][0]["factAccountRef"], "account-1")
+            self.assertEqual(
+                payload["targets"][0]["runtimeScopeRef"],
+                "anon_0123456789abcdef",
+            )
             self.assertNotIn("adapterAvailable", payload["targets"][0])
             self.assertNotIn("secret", path.read_text(encoding="utf-8").lower())
 
@@ -62,6 +68,9 @@ class RouteTargetStoreTests(unittest.TestCase):
                 "connectionRef": "connection-1",
                 "executionClass": "direct_api",
                 "executionAdapterId": "openai.direct",
+                "resourceMode": "quota",
+                "runtimeScopeRef": "anon_0123456789abcdef",
+                "factAccountRef": "account-1",
                 "enabled": True,
                 "regions": ["global"],
                 "privacyClass": "direct_provider",

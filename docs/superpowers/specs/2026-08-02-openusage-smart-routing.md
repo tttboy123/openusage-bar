@@ -133,6 +133,10 @@ A route target is a non-secret execution-capable reference:
   "modelId": "gpt-5",
   "connectionRef": "connection-1",
   "executionClass": "direct_api",
+  "executionAdapterId": "openai.direct",
+  "resourceMode": "quota",
+  "factAccountRef": "account-1",
+  "runtimeScopeRef": "anon_0123456789abcdef",
   "enabled": true,
   "regions": ["global"],
   "privacyClass": "direct_provider",
@@ -147,8 +151,17 @@ Rules:
 - IDs use the existing stable public-ID grammar and are capped at 128 bytes.
 - `accountRef` and `connectionRef` are opaque local references, never account
   names, e-mail addresses or Provider IDs.
+- `factAccountRef` is the exact nullable account scope used to join Resource
+  facts. It is separate from the execution account so an unscoped fact never
+  silently matches every account.
+- `runtimeScopeRef` is either null or an anonymous `anon_...` Runtime scope.
+  Runtime observations never join on an account name or direct identity.
 - `executionClass` is one of `direct_api`, `subscription_cli`,
   `openai_compatible` or `self_hosted`.
+- `executionAdapterId` names an installed execution adapter; discovery alone
+  does not make that adapter or its connection available.
+- `resourceMode` is `quota` or `balance`. A mode without a complete compatible
+  fact adapter remains unavailable rather than being treated as unmetered.
 - capability tags are from a versioned allowlist; unknown tags fail closed.
 - context window and quality tier are declared metadata with source/revision,
   not inferred from a recent request.
@@ -305,6 +318,13 @@ across databases. The decision expires at the earliest of:
 
 Official facts and fallback facts retain the selected source/quality semantics;
 the engine never sums overlapping sources.
+
+For quota targets, every Provider/account/model-applicable quota window is a
+simultaneous constraint. Normalization uses the smallest known remaining ratio;
+one missing window makes coverage partial, and any stale applicable window
+makes the target stale. Ratios convert to basis points by flooring, so a value
+just below a reserve boundary cannot round upward into eligibility. Runtime
+quality joins only on the explicit Provider/model/anonymous scope tuple.
 
 ## 9. Decision response
 

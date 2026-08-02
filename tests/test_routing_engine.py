@@ -13,6 +13,9 @@ def target(
     capabilities: frozenset[str] = frozenset({"chat", "reasoning", "tools"}),
     regions: frozenset[str] = frozenset({"global"}),
     context_window_tokens: int = 400_000,
+    resource_mode: str = "quota",
+    runtime_scope_ref: str | None = "anon_0123456789abcdef",
+    fact_account_ref: str | None = "account-1",
 ):
     from openusage_bar.routing_contract import RouteTarget
 
@@ -24,6 +27,9 @@ def target(
         connection_ref="connection-1",
         execution_class="direct_api",
         execution_adapter_id="openai.direct",
+        resource_mode=resource_mode,
+        runtime_scope_ref=runtime_scope_ref,
+        fact_account_ref=fact_account_ref,
         enabled=enabled,
         adapter_available=adapter_available,
         regions=regions,
@@ -144,6 +150,14 @@ class RoutingContractTests(unittest.TestCase):
             lambda: RouteTarget(**{
                 **dataclasses.asdict(target("valid")),
                 "execution_class": "shell",
+            }),
+            lambda: RouteTarget(**{
+                **dataclasses.asdict(target("valid")),
+                "resource_mode": "unlimited",
+            }),
+            lambda: RouteTarget(**{
+                **dataclasses.asdict(target("valid")),
+                "runtime_scope_ref": "customer@example.com",
             }),
             lambda: RouteTask(**{
                 **dataclasses.asdict(request().task),

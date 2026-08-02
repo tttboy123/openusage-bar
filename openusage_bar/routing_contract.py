@@ -18,6 +18,7 @@ TASK_KINDS = frozenset({"chat", "code", "reasoning", "embedding", "image", "audi
 PRIVACY_LEVELS = frozenset({"local_only", "direct_provider", "allow_proxy"})
 TARGET_PRIVACY_CLASSES = frozenset({"local_only", "direct_provider", "proxy"})
 EXECUTION_CLASSES = frozenset({"direct_api", "subscription_cli", "openai_compatible", "self_hosted"})
+RESOURCE_MODES = frozenset({"quota", "balance"})
 CONNECTION_STATES = frozenset({"available", "unavailable"})
 SOURCE_STATES = frozenset({"ok", "error", "authentication_failed", "unavailable", "unknown"})
 FACT_STATES = frozenset({"complete", "partial", "missing", "stale"})
@@ -78,6 +79,9 @@ class RouteTarget:
     connection_ref: str
     execution_class: str
     execution_adapter_id: str
+    resource_mode: str
+    fact_account_ref: str | None
+    runtime_scope_ref: str | None
     enabled: bool
     adapter_available: bool
     regions: tuple[str, ...]
@@ -93,7 +97,18 @@ class RouteTarget:
         ):
             _stable_id(name, getattr(self, name))
         _enum("execution_class", self.execution_class, EXECUTION_CLASSES)
+        _enum("resource_mode", self.resource_mode, RESOURCE_MODES)
         _enum("privacy_class", self.privacy_class, TARGET_PRIVACY_CLASSES)
+        if self.fact_account_ref is not None:
+            _stable_id("fact_account_ref", self.fact_account_ref)
+        if (
+            self.runtime_scope_ref is not None
+            and (
+                not isinstance(self.runtime_scope_ref, str)
+                or _ANON_REF.fullmatch(self.runtime_scope_ref) is None
+            )
+        ):
+            raise ValueError("runtime_scope_ref must be anonymous")
         if not isinstance(self.enabled, bool) or not isinstance(self.adapter_available, bool):
             raise ValueError("target flags must be booleans")
         object.__setattr__(self, "regions", _ids("regions", self.regions))

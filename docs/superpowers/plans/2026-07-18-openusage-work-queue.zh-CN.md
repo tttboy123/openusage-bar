@@ -993,7 +993,9 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
 - **WQ-26：实现 Phase A 决策引擎与机器接口。** 先做纯函数 hard filter 和
   reliability-first 整数评分，再接 Resource Snapshot、Runtime Summary、独立
   `routing.sqlite3`、Decision API 和 CLI。所有硬过滤先于评分；无安全目标必须
-  返回 `no_route`。
+  返回 `no_route`。**截至 2026-08-02，确定性引擎、显式 Route Target 私有
+  存储，以及订阅额度与匿名 Runtime scope 的首个事实归一化切片已完成本地
+  实现；余额事实、证据库、Decision API 和 CLI 仍在 WQ-26 内继续。**
 - **WQ-27：接入 Provider Center。** 支持显式 Route Target、内置/自定义策略、
   中英文、Dry Run、选择/备选/排除原因和内容无关的近期决策历史。自动发现只
   证明 Provider 存在，不会自动授予可执行路由能力。
