@@ -15,6 +15,11 @@ from .routing_execution import (
     credential_account,
 )
 from .routing_targets import RouteTargetConfigError, RouteTargetStore
+from .routing_policy import RoutePolicy, built_in_policy_ids
+from .routing_policy_store import (
+    RoutingPolicyConfigError,
+    RoutingPolicyStore,
+)
 
 
 MAX_REQUEST_BYTES = 256 * 1024
@@ -26,6 +31,13 @@ _REMOVE_CONNECTION_REQUEST_KEYS = frozenset({
     "version", "action", "expectedRevision", "connectionRef",
 })
 _LIST_CONNECTION_REQUEST_KEYS = frozenset({"version", "action"})
+_POLICY_REQUEST_KEYS = frozenset({
+    "version", "action", "expectedRevision", "policy",
+})
+_REMOVE_POLICY_REQUEST_KEYS = frozenset({
+    "version", "action", "expectedRevision", "policyId",
+})
+_LIST_POLICY_REQUEST_KEYS = frozenset({"version", "action"})
 _CONNECTION_KEYS = frozenset({
     "connectionRef", "providerId", "accountRef", "executionClass",
     "executionAdapterId", "baseURL", "enabled", "models",
@@ -52,6 +64,14 @@ _TARGET_KEYS = frozenset({
     "contextWindowTokens",
     "qualityTier",
 })
+_POLICY_KEYS = frozenset({
+    "policyId", "reliabilityWeight", "headroomWeight", "latencyWeight",
+    "costWeight", "minimumHeadroomBasisPoints", "maximumErrorRateBasisPoints",
+    "minimumRuntimeSamples", "latencyReferenceMilliseconds",
+    "costReferenceMicrounits", "costCurrency", "minimumBalanceMicrounits",
+    "balanceReferenceMicrounits", "unknownPenaltyBasisPoints", "requireCost",
+    "requireRuntime", "allowedExecutionClasses", "allowedPrivacyClasses",
+})
 
 
 class _StaleRevision(ValueError):
@@ -59,6 +79,10 @@ class _StaleRevision(ValueError):
 
 
 class _StaleConnectionRevision(ValueError):
+    pass
+
+
+class _StalePolicyRevision(ValueError):
     pass
 
 
@@ -173,6 +197,34 @@ def _decode_connection(value: object) -> ExecutionConnection:
         raise ValueError("invalid execution connection") from error
 
 
+def _decode_policy(value: object, *, revision: int) -> RoutePolicy:
+    raw = _exact(value, _POLICY_KEYS)
+    try:
+        return RoutePolicy(
+            policy_id=raw["policyId"],
+            revision=revision,
+            reliability_weight=raw["reliabilityWeight"],
+            headroom_weight=raw["headroomWeight"],
+            latency_weight=raw["latencyWeight"],
+            cost_weight=raw["costWeight"],
+            min_headroom_bp=raw["minimumHeadroomBasisPoints"],
+            max_error_rate_bp=raw["maximumErrorRateBasisPoints"],
+            min_runtime_samples=raw["minimumRuntimeSamples"],
+            latency_reference_ms=raw["latencyReferenceMilliseconds"],
+            cost_reference_micros=raw["costReferenceMicrounits"],
+            cost_currency=raw["costCurrency"],
+            min_balance_micros=raw["minimumBalanceMicrounits"],
+            balance_reference_micros=raw["balanceReferenceMicrounits"],
+            unknown_penalty=raw["unknownPenaltyBasisPoints"],
+            require_cost=raw["requireCost"],
+            require_runtime=raw["requireRuntime"],
+            allowed_execution_classes=frozenset(_ids(raw["allowedExecutionClasses"])),
+            allowed_privacy_classes=frozenset(_ids(raw["allowedPrivacyClasses"])),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("invalid custom routing policy") from error
+
+
 def _default_store() -> RouteTargetStore:
     return RouteTargetStore(
         Path.home() / ".local" / "state" / "openusage-bar" / "route-targets.json"
@@ -184,6 +236,12 @@ def _default_connection_store() -> ExecutionConnectionStore:
         Path.home()
         / ".local" / "state" / "openusage-bar"
         / "execution-connections.json"
+    )
+
+
+def _default_policy_store() -> RoutingPolicyStore:
+    return RoutingPolicyStore(
+        Path.home() / ".local" / "state" / "openusage-bar" / "routing-policies.json"
     )
 
 
@@ -210,6 +268,30 @@ def _connection_wire(value: ExecutionConnection) -> dict[str, object]:
     }
 
 
+def _policy_wire(value: RoutePolicy) -> dict[str, object]:
+    return {
+        "policyId": value.policy_id,
+        "policyRevision": value.revision,
+        "reliabilityWeight": value.reliability_weight,
+        "headroomWeight": value.headroom_weight,
+        "latencyWeight": value.latency_weight,
+        "costWeight": value.cost_weight,
+        "minimumHeadroomBasisPoints": value.min_headroom_bp,
+        "maximumErrorRateBasisPoints": value.max_error_rate_bp,
+        "minimumRuntimeSamples": value.min_runtime_samples,
+        "latencyReferenceMilliseconds": value.latency_reference_ms,
+        "costReferenceMicrounits": value.cost_reference_micros,
+        "costCurrency": value.cost_currency,
+        "minimumBalanceMicrounits": value.min_balance_micros,
+        "balanceReferenceMicrounits": value.balance_reference_micros,
+        "unknownPenaltyBasisPoints": value.unknown_penalty,
+        "requireCost": value.require_cost,
+        "requireRuntime": value.require_runtime,
+        "allowedExecutionClasses": sorted(value.allowed_execution_classes),
+        "allowedPrivacyClasses": sorted(value.allowed_privacy_classes),
+    }
+
+
 def _restore_secret(
     keychain: MacOSKeychain,
     account: str,
@@ -232,6 +314,8 @@ def _write(
     target_revision: int | None = None,
     connection_revision: int | None = None,
     connections: tuple[ExecutionConnection, ...] | None = None,
+    policy_document_revision: int | None = None,
+    custom_policies: tuple[RoutePolicy, ...] | None = None,
 ) -> int:
     payload: dict[str, object] = {"version": 1, "ok": ok, "message": message}
     if target_revision is not None:
@@ -240,6 +324,10 @@ def _write(
         payload["connectionRevision"] = connection_revision
     if connections is not None:
         payload["connections"] = [_connection_wire(value) for value in connections]
+    if policy_document_revision is not None:
+        payload["policyDocumentRevision"] = policy_document_revision
+    if custom_policies is not None:
+        payload["customPolicies"] = [_policy_wire(value) for value in custom_policies]
     output.write(json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n")
     output.flush()
     return 0 if ok else 1
@@ -252,10 +340,12 @@ def run_routing_mutation(
     store: RouteTargetStore | None = None,
     connection_store: ExecutionConnectionStore | None = None,
     keychain: MacOSKeychain | None = None,
+    policy_store: RoutingPolicyStore | None = None,
 ) -> int:
     """Mutate bounded route configuration from one private stdin document."""
     resolved = store or _default_store()
     resolved_connections = connection_store or _default_connection_store()
+    resolved_policies = policy_store or _default_policy_store()
     resolved_keychain = keychain
 
     def mutation_keychain() -> MacOSKeychain:
@@ -263,6 +353,7 @@ def run_routing_mutation(
         if resolved_keychain is None:
             resolved_keychain = MacOSKeychain()
         return resolved_keychain
+    payload: object = None
     try:
         raw = input_stream.read(MAX_REQUEST_BYTES + 1)
         if not raw or len(raw.encode("utf-8")) > MAX_REQUEST_BYTES:
@@ -271,6 +362,14 @@ def run_routing_mutation(
         if not isinstance(payload, dict) or payload.get("version") != 1:
             raise ValueError("invalid request")
         action = payload.get("action")
+        if action == "list_policies":
+            _exact(payload, _LIST_POLICY_REQUEST_KEYS)
+            configuration = resolved_policies.load()
+            return _write(
+                output_stream, True, "Custom routing policies loaded",
+                policy_document_revision=configuration.revision,
+                custom_policies=configuration.policies,
+            )
         if action == "list_connections":
             _exact(payload, _LIST_CONNECTION_REQUEST_KEYS)
             configuration = resolved_connections.load()
@@ -409,6 +508,60 @@ def run_routing_mutation(
                 output_stream, True, "Execution connection removed",
                 connection_revision=revision,
             )
+        if action == "upsert_policy":
+            request = _exact(payload, _POLICY_REQUEST_KEYS)
+            expected = request["expectedRevision"]
+            if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
+                raise ValueError("invalid revision")
+            raw_policy = _exact(request["policy"], _POLICY_KEYS)
+            policy_id = raw_policy["policyId"]
+            if not isinstance(policy_id, str) or policy_id in built_in_policy_ids():
+                raise ValueError("invalid custom policy")
+            configuration = resolved_policies.load()
+            if configuration.revision != expected:
+                raise _StalePolicyRevision()
+            existing = next((
+                value for value in configuration.policies
+                if value.policy_id == policy_id
+            ), None)
+            policy = _decode_policy(
+                raw_policy,
+                revision=1 if existing is None else existing.revision + 1,
+            )
+            updated = tuple(
+                policy if value.policy_id == policy_id else value
+                for value in configuration.policies
+            )
+            if existing is None:
+                updated = (*updated, policy)
+            revision = expected + 1
+            resolved_policies.save(updated, revision=revision)
+            return _write(
+                output_stream, True, "Custom routing policy saved",
+                policy_document_revision=revision,
+            )
+        if action == "remove_policy":
+            request = _exact(payload, _REMOVE_POLICY_REQUEST_KEYS)
+            expected = request["expectedRevision"]
+            if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
+                raise ValueError("invalid revision")
+            policy_id = request["policyId"]
+            if not isinstance(policy_id, str) or policy_id in built_in_policy_ids():
+                raise ValueError("invalid custom policy")
+            configuration = resolved_policies.load()
+            if configuration.revision != expected:
+                raise _StalePolicyRevision()
+            if not any(value.policy_id == policy_id for value in configuration.policies):
+                raise ValueError("custom policy missing")
+            revision = expected + 1
+            resolved_policies.save(tuple(
+                value for value in configuration.policies
+                if value.policy_id != policy_id
+            ), revision=revision)
+            return _write(
+                output_stream, True, "Custom routing policy removed",
+                policy_document_revision=revision,
+            )
         raise ValueError("invalid request")
     except _StaleRevision:
         return _write(
@@ -420,6 +573,11 @@ def run_routing_mutation(
         return _write(
             output_stream, False,
             "Execution connections changed; reload before saving",
+        )
+    except _StalePolicyRevision:
+        return _write(
+            output_stream, False,
+            "Routing policies changed; reload before saving",
         )
     except _ConnectionConflict:
         return _write(
@@ -444,7 +602,14 @@ def run_routing_mutation(
     except (
         json.JSONDecodeError, UnicodeError, TypeError, ValueError,
         RouteTargetConfigError, ExecutionConnectionConfigError,
+        RoutingPolicyConfigError,
     ):
-        return _write(output_stream, False, "Routing target request is invalid")
+        message = (
+            "Custom routing policy request is invalid"
+            if isinstance(payload, dict)
+            and payload.get("action") in {"upsert_policy", "remove_policy"}
+            else "Routing target request is invalid"
+        )
+        return _write(output_stream, False, message)
     except Exception:
         return _write(output_stream, False, "Routing targets could not be saved")

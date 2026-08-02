@@ -6,6 +6,7 @@ struct RoutingPage: View {
     @State private var localMutationFailure: String?
     @State private var editingConnection: RoutingConnectionDraft?
     @State private var editingTarget: RoutingTargetDraft?
+    @State private var editingPolicy: RoutingPolicyDraft?
 
     var body: some View {
         ScrollView(.vertical) {
@@ -19,6 +20,7 @@ struct RoutingPage: View {
                     )
                     .frame(maxWidth: .infinity, minHeight: 240)
                     connections
+                    customPolicies
                 } else {
                     if let failure = model.mutationFailure?.title ?? localMutationFailure {
                         Label(failure, systemImage: "exclamationmark.triangle.fill")
@@ -29,6 +31,7 @@ struct RoutingPage: View {
                     overview
                     connections
                     targets
+                    customPolicies
                     dryRun
                     decisionResult
                     history
@@ -58,6 +61,16 @@ struct RoutingPage: View {
                 onSave: saveTarget,
                 onRemove: draft.isNew ? nil : { targetID in
                     removeTarget(targetID)
+                }
+            )
+        }
+        .sheet(item: $editingPolicy) { draft in
+            RoutingPolicyEditor(
+                draft: draft,
+                isSaving: model.isMutating,
+                onSave: savePolicy,
+                onRemove: draft.isNew ? nil : { policyID in
+                    removePolicy(policyID)
                 }
             )
         }
@@ -262,6 +275,75 @@ struct RoutingPage: View {
         .accessibilityLabel("\(target.modelID), \(DisplayText.provider(target.providerID)), \(readiness.title)")
     }
 
+    private var customPolicies: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                sectionTitle(
+                    "Custom policies",
+                    detail: "Built-in safety remains mandatory"
+                )
+                Spacer()
+                Button("Add policy", systemImage: "plus") {
+                    editingPolicy = RoutingPolicyDraft()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            if model.customPolicies.isEmpty {
+                Text("Use a built-in policy or add a bounded scoring profile.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(18)
+                    .background(
+                        .quaternary.opacity(0.28),
+                        in: RoundedRectangle(cornerRadius: 12)
+                    )
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(model.customPolicies.enumerated()), id: \.element.id) {
+                        index, policy in
+                        HStack(spacing: 12) {
+                            Image(systemName: "slider.horizontal.3")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(policy.policyID).font(.body.weight(.medium))
+                                Text(AppLocalization.format(
+                                    "Revision %lld", policy.policyRevision
+                                ))
+                                .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(AppLocalization.format(
+                                "R %lld · H %lld · L %lld · C %lld",
+                                Int64(policy.reliabilityWeight),
+                                Int64(policy.headroomWeight),
+                                Int64(policy.latencyWeight),
+                                Int64(policy.costWeight)
+                            ))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            Button("Edit") {
+                                editingPolicy = RoutingPolicyDraft(policy: policy)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.indigo)
+                            .controlSize(.small)
+                        }
+                        .padding(.vertical, 12)
+                        if index < model.customPolicies.count - 1 {
+                            Divider().padding(.leading, 42)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .background(
+                    .quaternary.opacity(0.28),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+            }
+        }
+    }
+
     private var dryRun: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionTitle("Dry Run", detail: "Evaluate metadata only; no model request is sent")
@@ -463,6 +545,7 @@ struct RoutingPage: View {
         await model.load()
         if let command = routingCommand() {
             await model.loadConnections(command: command)
+            await model.loadCustomPolicies(command: command)
         }
     }
 
@@ -508,6 +591,24 @@ struct RoutingPage: View {
             return
         }
         Task { await model.removeTarget(targetID, command: command) }
+    }
+
+    private func savePolicy(_ draft: RoutingPolicyDraft) {
+        localMutationFailure = nil
+        guard let command = routingCommand(), let policy = draft.mutationValue else {
+            localMutationFailure = AppLocalization.text("Routing target update unavailable")
+            return
+        }
+        Task { await model.upsertCustomPolicy(policy, command: command) }
+    }
+
+    private func removePolicy(_ policyID: String) {
+        localMutationFailure = nil
+        guard let command = routingCommand() else {
+            localMutationFailure = AppLocalization.text("Routing target update unavailable")
+            return
+        }
+        Task { await model.removeCustomPolicy(policyID, command: command) }
     }
 
     private func routingCommand() -> ProviderMutationCommand? {

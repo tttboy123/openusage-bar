@@ -341,6 +341,7 @@ final class RoutingViewModel {
     private let client: any RoutingAPIReading
     private let mutations: any RoutingMutationSubmitting
     private let connectionMutations: any RoutingConnectionMutationSubmitting
+    private let policyMutations: any RoutingPolicyMutationSubmitting
 
     private(set) var health: RoutingHealth?
     private(set) var policies: [RoutingPolicy] = []
@@ -348,14 +349,17 @@ final class RoutingViewModel {
     private(set) var history: [RoutingHistoryDecision] = []
     private(set) var decision: RoutingDecision?
     private(set) var connections: [RoutingExecutionConnection] = []
+    private(set) var customPolicies: [RoutingCustomPolicy] = []
     private(set) var failure: RoutingFailure?
     private(set) var mutationFailure: RoutingFailure?
     private(set) var isLoading = false
     private(set) var isSimulating = false
     private(set) var isMutating = false
     private(set) var isLoadingConnections = false
+    private(set) var isLoadingPolicies = false
     private(set) var targetRevision: Int64 = 0
     private(set) var connectionRevision: Int64 = 0
+    private(set) var policyDocumentRevision: Int64 = 0
 
     var selectedPolicyID = "reliable"
     var taskKind = RoutingTaskKind.code
@@ -370,11 +374,95 @@ final class RoutingViewModel {
         client: any RoutingAPIReading = RoutingAPIClient(),
         mutations: any RoutingMutationSubmitting = RoutingMutationClient(),
         connectionMutations: any RoutingConnectionMutationSubmitting =
-            RoutingConnectionMutationClient()
+            RoutingConnectionMutationClient(),
+        policyMutations: any RoutingPolicyMutationSubmitting =
+            RoutingPolicyMutationClient()
     ) {
         self.client = client
         self.mutations = mutations
         self.connectionMutations = connectionMutations
+        self.policyMutations = policyMutations
+    }
+
+    func loadCustomPolicies(command: ProviderMutationCommand) async {
+        guard !isLoadingPolicies else { return }
+        isLoadingPolicies = true
+        mutationFailure = nil
+        defer { isLoadingPolicies = false }
+        switch await policyMutations.loadPolicies(command: command) {
+        case let .success(response):
+            guard response.ok,
+                  let revision = response.policyDocumentRevision,
+                  let policies = response.customPolicies
+            else {
+                customPolicies = []
+                policyDocumentRevision = 0
+                mutationFailure = .invalidData
+                return
+            }
+            customPolicies = policies.sorted { $0.policyID < $1.policyID }
+            policyDocumentRevision = revision
+        case let .failure(error):
+            customPolicies = []
+            policyDocumentRevision = 0
+            mutationFailure = Self.failure(for: error)
+        }
+    }
+
+    func upsertCustomPolicy(
+        _ policy: RoutingPolicyMutationValue,
+        command: ProviderMutationCommand
+    ) async {
+        guard !isMutating, policy.isValid else { return }
+        isMutating = true
+        mutationFailure = nil
+        let result = await policyMutations.upsertPolicy(
+            RoutingPolicyMutationRequest(
+                expectedRevision: policyDocumentRevision, policy: policy
+            ),
+            command: command
+        )
+        isMutating = false
+        switch result {
+        case let .success(response):
+            guard response.ok else {
+                mutationFailure = .invalidData
+                return
+            }
+            await loadCustomPolicies(command: command)
+            await load()
+        case let .failure(error):
+            mutationFailure = Self.failure(for: error)
+        }
+    }
+
+    func removeCustomPolicy(
+        _ policyID: String,
+        command: ProviderMutationCommand
+    ) async {
+        guard !isMutating,
+              customPolicies.contains(where: { $0.policyID == policyID })
+        else { return }
+        isMutating = true
+        mutationFailure = nil
+        let result = await policyMutations.removePolicy(
+            RoutingPolicyRemoveRequest(
+                expectedRevision: policyDocumentRevision, policyID: policyID
+            ),
+            command: command
+        )
+        isMutating = false
+        switch result {
+        case let .success(response):
+            guard response.ok else {
+                mutationFailure = .invalidData
+                return
+            }
+            await loadCustomPolicies(command: command)
+            await load()
+        case let .failure(error):
+            mutationFailure = Self.failure(for: error)
+        }
     }
 
     func loadConnections(command: ProviderMutationCommand) async {

@@ -120,6 +120,8 @@ struct RoutingMutationResponse: Decodable, Sendable, Hashable {
     let targetRevision: Int64?
     let connectionRevision: Int64?
     let connections: [RoutingExecutionConnection]?
+    let policyDocumentRevision: Int64?
+    let customPolicies: [RoutingCustomPolicy]?
 
     init(
         version: Int,
@@ -127,7 +129,9 @@ struct RoutingMutationResponse: Decodable, Sendable, Hashable {
         message: String,
         targetRevision: Int64? = nil,
         connectionRevision: Int64? = nil,
-        connections: [RoutingExecutionConnection]? = nil
+        connections: [RoutingExecutionConnection]? = nil,
+        policyDocumentRevision: Int64? = nil,
+        customPolicies: [RoutingCustomPolicy]? = nil
     ) {
         self.version = version
         self.ok = ok
@@ -135,6 +139,8 @@ struct RoutingMutationResponse: Decodable, Sendable, Hashable {
         self.targetRevision = targetRevision
         self.connectionRevision = connectionRevision
         self.connections = connections
+        self.policyDocumentRevision = policyDocumentRevision
+        self.customPolicies = customPolicies
     }
 }
 
@@ -188,7 +194,9 @@ struct RoutingMutationClient: RoutingMutationSubmitting, Sendable {
                       response.ok == (response.targetRevision != nil),
                       response.targetRevision.map({ $0 > 0 }) ?? true,
                       response.connectionRevision == nil,
-                      response.connections == nil
+                      response.connections == nil,
+                      response.policyDocumentRevision == nil,
+                      response.customPolicies == nil
                 else { return .failure(.invalidResponse) }
                 return .success(response)
             }

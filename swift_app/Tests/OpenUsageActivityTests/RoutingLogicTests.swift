@@ -187,6 +187,50 @@ struct RoutingLogicTests {
         #expect(mutations.lastRequest?.targets.isEmpty == true)
     }
 
+    @Test("Custom policy drafts enforce deterministic weights and safe bounds")
+    func customPolicyDraft() throws {
+        var draft = RoutingPolicyDraft(generatedID: "custom_coding")
+        #expect(draft.canSave)
+        draft.reliabilityWeight = 40
+        #expect(!draft.canSave)
+        draft.headroomWeight = 30
+        draft.costWeight = 10
+        #expect(draft.canSave)
+        draft.requireRuntime = true
+        draft.minimumRuntimeSamples = 0
+        #expect(!draft.canSave)
+        draft.minimumRuntimeSamples = 3
+        let value = try #require(draft.mutationValue)
+        #expect(value.policyID == "custom_coding")
+        #expect(value.reliabilityWeight == 40)
+        #expect(value.headroomWeight == 30)
+    }
+
+    @Test("Custom policies load and mutate through the isolated controller")
+    func customPolicyLifecycle() async {
+        let policyMutations = RoutingPolicyMutationFixture()
+        let model = RoutingViewModel(
+            client: RoutingClientFixture(),
+            mutations: RoutingMutationFixture(),
+            connectionMutations: RoutingConnectionMutationFixture(),
+            policyMutations: policyMutations
+        )
+        let command = ProviderMutationCommand(
+            executableURL: URL(fileURLWithPath: "/tmp/helper"),
+            arguments: ["routing-mutate"]
+        )
+        await model.loadCustomPolicies(command: command)
+        #expect(model.policyDocumentRevision == 4)
+        #expect(model.customPolicies.map(\.policyID) == ["custom_coding"])
+
+        await model.upsertCustomPolicy(
+            RoutingPolicyDraft(policy: model.customPolicies[0]).mutationValue!,
+            command: command
+        )
+        #expect(policyMutations.lastUpsert?.expectedRevision == 4)
+        #expect(model.mutationFailure == nil)
+    }
+
     private func target(adapterAvailable: Bool = true) -> RoutingTarget {
         RoutingTarget.fixture(adapterAvailable: adapterAvailable)
     }
@@ -230,6 +274,47 @@ private final class RoutingConnectionMutationFixture:
         .success(.init(
             version: 1, ok: true, message: "Execution connection removed",
             connectionRevision: request.expectedRevision + 1
+        ))
+    }
+}
+
+private final class RoutingPolicyMutationFixture:
+    RoutingPolicyMutationSubmitting, @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var capturedUpsert: RoutingPolicyMutationRequest?
+    var lastUpsert: RoutingPolicyMutationRequest? {
+        lock.withLock { capturedUpsert }
+    }
+
+    func loadPolicies(
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        .success(.init(
+            version: 1, ok: true, message: "Custom routing policies loaded",
+            policyDocumentRevision: 4,
+            customPolicies: [.fixture()]
+        ))
+    }
+
+    func upsertPolicy(
+        _ request: RoutingPolicyMutationRequest,
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        lock.withLock { capturedUpsert = request }
+        return .success(.init(
+            version: 1, ok: true, message: "Custom routing policy saved",
+            policyDocumentRevision: request.expectedRevision + 1
+        ))
+    }
+
+    func removePolicy(
+        _ request: RoutingPolicyRemoveRequest,
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        .success(.init(
+            version: 1, ok: true, message: "Custom routing policy removed",
+            policyDocumentRevision: request.expectedRevision + 1
         ))
     }
 }
@@ -305,6 +390,27 @@ private extension RoutingExecutionConnection {
             executionAdapterID: "openai_compatible.direct",
             baseURL: "https://api.example.com/v1",
             enabled: true, models: ["gpt-5"]
+        )
+    }
+}
+
+private extension RoutingCustomPolicy {
+    static func fixture() -> Self {
+        Self(
+            policyID: "custom_coding", policyRevision: 2,
+            reliabilityWeight: 45, headroomWeight: 25,
+            latencyWeight: 20, costWeight: 10,
+            minimumHeadroomBasisPoints: 1_000,
+            maximumErrorRateBasisPoints: 1_500,
+            minimumRuntimeSamples: 3,
+            latencyReferenceMilliseconds: 8_000,
+            costReferenceMicrounits: 2_000,
+            costCurrency: "USD", minimumBalanceMicrounits: 2_000_000,
+            balanceReferenceMicrounits: 25_000_000,
+            unknownPenaltyBasisPoints: 3_000,
+            requireCost: false, requireRuntime: false,
+            allowedExecutionClasses: ["direct_api", "openai_compatible"],
+            allowedPrivacyClasses: ["direct_provider"]
         )
     }
 }

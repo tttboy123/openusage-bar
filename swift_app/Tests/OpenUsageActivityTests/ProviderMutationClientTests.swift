@@ -128,4 +128,53 @@ struct ProviderMutationClientTests {
         #expect(object["secret"] as? String == "replacement-secret")
         #expect(object["credentialMaterial"] == nil)
     }
+
+    @Test("Custom routing policies mutate without credential fields")
+    func routingPolicies() async throws {
+        let script = #"read payload; printf '{"version":1,"ok":true,"message":"Custom routing policies loaded","policyDocumentRevision":0,"customPolicies":[]}'"#
+        let client = RoutingPolicyMutationClient(
+            limits: .init(timeout: .seconds(1), maximumResponseBytes: 4_096),
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/Users/tester"]
+        )
+        let response = await client.loadPolicies(command: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", script]
+        ))
+        let loaded = try response.get()
+        #expect(loaded.policyDocumentRevision == 0)
+        #expect(loaded.customPolicies == [])
+
+        let request = RoutingPolicyMutationRequest(
+            expectedRevision: 0,
+            policy: RoutingPolicyDraft(generatedID: "custom_coding").mutationValue!
+        )
+        let object = try #require(JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(request)
+        ) as? [String: Any])
+        #expect(object["action"] as? String == "upsert_policy")
+        #expect(object["secret"] == nil)
+        #expect(object["apiKey"] == nil)
+    }
+
+    @Test("Custom policy helper rejects control characters in status messages")
+    func routingPolicyControlCharacters() async throws {
+        let script = #"read payload; printf '%s' '{"version":1,"ok":true,"message":"bad\u0001","policyDocumentRevision":1}'"#
+        let client = RoutingPolicyMutationClient(
+            limits: .init(timeout: .seconds(1), maximumResponseBytes: 4_096),
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/Users/tester"]
+        )
+        let policy = try #require(
+            RoutingPolicyDraft(generatedID: "custom_coding").mutationValue
+        )
+
+        let response = await client.upsertPolicy(
+            RoutingPolicyMutationRequest(expectedRevision: 0, policy: policy),
+            command: .init(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", script]
+            )
+        )
+
+        #expect(response == .failure(.invalidResponse))
+    }
 }

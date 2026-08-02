@@ -14,6 +14,7 @@ from openusage_bar.routing_execution import (
     credential_account,
 )
 from openusage_bar.routing_targets import RouteTargetStore
+from openusage_bar.routing_policy_store import RoutingPolicyStore
 
 
 def target_payload(**changes: object) -> dict[str, object]:
@@ -59,6 +60,8 @@ class RoutingMutationCommandTests(unittest.TestCase):
         self.store = RouteTargetStore(self.path)
         self.connection_path = Path(self.temporary.name) / "execution-connections.json"
         self.connection_store = ExecutionConnectionStore(self.connection_path)
+        self.policy_path = Path(self.temporary.name) / "routing-policies.json"
+        self.policy_store = RoutingPolicyStore(self.policy_path)
         self.keychain = Mock()
 
     def tearDown(self) -> None:
@@ -69,6 +72,7 @@ class RoutingMutationCommandTests(unittest.TestCase):
         status = run_routing_mutation(
             io.StringIO(raw), output, store=self.store,
             connection_store=self.connection_store, keychain=self.keychain,
+            policy_store=self.policy_store,
         )
         return status, json.loads(output.getvalue())
 
@@ -106,6 +110,41 @@ class RoutingMutationCommandTests(unittest.TestCase):
             "expectedRevision": expected_revision,
             "connection": connection,
             "secret": secret,
+        })
+
+    def policy_request(
+        self,
+        *,
+        action: str = "upsert_policy",
+        expected_revision: int = 0,
+        **changes: object,
+    ) -> str:
+        policy: dict[str, object] = {
+            "policyId": "custom_coding",
+            "reliabilityWeight": 45,
+            "headroomWeight": 25,
+            "latencyWeight": 20,
+            "costWeight": 10,
+            "minimumHeadroomBasisPoints": 1_000,
+            "maximumErrorRateBasisPoints": 1_500,
+            "minimumRuntimeSamples": 3,
+            "latencyReferenceMilliseconds": 8_000,
+            "costReferenceMicrounits": 2_000,
+            "costCurrency": "USD",
+            "minimumBalanceMicrounits": 2_000_000,
+            "balanceReferenceMicrounits": 25_000_000,
+            "unknownPenaltyBasisPoints": 3_000,
+            "requireCost": False,
+            "requireRuntime": False,
+            "allowedExecutionClasses": ["direct_api", "openai_compatible"],
+            "allowedPrivacyClasses": ["direct_provider"],
+        }
+        policy.update(changes)
+        return json.dumps({
+            "version": 1,
+            "action": action,
+            "expectedRevision": expected_revision,
+            "policy": policy,
         })
 
     def test_replaces_targets_with_monotonic_revision_and_private_file(self) -> None:
@@ -264,6 +303,51 @@ class RoutingMutationCommandTests(unittest.TestCase):
             self.connection_store.load().connections[0].models,
             tuple(sorted(models)),
         )
+
+    def test_custom_policy_lifecycle_uses_document_and_policy_revisions(self) -> None:
+        status, result = self.mutate(self.policy_request())
+        self.assertEqual(status, 0)
+        self.assertEqual(result["policyDocumentRevision"], 1)
+
+        status, listed = self.mutate(json.dumps({
+            "version": 1, "action": "list_policies",
+        }))
+        self.assertEqual(status, 0)
+        self.assertEqual(listed["policyDocumentRevision"], 1)
+        self.assertEqual(listed["customPolicies"][0]["policyId"], "custom_coding")
+        self.assertEqual(listed["customPolicies"][0]["policyRevision"], 1)
+
+        status, result = self.mutate(self.policy_request(
+            expected_revision=1,
+            reliabilityWeight=40,
+            headroomWeight=30,
+        ))
+        self.assertEqual(status, 0)
+        self.assertEqual(result["policyDocumentRevision"], 2)
+        self.assertEqual(self.policy_store.load().policies[0].revision, 2)
+
+        remove = json.dumps({
+            "version": 1, "action": "remove_policy",
+            "expectedRevision": 2, "policyId": "custom_coding",
+        })
+        status, result = self.mutate(remove)
+        self.assertEqual(status, 0)
+        self.assertEqual(result["policyDocumentRevision"], 3)
+        self.assertEqual(self.policy_store.load().policies, ())
+
+    def test_custom_policy_mutation_rejects_builtin_and_stale_updates(self) -> None:
+        status, result = self.mutate(self.policy_request(policyId="reliable"))
+        self.assertEqual(status, 1)
+        self.assertEqual(result["message"], "Custom routing policy request is invalid")
+
+        self.mutate(self.policy_request())
+        before = self.policy_path.read_bytes()
+        status, result = self.mutate(self.policy_request(expected_revision=0))
+        self.assertEqual(status, 1)
+        self.assertEqual(
+            result["message"], "Routing policies changed; reload before saving"
+        )
+        self.assertEqual(self.policy_path.read_bytes(), before)
 
     def test_update_can_retain_secret_but_cannot_orphan_an_existing_target(self) -> None:
         existing = ExecutionConnection(

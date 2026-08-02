@@ -53,6 +53,10 @@ struct LocalizationContractTests {
             "Model profile",
             "Optional cost metadata",
             "Remove routing target",
+            "Custom policies",
+            "Add policy",
+            "Add custom policy",
+            "Edit custom policy",
         ]
 
         for key in requiredKeys {
