@@ -218,14 +218,15 @@ fallback，完整 OpenUsage daily import 最长 60 秒。超时不会把未知�
 ```
 
 Phase A 只返回可解释的 Provider/账号/模型选择，不发送模型请求，也不接收
-Prompt 或响应内容。显式 Route Target 和执行适配器仍需在后续 Provider Center
-切片中配置；自动发现 Provider 不会自动授予可执行路由能力。完整契约与退出码
-见 [Route Decision API v1](docs/routing-api-v1.md)。
+Prompt 或响应内容。显式 Execution Connection、Route Target 和自定义策略已可在
+Provider Center 的“智能路由”页面配置；自动发现 Provider 不会自动授予可执行
+路由能力。完整契约与退出码见 [Route Decision API v1](docs/routing-api-v1.md)。
 
 0.8 当前开发树还提供内容无关的 Shadow 比较与有界离线 Replay：前者比较实际
 目标和策略推荐，后者使用冻结事实评估策略；两者均不代理请求，Replay 也不写
 证据。原生评测界面已经接入 Shadow 历史、紧凑汇总指标和本地 Replay JSON
-导入；新构建完成完整打包与安装验证后再替换当前本机开发版。
+导入；本地开发版 `0.8.0 (12)` 已完成完整构建、事务升级、双私有 Socket、CLI、
+确定性 Replay 与用户可见界面验收。下一切片是默认关闭的 loopback 执行代理。
 
 ## Provider 支持
 

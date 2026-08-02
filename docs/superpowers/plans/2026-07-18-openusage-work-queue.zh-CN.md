@@ -1008,13 +1008,13 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   Execution Connection、显式 Route Target、内置/自定义策略、默认策略、
   Decision API 总开关、Dry Run、解释与近期历史均已完成本地实现；凭证只经
   stdin 写入 Keychain。总开关关闭时健康与配置读取仍可用，但决策/模拟以
-  `router_disabled` fail closed。最终全量构建为 Python 1,099 项与 Swift
-  283 项通过，所有 Python 产品模块覆盖率不低于 80%，Swift 行覆盖率为
-  87.12%。128 个显式目标、500 次实测中，纯引擎 p95 为 0.742 ms，私有 Unix
+  `router_disabled` fail closed。最新全量构建为 Python 1,128 项与 Swift
+  286 项通过，所有 Python 产品模块覆盖率不低于 80%，Swift 行覆盖率为
+  87.34%。128 个显式目标、500 次实测中，纯引擎 p95 为 0.742 ms，私有 Unix
   Socket API p95 为 1.673 ms，分别低于 5 ms 与 50 ms 门限；测量同时修复了
   完整事实仍提前构造缺失 fallback 的热路径。键盘/VoiceOver 可访问状态、
   打包安装、升级事务、签名、LaunchAgent、双 `0600` Unix Socket、CLI、
-  Decision API 健康及隐私扫描均已在本机 0.8.0 (10) 开发版验证；公开发布版本
+  Decision API 健康及隐私扫描均已在本机 0.8.0 (12) 开发版验证；公开发布版本
   仍保持 0.6.0。WQ-27 的本地 Phase A 工作完成。**
 - **WQ-28：实现 Phase B 可选代理。** 独立显式开启的 IPv4 loopback
   OpenAI-compatible Chat Completions Proxy；Keychain Bearer、本地内存转发、
@@ -1030,9 +1030,14 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   Python 路由与构建契约回归 150 项通过。截至同日，原生 SwiftUI 已接入
   实际目标选择、
   Shadow 写入与近期比较、紧凑汇总指标、本地 Replay JSON 导入和确定性报告；
-  完整 Swift 286 项在 `warnings-as-errors` 下通过，产品行覆盖率为 87.22%。下一
-  门禁是完整 Python/隐私/打包发布构建与本机新构建安装；完成前不得把这一切片
-  标记为已发行。**
+  完整 Swift 286 项在 `warnings-as-errors` 下通过，最新产品行覆盖率为 87.34%。
+  本轮还以 TDD 修复了采集写锁阻塞 Resource API 与路由读取的问题：Collector
+  继续使用写连接，两个 API 通过独立 SQLite WAL 连接读取最后提交快照。完整
+  Python 1,128 项、隐私扫描、打包、事务安装、深度签名、双 `0600` Socket、
+  连续 20 轮健康读取、两次相同哈希的确定性 Replay 和原生 SwiftUI 可达性均已
+  在本机 `0.8.0 (12)` 通过。WQ-29 剩余门禁随 WQ-28 的可选代理实施：429、5xx、
+  timeout、stream、隐私、性能与独立安全复核；完成前不得把 0.8 标记为公开
+  发行。**
 
 WQ-25 通过前不得开始 WQ-26 产品代码；WQ-26 是 WQ-27 与 WQ-28 的共同依赖。
 WQ-28 不阻塞只使用 Decision API 的用户。0.8 的实现和发布不依赖 Loom X1。
