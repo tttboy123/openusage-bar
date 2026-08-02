@@ -110,6 +110,14 @@ rollback() {
   # restore a function-scoped trap during exit and otherwise invoke rollback a
   # second time after the staged bundle has already moved.
   trap '' EXIT INT TERM
+  if (( ! MUTATED )); then
+    if [[ -d "$NEW" ]]; then
+      prepare_bundle_stage_cleanup "$NEW" || \
+        print -u2 "installation failed before mutation; staged app permissions were retained at $NEW"
+      commit_bundle_transaction "$NEW" || \
+        print -u2 "installation failed before mutation; staged app cleanup was skipped at $NEW"
+    fi
+  fi
   if (( MUTATED )); then
     "$LAUNCHCTL" bootout "$DOMAIN/$STATUS_LABEL" >/dev/null 2>&1 || true
     "$LAUNCHCTL" bootout "$DOMAIN/$COLLECTOR_LABEL" >/dev/null 2>&1 || true
@@ -272,10 +280,12 @@ HAD_TARGET=0
 MUTATED=0
 trap - EXIT INT TERM
 
-prepare_bundle_stage_cleanup "$NEW" || \
-  print -u2 "installed successfully; previous app stage permissions were retained at $NEW"
-commit_bundle_transaction "$NEW" || \
-  print -u2 "installed successfully; previous app stage cleanup was skipped at $NEW"
+if [[ -d "$NEW" ]]; then
+  prepare_bundle_stage_cleanup "$NEW" || \
+    print -u2 "installed successfully; previous app stage permissions were retained at $NEW"
+  commit_bundle_transaction "$NEW" || \
+    print -u2 "installed successfully; previous app stage cleanup was skipped at $NEW"
+fi
 cleanup_legacy_previous_bundles "$INSTALL_DIR" || \
   print -u2 "installed successfully; historical app cleanup was skipped"
 prune_complete_app_backups "$BACKUP_ROOT" 2 || \

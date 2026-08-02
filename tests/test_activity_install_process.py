@@ -753,6 +753,9 @@ class ActivityInstallProcessTests(unittest.TestCase):
         rollback = source.index("rollback()")
         rollback_end = source.index("trap rollback", rollback)
         rollback_source = source[rollback:rollback_end]
+        self.assertIn("if (( ! MUTATED )); then", rollback_source)
+        self.assertIn('prepare_bundle_stage_cleanup "$NEW"', rollback_source)
+        self.assertIn('commit_bundle_transaction "$NEW"', rollback_source)
         self.assertIn(
             "if (( SWAPPED || FIRST_INSTALLED || ACTIVITY_STOPPED || SETTINGS_STOPPED )); then",
             rollback_source,
@@ -781,6 +784,53 @@ class ActivityInstallProcessTests(unittest.TestCase):
         self.assertLess(install_swap, post_swap_stop)
         self.assertLess(install_swap, post_swap_settings_stop)
         self.assertLess(installed_verify, success_reopen)
+        self.assertLess(installed_verify, success_settings_reopen)
+
+    def test_rollback_restarts_visible_activity_and_settings_helpers(self):
+        source = (ROOT / "scripts/rollback_app.sh").read_text(encoding="utf-8")
+
+        self.assertIn('source "$ROOT/scripts/activity_install_process.sh"', source)
+        self.assertIn(
+            'ACTIVITY_EXECUTABLE="$TARGET/Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity"',
+            source,
+        )
+        self.assertIn(
+            'SETTINGS_EXECUTABLE="$TARGET/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"',
+            source,
+        )
+        self.assertIn('activity_has_exact_process "$ACTIVITY_EXECUTABLE" && ACTIVITY_WAS_RUNNING=1', source)
+        self.assertIn('activity_has_exact_process "$SETTINGS_EXECUTABLE" && SETTINGS_WAS_RUNNING=1', source)
+        self.assertIn('stop_exact_activity_processes "$ACTIVITY_EXECUTABLE"', source)
+        self.assertIn('stop_exact_activity_processes "$SETTINGS_EXECUTABLE"', source)
+        self.assertEqual(
+            source.count('reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"'),
+            2,
+        )
+        self.assertEqual(
+            source.count('reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE"'),
+            2,
+        )
+        self.assertNotIn("pkill", source)
+        self.assertNotIn("killall", source)
+        self.assertNotIn("osascript", source)
+
+        swap = source.index('"$ATOMIC_SWAP" "$TARGET" "$NEW"')
+        pre_swap_activity_stop = source.index(
+            'stop_exact_activity_processes "$ACTIVITY_EXECUTABLE"',
+        )
+        pre_swap_settings_stop = source.index(
+            'stop_exact_activity_processes "$SETTINGS_EXECUTABLE"',
+        )
+        success_activity_reopen = source.rindex(
+            'reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"',
+        )
+        success_settings_reopen = source.rindex(
+            'reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE"',
+        )
+        installed_verify = source.rindex('validate_app_bundle "$TARGET"')
+        self.assertLess(pre_swap_activity_stop, swap)
+        self.assertLess(pre_swap_settings_stop, swap)
+        self.assertLess(installed_verify, success_activity_reopen)
         self.assertLess(installed_verify, success_settings_reopen)
 
 

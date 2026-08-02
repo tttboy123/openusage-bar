@@ -39,6 +39,16 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Active Usage Details and Provider Settings helpers are now stopped and
+  reopened across an explicit rollback, preventing an already visible window
+  from continuing to run the replaced app image. Rollback cleanup first
+  restores write permission on the signed integration stage, so a successful
+  rollback no longer reports failure merely because the previous bundle is
+  read-only.
+- Install failures before the atomic swap now remove their read-only staged
+  bundle, and uninstall stops both visible helpers before safely removing the
+  signed app. Data purge applies the same bounded cleanup to app backups, so
+  release smoke and real uninstall do not leave immutable bundle residue.
 - Visible Usage Details windows opened on the Smart Routing route are now part
   of the installer's exact process allowlist, so transactional upgrades stop
   and reopen the helper instead of leaving an old image across the bundle swap.

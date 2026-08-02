@@ -12,6 +12,7 @@ if [[ -z ${OPENUSAGE_INSTALL_DIR:-} ]]; then
   APP_TARGETS+=("$SYSTEM_TARGET" "$USER_TARGET")
 fi
 ACTIVITY_SUFFIX="Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity"
+SETTINGS_SUFFIX="Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"
 AGENTS="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
 LABEL_SUFFIX=${OPENUSAGE_LABEL_SUFFIX:-}
@@ -27,6 +28,7 @@ HOME_ROOT=${HOME:A}
 PURGE=0
 
 source "$ROOT/scripts/activity_install_process.sh"
+source "$ROOT/scripts/install_app_transaction.sh"
 
 is_openusage_bundle() {
   local app=$1
@@ -54,14 +56,29 @@ done
 for app_target in "${(@u)APP_TARGETS}"; do
   if is_openusage_bundle "$app_target"; then
     stop_exact_activity_processes "$app_target/$ACTIVITY_SUFFIX"
+    stop_exact_activity_processes "$app_target/$SETTINGS_SUFFIX"
+    prepare_bundle_stage_cleanup "$app_target" || {
+      print -u2 "refusing to remove an unsafe OpenUsage app bundle at $app_target"
+      exit 1
+    }
     rm -rf "$app_target"
   else
     stop_exact_activity_processes "$app_target/$ACTIVITY_SUFFIX" 50 0.1 \
       /bin/kill com.lune.openusagebar.activity
+    stop_exact_activity_processes "$app_target/$SETTINGS_SUFFIX" 50 0.1 \
+      /bin/kill com.lune.openusagebar.settings
   fi
 done
 
 if (( PURGE )); then
+  for staged_app in "$STATE_DIR"/**/*.app(N/); do
+    if is_openusage_bundle "$staged_app"; then
+      prepare_bundle_stage_cleanup "$staged_app" || {
+        print -u2 "refusing to purge an unsafe OpenUsage app backup at $staged_app"
+        exit 1
+      }
+    fi
+  done
   rm -rf \
     "$STATE_DIR" \
     "$HOME/.config/openusage-bar"

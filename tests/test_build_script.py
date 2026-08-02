@@ -244,7 +244,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertNotIn('mv "$TARGET" "$PREVIOUS"', source)
         self.assertIn('install_bundle_transaction "$ATOMIC_SWAP" "$TARGET" "$NEW"', source)
         self.assertIn('commit_bundle_transaction "$NEW"', source)
-        commit = source.index('commit_bundle_transaction "$NEW"')
+        commit = source.rindex('commit_bundle_transaction "$NEW"')
         trap_off = source.index('trap - EXIT INT TERM', source.index('codesign --verify --deep --strict "$TARGET"'))
         cleanup = source.index('cleanup_legacy_previous_bundles', trap_off)
         self.assertLess(trap_off, commit)

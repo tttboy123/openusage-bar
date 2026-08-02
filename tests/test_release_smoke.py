@@ -289,6 +289,7 @@ prune_complete_app_backups "{backups}" 2
 
     def test_installer_exposes_isolated_smoke_controls_and_failure_points(self) -> None:
         install = (ROOT / "scripts/install_app.sh").read_text(encoding="utf-8")
+        uninstall = (ROOT / "scripts/uninstall_app.sh").read_text(encoding="utf-8")
         location = (ROOT / "scripts/install_location.sh").read_text(encoding="utf-8")
         transaction = (ROOT / "scripts/install_app_transaction.sh").read_text(encoding="utf-8")
         smoke = (ROOT / "scripts/release_smoke.sh").read_text(encoding="utf-8")
@@ -312,6 +313,23 @@ prune_complete_app_backups "{backups}" 2
         self.assertIn('== "$SOURCE_VERSION"', smoke)
         self.assertIn("--purge-data", smoke)
         self.assertNotIn("security ", rollback)
+        self.assertIn('prepare_bundle_stage_cleanup "$NEW"', rollback)
+        self.assertIn('commit_bundle_transaction "$NEW"', rollback)
+        self.assertLess(
+            rollback.index('prepare_bundle_stage_cleanup "$NEW"'),
+            rollback.index('commit_bundle_transaction "$NEW"'),
+        )
+        self.assertIn('source "$ROOT/scripts/install_app_transaction.sh"', uninstall)
+        self.assertIn(
+            'SETTINGS_SUFFIX="Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"',
+            uninstall,
+        )
+        self.assertIn('stop_exact_activity_processes "$app_target/$SETTINGS_SUFFIX"', uninstall)
+        self.assertIn('prepare_bundle_stage_cleanup "$app_target"', uninstall)
+        self.assertLess(
+            uninstall.index('prepare_bundle_stage_cleanup "$app_target"'),
+            uninstall.index('rm -rf "$app_target"'),
+        )
         self.assertIn("scripts/release_smoke.sh", workflow)
 
 
