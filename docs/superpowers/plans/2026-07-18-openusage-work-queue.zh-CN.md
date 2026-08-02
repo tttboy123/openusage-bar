@@ -1000,19 +1000,22 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   尝试与 16 MiB 上限；Prompt、响应、凭证、请求头、端点和直接账号身份不会
   入库。严格的第二 Unix Socket Decision API、冻结 JSON Schema 和
   `route decide|simulate|history --format json` CLI 也已本地实现并接入现有
-  常驻 Controller；路由启动失败不会停止事实采集或 Resource API。WQ-26 的
-  剩余工作是兼容性、性能、故障注入与完整发布门禁。**
+  常驻 Controller；路由启动失败不会停止事实采集或 Resource API。兼容性、
+  性能、隐私、故障隔离与完整本地发布门禁也已通过。**
 - **WQ-27：接入 Provider Center。** 支持显式 Route Target、内置/自定义策略、
   中英文、Dry Run、选择/备选/排除原因和内容无关的近期决策历史。自动发现只
   证明 Provider 存在，不会自动授予可执行路由能力。**截至 2026-08-02，原生
   Execution Connection、显式 Route Target、内置/自定义策略、默认策略、
   Decision API 总开关、Dry Run、解释与近期历史均已完成本地实现；凭证只经
   stdin 写入 Keychain。总开关关闭时健康与配置读取仍可用，但决策/模拟以
-  `router_disabled` fail closed。Python 路由相关 110 项与 Swift 全量 283 项
-  已通过。128 个显式目标、500 次实测中，纯引擎 p95 为 0.742 ms，私有 Unix
+  `router_disabled` fail closed。最终全量构建为 Python 1,099 项与 Swift
+  283 项通过，所有 Python 产品模块覆盖率不低于 80%，Swift 行覆盖率为
+  87.12%。128 个显式目标、500 次实测中，纯引擎 p95 为 0.742 ms，私有 Unix
   Socket API p95 为 1.673 ms，分别低于 5 ms 与 50 ms 门限；测量同时修复了
-  完整事实仍提前构造缺失 fallback 的热路径。本项剩余键盘/VoiceOver 实机
-  审查、打包安装门禁及本机 0.8 部署。**
+  完整事实仍提前构造缺失 fallback 的热路径。键盘/VoiceOver 可访问状态、
+  打包安装、升级事务、签名、LaunchAgent、双 `0600` Unix Socket、CLI、
+  Decision API 健康及隐私扫描均已在本机 0.8.0 (10) 开发版验证；公开发布版本
+  仍保持 0.6.0。WQ-27 的本地 Phase A 工作完成。**
 - **WQ-28：实现 Phase B 可选代理。** 独立显式开启的 IPv4 loopback
   OpenAI-compatible Chat Completions Proxy；Keychain Bearer、本地内存转发、
   有界重试/回退，流式输出开始后禁止透明换目标。关闭代理不影响菜单栏、账本、
@@ -1020,7 +1023,9 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
 - **WQ-29：评测、故障注入与发行门禁。** 增加 replay/shadow 决策、性能基线、
   429/5xx/timeout/stream 故障、隐私与依赖扫描、完整 Python/Swift/打包/安装/
   升级/回滚及独立安全复核。Learned Router 只有通过这些门禁后才能从 shadow
-  候选进入明确授权的策略。
+  候选进入明确授权的策略。**基础性能、隐私、兼容性、打包、安装与升级门禁
+  已由 Phase A 通过；下一项是实现内容无关的 Shadow 与有界 Replay，再进入
+  WQ-28 代理故障矩阵。**
 
 WQ-25 通过前不得开始 WQ-26 产品代码；WQ-26 是 WQ-27 与 WQ-28 的共同依赖。
 WQ-28 不阻塞只使用 Decision API 的用户。0.8 的实现和发布不依赖 Loom X1。
