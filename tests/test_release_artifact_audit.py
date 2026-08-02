@@ -3,6 +3,7 @@ import plistlib
 import stat
 import tempfile
 import unittest
+import warnings
 import zipfile
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -17,10 +18,14 @@ def archive_with(entries):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         for name, value in entries:
-            if isinstance(value, zipfile.ZipInfo):
-                archive.writestr(value, b"../../../../outside")
-            else:
-                archive.writestr(name, value)
+            with warnings.catch_warnings():
+                # Duplicate names are an intentional hostile fixture; the
+                # product auditor, not zipfile's ambient warning, is asserted.
+                warnings.simplefilter("ignore", UserWarning)
+                if isinstance(value, zipfile.ZipInfo):
+                    archive.writestr(value, b"../../../../outside")
+                else:
+                    archive.writestr(name, value)
     buffer.seek(0)
     return zipfile.ZipFile(buffer)
 
