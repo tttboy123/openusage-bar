@@ -272,6 +272,8 @@ HAD_TARGET=0
 MUTATED=0
 trap - EXIT INT TERM
 
+prepare_bundle_stage_cleanup "$NEW" || \
+  print -u2 "installed successfully; previous app stage permissions were retained at $NEW"
 commit_bundle_transaction "$NEW" || \
   print -u2 "installed successfully; previous app stage cleanup was skipped at $NEW"
 cleanup_legacy_previous_bundles "$INSTALL_DIR" || \

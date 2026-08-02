@@ -501,6 +501,48 @@ cleanup_legacy_previous_bundles "{root}" || true
             self.assertEqual((target / "version").read_text(encoding="utf-8"), "new")
             self.assertFalse(staged.exists())
 
+    def test_commit_prepares_read_only_integration_directory_for_cleanup(self):
+        transaction = ROOT / "scripts/install_app_transaction.sh"
+        with tempfile.TemporaryDirectory() as temp:
+            staged = Path(temp) / "OpenUsage Bar.app.new"
+            integrations = staged / "Contents/Resources/Integrations"
+            integrations.mkdir(parents=True)
+            integrations.joinpath("litellm_openusage.py").write_text(
+                "adapter", encoding="utf-8"
+            )
+            integrations.chmod(0o555)
+            script = f'''source "{transaction}"
+prepare_bundle_stage_cleanup "{staged}"
+commit_bundle_transaction "{staged}"
+'''
+            result = subprocess.run(
+                ["/bin/zsh", "-c", script], capture_output=True, text=True
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(staged.exists())
+
+    def test_stage_cleanup_never_changes_a_symlinked_integration_directory(self):
+        transaction = ROOT / "scripts/install_app_transaction.sh"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            staged = root / "OpenUsage Bar.app.new"
+            resources = staged / "Contents/Resources"
+            resources.mkdir(parents=True)
+            outside = root / "outside"
+            outside.mkdir()
+            outside.chmod(0o555)
+            resources.joinpath("Integrations").symlink_to(outside)
+            script = f'''source "{transaction}"
+prepare_bundle_stage_cleanup "{staged}"
+'''
+            result = subprocess.run(
+                ["/bin/zsh", "-c", script], capture_output=True, text=True
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(outside.stat().st_mode & 0o777, 0o555)
+
     def test_commit_partial_delete_failure_never_rolls_back_healthy_target(self):
         helper = ROOT / "scripts/atomic_swap.c"
         transaction = ROOT / "scripts/install_app_transaction.sh"

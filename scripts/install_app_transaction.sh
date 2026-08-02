@@ -225,6 +225,16 @@ commit_bundle_transaction() {
   rm -rf "$staged"
 }
 
+prepare_bundle_stage_cleanup() {
+  local staged=$1
+  local integrations="$staged/Contents/Resources/Integrations"
+  [[ -d "$staged" && ! -L "$staged" ]] || return 1
+  if [[ -e "$integrations" ]]; then
+    [[ -d "$integrations" && ! -L "$integrations" ]] || return 1
+    chmod u+w "$integrations" || return 1
+  fi
+}
+
 cleanup_legacy_previous_bundles() {
   local applications_dir=$1
   local previous
