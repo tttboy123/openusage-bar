@@ -138,6 +138,18 @@ class SettingsEntrypointTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 0)
         mutate.assert_called_once_with(sys.stdin, sys.stdout)
 
+    def test_routing_mutation_is_dispatched_without_opening_appkit(self):
+        with patch.object(
+            sys, "argv", ["openusage_settings.py", "routing-mutate"]
+        ), patch(
+            "openusage_bar.routing_commands.run_routing_mutation", return_value=0
+        ) as mutate, patch.dict(sys.modules, {"openusage_bar.ui": None}):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path("openusage_settings.py", run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 0)
+        mutate.assert_called_once_with(sys.stdin, sys.stdout)
+
     def test_private_keychain_operation_is_dispatched_without_opening_appkit(self):
         with patch.object(
             sys, "argv", ["openusage_settings.py", "__keychain-write"]

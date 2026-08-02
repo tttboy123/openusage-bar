@@ -557,6 +557,33 @@ struct ProviderMutationCommand: Sendable, Hashable {
         activityExecutableURL: URL,
         isExecutable: (URL) -> Bool = { FileManager.default.isExecutableFile(atPath: $0.path) }
     ) -> Self? {
+        resolve(
+            activityBundleURL: activityBundleURL,
+            activityExecutableURL: activityExecutableURL,
+            subcommand: "provider-mutate",
+            isExecutable: isExecutable
+        )
+    }
+
+    static func resolveRouting(
+        activityBundleURL: URL,
+        activityExecutableURL: URL,
+        isExecutable: (URL) -> Bool = { FileManager.default.isExecutableFile(atPath: $0.path) }
+    ) -> Self? {
+        resolve(
+            activityBundleURL: activityBundleURL,
+            activityExecutableURL: activityExecutableURL,
+            subcommand: "routing-mutate",
+            isExecutable: isExecutable
+        )
+    }
+
+    private static func resolve(
+        activityBundleURL: URL,
+        activityExecutableURL: URL,
+        subcommand: String,
+        isExecutable: (URL) -> Bool
+    ) -> Self? {
         let helperDirectory = activityBundleURL.pathExtension.lowercased() == "app"
             ? activityBundleURL.deletingLastPathComponent()
             : activityExecutableURL.deletingLastPathComponent()
@@ -564,13 +591,13 @@ struct ProviderMutationCommand: Sendable, Hashable {
             .appendingPathComponent("OpenUsage Provider Settings.app")
             .appendingPathComponent("Contents/MacOS/OpenUsage Provider Settings")
         if isExecutable(bundled) {
-            return Self(executableURL: bundled, arguments: ["provider-mutate"])
+            return Self(executableURL: bundled, arguments: [subcommand])
         }
         let fallbacks = ["OpenUsageSettings", "openusage_settings"].map {
             helperDirectory.appendingPathComponent($0)
         }
         guard let executable = fallbacks.first(where: isExecutable) else { return nil }
-        return Self(executableURL: executable, arguments: ["provider-mutate"])
+        return Self(executableURL: executable, arguments: [subcommand])
     }
 }
 

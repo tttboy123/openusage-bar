@@ -3,6 +3,7 @@ import UsageCore
 
 struct RoutingPage: View {
     @State private var model = RoutingViewModel()
+    @State private var localMutationFailure: String?
 
     var body: some View {
         ScrollView {
@@ -16,6 +17,12 @@ struct RoutingPage: View {
                     )
                     .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
+                    if let failure = model.mutationFailure?.title ?? localMutationFailure {
+                        Label(failure, systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout)
+                            .foregroundStyle(.orange)
+                            .accessibilityLabel(failure)
+                    }
                     overview
                     targets
                     dryRun
@@ -122,6 +129,15 @@ struct RoutingPage: View {
                 Text(target.capabilities.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Button(AppLocalization.text(target.enabled ? "Disable" : "Enable")) {
+                mutate(target, enabled: !target.enabled)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(model.isMutating)
+            .accessibilityLabel(
+                "\(target.enabled ? AppLocalization.text("Disable") : AppLocalization.text("Enable")) \(target.modelID)"
+            )
         }
         .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
@@ -307,6 +323,26 @@ struct RoutingPage: View {
         case .ready: .green
         case .disabled: .secondary
         case .adapterMissing: .orange
+        }
+    }
+
+    private func mutate(_ target: RoutingTarget, enabled: Bool) {
+        localMutationFailure = nil
+        guard let executable = Bundle.main.executableURL,
+              let command = ProviderMutationCommand.resolveRouting(
+                  activityBundleURL: Bundle.main.bundleURL,
+                  activityExecutableURL: executable
+              )
+        else {
+            localMutationFailure = AppLocalization.text("Routing target update unavailable")
+            return
+        }
+        Task {
+            await model.setTargetEnabled(
+                target.targetID,
+                enabled: enabled,
+                command: command
+            )
         }
     }
 }

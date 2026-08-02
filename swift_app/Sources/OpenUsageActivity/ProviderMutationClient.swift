@@ -51,7 +51,7 @@ struct ProviderMutationClient: Sendable {
     }
 }
 
-private struct ProviderMutationProcessRunner: Sendable {
+struct ProviderMutationProcessRunner: Sendable {
     let environment: [String: String]
 
     func run(

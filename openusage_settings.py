@@ -23,6 +23,10 @@ def main(argv: list[str] | None = None) -> int:
         from openusage_bar.provider_commands import run_provider_mutation
 
         return run_provider_mutation(sys.stdin, sys.stdout)
+    if arguments == ["routing-mutate"]:
+        from openusage_bar.routing_commands import run_routing_mutation
+
+        return run_routing_mutation(sys.stdin, sys.stdout)
     if arguments == ["__keychain-write"]:
         from openusage_bar.keychain import run_native_keychain_write
 

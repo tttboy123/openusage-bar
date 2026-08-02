@@ -104,6 +104,7 @@ enum RoutingPresentation {
 @Observable
 final class RoutingViewModel {
     private let client: any RoutingAPIReading
+    private let mutations: any RoutingMutationSubmitting
 
     private(set) var health: RoutingHealth?
     private(set) var policies: [RoutingPolicy] = []
@@ -111,8 +112,11 @@ final class RoutingViewModel {
     private(set) var history: [RoutingHistoryDecision] = []
     private(set) var decision: RoutingDecision?
     private(set) var failure: RoutingFailure?
+    private(set) var mutationFailure: RoutingFailure?
     private(set) var isLoading = false
     private(set) var isSimulating = false
+    private(set) var isMutating = false
+    private(set) var targetRevision: Int64 = 0
 
     var selectedPolicyID = "reliable"
     var taskKind = RoutingTaskKind.code
@@ -123,8 +127,12 @@ final class RoutingViewModel {
     var requiresTools = true
     var privacy = RoutingPrivacy.directProvider
 
-    init(client: any RoutingAPIReading = RoutingAPIClient()) {
+    init(
+        client: any RoutingAPIReading = RoutingAPIClient(),
+        mutations: any RoutingMutationSubmitting = RoutingMutationClient()
+    ) {
         self.client = client
+        self.mutations = mutations
     }
 
     func load() async {
@@ -143,6 +151,7 @@ final class RoutingViewModel {
             health = values.0
             policies = values.1
             targets = values.2.targets
+            targetRevision = values.2.revision
             history = values.3.decisions
             if !policies.contains(where: { $0.policyID == selectedPolicyID }),
                let first = policies.first {
@@ -152,8 +161,47 @@ final class RoutingViewModel {
             health = nil
             policies = []
             targets = []
+            targetRevision = 0
             history = []
             failure = Self.failure(for: error)
+        }
+    }
+
+    func setTargetEnabled(
+        _ targetID: String,
+        enabled: Bool,
+        command: ProviderMutationCommand
+    ) async {
+        guard !isMutating, targets.contains(where: { $0.targetID == targetID }) else { return }
+        isMutating = true
+        mutationFailure = nil
+        defer { isMutating = false }
+        let values = targets.map { target in
+            RoutingTargetMutationValue(
+                target: target,
+                enabled: target.targetID == targetID ? enabled : nil
+            )
+        }
+        let result = await mutations.submit(
+            RoutingTargetMutationRequest(
+                expectedRevision: targetRevision,
+                targets: values
+            ),
+            command: command
+        )
+        switch result {
+        case let .success(response):
+            guard response.ok else {
+                mutationFailure = .invalidData
+                return
+            }
+            await load()
+        case let .failure(error):
+            mutationFailure = switch error {
+            case .timedOut: .timedOut
+            case .unavailable, .couldNotLaunch: .serviceUnavailable
+            case .responseTooLarge, .invalidResponse: .invalidData
+            }
         }
     }
 

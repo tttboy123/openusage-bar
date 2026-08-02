@@ -62,8 +62,41 @@ struct RoutingLogicTests {
         #expect(RoutingPresentation.reason("fact_stale") == AppLocalization.text("Usage facts are stale"))
     }
 
+    @Test("Target enable changes use optimistic full-document replacement")
+    func targetToggle() async {
+        let client = RoutingClientFixture()
+        let mutations = RoutingMutationFixture()
+        let model = RoutingViewModel(client: client, mutations: mutations)
+        await model.load()
+        let command = ProviderMutationCommand(
+            executableURL: URL(fileURLWithPath: "/tmp/helper"),
+            arguments: ["routing-mutate"]
+        )
+        await model.setTargetEnabled("openai.work.gpt-5", enabled: false, command: command)
+        #expect(mutations.lastRequest?.expectedRevision == 1)
+        #expect(mutations.lastRequest?.targets.first?.enabled == false)
+        #expect(model.mutationFailure == nil)
+    }
+
     private func target(adapterAvailable: Bool = true) -> RoutingTarget {
         RoutingTarget.fixture(adapterAvailable: adapterAvailable)
+    }
+}
+
+private final class RoutingMutationFixture: RoutingMutationSubmitting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var capturedRequest: RoutingTargetMutationRequest?
+    var lastRequest: RoutingTargetMutationRequest? { lock.withLock { capturedRequest } }
+
+    func submit(
+        _ request: RoutingTargetMutationRequest,
+        command: ProviderMutationCommand
+    ) async -> Result<RoutingMutationResponse, ProviderMutationFailure> {
+        lock.withLock { capturedRequest = request }
+        return .success(.init(
+            version: 1, ok: true,
+            message: "Routing targets saved", targetRevision: request.expectedRevision + 1
+        ))
     }
 }
 

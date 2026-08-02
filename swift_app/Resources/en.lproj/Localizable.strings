@@ -521,3 +521,6 @@
 "Recent latency is available" = "Recent latency is available";
 "Cost is known" = "Cost is known";
 "Routing constraint was not satisfied" = "Routing constraint was not satisfied";
+"Enable" = "Enable";
+"Disable" = "Disable";
+"Routing target update unavailable" = "Routing target update unavailable";
