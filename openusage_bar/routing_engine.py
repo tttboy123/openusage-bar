@@ -160,7 +160,10 @@ def _rejection_codes(
     if maximum_cost is not None:
         assert route_request.constraints.cost_currency is not None
         required_currencies.add(route_request.constraints.cost_currency)
-    if route_request.session is not None:
+    if (
+        route_request.session is not None
+        and route_request.session.remaining_budget_micros is not None
+    ):
         assert route_request.session.budget_currency is not None
         required_currencies.add(route_request.session.budget_currency)
     if value.resource_mode == "balance" and value.balance_currency is not None:
@@ -188,7 +191,10 @@ def _rejection_codes(
             < policy.min_balance_micros
         ):
             codes.add("balance_reserve_exceeded")
-        if route_request.session is not None:
+        if (
+            route_request.session is not None
+            and route_request.session.remaining_budget_micros is not None
+        ):
             remaining = route_request.session.remaining_budget_micros
             reserve = route_request.session.reserve_micros
             assert remaining is not None and reserve is not None
