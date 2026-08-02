@@ -226,6 +226,46 @@ validate_complete_app_backup "{complete[-1].parent}"
             )
             self.assertNotEqual(invalid.returncode, 0)
 
+    def test_backup_pruning_handles_packaged_read_only_integrations(self) -> None:
+        transaction = ROOT / "scripts/install_app_transaction.sh"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            backups = root / "state/backups/app"
+            for index in range(3):
+                app = root / f"source-{index}/OpenUsage Bar.app"
+                make_signed_app(app, f"0.8.{index}", str(10 + index))
+                integrations = app / "Contents/Resources/Integrations"
+                integrations.mkdir(parents=True)
+                integrations.joinpath("litellm_openusage.py").write_text(
+                    "adapter\n", encoding="utf-8"
+                )
+                subprocess.run(
+                    ["/usr/bin/codesign", "--force", "--sign", "-", str(app)],
+                    check=True,
+                    capture_output=True,
+                )
+                integrations.chmod(0o555)
+                stamp = f"20260802T00000{index}Z"
+                script = f'''source "{transaction}"
+create_complete_app_backup "{app}" "{backups}" "{stamp}"
+prune_complete_app_backups "{backups}" 2
+'''
+                result = subprocess.run(
+                    ["/bin/zsh", "-c", script], capture_output=True, text=True
+                )
+                integrations.chmod(0o755)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+            complete = sorted(backups.glob("*/metadata.plist"))
+            self.assertEqual(len(complete), 2)
+            self.assertFalse(any("0.8.0" in str(path) for path in complete))
+            for marker in complete:
+                integrations = (
+                    marker.parent
+                    / "OpenUsage Bar.app/Contents/Resources/Integrations"
+                )
+                integrations.chmod(0o755)
+
     def test_purge_rejects_a_state_directory_outside_home(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp) / "home"

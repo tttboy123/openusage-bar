@@ -157,6 +157,14 @@ validate_complete_app_backup() {
   [[ "$actual_hash" == "$expected_hash" ]]
 }
 
+prepare_complete_app_backup_cleanup() {
+  local backup=$1
+  local app="$backup/OpenUsage Bar.app"
+  [[ -d "$backup" && ! -L "$backup" ]] || return 1
+  validate_complete_app_backup "$backup" || return 1
+  prepare_bundle_stage_cleanup "$app"
+}
+
 prune_complete_app_backups() {
   local backup_root=$1
   local keep=${2:-2}
@@ -170,7 +178,8 @@ prune_complete_app_backups() {
   remove_count=$(( ${#complete} - keep ))
   if (( remove_count > 0 )); then
     for (( index = 1; index <= remove_count; index++ )); do
-      rm -rf "$complete[$index]"
+      prepare_complete_app_backup_cleanup "$complete[$index]" || return 1
+      rm -rf "$complete[$index]" || return 1
     done
   fi
   for entry in "$backup_root"/.incomplete-*(N); do
