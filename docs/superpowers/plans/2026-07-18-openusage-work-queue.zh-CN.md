@@ -977,6 +977,38 @@ release smoke。公开 intake 已打开，但外部机器仍为 0 / 5，30 天�
   append-only Evidence、Scheduler、预留、准入或策略路由；这些仍需在 Loom
   对应权限边界内以独立 Candidate 实施。**
 
+### 0.8 本地自动策略路由
+
+本阶段是 OpenUsage Bar 自身的可选能力，不依赖 Loom。它不会把写请求、策略或
+模型内容加入现有只读 Resource API。社区调研、边界决策和完整规格见：
+
+- [`社区智能路由调研`](../../research/2026-08-02-community-smart-routing.md)
+- [`ADR 0003`](../../adr/0003-local-strategy-routing.md)
+- [`自动策略路由规格`](../specs/2026-08-02-openusage-smart-routing.md)
+
+- **WQ-25：冻结 Route Decision 契约。** 完成人工规格评审，冻结目标、策略、
+  请求/响应、稳定原因码、Unknown/stale 处理、独立 Unix Socket、7 天有界决策
+  证据与 N-1 Fixture。**已于 2026-08-02 完成人工评审并批准六项核心决策；
+  ADR 0003 已 Accepted，规格已 Approved，WQ-26 可以开始。**
+- **WQ-26：实现 Phase A 决策引擎与机器接口。** 先做纯函数 hard filter 和
+  reliability-first 整数评分，再接 Resource Snapshot、Runtime Summary、独立
+  `routing.sqlite3`、Decision API 和 CLI。所有硬过滤先于评分；无安全目标必须
+  返回 `no_route`。
+- **WQ-27：接入 Provider Center。** 支持显式 Route Target、内置/自定义策略、
+  中英文、Dry Run、选择/备选/排除原因和内容无关的近期决策历史。自动发现只
+  证明 Provider 存在，不会自动授予可执行路由能力。
+- **WQ-28：实现 Phase B 可选代理。** 独立显式开启的 IPv4 loopback
+  OpenAI-compatible Chat Completions Proxy；Keychain Bearer、本地内存转发、
+  有界重试/回退，流式输出开始后禁止透明换目标。关闭代理不影响菜单栏、账本、
+  Provider Center、Resource API 或 Decision API。
+- **WQ-29：评测、故障注入与发行门禁。** 增加 replay/shadow 决策、性能基线、
+  429/5xx/timeout/stream 故障、隐私与依赖扫描、完整 Python/Swift/打包/安装/
+  升级/回滚及独立安全复核。Learned Router 只有通过这些门禁后才能从 shadow
+  候选进入明确授权的策略。
+
+WQ-25 通过前不得开始 WQ-26 产品代码；WQ-26 是 WQ-27 与 WQ-28 的共同依赖。
+WQ-28 不阻塞只使用 Decision API 的用户。0.8 的实现和发布不依赖 Loom X1。
+
 WQ-18 完成后才能开始 WQ-19；WQ-20 可与 WQ-19 按不同文件并行设计；
 WQ-21 必须先有独立 ADR、保留期与数据上限，不得直接写入
 `activity.sqlite3`。这些仓库内工作不会把外部机器从 0 / 5 改为已验证，
