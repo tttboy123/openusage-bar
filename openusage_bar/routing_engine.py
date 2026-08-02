@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from .routing_contract import (
     DecisionContext,
+    MAX_ALTERNATIVES,
+    REJECTION_REASON_ORDER,
     RejectedTarget,
     RouteDecision,
     RouteRequest,
@@ -16,28 +18,6 @@ from .routing_policy import RoutePolicy
 
 
 MAX_TARGETS = 128
-MAX_ALTERNATIVES = 16
-
-REASON_ORDER = (
-    "target_disabled",
-    "adapter_unavailable",
-    "not_allowed",
-    "capability_missing",
-    "context_too_small",
-    "privacy_incompatible",
-    "region_incompatible",
-    "connection_unavailable",
-    "source_unhealthy",
-    "fact_missing",
-    "fact_stale",
-    "coverage_partial",
-    "quota_reserve_exceeded",
-    "balance_reserve_exceeded",
-    "error_rate_exceeded",
-    "session_budget_exceeded",
-    "cost_unknown",
-    "cost_limit_exceeded",
-)
 
 
 def _unique_by_id(values, *, name: str):
@@ -215,7 +195,7 @@ def _rejection_codes(
             if value.estimated_cost_micros > remaining or remaining - value.estimated_cost_micros < reserve:
                 codes.add("session_budget_exceeded")
 
-    return tuple(code for code in REASON_ORDER if code in codes)
+    return tuple(code for code in REJECTION_REASON_ORDER if code in codes)
 
 
 def _components(value: TargetFacts, policy: RoutePolicy) -> ScoreComponents:

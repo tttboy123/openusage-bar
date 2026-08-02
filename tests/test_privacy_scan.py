@@ -90,6 +90,25 @@ class PrivacyScanTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "privacy_scan_matches=0 files=1 sqlite_files=1\n")
 
+    def test_structurally_scans_content_free_routing_sqlite(self):
+        scanner = ROOT / "scripts/privacy_scan.py"
+        from tests.test_routing_store import NOW, evidence
+        from openusage_bar.routing_store import RoutingStore
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "routing.sqlite3"
+            store = RoutingStore(path, clock=lambda: NOW)
+            store.record_decision(evidence(1))
+            store.close()
+            result = subprocess.run(
+                [str(scanner), str(path)], capture_output=True, text=True
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout,
+                "privacy_scan_matches=0 files=0 sqlite_files=1\n",
+            )
+
     def test_sqlite_unexpected_schema_and_secret_value_fail_without_echo(self):
         scanner = ROOT / "scripts/privacy_scan.py"
         from openusage_bar.activity_store import ActivityStore

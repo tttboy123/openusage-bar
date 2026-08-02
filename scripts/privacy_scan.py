@@ -11,13 +11,19 @@ from pathlib import Path
 from urllib.parse import quote
 
 PACKAGED_SCHEMA = Path(__file__).with_name("activity_schema.py")
+PACKAGED_ROUTING_SCHEMA = Path(__file__).with_name("routing_schema.py")
 if PACKAGED_SCHEMA.is_file():
     from activity_schema import EXPECTED_SCHEMA as _EXPECTED_SCHEMA
+    if PACKAGED_ROUTING_SCHEMA.is_file():
+        from routing_schema import EXPECTED_SCHEMA as _ROUTING_EXPECTED_SCHEMA
+    else:
+        _ROUTING_EXPECTED_SCHEMA = None
 else:
     PROJECT_ROOT = Path(__file__).resolve().parents[1]
     if str(PROJECT_ROOT) not in sys.path:
         sys.path.insert(0, str(PROJECT_ROOT))
     from openusage_bar.activity_schema import EXPECTED_SCHEMA as _EXPECTED_SCHEMA
+    from openusage_bar.routing_schema import EXPECTED_SCHEMA as _ROUTING_EXPECTED_SCHEMA
 
 
 FORBIDDEN_NAME = (
@@ -44,7 +50,7 @@ CREDENTIAL_OR_EMAIL = re.compile(
 MAX_BYTES = 16 * 1024 * 1024
 MAX_SQLITE_ROWS_PER_TABLE = 250_000
 MAX_SQLITE_TEXT_BYTES = 16 * 1024 * 1024
-MAX_SQLITE_CELL_BYTES = 64 * 1024
+MAX_SQLITE_CELL_BYTES = 256 * 1024
 SQLITE_HEADER = b"SQLite format 3\x00"
 
 
@@ -81,15 +87,22 @@ def scan_sqlite(path: Path) -> ScanResult:
             for object_type, name, _table_name, _sql in schema_rows
             if object_type == "table" and not name.startswith("sqlite_")
         }
-        if actual_tables != set(_EXPECTED_SCHEMA):
+        schemas = [_EXPECTED_SCHEMA]
+        if _ROUTING_EXPECTED_SCHEMA is not None:
+            schemas.append(_ROUTING_EXPECTED_SCHEMA)
+        matching_schemas = [
+            schema for schema in schemas if actual_tables == set(schema)
+        ]
+        if len(matching_schemas) != 1:
             return ScanResult.INVALID
+        expected_schema = matching_schemas[0]
 
         for schema_row in schema_rows:
             for value in schema_row:
                 if isinstance(value, str) and _contains_forbidden(value):
                     return ScanResult.INVALID
 
-        for table_name, expected_columns in _EXPECTED_SCHEMA.items():
+        for table_name, expected_columns in expected_schema.items():
             actual_columns = tuple(
                 (name, column_type, not_null, default, primary_key)
                 for (

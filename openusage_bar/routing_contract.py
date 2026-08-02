@@ -10,6 +10,42 @@ from typing import Iterable
 
 MAX_COUNTER = 1_000_000_000_000
 MAX_IDS = 50
+MAX_SCORE = 10_000
+MAX_SCORE_REASONS = 16
+MAX_ALTERNATIVES = 16
+MAX_REJECTED_TARGETS = 128
+
+SCORE_REASON_CODES = frozenset(
+    {
+        "healthy_source",
+        "quota_headroom",
+        "balance_headroom",
+        "low_recent_error_rate",
+        "latency_observed",
+        "cost_known",
+    }
+)
+REJECTION_REASON_ORDER = (
+    "target_disabled",
+    "adapter_unavailable",
+    "not_allowed",
+    "capability_missing",
+    "context_too_small",
+    "privacy_incompatible",
+    "region_incompatible",
+    "connection_unavailable",
+    "source_unhealthy",
+    "fact_missing",
+    "fact_stale",
+    "coverage_partial",
+    "quota_reserve_exceeded",
+    "balance_reserve_exceeded",
+    "error_rate_exceeded",
+    "session_budget_exceeded",
+    "cost_unknown",
+    "cost_limit_exceeded",
+)
+REJECTION_REASON_CODES = frozenset(REJECTION_REASON_ORDER)
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ANON_REF = re.compile(r"^anon_[0-9a-f]{16,64}$")
@@ -62,6 +98,19 @@ def _ids(name: str, values: Iterable[str], *, maximum: int = MAX_IDS) -> tuple[s
     result = tuple(sorted({_stable_id(name, value) for value in values}))
     if len(result) > maximum:
         raise ValueError(f"{name} contains too many identifiers")
+    return result
+
+
+def _reason_codes(
+    name: str, values: object, allowed: frozenset[str]
+) -> tuple[str, ...]:
+    if not isinstance(values, tuple) or not 1 <= len(values) <= MAX_SCORE_REASONS:
+        raise ValueError(f"{name} must contain bounded reason codes")
+    result = tuple(_stable_id(name, value) for value in values)
+    if any(value not in allowed for value in result):
+        raise ValueError(f"{name} contains an unknown reason code")
+    if len(set(result)) != len(result):
+        raise ValueError(f"{name} contains duplicate reason codes")
     return result
 
 
@@ -311,6 +360,10 @@ class ScoreComponents:
     latency: int
     cost: int
 
+    def __post_init__(self) -> None:
+        for name in ("reliability", "headroom", "latency", "cost"):
+            _integer(name, getattr(self, name), maximum=MAX_SCORE)
+
 
 @dataclass(frozen=True)
 class ScoredTarget:
@@ -322,11 +375,23 @@ class ScoredTarget:
     components: ScoreComponents
     reasons: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        for name in ("target_id", "provider_id", "account_ref", "model_id"):
+            _stable_id(name, getattr(self, name))
+        _integer("score", self.score, maximum=MAX_SCORE)
+        if not isinstance(self.components, ScoreComponents):
+            raise ValueError("components are invalid")
+        _reason_codes("reasons", self.reasons, SCORE_REASON_CODES)
+
 
 @dataclass(frozen=True)
 class RejectedTarget:
     target_id: str
     reason_codes: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _stable_id("target_id", self.target_id)
+        _reason_codes("reason_codes", self.reason_codes, REJECTION_REASON_CODES)
 
 
 @dataclass(frozen=True)
@@ -340,3 +405,43 @@ class RouteDecision:
     selected: ScoredTarget | None
     alternatives: tuple[ScoredTarget, ...]
     rejected: tuple[RejectedTarget, ...]
+
+    def __post_init__(self) -> None:
+        generated = _utc_timestamp("generated_at", self.generated_at)
+        expires = _utc_timestamp("expires_at", self.expires_at)
+        if expires <= generated:
+            raise ValueError("expires_at must be after generated_at")
+        _stable_id("policy_id", self.policy_id)
+        _integer("policy_revision", self.policy_revision)
+        _integer("data_revision", self.data_revision)
+        _optional_integer("runtime_revision", self.runtime_revision)
+        if self.selected is not None and not isinstance(self.selected, ScoredTarget):
+            raise ValueError("selected target is invalid")
+        if (
+            not isinstance(self.alternatives, tuple)
+            or len(self.alternatives) > MAX_ALTERNATIVES
+            or any(not isinstance(value, ScoredTarget) for value in self.alternatives)
+        ):
+            raise ValueError("alternatives are invalid")
+        if (
+            not isinstance(self.rejected, tuple)
+            or len(self.rejected) > MAX_REJECTED_TARGETS
+            or any(not isinstance(value, RejectedTarget) for value in self.rejected)
+        ):
+            raise ValueError("rejected targets are invalid")
+        if self.selected is None and self.alternatives:
+            raise ValueError("alternatives require a selected target")
+        if tuple(sorted(self.alternatives, key=lambda value: (-value.score, value.target_id))) != self.alternatives:
+            raise ValueError("alternatives are not canonical")
+        if tuple(sorted(self.rejected, key=lambda value: value.target_id)) != self.rejected:
+            raise ValueError("rejected targets are not canonical")
+        candidates = (() if self.selected is None else (self.selected,)) + self.alternatives
+        if self.selected is not None and any(
+            value.score > self.selected.score for value in self.alternatives
+        ):
+            raise ValueError("selected target is not the highest score")
+        target_ids = tuple(value.target_id for value in candidates) + tuple(
+            value.target_id for value in self.rejected
+        )
+        if len(set(target_ids)) != len(target_ids):
+            raise ValueError("decision contains duplicate target identifiers")

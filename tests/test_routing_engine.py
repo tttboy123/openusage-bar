@@ -212,6 +212,74 @@ class RoutingContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     case()
 
+    def test_decision_outputs_are_deeply_frozen_bounded_and_canonical(self):
+        from openusage_bar.routing_contract import (
+            RejectedTarget,
+            RouteDecision,
+            ScoreComponents,
+            ScoredTarget,
+        )
+
+        components = ScoreComponents(
+            reliability=9_000,
+            headroom=8_000,
+            latency=7_000,
+            cost=6_000,
+        )
+        selected = ScoredTarget(
+            target_id="openai.work.gpt-5",
+            provider_id="openai",
+            account_ref="account-1",
+            model_id="gpt-5",
+            score=8_500,
+            components=components,
+            reasons=("healthy_source", "quota_headroom"),
+        )
+        alternative = ScoredTarget(
+            target_id="openai.work.gpt-5-mini",
+            provider_id="openai",
+            account_ref="account-1",
+            model_id="gpt-5-mini",
+            score=7_500,
+            components=components,
+            reasons=("healthy_source",),
+        )
+        rejected = RejectedTarget(
+            target_id="minimax.work.m2",
+            reason_codes=("fact_stale",),
+        )
+        decision = RouteDecision(
+            generated_at="2026-08-02T12:00:00Z",
+            expires_at="2026-08-02T12:00:30Z",
+            policy_id="reliable",
+            policy_revision=1,
+            data_revision=60_000,
+            runtime_revision=120,
+            selected=selected,
+            alternatives=(alternative,),
+            rejected=(rejected,),
+        )
+
+        self.assertEqual(decision.alternatives, (alternative,))
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            decision.policy_revision = 2
+
+        invalid_cases = (
+            lambda: ScoreComponents(True, 0, 0, 0),
+            lambda: ScoreComponents(10_001, 0, 0, 0),
+            lambda: dataclasses.replace(selected, reasons=["healthy_source"]),
+            lambda: dataclasses.replace(selected, reasons=("customer@example.com",)),
+            lambda: dataclasses.replace(selected, score=10_001),
+            lambda: dataclasses.replace(rejected, reason_codes=()),
+            lambda: dataclasses.replace(decision, alternatives=(selected,)),
+            lambda: dataclasses.replace(decision, selected=None, alternatives=(alternative,)),
+            lambda: dataclasses.replace(decision, alternatives=(alternative,) * 17),
+            lambda: dataclasses.replace(decision, rejected=(rejected,) * 129),
+        )
+        for case in invalid_cases:
+            with self.subTest(case=case), self.assertRaises(ValueError):
+                case()
+
 
 class RoutingEngineTests(unittest.TestCase):
     def test_reliability_first_prefers_healthier_target_over_cheaper_target(self):
