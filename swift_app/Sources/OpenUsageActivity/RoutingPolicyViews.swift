@@ -197,7 +197,7 @@ struct RoutingPolicyEditor: View {
                 TextField(title, value: value, format: .number.grouping(.never))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 80)
-                Text("%").foregroundStyle(.secondary)
+                Text(verbatim: "%").foregroundStyle(.secondary)
             }
         }
     }
