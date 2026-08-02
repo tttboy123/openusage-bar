@@ -657,14 +657,25 @@ def _run_daemon_with_api(
     from .local_api import create_unix_server
 
     api_path = Path(api_socket).expanduser()
+    api_store: ActivityStore | None = None
+    api_query = query
     try:
+        if query.store.path != ":memory:":
+            # The collector can hold its ActivityStore RLock while committing a
+            # large import. A dedicated SQLite connection lets the Resource and
+            # Routing APIs continue reading the last committed WAL snapshot
+            # instead of queueing behind the writer's in-process lock.
+            api_store = ActivityStore(query.store.path)
+            api_query = QueryService(api_store, clock=clock)
         server = create_unix_server(
             api_path,
-            query,
+            api_query,
             runtime_database=DEFAULT_RUNTIME_PATH,
             clock=clock,
         )
     except Exception:
+        if api_store is not None:
+            api_store.close()
         stderr.write("local API unavailable; daemon stopped\n")
         return 1
     server_thread = threading.Thread(
@@ -718,7 +729,7 @@ def _run_daemon_with_api(
             )
 
         controller = RoutingController(
-            query=query,
+            query=api_query,
             target_loader=lambda: target_store.load(
                 available_adapters=(
                     adapter.adapter_id for adapter in execution_adapters
@@ -772,9 +783,13 @@ def _run_daemon_with_api(
                 if routing_store is not None:
                     routing_store.close()
         finally:
-            server.shutdown()
-            server.server_close()
-            server_thread.join(5)
+            try:
+                server.shutdown()
+                server.server_close()
+                server_thread.join(5)
+            finally:
+                if api_store is not None:
+                    api_store.close()
 
 
 def main(

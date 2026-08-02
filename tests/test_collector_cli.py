@@ -518,6 +518,159 @@ class CollectorCLITests(unittest.TestCase):
             self.assertFalse(socket_path.exists())
             self.assertFalse(router_path.exists())
 
+    def test_daemon_resource_api_reads_do_not_wait_for_writer_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = seeded_store(root / "activity.sqlite3")
+            socket_path = root / "openusage.sock"
+            router_path = root / "router.sock"
+            RouteTargetStore(root / "route-targets.json").save((
+                RouteTarget(
+                    target_id="minimax.work.minimax-m2",
+                    provider_id="minimax",
+                    account_ref="account-1",
+                    model_id="minimax-m2",
+                    connection_ref="conn_0123456789abcdef",
+                    execution_class="openai_compatible",
+                    execution_adapter_id="openai_compatible.direct",
+                    resource_mode="quota",
+                    fact_account_ref=None,
+                    runtime_scope_ref=None,
+                    balance_currency=None,
+                    cost_currency=None,
+                    input_cost_micros_per_million=None,
+                    output_cost_micros_per_million=None,
+                    enabled=True,
+                    adapter_available=False,
+                    regions=("global",),
+                    privacy_class="direct_provider",
+                    capabilities=("chat",),
+                    context_window_tokens=128_000,
+                    quality_tier=3,
+                ),
+            ), revision=1)
+            ExecutionConnectionStore(root / "execution-connections.json").save((
+                ExecutionConnection(
+                    connection_ref="conn_0123456789abcdef",
+                    provider_id="minimax",
+                    account_ref="account-1",
+                    execution_class="openai_compatible",
+                    execution_adapter_id="openai_compatible.direct",
+                    base_url="https://api.minimax.chat/v1",
+                    enabled=True,
+                    models=("minimax-m2",),
+                ),
+            ), revision=1)
+            stop = threading.Event()
+            writer_locked = threading.Event()
+            release_writer = threading.Event()
+            result: list[int] = []
+
+            class LockedWriterRefresher:
+                def refresh(self) -> None:
+                    with store._lock:
+                        writer_locked.set()
+                        release_writer.wait(2)
+
+            thread = threading.Thread(
+                target=lambda: result.append(main(
+                    [
+                        "daemon", "--interval", "60",
+                        "--api-socket", str(socket_path),
+                        "--router-socket", str(router_path),
+                    ],
+                    stderr=io.StringIO(),
+                    store=store,
+                    query=QueryService(store, clock=lambda: NOW),
+                    refresher=LockedWriterRefresher(),
+                    stop_event=stop,
+                    clock=lambda: NOW,
+                    catalog_monitor=Mock(),
+                ))
+            )
+            thread.start()
+            try:
+                self.assertTrue(writer_locked.wait(2))
+                client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                client.settimeout(0.5)
+                response = b""
+                try:
+                    client.connect(str(socket_path))
+                    client.sendall(
+                        b"GET /v1/health HTTP/1.1\r\n"
+                        b"Host: localhost\r\nConnection: close\r\n\r\n"
+                    )
+                    while True:
+                        chunk = client.recv(65536)
+                        if not chunk:
+                            break
+                        response += chunk
+                except TimeoutError:
+                    pass
+                finally:
+                    client.close()
+                self.assertIn(b"HTTP/1.1 200", response)
+
+                payload = {
+                    "schemaVersion": "1.0",
+                    "clientRequestRef": "req_0123456789abcdef",
+                    "policyId": "reliable",
+                    "task": {
+                        "kind": "chat",
+                        "requiredCapabilities": ["chat"],
+                        "estimatedInputTokens": 1000,
+                        "maxOutputTokens": 1000,
+                        "minimumContextWindowTokens": 2000,
+                        "privacy": "direct_provider",
+                        "regions": ["global"],
+                    },
+                    "constraints": {
+                        "allowProviders": [],
+                        "denyProviders": [],
+                        "allowTargets": [],
+                        "denyTargets": [],
+                        "maximumEstimatedCostMicrounits": None,
+                        "costCurrency": None,
+                    },
+                    "session": None,
+                }
+                encoded = json.dumps(
+                    payload, separators=(",", ":")
+                ).encode("utf-8")
+                client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                client.settimeout(0.5)
+                routing_response = b""
+                try:
+                    client.connect(str(router_path))
+                    client.sendall(
+                        b"POST /v1/simulations HTTP/1.1\r\n"
+                        b"Host: localhost\r\nContent-Type: application/json\r\n"
+                        + f"Content-Length: {len(encoded)}\r\n".encode("ascii")
+                        + b"Connection: close\r\n\r\n"
+                        + encoded
+                    )
+                    while True:
+                        chunk = client.recv(65536)
+                        if not chunk:
+                            break
+                        routing_response += chunk
+                except TimeoutError:
+                    pass
+                finally:
+                    client.close()
+                self.assertIn(b"HTTP/1.1 200", routing_response)
+                self.assertIn(
+                    b'"targetId":"minimax.work.minimax-m2"',
+                    routing_response,
+                )
+            finally:
+                stop.set()
+                release_writer.set()
+                thread.join(3)
+                store.close()
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result, [0])
+
     def test_daemon_routes_only_through_installed_adapter_and_connection(self):
         self.store.record_quota(QuotaObservation(
             record_id="minimax.current", observed_at="2026-07-14T09:59:00Z",
