@@ -180,6 +180,8 @@ struct RoutingPage: View {
                 .toggleStyle(.switch)
                 .disabled(model.isMutating || model.health == nil)
                 .help("Enable or disable local route decisions")
+                .accessibilityLabel("Decision API")
+                .accessibilityValue(decisionAPIStatus)
                 Spacer()
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Default policy").font(.caption).foregroundStyle(.secondary)
@@ -212,7 +214,6 @@ struct RoutingPage: View {
             }
             .padding(6)
         }
-        .accessibilityElement(children: .combine)
     }
 
     private var targets: some View {
