@@ -40,11 +40,9 @@ bug bounty program.
   the fixed Provider endpoint and secret never cross into SwiftUI or JSON.
 - Releases must pass the repository and Git-history secret scanner.
 
-The current 0.8 routing security pre-review packet, trust boundaries, residual
-risks and reproducible evidence commands are recorded in
-[`docs/security/0.8-routing-review.md`](docs/security/0.8-routing-review.md).
-That packet is not an independent approval and does not make a local candidate
-a public release.
+Pre-release security reviews are maintained outside the public repository.
+Passing repository checks is not an independent security approval and does not
+make a local candidate a public release.
 
 ## Canary diagnostics
 
