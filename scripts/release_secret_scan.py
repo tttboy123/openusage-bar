@@ -35,6 +35,11 @@ CONTEXTUAL_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+PRIVATE_PATH_PATTERNS = (
+    re.compile(r"(?:file://)?/Users/[^/\s]+/(?:Desktop|Documents|Downloads)/"),
+    re.compile(r"/var/" r"folders/[^\s\"']+"),
+    re.compile(r"~/Documents/(?:Codex|Projects|Work)(?:/|\b)"),
+)
 
 
 def _git(*arguments: str, cwd: Path) -> subprocess.CompletedProcess[bytes]:
@@ -53,7 +58,15 @@ def _contains_secret(payload: str, *, contextual: bool = True) -> bool:
 
 
 def _is_fixture_path(path: Path) -> bool:
-    return path.parts[0] == "tests" or path.parts[:2] == ("docs", "testing")
+    return (
+        path.parts[0] == "tests"
+        or path.parts[:2] == ("swift_app", "Tests")
+        or path.parts[:2] == ("docs", "testing")
+    )
+
+
+def _contains_private_path(payload: str) -> bool:
+    return any(pattern.search(payload) for pattern in PRIVATE_PATH_PATTERNS)
 
 
 def scan_tree(root: Path) -> bool:
@@ -75,10 +88,11 @@ def scan_tree(root: Path) -> bool:
             raise RuntimeError("tracked file scan unavailable") from error
         if b"\0" in payload:
             continue
-        if _contains_secret(
-            payload.decode("utf-8", errors="replace"),
-            contextual=not _is_fixture_path(relative),
-        ):
+        text = payload.decode("utf-8", errors="replace")
+        is_fixture = _is_fixture_path(relative)
+        if _contains_secret(text, contextual=not is_fixture):
+            return True
+        if not is_fixture and _contains_private_path(text):
             return True
     return False
 

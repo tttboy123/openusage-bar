@@ -6,6 +6,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A native macOS application icon is embedded in the menu-bar host and both
+  helper apps. Public README assets now demonstrate the menu bar, activity
+  ledger, and Provider catalog using synthetic or static-data-only surfaces.
 - A bounded, content-free `GET /v1/runtime/summary` Local API route exposes the
   separate 24-hour Runtime Ledger to local schedulers with an independent
   `runtimeRevision`; unsafe or unavailable state fails closed instead of
@@ -27,6 +30,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The public README is product-first and bilingual, while internal execution
+  plans have been removed from the distributable source tree. Release scanning
+  now rejects machine-specific development paths outside test fixtures.
 - Provider source contracts are OS-neutral; the OpenUsage Bar distribution
   separately verifies that every source registered in its shipped catalog
   supports macOS.
@@ -39,6 +45,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- OpenUsage executable discovery no longer includes a developer-specific
+  project directory; only standard user and system tool locations are added to
+  the credential-free child `PATH`.
 - Execution requests now pin one already validated public numeric address for
   the TCP connection while retaining the original Provider hostname for TLS
   SNI and certificate verification. This removes the DNS validation/connection

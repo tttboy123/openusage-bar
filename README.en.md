@@ -1,29 +1,54 @@
 <!-- openusage-release-version: 0.6.0 -->
 <div align="center">
 
+<img src="docs/assets/brand/openusage-bar-icon.png" width="124" alt="OpenUsage Bar app icon">
+
 # OpenUsage Bar
 
-**See AI subscription capacity, token activity, and API spend at a glance.**
+### A local AI resource console for macOS
 
-A native macOS menu-bar utility. Data stays local; people read the UI and schedulers read JSON.
+**Think iStat Menus for AI accounts and subscriptions: native UI for people, trustworthy JSON for schedulers.**
 
 [![Release](https://img.shields.io/github/v/release/tttboy123/openusage-bar?include_prereleases&style=flat-square&color=0A84FF)](https://github.com/tttboy123/openusage-bar/releases)
 ![macOS](https://img.shields.io/badge/macOS-15%2B-111111?style=flat-square&logo=apple&logoColor=white)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-111111?style=flat-square)
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-native-111111?style=flat-square&logo=swift&logoColor=white)
 ![Local First](https://img.shields.io/badge/Local--First-Keychain%20%2B%20SQLite-111111?style=flat-square)
+[![CI](https://img.shields.io/github/actions/workflow/status/tttboy123/openusage-bar/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/tttboy123/openusage-bar/actions/workflows/ci.yml)
 
-[中文](README.md) | [Roadmap](ROADMAP.md) | [Local API](docs/api/local-api-v1.md) | [Provider support](docs/provider-support.md) | [Install](docs/release-quick-start.md)
+[Download](https://github.com/tttboy123/openusage-bar/releases) · [Install](docs/release-quick-start.md) · [Provider support](docs/provider-support.md) · [Local API](docs/api/local-api-v1.md) · [中文](README.md)
 
 </div>
-
-OpenUsage Bar is a local-first native macOS dashboard for AI subscriptions, API providers, local coding tools, and daily token activity.
 
 <p align="center">
   <img src="docs/assets/openusage-bar-activity-demo-zh.png" width="1160" alt="OpenUsage Bar Activity view showing the yearly token heatmap and daily model trend">
 </p>
 
-<p align="center"><sub>Real SwiftUI interface rendered from an isolated synthetic ledger. No user ledger, Keychain data, or real quota was read.</sub></p>
+<table>
+  <tr>
+    <td width="36%" align="center">
+      <img src="docs/assets/openusage-bar-menu-demo.png" width="310" alt="OpenUsage Bar menu-bar capacity overview"><br>
+      <sub><b>Menu bar</b> · today tokens and urgent capacity</sub>
+    </td>
+    <td width="64%" align="center">
+      <img src="docs/assets/openusage-bar-provider-catalog-demo-zh.png" width="590" alt="OpenUsage Bar provider catalog"><br>
+      <sub><b>Provider Center</b> · built-ins, custom endpoints, and discovery</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center"><sub>Real SwiftUI surfaces. Activity and menu-bar images use isolated synthetic ledgers; the Provider image contains only the static service catalog. No user ledger, Keychain item, account, or live quota was read.</sub></p>
+
+## One ledger, four product surfaces
+
+| Surface | Purpose |
+| --- | --- |
+| **Menu bar** | Today tokens, remaining subscription capacity, reset time, and freshness |
+| **Usage Details** | Daily/weekly/monthly activity, token breakdowns, model trends, quota history, and spend |
+| **Provider Center** | Built-in providers, multiple accounts, custom HTTPS mappings, usage feeds, and visibility |
+| **Local API / CLI** | Versioned facts, source, quality, timestamps, and `dataRevision` for schedulers such as Loom |
+
+Missing facts remain `Unknown` with a reason; they are never fabricated as zero. Credentials stay in Keychain, the ledger stays in SQLite, and TCP listening is disabled by default. OpenUsage Bar remains fully useful without Loom or any other scheduler.
 
 > Current public pre-release: **0.6.0 RC**, for the opt-in, no-telemetry
 > external Canary. The qualifying external cohort remains **0 / 5** and the

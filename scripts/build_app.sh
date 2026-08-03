@@ -139,6 +139,7 @@ mkdir -p \
   "$ROOT/scripts/atomic_swap.c" -o "$ATOMIC_SWAP"
 chmod 755 "$ATOMIC_SWAP"
 cp "$RESOURCES/OpenUsageBar-Info.plist" "$APP/Contents/Info.plist"
+cp "$RESOURCES/OpenUsageBar.icns" "$APP/Contents/Resources/OpenUsageBar.icns"
 cp "$SWIFT_PACKAGE/.build/release/OpenUsageBar" "$STATUS_RUNTIME"
 /usr/bin/clang -Wall -Wextra -Werror -mmacosx-version-min=15.0 \
   "$ROOT/scripts/clean_env_launcher.c" -o "$APP/Contents/MacOS/OpenUsage Bar"
@@ -153,6 +154,8 @@ chmod 555 "$INTEGRATIONS"
 
 mkdir -p "$ACTIVITY_APP/Contents/MacOS"
 cp "$RESOURCES/OpenUsageActivity-Info.plist" "$ACTIVITY_APP/Contents/Info.plist"
+mkdir -p "$ACTIVITY_APP/Contents/Resources"
+cp "$RESOURCES/OpenUsageBar.icns" "$ACTIVITY_APP/Contents/Resources/OpenUsageBar.icns"
 cp "$SWIFT_PACKAGE/.build/release/OpenUsageActivity" "$ACTIVITY_APP/Contents/MacOS/OpenUsage Activity"
 chmod 755 "$ACTIVITY_APP/Contents/MacOS/OpenUsage Activity"
 for LANGUAGE in en zh-Hans; do
@@ -170,6 +173,8 @@ mkdir -p "$BUILD_ROOT/python-dist" "$BUILD_ROOT/python-build"
 PY_APP=$(find "$BUILD_ROOT/python-dist" -maxdepth 1 -type d -name '*.app' -print -quit)
 [[ -n "$PY_APP" ]] || { print -u2 "settings helper build unavailable"; exit 1; }
 /usr/bin/ditto "$PY_APP" "$SETTINGS_APP"
+mkdir -p "$SETTINGS_APP/Contents/Resources"
+cp "$RESOURCES/OpenUsageBar.icns" "$SETTINGS_APP/Contents/Resources/OpenUsageBar.icns"
 if [[ ! -x "$SETTINGS_APP/Contents/MacOS/OpenUsage Provider Settings" ]]; then
   PY_EXEC=$(find "$SETTINGS_APP/Contents/MacOS" -maxdepth 1 -type f -perm +111 -print -quit)
   [[ -n "$PY_EXEC" ]] || { print -u2 "settings helper executable unavailable"; exit 1; }
@@ -214,8 +219,14 @@ codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 
 [[ $(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist") == com.lune.openusagebar ]]
+[[ $(plutil -extract CFBundleIconFile raw "$APP/Contents/Info.plist") == OpenUsageBar ]]
+[[ -f "$APP/Contents/Resources/OpenUsageBar.icns" ]]
 [[ $(plutil -extract CFBundleIdentifier raw "$ACTIVITY_APP/Contents/Info.plist") == com.lune.openusagebar.activity ]]
 [[ $(plutil -extract CFBundleIdentifier raw "$SETTINGS_APP/Contents/Info.plist") == com.lune.openusagebar.settings ]]
+[[ $(plutil -extract CFBundleIconFile raw "$ACTIVITY_APP/Contents/Info.plist") == OpenUsageBar ]]
+[[ $(plutil -extract CFBundleIconFile raw "$SETTINGS_APP/Contents/Info.plist") == OpenUsageBar ]]
+[[ -f "$ACTIVITY_APP/Contents/Resources/OpenUsageBar.icns" ]]
+[[ -f "$SETTINGS_APP/Contents/Resources/OpenUsageBar.icns" ]]
 [[ $(plutil -extract LSUIElement raw "$APP/Contents/Info.plist") == true ]]
 ! plutil -extract LSUIElement raw "$ACTIVITY_APP/Contents/Info.plist" >/dev/null 2>&1
 ! plutil -extract LSUIElement raw "$SETTINGS_APP/Contents/Info.plist" >/dev/null 2>&1

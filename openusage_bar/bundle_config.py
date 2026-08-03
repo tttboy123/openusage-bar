@@ -14,6 +14,7 @@ def info_plist() -> dict[str, object]:
         "CFBundleName": APP_NAME,
         "CFBundleDisplayName": APP_NAME,
         "CFBundleIdentifier": BUNDLE_ID,
+        "CFBundleIconFile": "OpenUsageBar",
         "CFBundleShortVersionString": APP_VERSION,
         "CFBundleVersion": BUILD_VERSION,
         "LSMinimumSystemVersion": "15.0",

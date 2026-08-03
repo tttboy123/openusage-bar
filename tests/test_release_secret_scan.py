@@ -80,6 +80,39 @@ class ReleaseSecretScanTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
 
+    def test_machine_specific_development_path_fails_without_echoing_it(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+            private_path = "/Users/developer/Documents/PrivateProject/worktree"
+            (repo / "README.md").write_text(private_path + "\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+
+            result = self.run_scan(repo)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(
+                result.stderr,
+                "release_secret_scan_forbidden_material scope=tree\n",
+            )
+            self.assertNotIn(private_path, result.stdout + result.stderr)
+
+    def test_fixture_paths_can_exercise_redaction_logic(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+            path = repo / "tests" / "test_redaction.py"
+            path.parent.mkdir()
+            path.write_text(
+                "fixture = '/Users/tester/Documents/PrivateProject/input.json'\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+
+            result = self.run_scan(repo)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_tree_failure_does_not_echo_path_or_secret(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)

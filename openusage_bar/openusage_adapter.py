@@ -47,7 +47,6 @@ CHILD_CLI_DIRECTORIES = CURSOR_CLI_DIRECTORIES + (
     os.path.expanduser("~/Library/pnpm"),
     os.path.expanduser("~/.bun/bin"),
     os.path.expanduser("~/.cargo/bin"),
-    os.path.expanduser("~/Documents/Codex/devtools/npm/bin"),
     "/opt/homebrew/bin",
     "/usr/local/bin",
 )

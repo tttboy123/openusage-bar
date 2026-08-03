@@ -1,11 +1,13 @@
 <!-- openusage-release-version: 0.6.0 -->
 <div align="center">
 
+<img src="docs/assets/brand/openusage-bar-icon.png" width="124" alt="OpenUsage Bar App 图标">
+
 # OpenUsage Bar
 
-**一眼掌握 AI 订阅余量、Token 活动与 API 消耗。**
+### macOS 上的本地 AI 资源控制台
 
-原生 macOS 菜单栏工具。数据留在本机，人看界面，调度器读 JSON。
+**像 AI 账号与订阅的 iStat Menus：人看原生界面，调度器读可信 JSON。**
 
 [![Release](https://img.shields.io/github/v/release/tttboy123/openusage-bar?include_prereleases&style=flat-square&color=0A84FF)](https://github.com/tttboy123/openusage-bar/releases)
 ![macOS](https://img.shields.io/badge/macOS-15%2B-111111?style=flat-square&logo=apple&logoColor=white)
@@ -13,18 +15,60 @@
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-native-111111?style=flat-square&logo=swift&logoColor=white)
 ![Local First](https://img.shields.io/badge/Local--First-Keychain%20%2B%20SQLite-111111?style=flat-square)
 ![License](https://img.shields.io/badge/License-Apache--2.0-111111?style=flat-square)
+[![CI](https://img.shields.io/github/actions/workflow/status/tttboy123/openusage-bar/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/tttboy123/openusage-bar/actions/workflows/ci.yml)
 
-[English](README.en.md) | [路线图](ROADMAP.md) | [本地 API](docs/api/local-api-v1.md) | [Provider 支持](docs/provider-support.md) | [性能预算](docs/performance.md) | [安装指南](docs/release-quick-start.md)
+[下载应用](https://github.com/tttboy123/openusage-bar/releases) · [5 分钟安装](docs/release-quick-start.md) · [Provider 支持](docs/provider-support.md) · [本地 API](docs/api/local-api-v1.md) · [English](README.en.md)
 
 </div>
-
-OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Token 活动统一到一个原生 SwiftUI 客户端里：菜单栏用于快速判断，详情页用于分析，CLI JSON 和本地只读 API 供调度平台读取。
 
 <p align="center">
   <img src="docs/assets/openusage-bar-activity-demo-zh.png" width="1160" alt="OpenUsage Bar 中文 Activity 界面，展示年度 Token 热力图与每日模型趋势">
 </p>
 
-<p align="center"><sub>真实 SwiftUI 界面，使用隔离的合成账本生成。未读取用户账本、Keychain 或真实额度。</sub></p>
+<table>
+  <tr>
+    <td width="36%" align="center">
+      <img src="docs/assets/openusage-bar-menu-demo.png" width="310" alt="OpenUsage Bar 菜单栏容量总览"><br>
+      <sub><b>菜单栏</b> · 两秒判断今日 Token 与订阅余量</sub>
+    </td>
+    <td width="64%" align="center">
+      <img src="docs/assets/openusage-bar-provider-catalog-demo-zh.png" width="590" alt="OpenUsage Bar Provider 接入目录"><br>
+      <sub><b>Provider Center</b> · 内置连接、自定义接口与自动发现</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center"><sub>以上均为真实 SwiftUI 界面。Activity 与菜单栏使用隔离的合成账本生成；Provider 图只包含静态服务目录，未读取用户账本、Keychain、真实账号或额度。</sub></p>
+
+## 一个数据底座，四个产品界面
+
+OpenUsage Bar 把分散在 AI 厂商、本地编码客户端和 API 账单里的事实写入同一份本地账本，同时明确区分“订阅容量、Token 活动、API 费用、数据健康”。缺失值显示 `Unknown` 和原因，绝不用 `0` 伪装。
+
+| 界面 | 解决的问题 |
+| --- | --- |
+| **菜单栏** | 今天用了多少 Token、各订阅还剩多少、何时重置、哪条数据过期 |
+| **Usage Details** | 每日/周/月/年活动、输入/输出/缓存拆分、模型趋势、额度历史与 API 消耗 |
+| **Provider Center** | 内置 Provider、多账号、自定义 HTTPS 映射、每日用量 Feed、隐藏与刷新 |
+| **Local API / CLI** | 为 Loom 等调度器提供版本化 JSON、来源、质量、更新时间与 `dataRevision` |
+
+```mermaid
+flowchart LR
+  A[AI Provider 与本地客户端] --> B[受限采集器]
+  K[(macOS Keychain)] --> B
+  B --> D[(本地 SQLite 账本)]
+  D --> E[菜单栏]
+  D --> F[Usage Details]
+  D --> G[Provider Center]
+  D --> H[CLI JSON 与只读 API]
+```
+
+### 设计原则
+
+- **本地优先**：密钥留在 Keychain，账本留在 SQLite，默认不监听 TCP。
+- **来源可追溯**：每个事实带来源、质量、更新时间和缺失原因。
+- **不重复计算**：官方数据优先，OpenUsage 可作备选；同一批数据不会相加两次。
+- **独立可用**：不依赖 Loom；Loom 和其他调度器只是可选的只读 API 消费者。
+- **可扩展**：优先复用 OpenUsage 等成熟采集源，缺口通过 Provider Adapter Kit 补齐。
 
 > 当前公开预发布版：**0.6.0 RC**，用于自愿参加、无遥测的外部
 > Canary。当前合格外部机器仍为 **0 / 5**，30 天时钟为
@@ -32,35 +76,8 @@ OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Tok
 > [Canary 跟踪 Issue #33](https://github.com/tttboy123/openusage-bar/issues/33)。
 > 支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple
 > Developer ID 公证包；若 macOS 显示“已损坏”，按下方指引仅移除本 App
-> 的下载隔离属性。
-
-## 为什么需要它
-
-AI 工具越来越多，但用量信息分散在不同地方：
-
-- Codex、Cursor、Kiro 这类订阅型工具关心剩余额度和重置周期。
-- MiniMax、StepFun、OpenAI Organization 这类 Provider 关心套餐余量、账单和 API 消耗。
-- Claude Code、OpenCode、Hermes、OpenClaw 等本地工具关心本地活动和 Token 历史。
-- 自动调度平台需要结构化数据，而不是去解析 UI 文本。
-
-OpenUsage Bar 的定位很明确：
-
-```text
-菜单栏：给人看，快速判断今天还能不能继续跑。
-详情页：给人分析，看每日 Token、模型趋势、额度历史和数据健康。
-本地 API：给调度系统读，稳定 JSON，不依赖 UI 文案。
-Keychain：放密钥；SQLite：放账本；日志：不放凭证。
-```
-
-```mermaid
-flowchart LR
-  A[AI Provider 与本地工具] --> B[受限 Python Collector]
-  K[(macOS Keychain)] --> B
-  B --> D[(本地 SQLite 账本)]
-  D --> E[菜单栏快照]
-  D --> F[Usage Details]
-  D --> G[CLI JSON 与只读 API]
-```
+> 的下载隔离属性。发布资格和真实账号验证状态会明确标注，不把 Fixture
+> 通过写成真实环境通过。
 
 ## 核心能力
 

@@ -41,6 +41,8 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("-warnings-as-errors", source)
         self.assertIn("OpenUsageBar", source)
         self.assertIn("OpenUsageActivity", source)
+        self.assertIn('OpenUsageBar.icns', source)
+        self.assertIn('CFBundleIconFile', source)
         self.assertIn("codesign --verify --deep --strict", source)
         self.assertNotIn("curl ", source)
         self.assertNotIn("npm ", source)

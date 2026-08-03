@@ -151,13 +151,16 @@ struct VisibilityStoreTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let ledgerURL = directory.appendingPathComponent("activity.sqlite3")
         let visibilityURL = directory.appendingPathComponent("visibility.json")
-        try writeLedger(to: ledgerURL)
+        try writeScreenshotLedger(to: ledgerURL)
         try writeVisibility([], to: visibilityURL)
 
         let populated = MenuBarViewModel(ledgerURL: ledgerURL, visibilityURL: visibilityURL)
         populated.loadLastGoodOnce()
         #expect(populated.groups.contains(where: { $0.primary.providerID == "minimax" }))
-        let expanded = render(MenuBarPopover(model: populated))
+        let expanded = render(
+            MenuBarPopover(model: populated),
+            screenshotName: "openusage-bar-menu-demo.png"
+        )
         #expect(expanded.size.width == 400)
         #expect(expanded.descendantCount > 8)
 
@@ -204,6 +207,48 @@ struct VisibilityStoreTests {
         guard process.terminationStatus == 0 else { throw VisibilityFixtureError.python }
     }
 
+    private func writeScreenshotLedger(to url: URL) throws {
+        let root = repositoryRoot()
+        let process = Process()
+        process.executableURL = root.appendingPathComponent(".build-venv/bin/python")
+        process.arguments = [
+            "-c",
+            """
+            import sys
+            from datetime import datetime, timedelta, timezone
+            from openusage_bar.activity_store import ActivityStore, DailyUsageRow, QuotaObservation
+            store=ActivityStore(sys.argv[1])
+            now=datetime.now(timezone.utc)
+            day=now.date().isoformat()
+            observed_at=now.isoformat().replace('+00:00', 'Z')
+            store.replace_daily_usage('codex', day, [DailyUsageRow(
+                day=day, provider_id='codex', model_id='gpt-5.6-sol',
+                input_tokens=31_200_000, output_tokens=8_400_000,
+                cache_read_tokens=34_600_000, cache_creation_tokens=0,
+                reasoning_tokens=None, total_tokens=74_200_000,
+                cost_amount=None, cost_currency=None, cost_basis='unavailable',
+                quality='exact', imported_at=observed_at)], imported_at=observed_at)
+            def iso(value):
+                return value.isoformat().replace('+00:00', 'Z')
+            store.record_quota(QuotaObservation(record_id='minimax.five-hour', observed_at=observed_at, provider_id='minimax', quota_name='5-hour', unit='percent', used='82', quota_limit='100', remaining='18', remaining_ratio=.18, resets_at=iso(now + timedelta(hours=2)), period_start=None, period_end=None, state='ok', quality='live', stale=False))
+            store.record_quota(QuotaObservation(record_id='cursor.monthly', observed_at=observed_at, provider_id='cursor', quota_name='monthly', unit='percent', used='8', quota_limit='100', remaining='92', remaining_ratio=.92, resets_at=iso(now + timedelta(days=12)), period_start=None, period_end=None, state='ok', quality='live', stale=False))
+            store.record_quota(QuotaObservation(record_id='kiro.monthly', observed_at=observed_at, provider_id='kiro', quota_name='monthly', unit='percent', used='36', quota_limit='100', remaining='64', remaining_ratio=.64, resets_at=iso(now + timedelta(days=8)), period_start=None, period_end=None, state='ok', quality='live', stale=False))
+            store.record_quota(QuotaObservation(record_id='codex.weekly', observed_at=observed_at, provider_id='codex', quota_name='weekly', unit='tokens', used=None, quota_limit=None, remaining=None, remaining_ratio=None, resets_at=None, period_start=None, period_end=None, state='temporarily_unavailable', quality='cached', stale=True))
+            store.close()
+            """,
+            url.path,
+        ]
+        process.currentDirectoryURL = root
+        var environment = ProcessInfo.processInfo.environment
+        environment["PYTHONPATH"] = root.path
+        process.environment = environment
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw VisibilityFixtureError.python }
+    }
+
     private func updateQuota(remainingRatio: Double, in url: URL) throws {
         let root = repositoryRoot()
         let process = Process()
@@ -233,7 +278,9 @@ struct VisibilityStoreTests {
     }
 
     @MainActor
-    private func render<Content: View>(_ content: Content) -> (size: CGSize, descendantCount: Int) {
+    private func render<Content: View>(
+        _ content: Content, screenshotName: String? = nil
+    ) -> (size: CGSize, descendantCount: Int) {
         let hosting = NSHostingView(rootView: content)
         hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 620)
         let window = NSWindow(
@@ -243,9 +290,37 @@ struct VisibilityStoreTests {
         window.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
         hosting.displayIfNeeded()
+        if let screenshotName {
+            writeDocumentationScreenshot(hosting, name: screenshotName)
+        }
         let result = (hosting.frame.size, descendants(of: hosting))
         MenuRenderRetention.windows.append(window)
         return result
+    }
+
+    @MainActor
+    private func writeDocumentationScreenshot(_ view: NSView, name: String) {
+        guard let directory = ProcessInfo.processInfo.environment["OPENUSAGE_SCREENSHOT_DIR"] else {
+            return
+        }
+        guard let representation = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            Issue.record("Documentation screenshot bitmap unavailable")
+            return
+        }
+        view.cacheDisplay(in: view.bounds, to: representation)
+        guard let data = representation.representation(using: .png, properties: [:]) else {
+            Issue.record("Documentation screenshot encoding unavailable")
+            return
+        }
+        do {
+            let outputDirectory = URL(fileURLWithPath: directory, isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: outputDirectory, withIntermediateDirectories: true
+            )
+            try data.write(to: outputDirectory.appendingPathComponent(name), options: .atomic)
+        } catch {
+            Issue.record("Documentation screenshot write failed")
+        }
     }
 
     @MainActor
