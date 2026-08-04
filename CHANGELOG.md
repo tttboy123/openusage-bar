@@ -24,6 +24,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   `openusage-bar` CLI, Local API v1 contract) remains compatible; app-bundle
   renaming is scheduled with the cross-platform release.
 
+## 0.7.1 - 2026-08-04
+
+- Native UI: render model trend points on partial days (chart was empty)
+- Native UI: keep Provider configuration stable when switching Spaces or apps
+- Native UI: add per-Provider Token Usage to API Spend, Get API Key links,
+  Data Health summary, and clearer Local Tools empty state
+
 ## 0.7.0 - 2026-08-04
 
 - Settings helper GUI: fix PyObjC selector crash and launcher naming

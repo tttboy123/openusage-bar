@@ -1,6 +1,6 @@
 # UsageHub Roadmap
 
-<!-- openusage-release-state: version=0.7.0 channel=rc api=1.0 canary=0/5 clock=not_started -->
+<!-- openusage-release-state: version=0.7.1 channel=rc api=1.0 canary=0/5 clock=not_started -->
 
 UsageHub (formerly OpenUsage Bar) is a standalone, local-first macOS product. Loom and other local
 schedulers are optional read-only API consumers and do not gate any OpenUsage

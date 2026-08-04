@@ -28,7 +28,7 @@ maintainer explicitly activates the timed cohort, the clock state is
 `not_started`.
 
 The current public intake uses the
-[v0.7.0 pre-release](https://github.com/tttboy123/openusage-bar/releases/tag/v0.7.0).
+[v0.7.1 pre-release](https://github.com/tttboy123/openusage-bar/releases/tag/v0.7.1).
 Accepted-machine counts, configuration-class coverage, blocking incidents and
 the eventual UTC activation timestamp are recorded in
 [Canary tracking issue #33](https://github.com/tttboy123/openusage-bar/issues/33).
@@ -60,16 +60,16 @@ Record pass/fail and UTC date for each event:
    files extracted from it. Replace `0.6.0` with the candidate version:
 
    ```bash
-   gh attestation verify OpenUsage-Bar-v0.7.0-macos-arm64.zip \
+   gh attestation verify OpenUsage-Bar-v0.7.1-macos-arm64.zip \
      --repo tttboy123/openusage-bar \
      --signer-workflow \
        tttboy123/openusage-bar/.github/workflows/release.yml \
-     --source-ref refs/tags/v0.7.0 \
+     --source-ref refs/tags/v0.7.1 \
      --deny-self-hosted-runners
-   shasum -a 256 -c OpenUsage-Bar-v0.7.0-macos-arm64.zip.sha256
-   unzip OpenUsage-Bar-v0.7.0-macos-arm64.zip
-   cd OpenUsage-Bar-v0.7.0-macos-arm64
-   scripts/verify_canary_candidate.py --assets-dir .. --version 0.7.0
+   shasum -a 256 -c OpenUsage-Bar-v0.7.1-macos-arm64.zip.sha256
+   unzip OpenUsage-Bar-v0.7.1-macos-arm64.zip
+   cd OpenUsage-Bar-v0.7.1-macos-arm64
+   scripts/verify_canary_candidate.py --assets-dir .. --version 0.7.1
    ```
 
    The packaged verifier requires the expected version and exactly one release

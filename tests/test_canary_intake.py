@@ -51,7 +51,7 @@ class CanaryIntakeContractTests(unittest.TestCase):
         self.assertIn("aggregate Balance state/quality/stale counts", protocol)
         self.assertIn("scripts/verify_canary_surfaces.py", protocol)
         self.assertIn("scripts/verify_canary_candidate.py", protocol)
-        self.assertIn("--version 0.7.0", protocol)
+        self.assertIn("--version 0.7.1", protocol)
         self.assertIn("gh attestation verify", protocol)
         self.assertIn("--signer-workflow", protocol)
         self.assertRegex(

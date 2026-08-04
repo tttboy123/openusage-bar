@@ -1,4 +1,4 @@
-<!-- openusage-release-version: 0.7.0 -->
+<!-- openusage-release-version: 0.7.1 -->
 <div align="center">
 
 # UsageHub
@@ -85,7 +85,7 @@ flowchart LR
 
 ## 快速安装
 
-[下载 OpenUsage Bar v0.7.0 DMG（Apple Silicon）](https://github.com/tttboy123/openusage-bar/releases/download/v0.7.0/OpenUsage-Bar-v0.7.0-macos-arm64.dmg)
+[下载 OpenUsage Bar v0.7.1 DMG（Apple Silicon）](https://github.com/tttboy123/openusage-bar/releases/download/v0.7.1/OpenUsage-Bar-v0.7.1-macos-arm64.dmg)
 
 1. 打开下载的 DMG。
 2. 将 **OpenUsage Bar** 拖入 **Applications**。

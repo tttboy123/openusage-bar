@@ -85,7 +85,7 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
         report = self.module.verify_surfaces(
             api_get=lambda: next(api_values),
             cli_get=lambda: cli_value,
-            product={"version": "0.7.0", "build": "10"},
+            product={"version": "0.7.1", "build": "11"},
             captured_at="2026-07-30T00:00:03Z",
         )
 
@@ -97,7 +97,7 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
                 "visualMenu": "pending_manual",
             },
             "dataRevision": 7,
-            "product": {"build": "10", "version": "0.7.0"},
+            "product": {"build": "11", "version": "0.7.1"},
             "schemaVersion": "openusage-canary-surfaces-1",
         })
         encoded = json.dumps(report, sort_keys=True).lower()
@@ -121,7 +121,7 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
         report = self.module.verify_surfaces(
             api_get=lambda: next(api_values),
             cli_get=lambda: next(cli_values),
-            product={"version": "0.7.0", "build": "10"},
+            product={"version": "0.7.1", "build": "11"},
             captured_at="2026-07-30T00:00:05Z",
             attempts=2,
         )
@@ -140,7 +140,7 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
             self.module.verify_surfaces(
                 api_get=lambda: api_value,
                 cli_get=lambda: cli_value,
-                product={"version": "0.7.0", "build": "10"},
+                product={"version": "0.7.1", "build": "11"},
                 captured_at="2026-07-30T00:00:02Z",
             )
 
@@ -160,7 +160,7 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
                     next(revisions),
                     generated_at="2026-07-30T00:00:00Z",
                 ),
-                product={"version": "0.7.0", "build": "10"},
+                product={"version": "0.7.1", "build": "11"},
                 captured_at="2026-07-30T00:00:02Z",
                 attempts=2,
             )
@@ -172,7 +172,7 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
             "schemaVersion": "openusage-canary-surfaces-1",
             "capturedAt": "2026-07-30T00:00:03Z",
             "dataRevision": 7,
-            "product": {"version": "0.7.0", "build": "10"},
+            "product": {"version": "0.7.1", "build": "11"},
             "checks": {
                 "apiCliSnapshot": "pass",
                 "sourceHealthAgreement": "pass",
