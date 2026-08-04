@@ -134,13 +134,19 @@ if [[ ! -x "$SETTINGS_APP/Contents/MacOS/OpenUsage Provider Settings" ]]; then
   PY_EXEC=$(find "$SETTINGS_APP/Contents/MacOS" -maxdepth 1 -type f -perm +111 ! -name python -print -quit)
   [[ -n "$PY_EXEC" ]] || { print -u2 "settings helper executable unavailable"; exit 1; }
   mv "$PY_EXEC" "$SETTINGS_APP/Contents/MacOS/OpenUsage Provider Settings"
-  # py2app records the original stub name in CFBundleExecutable; keep it in
-  # sync with the renamed launcher so LaunchServices can open the helper GUI.
-  /usr/libexec/PlistBuddy -c \
-    "Set :CFBundleExecutable OpenUsage Provider Settings" \
-    "$SETTINGS_APP/Contents/Info.plist"
 fi
-/usr/libexec/PlistBuddy -c "Delete :PythonInfoDict:PythonExecutable" \
+# py2app records the original stub name in CFBundleExecutable; keep it in
+# sync with the renamed launcher so LaunchServices can open the helper GUI.
+/usr/libexec/PlistBuddy -c \
+  "Set :CFBundleExecutable OpenUsage Provider Settings" \
+  "$SETTINGS_APP/Contents/Info.plist"
+# Point PythonExecutable at the bundled interpreter instead of the build
+# home path; the launcher resolves @executable_path against Contents/MacOS.
+/usr/libexec/PlistBuddy -c \
+  "Delete :PythonInfoDict:PythonExecutable" \
+  "$SETTINGS_APP/Contents/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c \
+  "Add :PythonInfoDict:PythonExecutable string @executable_path/python" \
   "$SETTINGS_APP/Contents/Info.plist"
 # py2app copies Python development headers even though this app never compiles
 # extensions at runtime. Hosted Python's pyconfig.h can contain its build-home

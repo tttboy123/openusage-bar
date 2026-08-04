@@ -43,7 +43,7 @@ class BundleConfigTests(unittest.TestCase):
 
     def test_all_three_bundles_share_the_canonical_version(self):
         expected = (APP_VERSION, BUILD_VERSION)
-        self.assertEqual(expected, ("0.6.0", "9"))
+        self.assertEqual(expected, ("0.7.0", "10"))
         self.assertEqual(
             (info_plist()["CFBundleShortVersionString"], info_plist()["CFBundleVersion"]),
             expected,

@@ -5,8 +5,8 @@ APP_NAME = "UsageHub Provider Settings"
 APP_BUNDLE_PATH = "/Applications/OpenUsage Bar.app"
 BUNDLE_ID = "com.lune.openusagebar.settings"
 LAUNCH_AGENT_LABEL = "com.lune.openusagebar.collector"
-APP_VERSION = "0.6.0"
-BUILD_VERSION = "9"
+APP_VERSION = "0.7.0"
+BUILD_VERSION = "10"
 
 
 def info_plist() -> dict[str, object]:
