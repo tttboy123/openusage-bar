@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -165,6 +166,8 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
             )
 
     def test_private_report_writer_is_atomic_and_mode_0600(self):
+        if sys.platform == "win32":
+            self.skipTest("POSIX mode assertion")
         report = {
             "schemaVersion": "openusage-canary-surfaces-1",
             "capturedAt": "2026-07-30T00:00:03Z",
@@ -185,6 +188,8 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
             self.assertEqual(os.stat(output).st_mode & 0o777, 0o600)
 
     def test_signature_verification_is_fixed_shell_free_and_bounded(self):
+        if sys.platform == "win32":
+            self.skipTest("POSIX shell-free verifier test")
         process = mock.Mock()
         process.wait.return_value = 0
         process.poll.return_value = 0

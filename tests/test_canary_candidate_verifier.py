@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -32,6 +33,9 @@ def _load_verifier_module():
 
 
 class CanaryCandidateVerifierTests(unittest.TestCase):
+    if sys.platform == "win32":
+        __unittest_skip__ = True
+        __unittest_skip_why__ = "macOS release canary verifier test"
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

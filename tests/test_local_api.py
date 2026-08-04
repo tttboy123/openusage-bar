@@ -1233,6 +1233,7 @@ class TCPLocalAPITests(unittest.TestCase):
         finally:
             second.server_close()
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX permission semantics")
     def test_unsafe_or_mismatched_existing_token_files_are_rejected(self):
         unsafe = Path(self.temp.name) / "unsafe.token"
         unsafe.write_text(TOKEN, encoding="ascii")

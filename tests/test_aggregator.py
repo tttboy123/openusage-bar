@@ -63,6 +63,9 @@ class TimedAdapter(Adapter):
 
 
 class BoundedReadOnlyKeychainTests(unittest.TestCase):
+    if sys.platform == "win32":
+        __unittest_skip__ = True
+        __unittest_skip_why__ = "POSIX security reader test"
     def test_read_is_shell_free_bounded_and_returns_only_stdout(self):
         with tempfile.TemporaryDirectory() as directory:
             helper = Path(directory) / "security-helper"
