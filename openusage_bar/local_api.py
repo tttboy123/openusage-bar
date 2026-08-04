@@ -1056,9 +1056,12 @@ def _prepare_private_parent(path: Path, purpose: str) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.parent.is_symlink() or not path.parent.is_dir():
         raise OSError(f"{purpose} parent must be a directory")
-    if path.parent.stat().st_uid != os.getuid():
+    if hasattr(os, "getuid") and path.parent.stat().st_uid != os.getuid():
         raise OSError(f"{purpose} parent must be owned by the current user")
-    os.chmod(path.parent, 0o700, follow_symlinks=False)
+    try:
+        os.chmod(path.parent, 0o700, follow_symlinks=False)
+    except (NotImplementedError, OSError, TypeError):
+        os.chmod(path.parent, 0o700)
 
 
 def _read_token(path: Path) -> str:
@@ -1071,8 +1074,13 @@ def _read_token(path: Path) -> str:
         content = os.read(descriptor, 257)
         if (
             not stat.S_ISREG(current.st_mode)
-            or current.st_uid != os.getuid()
-            or stat.S_IMODE(current.st_mode) != 0o600
+            or (
+                hasattr(os, "getuid")
+                and (
+                    current.st_uid != os.getuid()
+                    or stat.S_IMODE(current.st_mode) != 0o600
+                )
+            )
         ):
             raise OSError("existing token file is unsafe")
     finally:
@@ -1092,7 +1100,13 @@ def _create_token(path: Path, token: str) -> bool:
     except FileExistsError:
         return False
     try:
-        os.fchmod(descriptor, 0o600)
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        else:
+            try:
+                os.chmod(path, 0o600)
+            except (NotImplementedError, OSError, TypeError):
+                pass
         content = memoryview(token.encode("ascii"))
         while content:
             written = os.write(descriptor, content)

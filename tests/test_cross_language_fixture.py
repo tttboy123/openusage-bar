@@ -53,6 +53,7 @@ def unix_json_request(socket_path: Path, target: str) -> tuple[int, dict[str, ob
 
 
 class CrossLanguageFixtureTests(unittest.TestCase):
+    @unittest.skipIf(sys.platform == "win32", "uses the Unix-domain transport")
     def test_one_fixture_matches_sqlite_query_api_and_cli_json_contracts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

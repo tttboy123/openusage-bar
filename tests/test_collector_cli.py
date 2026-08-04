@@ -36,6 +36,7 @@ from openusage_bar.query import QueryService, to_wire
 NOW = datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc)
 
 
+@unittest.skipIf(sys.platform == "win32", "POSIX process-group helper test")
 class FrozenRefreshCommandTests(unittest.TestCase):
     def test_cursor_direct_export_has_measured_runtime_margin(self):
         # A sanitized standalone probe completed in 38.41 seconds, while the
@@ -447,6 +448,7 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual((code, err, refresher.calls), (0, "", 0))
         self.assertTrue(out)
 
+    @unittest.skipIf(sys.platform == "win32", "Windows uses loopback TCP transport")
     def test_daemon_serves_private_unix_api_and_cleans_socket_on_stop(self):
         with tempfile.TemporaryDirectory() as directory:
             socket_path = Path(directory) / "openusage.sock"
@@ -677,6 +679,7 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(json.loads(out)["todayTokens"], 999)
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX path/process-group test")
     def test_default_fresh_uses_secret_safe_bounded_subprocess_and_requeries(self):
         calls = []
 
@@ -802,6 +805,7 @@ class CollectorCLITests(unittest.TestCase):
             calls[0][1]["timeout"], DEFAULT_FRESH_TIMEOUT_SECONDS
         )
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX process-group test")
     def test_default_fresh_timeout_kills_and_reaps_forked_descendant(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

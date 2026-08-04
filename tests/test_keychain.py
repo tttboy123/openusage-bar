@@ -23,6 +23,7 @@ from openusage_bar.keychain import (
 )
 
 
+@unittest.skipIf(sys.platform == "win32", "macOS bounded keychain behavior")
 class KeychainTests(unittest.TestCase):
     def test_uses_fixed_service_and_provider_account(self):
         api = Mock()

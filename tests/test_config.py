@@ -261,7 +261,8 @@ class ProviderConfigTests(unittest.TestCase):
             text = path.read_text()
             self.assertNotIn("api_key", text.lower())
             self.assertNotIn("secret", text.lower())
-            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
             self.assertEqual(
                 [item.provider_id for item in store.load()],
                 ["demo", "minimax-main", "step-plan-main", "openai"],
