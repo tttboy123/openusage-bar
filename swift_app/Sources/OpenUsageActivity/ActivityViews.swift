@@ -34,7 +34,7 @@ struct ActivityRootView: View {
             List(UsageDetailsRoute.allCases, selection: routeBinding) { route in
                 Label(route.title, systemImage: route.symbol).tag(route)
             }
-            .navigationTitle("OpenUsage")
+            .navigationTitle(AppLocalization.text("UsageHub"))
             .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 250)
         } detail: {
             content

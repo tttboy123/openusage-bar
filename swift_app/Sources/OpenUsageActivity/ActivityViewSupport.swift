@@ -42,7 +42,7 @@ struct DataHealthPage: View {
                 let issue = ProviderSourceIssuePresentation.make(from: source)
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
-                        Text("OpenUsage").font(.headline)
+                        Text(AppLocalization.text("UsageHub")).font(.headline)
                         Text(AppLocalization.text(issue.title)).foregroundStyle(.secondary)
                         Spacer()
                         StateLabel(state: source.effectiveState)
@@ -337,7 +337,7 @@ enum SettingsHelper {
             let alert = NSAlert()
             alert.messageText = AppLocalization.text("Provider Settings unavailable")
             alert.informativeText = AppLocalization.text(
-                "Reinstall OpenUsage Bar to restore the settings helper."
+                "Reinstall UsageHub to restore the settings helper."
             )
             alert.runModal()
     }

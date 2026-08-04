@@ -65,11 +65,11 @@ struct OnboardingView: View {
 
     private var detailKey: String {
         switch phase {
-        case .discoverableProviders: "Review the local clients OpenUsage Bar found on this Mac."
+        case .discoverableProviders: "Review the local clients UsageHub found on this Mac."
         case .needsConnection: "Add one provider connection to begin collecting trustworthy usage facts."
-        case .collecting: "OpenUsage Bar is waiting for the first trustworthy usage or capacity fact."
+        case .collecting: "UsageHub is waiting for the first trustworthy usage or capacity fact."
         case .ready: "Your usage data is available in the native Activity dashboard."
-        case .hidden: "OpenUsage Bar keeps usage facts local to this Mac."
+        case .hidden: "UsageHub keeps usage facts local to this Mac."
         }
     }
 

@@ -599,7 +599,7 @@ enum ProviderMutationFailure: Error, Sendable, Hashable {
 
     var message: String {
         switch self {
-        case .unavailable: AppLocalization.text("Provider editor is unavailable. Reinstall OpenUsage Bar.")
+        case .unavailable: AppLocalization.text("Provider editor is unavailable. Reinstall UsageHub.")
         case .couldNotLaunch: AppLocalization.text("Provider connection could not be updated.")
         case .timedOut: AppLocalization.text("Provider editor timed out.")
         case .responseTooLarge: AppLocalization.text("Provider editor returned too much data.")

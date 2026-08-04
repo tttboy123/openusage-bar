@@ -175,7 +175,7 @@ struct ProvidersPage: View {
                                             in: RoundedRectangle(cornerRadius: 8)
                                         )
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("OpenUsage").font(.body.weight(.medium))
+                                        Text(AppLocalization.text("UsageHub")).font(.body.weight(.medium))
                                         Text(systemIntegrationSummary)
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
@@ -473,7 +473,7 @@ private struct ProviderConnectionDetail: View {
     private var capabilitySection: some View {
         ProviderDetailSection(
             title: "Available Data",
-            detail: "Unknown means OpenUsage Bar has no reliable declaration. It is not zero."
+            detail: "Unknown means UsageHub has no reliable declaration. It is not zero."
         ) {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(capability.groups, id: \.state) { group in

@@ -64,7 +64,7 @@ struct MenuBarPopover: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("OpenUsage Bar").font(.headline)
+                Text(AppLocalization.text("UsageHub")).font(.headline)
                 Text(model.updatedAge).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
