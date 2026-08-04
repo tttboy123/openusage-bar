@@ -43,6 +43,17 @@ class SettingsEntrypointTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 0)
         collector.assert_called_once_with(arguments[1:])
 
+    def test_dashboard_command_is_available_from_the_packaged_entrypoint(self):
+        arguments = ["openusage_settings.py", "dashboard", "--port", "17822"]
+        with patch.object(sys, "argv", arguments), patch(
+            "openusage_bar.collector_cli.main", return_value=0
+        ) as collector, patch.dict(sys.modules, {"openusage_bar.ui": None}):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path("openusage_settings.py", run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 0)
+        collector.assert_called_once_with(arguments[1:])
+
     def test_real_packaging_entry_script_serves_providers_json_offline(self):
         with tempfile.TemporaryDirectory() as home:
             completed = subprocess.run(
