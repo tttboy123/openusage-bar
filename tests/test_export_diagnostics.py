@@ -6,6 +6,7 @@ import os
 import plistlib
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -326,6 +327,7 @@ class DriftingReconciliationServer:
         self.thread.join(2)
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS build-venv diagnostics test")
 class ExportDiagnosticsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

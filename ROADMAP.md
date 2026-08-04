@@ -1,10 +1,11 @@
-# OpenUsage Bar Roadmap
+# UsageHub Roadmap
 
 <!-- openusage-release-state: version=0.6.0 channel=rc api=1.0 canary=0/5 clock=not_started -->
 
-OpenUsage Bar is a standalone, local-first macOS product. Loom and other local
+UsageHub (formerly OpenUsage Bar) is a standalone, local-first macOS product. Loom and other local
 schedulers are optional read-only API consumers and do not gate any OpenUsage
-Bar release.
+Bar release. Technical namespaces (`openusage` paths, CLI, sockets, Local API
+v1) remain compatible during the brand transition.
 
 Current published baseline: **v0.6.0 RC** (2026-07-30). Repository and release
 gates are implemented and CI verified. The opt-in external Canary remains at

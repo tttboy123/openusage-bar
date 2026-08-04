@@ -2,11 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
-  <key>CFBundleDisplayName</key><string>OpenUsage Provider Settings</string>
+  <key>CFBundleDisplayName</key><string>UsageHub Provider Settings</string>
   <key>CFBundleExecutable</key><string>OpenUsage Provider Settings</string>
   <key>CFBundleIdentifier</key><string>com.lune.openusagebar.settings</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>OpenUsage Provider Settings</string>
+  <key>CFBundleName</key><string>UsageHub Provider Settings</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.6.0</string>
   <key>CFBundleVersion</key><string>9</string>

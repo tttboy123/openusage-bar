@@ -69,8 +69,8 @@ class ProviderCapabilityTests(unittest.TestCase):
             cls._unknown_capabilities(),
         )
 
-    def test_registry_is_generated_from_all_37_catalog_families(self):
-        self.assertEqual(len(registry.descriptors), 37)
+    def test_registry_is_generated_from_all_39_catalog_families(self):
+        self.assertEqual(len(registry.descriptors), 39)
         self.assertEqual(
             {descriptor.category for descriptor in registry.descriptors},
             {"api", "subscription", "local_tool"},

@@ -9,11 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
-from .keychain import (
-    BoundedMacOSKeychain,
-    BoundedReadOnlyKeychain,
-    KeychainError,
-)
+from .keychain import BoundedReadOnlyKeychain, default_keychain
 from .models import Category, Overview, ProviderCard, ProviderStatus, canonical_category
 from .performance_timing import (
     RefreshTimingRecorder,
@@ -305,7 +301,7 @@ def build_headless_refresher(
     from .providers.builtins import default_registry
 
     clock = lambda: datetime.now(timezone.utc)
-    keychain = BoundedMacOSKeychain()
+    keychain = default_keychain()
     config_store = ProviderConfigStore()
     try:
         configs = config_store.load()

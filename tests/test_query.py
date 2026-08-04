@@ -618,7 +618,7 @@ class QueryServiceTests(unittest.TestCase):
         self.assertEqual(result.catalog_revision, "3059f1b")
         self.assertEqual(set(wire), {
             "schemaVersion", "dataRevision", "generatedAt", "localDay",
-            "summary", "balances", "quotaWindows", "providers", "sources",
+        "summary", "balances", "quotaWindows", "quotaHub", "providers", "sources",
             "catalogRevision",
         })
 

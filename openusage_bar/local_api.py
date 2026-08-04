@@ -266,6 +266,7 @@ class LocalAPIRouter:
         "/v1/costs/daily",
         "/v1/quotas/history",
         "/v1/sources/status", "/v1/changes",
+        "/v1/quick-connect",
     )
 
     def __init__(
@@ -444,6 +445,23 @@ class LocalAPIRouter:
                     params["limit"], "limit", minimum=1, maximum=MAX_LIMIT
                 ) if "limit" in params else None
                 return to_wire(self.query.balances(limit))
+            if route == "/v1/quick-connect":
+                from .quick_connect import QUICK_CONNECT
+
+                return {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "providers": [
+                        {
+                            "familyId": item.family_id,
+                            "consoleUrl": item.console_url,
+                            "authModes": list(item.auth_modes),
+                        }
+                        for item in sorted(
+                            QUICK_CONNECT.values(),
+                            key=lambda item: item.family_id,
+                        )
+                    ],
+                }
             if route == "/v1/activity/daily":
                 if "from" not in params or "to" not in params:
                     raise _error(HTTPStatus.BAD_REQUEST, "missing_parameter", "Required parameter is missing.")
@@ -927,7 +945,22 @@ def _rename_exclusive(parent_fd: int, source: str, destination: str) -> None:
     libc = ctypes.CDLL(None, use_errno=True)
     renameatx = getattr(libc, "renameatx_np", None)
     if renameatx is None:
-        raise OSError(errno.ENOTSUP, "exclusive rename is unavailable")
+        # Portable fallback for Linux/Windows: rename relative to the same
+        # open directory. The caller re-verifies the quarantined node identity
+        # before unlinking, so a non-exclusive rename stays safe for the
+        # local socket lifecycle.
+        try:
+            os.rename(
+                source,
+                destination,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+            )
+        except (NotImplementedError, OSError, TypeError) as error:
+            if not isinstance(error, OSError) or error.errno == errno.ENOTSUP:
+                raise OSError(errno.ENOTSUP, "exclusive rename is unavailable") from error
+            raise
+        return
     renameatx.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
     renameatx.restype = ctypes.c_int
     result = renameatx(

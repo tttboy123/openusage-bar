@@ -242,6 +242,71 @@
       ]
     },
     {
+      "id": "cc_switch",
+      "display_name": "CC Switch",
+      "category": "local_tool",
+      "metric_families": [
+        "operational"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "unknown",
+        "billing": "unknown",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "cc_switch.status",
+          "kind": "local_database",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "local",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "openusage_bar_builtin",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "unknown",
+          "verification": "unverified"
+        },
+        {
+          "source_id": "cc_switch.rollups",
+          "kind": "local_database",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "local",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "openusage_bar_builtin",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "aggregate",
+          "verification": "unverified"
+        }
+      ]
+    },
+    {
       "id": "claude_code",
       "display_name": "Claude Code",
       "aliases": [
@@ -592,6 +657,26 @@
         "service_status": "unknown"
       },
       "sources": [
+        {
+          "source_id": "deepseek_official_api",
+          "kind": "official_api",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "api_key",
+          "credential_scope": "deepseek_api_key",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "provider_official",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "provider_official",
+          "account_scope": "configured_account",
+          "model_scope": "aggregate",
+          "verification": "unverified"
+        },
         {
           "source_id": "openusage",
           "kind": "openusage",
@@ -1408,6 +1493,52 @@
           "account_scope": "local_profile",
           "model_scope": "per_model",
           "verification": "fixture"
+        }
+      ]
+    },
+    {
+      "id": "omniroute",
+      "display_name": "OmniRoute",
+      "category": "local_tool",
+      "metric_families": [
+        "operational"
+      ],
+      "regions": [],
+      "supports_accounts": false,
+      "capabilities": {
+        "quota_windows": {
+          "state": "unknown",
+          "values": []
+        },
+        "token_history": "unknown",
+        "model_breakdown": "unknown",
+        "reset_timestamps": "unknown",
+        "billing": "unknown",
+        "credits": "unknown",
+        "balance": "unknown",
+        "cost": "unknown",
+        "rate_limits": "unknown",
+        "service_status": "unknown"
+      },
+      "sources": [
+        {
+          "source_id": "omniroute.usage",
+          "kind": "local_database",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "local",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "experimental",
+          "provenance": "openusage_bar_builtin",
+          "fact_families": [
+            "detection"
+          ],
+          "authority": "third_party",
+          "account_scope": "local_profile",
+          "model_scope": "aggregate",
+          "verification": "unverified"
         }
       ]
     },

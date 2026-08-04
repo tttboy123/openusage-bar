@@ -416,6 +416,17 @@ private struct ProviderConnectionDetail: View {
                     .controlSize(.large)
                     Button("Refresh Data", systemImage: "arrow.clockwise", action: reload)
                         .controlSize(.large)
+                    if let consoleURL = GeneratedProviderCatalog.quickConnectURLs[
+                        descriptor.familyID
+                    ], let url = URL(string: consoleURL) {
+                        Link(destination: url) {
+                            Label(
+                                AppLocalization.text("Open Console"),
+                                systemImage: "arrow.up.right.square"
+                            )
+                        }
+                        .controlSize(.large)
+                    }
                 }
                 if connections.contains(where: { $0.isManaged }) {
                     Text("Existing app-managed accounts are edited in Connections above.")

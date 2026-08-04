@@ -1,7 +1,7 @@
 <!-- openusage-release-version: 0.6.0 -->
 <div align="center">
 
-# OpenUsage Bar
+# UsageHub
 
 **一眼掌握 AI 订阅余量、Token 活动与 API 消耗。**
 
@@ -18,7 +18,7 @@
 
 </div>
 
-OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Token 活动统一到一个原生 SwiftUI 客户端里：菜单栏用于快速判断，详情页用于分析，CLI JSON 和本地只读 API 供调度平台读取。
+UsageHub（原 OpenUsage Bar）把 AI 订阅额度、API 消耗、本地编码工具和每日 Token 活动统一到一个原生 SwiftUI 客户端里：菜单栏用于快速判断，详情页用于分析，CLI JSON 和本地只读 API 供调度平台读取。
 
 <p align="center">
   <img src="docs/assets/openusage-bar-activity-demo-zh.png" width="1160" alt="OpenUsage Bar 中文 Activity 界面，展示年度 Token 热力图与每日模型趋势">
@@ -34,6 +34,14 @@ OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Tok
 > Developer ID 公证包；若 macOS 显示“已损坏”，按下方指引仅移除本 App
 > 的下载隔离属性。
 
+## 品牌与命名
+
+产品品牌为 **UsageHub**（原 OpenUsage Bar）。技术命名空间保持兼容：
+`~/.config/openusage-bar`、`~/.local/state/openusage-bar`、`openusage.sock`、
+`openusage-bar` CLI 与 Local API v1 契约在可预见的版本内不变；应用包
+（`OpenUsage Bar.app`）与脚本中的技术标识符随跨平台发布一并迁移，不在此阶段
+改名，避免破坏现有安装、LaunchAgent 与回滚路径。
+
 ## 为什么需要它
 
 AI 工具越来越多，但用量信息分散在不同地方：
@@ -43,7 +51,7 @@ AI 工具越来越多，但用量信息分散在不同地方：
 - Claude Code、OpenCode、Hermes、OpenClaw 等本地工具关心本地活动和 Token 历史。
 - 自动调度平台需要结构化数据，而不是去解析 UI 文本。
 
-OpenUsage Bar 的定位很明确：
+UsageHub 的定位很明确：
 
 ```text
 菜单栏：给人看，快速判断今天还能不能继续跑。
@@ -199,7 +207,7 @@ fallback，完整 OpenUsage daily import 最长 60 秒。超时不会把未知�
 
 ## Provider 支持
 
-OpenUsage Bar 是独立仓库和独立发布。OpenUsage.sh 是可选数据源，只通过受限 JSON 接入；它的 Go 内部实现、凭证和发布周期不会嵌入本项目。
+UsageHub 是独立仓库和独立发布。OpenUsage.sh 是可选数据源，只通过受限 JSON 接入；它的 Go 内部实现、凭证和发布周期不会嵌入本项目。
 
 - OpenUsage 0.23.0 catalog：覆盖 35 个上游 family。
 - 内置增强：MiniMax、StepFun、Codex、Cursor、Kiro、OpenAI Organization、Generic HTTPS Provider、Custom Daily Token Feed。
@@ -213,7 +221,7 @@ OpenUsage Bar 是独立仓库和独立发布。OpenUsage.sh 是可选数据源�
 
 ## 隐私与安全
 
-OpenUsage Bar 的安全模型是“凭证只进 Keychain，事实才进账本”：
+UsageHub 的安全模型是“凭证只进 Keychain，事实才进账本”：
 
 - 不在 SQLite、JSON、JSONL、本地 API、UI 或日志中保存 API Key、Cookie、Session。
 - 不采集 Prompt、Response 或直接账号身份。

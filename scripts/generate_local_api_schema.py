@@ -187,6 +187,26 @@ def render_schema() -> dict[str, object]:
     }
     summary_required = ["todayTokens", "modelCount", "coveredDayCount"]
     summary = summary_contract(envelope(summary_properties, summary_required))
+    quota_hub = {
+        "type": "array",
+        "items": closed(
+            {
+                "currency": {"type": "string"},
+                "totalAvailable": {"type": "string"},
+                "providerCount": {"type": "integer", "minimum": 1},
+                "provenance": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 3,
+                        "maxItems": 3,
+                    },
+                },
+            },
+            ["currency", "totalAvailable", "providerCount", "provenance"],
+        ),
+    }
     snapshot = envelope(
         {
             "localDay": {"type": "string", "format": "date"},
@@ -195,6 +215,7 @@ def render_schema() -> dict[str, object]:
             ),
             "balances": {"type": "array", "items": balance},
             "quotaWindows": {"type": "array", "items": quota},
+            "quotaHub": quota_hub,
             "providers": {"type": "array", "items": provider},
             "sources": {"type": "array", "items": source},
             "catalogRevision": {"type": "string"},

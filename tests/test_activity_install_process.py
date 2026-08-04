@@ -7,6 +7,7 @@ import textwrap
 import threading
 import time
 import unittest
+import sys
 from pathlib import Path
 
 
@@ -16,6 +17,7 @@ INSTALL = ROOT / "scripts/install_app.sh"
 UNINSTALL = ROOT / "scripts/uninstall_app.sh"
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS app bundle test")
 class ActivityInstallProcessTests(unittest.TestCase):
     def build_process(
         self,

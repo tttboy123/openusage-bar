@@ -148,6 +148,7 @@ class BoundedReadOnlyKeychainTests(unittest.TestCase):
             self.assertFalse(keychain.last_process_alive)
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS bounded keychain assertions")
 class HeadlessRefresherFactoryTests(unittest.TestCase):
     def test_eager_local_usage_is_collected_before_slow_quota_refresh(self):
         events = []

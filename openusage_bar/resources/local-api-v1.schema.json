@@ -260,6 +260,42 @@
           },
           "type": "array"
         },
+        "quotaHub": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "currency": {
+                "type": "string"
+              },
+              "provenance": {
+                "items": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              "providerCount": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "totalAvailable": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "currency",
+              "totalAvailable",
+              "providerCount",
+              "provenance"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "quotaWindows": {
           "items": {
             "additionalProperties": false,

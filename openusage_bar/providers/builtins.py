@@ -5,6 +5,7 @@ from datetime import datetime
 
 from ..codex_daily import CodexLocalDailyImporter
 from ..codex_subscription import CodexSubscriptionAdapter
+from ..cc_switch import CcSwitchCostImporter, CcSwitchStatusAdapter
 from ..config import (
     DailyCostFeedConfig,
     DailyUsageFeedConfig,
@@ -17,6 +18,7 @@ from ..config import (
 from ..cost_feed import DailyCostFeedCardAdapter, DailyCostFeedImporter
 from ..daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
 from ..daily_history import OpenUsageDailyImporter
+from ..deepseek import DeepSeekBalanceAdapter
 from ..generic import GenericHTTPSAdapter
 from ..kiro import KiroQuotaAdapter
 from ..minimax import (
@@ -31,6 +33,7 @@ from ..openai_organization import (
     OpenAIOrganizationImporter,
 )
 from ..openusage_adapter import OpenUsageAdapter
+from ..omniroute import OmniRouteCostImporter
 from ..step_plan import StepPlanAdapter, endpoints_for_site
 from .contracts import ProviderBinding
 from .registry import AdapterRegistry
@@ -92,6 +95,27 @@ def default_registry(
         ),),
         usage_sources=(_performance_source(
             CodexLocalDailyImporter(clock=clock), "local_file"
+        ),),
+    ))
+    registry.register_global(lambda: ProviderBinding(
+        provider_id="cc_switch", family_id="cc_switch",
+        quota_sources=(_quota_source(
+            CcSwitchStatusAdapter(), "cc_switch.status", 30, "local_file"
+        ),),
+        cost_sources=(_performance_source(
+            CcSwitchCostImporter(), "local_file"
+        ),),
+    ))
+    registry.register_global(lambda: ProviderBinding(
+        provider_id="omniroute", family_id="omniroute",
+        cost_sources=(_performance_source(
+            OmniRouteCostImporter(), "local_file"
+        ),),
+    ))
+    registry.register_global(lambda: ProviderBinding(
+        provider_id="deepseek", family_id="deepseek",
+        balance_sources=(_performance_source(
+            DeepSeekBalanceAdapter(), "network"
         ),),
     ))
 

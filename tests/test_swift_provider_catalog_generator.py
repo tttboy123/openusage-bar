@@ -32,6 +32,16 @@ class SwiftProviderCatalogGeneratorTests(unittest.TestCase):
             "modelScope: .mixed, verification: .liveAccount",
             rendered,
         )
+
+    def test_render_emits_quick_connect_console_urls(self):
+        rendered = load_generator().render()
+
+        self.assertIn(
+            "public static let quickConnectURLs: [String: String] = [",
+            rendered,
+        )
+        self.assertIn('"deepseek": "https://platform.deepseek.com",', rendered)
+        self.assertIn('"codex": "https://chatgpt.com/codex",', rendered)
         self.assertIn(
             "factFamilies: [.detection, .tokenActivity], "
             "authority: .thirdParty, accountScope: .localProfile, "

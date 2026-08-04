@@ -295,7 +295,7 @@ class UnixLocalAPITests(unittest.TestCase):
         status, _, body = self.request("/v1/capabilities")
         self.assertEqual(status, 200)
         payload = json.loads(body)
-        self.assertEqual(len(payload["providers"]), 37)
+        self.assertEqual(len(payload["providers"]), 39)
         self.assertEqual(
             [row["familyId"] for row in payload["providers"]],
             sorted(row["familyId"] for row in payload["providers"]),

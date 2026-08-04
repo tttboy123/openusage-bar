@@ -29,13 +29,14 @@ The remaining fields are the same fields emitted by the existing collector CLI:
 | `GET /v1/schema.json` | none | committed Draft 2020-12 contract under `schema` |
 | `GET /schema` | none | Compatibility alias of `/v1/schema` |
 | `GET /v1/summary` | optional `today=YYYY-MM-DD` | `todayTokens` (`integer | null`), `modelCount`, `coveredDayCount` |
-| `GET /v1/snapshot` | optional `today=YYYY-MM-DD` | one-revision resource view: `localDay`, `summary`, every `quotaWindow`, `providers`, `sources`, `catalogRevision` |
+| `GET /v1/snapshot` | optional `today=YYYY-MM-DD` | one-revision resource view: `localDay`, `summary`, every `quotaWindow`, `quotaHub` (measured balance aggregation with provenance), `providers`, `sources`, `catalogRevision` |
 | `GET /v1/capabilities` | none | `providers`, sorted by `familyId`; nested sources retain declared priority |
 | `GET /v1/providers` | optional comma-separated `providerIds` | observed/configured provider instances, sorted by `providerId` |
 | `GET /v1/capacity` | optional `limit=1..1000` | `providers`, in canonical urgency order |
 | `GET /v1/activity/daily` | required `from`, `to`; optional comma-separated `providerIds`, `modelIds` | `rows`, `coverage`, canonical chronological order; at most 731 days |
 | `GET /v1/costs/daily` | required `from`, `to`; optional comma-separated `providerIds`, `currencies` | provider-reported daily cost rows and coverage in canonical chronological order |
 | `GET /v1/quotas/history` | optional `providerId`, `accountRef`, `limit`; `from` and `to` must be supplied together | `snapshots`; newest selected page returned in chronological order |
+| `GET /v1/quick-connect` | none | `providers`, sorted by `familyId`; each declares `consoleUrl` and `authModes` (`api_key` / `oauth` / `auto_detect`) for Provider Center quick connection |
 | `GET /v1/sources/status` | none | `sources`, canonical provider/source order |
 | `GET /v1/changes` | optional `after` (default 0), `limit` (default 100) | `records`, `nextCursor`, `hasMore`; an ahead cursor is invalid |
 

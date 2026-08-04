@@ -74,6 +74,7 @@ class ProviderConformanceTests(unittest.TestCase):
             {
                 "codex", "kiro", "minimax", "moonshot",
                 "step_plan", "openusage", "custom",
+                "cc_switch", "omniroute", "deepseek",
             },
         )
         for fixture in fixtures:

@@ -65,6 +65,7 @@
 "Add Connection" = "添加连接";
 "Add Account" = "添加账号";
 "Refresh Data" = "刷新数据";
+"Open Console" = "打开控制台";
 "Existing app-managed accounts are edited in Connections above." = "已有账号请在上方“连接”区域中修改。";
 "Data Source Issues" = "数据源问题";
 "These diagnostics do not mark the Provider connection as failed unless credentials need attention." = "除非凭证需要处理，这些诊断不会将 Provider 连接标记为失败。";

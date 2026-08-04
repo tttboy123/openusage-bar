@@ -37,7 +37,7 @@ class BundleConfigTests(unittest.TestCase):
 
         self.assertEqual(BUNDLE_ID, "com.lune.openusagebar.settings")
         self.assertEqual(plist["CFBundleIdentifier"], BUNDLE_ID)
-        self.assertEqual(plist["CFBundleDisplayName"], "OpenUsage Provider Settings")
+        self.assertEqual(plist["CFBundleDisplayName"], "UsageHub Provider Settings")
         self.assertNotIn("LSUIElement", plist)
         self.assertEqual(plist["LSMinimumSystemVersion"], "15.0")
 

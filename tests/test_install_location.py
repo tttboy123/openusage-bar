@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 
 
@@ -9,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCATION = ROOT / "scripts/install_location.sh"
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS /Applications path test")
 class InstallLocationTests(unittest.TestCase):
     def test_install_update_rollback_and_uninstall_share_the_same_resolver(self) -> None:
         for name in ("install_app.sh", "rollback_app.sh", "uninstall_app.sh"):

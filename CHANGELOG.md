@@ -19,6 +19,10 @@ This project follows [Semantic Versioning](https://semver.org/).
   supports macOS.
 - The public roadmap now reports the released v0.6.0 RC baseline and keeps the
   0 / 5 external Canary state distinct from repository test results.
+- Product branding: user-facing docs now use the **UsageHub** name (formerly
+  OpenUsage Bar). The `openusage` technical namespace (config paths, sockets,
+  `openusage-bar` CLI, Local API v1 contract) remains compatible; app-bundle
+  renaming is scheduled with the cross-platform release.
 
 ## 0.6.0 - 2026-07-30
 
