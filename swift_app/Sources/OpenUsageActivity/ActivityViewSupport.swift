@@ -377,6 +377,15 @@ enum APISpendText {
             ?? NSDecimalNumber(decimal: amount).stringValue
         return "\(currency) \(number)"
     }
+
+    static func displayBalance(available: String?, currency: String) -> String {
+        guard let available,
+              let decimal = Decimal(
+                string: available, locale: Locale(identifier: "en_US_POSIX")
+              )
+        else { return "\(currency) \(AppLocalization.text("Unavailable"))" }
+        return display(amount: decimal, currency: currency)
+    }
 }
 
 enum DateText {

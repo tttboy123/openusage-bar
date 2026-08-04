@@ -22,6 +22,7 @@ from openusage_bar.cost_feed import DailyCostFeedCardAdapter, DailyCostFeedImpor
 from openusage_bar.daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
 from openusage_bar.daily_history import OpenUsageDailyImporter
 from openusage_bar.deepseek import DeepSeekBalanceAdapter
+from openusage_bar.deepseek_openusage import OpenUsageDeepSeekAdapter
 from openusage_bar.generic import GenericHTTPSAdapter
 from openusage_bar.kiro import KiroQuotaAdapter
 from openusage_bar.minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
@@ -97,7 +98,7 @@ class AdapterRegistryTests(unittest.TestCase):
                 (CcSwitchStatusAdapter,), (), (CcSwitchCostImporter,),
             ),
             "omniroute": ((), (), (OmniRouteCostImporter,)),
-            "deepseek": ((), (), ()),
+            "deepseek": ((), (), (OpenUsageDeepSeekAdapter,)),
             "cost-work": ((DailyCostFeedCardAdapter,), (), (DailyCostFeedImporter,)),
             "minimax-work": (
                 (MiniMaxCodingPlanAdapter,), (MiniMaxBillingImporter,), (),
@@ -126,7 +127,7 @@ class AdapterRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             tuple(map(type, bindings["deepseek"].balance_sources)),
-            (DeepSeekBalanceAdapter,),
+            (DeepSeekBalanceAdapter, OpenUsageDeepSeekAdapter),
         )
         self.assertIs(
             bindings["openai"].usage_sources[0],

@@ -19,6 +19,7 @@ from ..cost_feed import DailyCostFeedCardAdapter, DailyCostFeedImporter
 from ..daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
 from ..daily_history import OpenUsageDailyImporter
 from ..deepseek import DeepSeekBalanceAdapter
+from ..deepseek_openusage import OpenUsageDeepSeekAdapter
 from ..generic import GenericHTTPSAdapter
 from ..kiro import KiroQuotaAdapter
 from ..minimax import (
@@ -112,12 +113,20 @@ def default_registry(
             OmniRouteCostImporter(), "local_file"
         ),),
     ))
-    registry.register_global(lambda: ProviderBinding(
-        provider_id="deepseek", family_id="deepseek",
-        balance_sources=(_performance_source(
-            DeepSeekBalanceAdapter(), "network"
-        ),),
-    ))
+    def deepseek_openusage() -> ProviderBinding:
+        openusage_adapter = OpenUsageDeepSeekAdapter(clock=clock)
+        return ProviderBinding(
+            provider_id="deepseek", family_id="deepseek",
+            balance_sources=(
+                _performance_source(DeepSeekBalanceAdapter(), "network"),
+                _performance_source(openusage_adapter, "child_process"),
+            ),
+            cost_sources=(
+                _performance_source(openusage_adapter, "child_process"),
+            ),
+        )
+
+    registry.register_global(deepseek_openusage)
 
     def minimax(config: MiniMaxConfig) -> ProviderBinding:
         endpoints = minimax_endpoints_for_site(config.site)

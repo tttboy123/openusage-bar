@@ -690,6 +690,7 @@ enum APISpendCoverage: String, Sendable, Hashable { case missing, partial, compl
 struct APISpendSummary: Sendable, Hashable {
     let totals: [APISpendTotal]
     let coverage: APISpendCoverage
+    let balances: [BalanceRecord]
 }
 
 enum APISpendAggregator {
@@ -697,7 +698,8 @@ enum APISpendAggregator {
         costs: DailyCostDataset,
         legacyRecords: [DailyUsage],
         range: ClosedRange<LocalDay>,
-        isLegacyCoverageComplete: Bool
+        isLegacyCoverageComplete: Bool,
+        balances: [BalanceRecord] = []
     ) -> APISpendSummary {
         let nativeScopes = costs.knownScopes
         let nativeRows = costs.records.filter { range.contains($0.day) }.compactMap {
@@ -749,7 +751,13 @@ enum APISpendAggregator {
         let coverage: APISpendCoverage = !hasKnownCoverage
             ? .missing
             : (nativeCoverageComplete && legacyCoverageComplete ? .complete : .partial)
-        return APISpendSummary(totals: totals, coverage: coverage)
+        return APISpendSummary(
+            totals: totals, coverage: coverage,
+            balances: balances.sorted {
+                $0.providerID == $1.providerID
+                    ? $0.currency < $1.currency : $0.providerID < $1.providerID
+            }
+        )
     }
 }
 

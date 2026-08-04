@@ -92,6 +92,7 @@ actor ActivityDataLoader: ActivityLoading {
                 from: request.repositoryRange.lowerBound,
                 to: request.repositoryRange.upperBound
             )
+            let balances = try repository.balances()
             let capacity = try repository.capacity(limit: nil)
             let health = try repository.sourceHealth()
             let instances = try repository.providerInstances()
@@ -256,7 +257,11 @@ actor ActivityDataLoader: ActivityLoading {
                     costs: selectedCosts,
                     legacyRecords: filteredRecords,
                     range: request.metricRange,
-                    isLegacyCoverageComplete: details.metrics.isComplete
+                    isLegacyCoverageComplete: details.metrics.isComplete,
+                    balances: balances.filter {
+                        visibleIDs.contains($0.providerID)
+                            && providerPredicate($0.providerID)
+                    }
                 )
             )
         }
