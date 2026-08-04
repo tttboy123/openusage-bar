@@ -42,12 +42,16 @@ struct APISpendPage: View {
 
     private var tokenSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Token Usage").font(.headline)
+            Text(AppLocalization.text("Token Usage")).font(.headline)
             Text(AppLocalization.format("%@ Tokens", store.period.title))
                 .font(.callout).foregroundStyle(.secondary)
             let rows = tokenRows
             if rows.isEmpty {
-                Text("No token activity matches the current filters.")
+                Text(
+                    AppLocalization.text(
+                        "No token activity matches the current filters."
+                    )
+                )
                     .font(.callout).foregroundStyle(.secondary)
             } else {
                 ForEach(rows) { row in
@@ -124,10 +128,10 @@ struct LocalToolsPage: View {
             )
             if summaries.isEmpty {
                 EmptyDataView(
-                    title: "No local tool activity yet",
-                    description:
-                        "Local runtimes such as Hermes and OpenClaw appear here "
-                            + "after they produce Token usage on this device."
+                    title: AppLocalization.text("No local tool activity yet"),
+                    description: AppLocalization.text(
+                        "Local runtimes such as Hermes and OpenClaw appear here after they produce Token usage on this device."
+                    )
                 )
             } else {
                 ForEach(summaries) { summary in

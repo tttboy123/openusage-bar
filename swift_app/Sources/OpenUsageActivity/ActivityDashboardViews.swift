@@ -520,8 +520,9 @@ private struct ModelChartSection: View {
                 HStack(spacing: 8) {
                     Image(systemName: "chart.bar.xaxis")
                     Text(
-                        "No model activity matches the current filters. "
-                            + "Switch the period or Provider to see a trend."
+                        AppLocalization.text(
+                            "No model activity matches the current filters. Switch the period or Provider to see a trend."
+                        )
                     )
                 }
                 .font(.callout)

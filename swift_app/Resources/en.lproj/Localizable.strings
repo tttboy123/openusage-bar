@@ -451,3 +451,11 @@
 "Later" = "Later";
 "UsageHub could not start its bundled collector. Reinstall the app from the official DMG or use the advanced repair package." = "UsageHub could not start its bundled collector. Reinstall the app from the official DMG or use the advanced repair package.";
 "OK" = "OK";
+"Get API Key" = "Get API Key";
+"Token Usage" = "Token Usage";
+"No token activity matches the current filters." = "No token activity matches the current filters.";
+"No model activity matches the current filters. Switch the period or Provider to see a trend." = "No model activity matches the current filters. Switch the period or Provider to see a trend.";
+"No local tool activity yet" = "No local tool activity yet";
+"Local runtimes such as Hermes and OpenClaw appear here after they produce Token usage on this device." = "Local runtimes such as Hermes and OpenClaw appear here after they produce Token usage on this device.";
+"All %lld sources are collecting normally." = "All %lld sources are collecting normally.";
+"%lld of %lld sources need attention. Items below show the fix." = "%lld of %lld sources need attention. Items below show the fix.";

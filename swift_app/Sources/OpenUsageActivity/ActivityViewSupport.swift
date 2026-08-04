@@ -135,9 +135,14 @@ struct DataHealthPage: View {
             .foregroundStyle(issueCount == 0 ? Color.green : Color.orange)
             Text(
                 issueCount == 0
-                    ? "All \(healthyCount) sources are collecting normally."
-                    : "\(issueCount) of \(data.health.sources.count) sources need attention. "
-                        + "Items below show the fix."
+                    ? AppLocalization.format(
+                        "All %lld sources are collecting normally.",
+                        Int64(healthyCount)
+                    )
+                    : AppLocalization.format(
+                        "%lld of %lld sources need attention. Items below show the fix.",
+                        Int64(issueCount), Int64(data.health.sources.count)
+                    )
             )
             .font(.callout)
         }
