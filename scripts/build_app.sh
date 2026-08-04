@@ -127,7 +127,11 @@ PY_APP=$(find "$BUILD_ROOT/python-dist" -maxdepth 1 -type d -name '*.app' -print
 [[ -n "$PY_APP" ]] || { print -u2 "settings helper build unavailable"; exit 1; }
 /usr/bin/ditto "$PY_APP" "$SETTINGS_APP"
 if [[ ! -x "$SETTINGS_APP/Contents/MacOS/OpenUsage Provider Settings" ]]; then
-  PY_EXEC=$(find "$SETTINGS_APP/Contents/MacOS" -maxdepth 1 -type f -perm +111 -print -quit)
+  # py2app names the launcher stub from CFBundleName (currently "UsageHub
+  # Provider Settings") and also drops a copy of the hosted interpreter as
+  # "python". The Collector launcher execs ".../OpenUsage Provider Settings",
+  # so rename the stub, never the raw interpreter.
+  PY_EXEC=$(find "$SETTINGS_APP/Contents/MacOS" -maxdepth 1 -type f -perm +111 ! -name python -print -quit)
   [[ -n "$PY_EXEC" ]] || { print -u2 "settings helper executable unavailable"; exit 1; }
   mv "$PY_EXEC" "$SETTINGS_APP/Contents/MacOS/OpenUsage Provider Settings"
 fi

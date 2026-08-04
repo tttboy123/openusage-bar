@@ -27,7 +27,11 @@ if sys.platform == "darwin":
     apply_py2app_static_zlib_patch()
     common.update(
         dict(
-            name=APP_NAME,
+            # The build script expects the py2app artifact and executable to be
+            # named "OpenUsage Provider Settings" so the Collector launcher can
+            # exec it. The user-visible display name stays "UsageHub Provider
+            # Settings" through info_plist().
+            name="OpenUsage Provider Settings",
             version=APP_VERSION,
             app=["openusage_settings.py"],
             options={
