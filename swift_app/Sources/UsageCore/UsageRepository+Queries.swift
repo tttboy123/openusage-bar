@@ -126,6 +126,66 @@ extension UsageRepository {
         }
     }
 
+    func queryBalances(_ database: OpaquePointer) throws -> [BalanceRecord] {
+        try withStatement(
+            database,
+            sql: """
+            SELECT record_id, observed_at, provider_id, account_ref, currency,
+                   available, voucher, cash, state, quality, stale, revision,
+                   source_id
+            FROM balance_state
+            ORDER BY provider_id, currency, record_id
+            """,
+            bindings: []
+        ) { statement in
+            var rows: [BalanceRecord] = []
+            while true {
+                switch sqlite3_step(statement) {
+                case SQLITE_ROW:
+                    let recordID = try requiredText(statement, 0)
+                    let observedAt = try requiredText(statement, 1)
+                    let provider = try requiredText(statement, 2)
+                    let account = try requiredText(statement, 3)
+                    let currency = try requiredText(statement, 4)
+                    let available = try optionalText(statement, 5)
+                    let voucher = try optionalText(statement, 6)
+                    let cash = try optionalText(statement, 7)
+                    let state = try requiredText(statement, 8)
+                    let quality = try requiredText(statement, 9)
+                    let stale = try requiredInt64(statement, 10) != 0
+                    let revision = try requiredInt64(statement, 11)
+                    let sourceID = try requiredText(statement, 12)
+                    guard Self.isStableID(provider),
+                          account.isEmpty || Self.isStableID(account),
+                          Self.isStableID(currency), currency == currency.uppercased(),
+                          (3...8).contains(currency.utf8.count),
+                          Self.isStableID(state), Self.isStableID(quality),
+                          Self.isStableID(sourceID),
+                          (try? parseTimestamp(observedAt)) != nil,
+                          revision > 0
+                    else { throw RepositoryError.corruptData }
+                    for amount in [available, voucher, cash].compactMap({ $0 }) {
+                        guard amount.utf8.count <= 128,
+                              let decimal = Decimal(
+                                string: amount, locale: Locale(identifier: "en_US_POSIX")
+                              ), decimal >= 0
+                        else { throw RepositoryError.corruptData }
+                    }
+                    rows.append(BalanceRecord(
+                        recordID: recordID, observedAt: observedAt,
+                        providerID: provider, accountRef: account,
+                        currency: currency, available: available,
+                        voucher: voucher, cash: cash, state: state,
+                        quality: quality, stale: stale, revision: revision,
+                        sourceID: sourceID
+                    ))
+                case SQLITE_DONE: return rows
+                default: throw RepositoryError.corruptData
+                }
+            }
+        }
+    }
+
     func queryKnownScopes(_ database: OpaquePointer) throws -> Set<ProviderScope> {
         try queryScopes(
             database,

@@ -7,6 +7,10 @@ struct APISpendPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             PageHeading("API Spend", detail: "Native currency values only")
+            if !data.apiSpend.balances.isEmpty {
+                balanceSection
+                Divider()
+            }
             if data.apiSpend.totals.isEmpty {
                 EmptyDataView(
                     title: data.apiSpend.coverage == .complete
@@ -26,6 +30,25 @@ struct APISpendPage: View {
                         Text(APISpendText.display(amount: total.amount, currency: total.currency)).monospacedDigit()
                     }
                     Divider()
+                }
+            }
+        }
+    }
+
+    private var balanceSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Balance").font(.headline)
+            ForEach(data.apiSpend.balances, id: \.recordID) { balance in
+                HStack {
+                    Text(data.providerDescriptor(for: balance.providerID).displayName)
+                    Spacer()
+                    Text(
+                        APISpendText.displayBalance(
+                            available: balance.available, currency: balance.currency
+                        )
+                    )
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
                 }
             }
         }

@@ -712,3 +712,7 @@
 "This catalog entry does not have a built-in connector yet. Configure a read-only HTTPS endpoint and response field mapping." = "This catalog entry does not have a built-in connector yet. Configure a read-only HTTPS endpoint and response field mapping.";
 "Use a stable HTTPS endpoint that returns quota, balance, credits, or remaining capacity." = "Use a stable HTTPS endpoint that returns quota, balance, credits, or remaining capacity.";
 "Use a stable HTTPS endpoint that returns daily records. Official and fallback sources are never summed together." = "Use a stable HTTPS endpoint that returns daily records. Official and fallback sources are never summed together.";
+"Open Provider Center" = "Open Provider Center";
+"Discard Changes" = "Discard Changes";
+"Keep Editing" = "Keep Editing";
+"Your Provider form changes will be lost." = "Your Provider form changes will be lost.";

@@ -240,6 +240,43 @@ public struct DailyCostDataset: Sendable, Hashable {
     }
 }
 
+public struct BalanceRecord: Sendable, Hashable {
+    public let recordID: String
+    public let observedAt: String
+    public let providerID: String
+    public let accountRef: String
+    public let currency: String
+    public let available: String?
+    public let voucher: String?
+    public let cash: String?
+    public let state: String
+    public let quality: String
+    public let stale: Bool
+    public let revision: Int64
+    public let sourceID: String
+
+    public init(
+        recordID: String, observedAt: String, providerID: String,
+        accountRef: String, currency: String, available: String?,
+        voucher: String?, cash: String?, state: String, quality: String,
+        stale: Bool, revision: Int64, sourceID: String
+    ) {
+        self.recordID = recordID
+        self.observedAt = observedAt
+        self.providerID = providerID
+        self.accountRef = accountRef
+        self.currency = currency
+        self.available = available
+        self.voucher = voucher
+        self.cash = cash
+        self.state = state
+        self.quality = quality
+        self.stale = stale
+        self.revision = revision
+        self.sourceID = sourceID
+    }
+}
+
 public enum QuotaScopeKind: String, Sendable, Hashable {
     case subscription
     case account

@@ -17,6 +17,7 @@ from ..config import (
 from ..cost_feed import DailyCostFeedImporter
 from ..daily_feed import DailyUsageFeedImporter
 from ..daily_history import OpenUsageDailyImporter
+from ..deepseek_openusage import OpenUsageDeepSeekAdapter
 from ..generic import GenericHTTPSAdapter
 from ..kiro import KiroQuotaAdapter
 from ..minimax import (
@@ -113,6 +114,16 @@ def default_registry(
         )
 
     registry.register_global(openusage)
+    def deepseek_openusage() -> ProviderBinding:
+        adapter = OpenUsageDeepSeekAdapter(clock=clock)
+        return ProviderBinding(
+            provider_id="deepseek", family_id="deepseek",
+            descriptor=_descriptor("deepseek", "deepseek", "DeepSeek", "api"),
+            balance_sources=(_performance_source(adapter, "child_process"),),
+            cost_sources=(_performance_source(adapter, "child_process"),),
+        )
+
+    registry.register_global(deepseek_openusage)
     registry.register_global(lambda: ProviderBinding(
         provider_id="kiro_cli", family_id="kiro_cli",
         descriptor=_descriptor(

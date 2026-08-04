@@ -1075,30 +1075,14 @@ private struct NativeProviderConnectionSheet: View {
     let onSaved: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var kind: String
-    @State private var providerID: String
-    @State private var name: String
-    @State private var site: String
-    @State private var endpoint = ""
-    @State private var familyID: String
-    @State private var headerName = "Authorization"
-    @State private var authPrefix = "Bearer"
-    @State private var primaryPath = "data.remaining"
-    @State private var remainingPercentPath = ""
-    @State private var resetPath = ""
-    @State private var detailPath = ""
-    @State private var itemsPath = "data.items"
-    @State private var datePath = "date"
-    @State private var modelPath = "model"
-    @State private var inputTokensPath = "input_tokens"
-    @State private var outputTokensPath = "output_tokens"
-    @State private var totalTokensPath = "total_tokens"
-    @State private var sinceParameter = "since"
-    @State private var untilParameter = "until"
+    @State private var draft: ProviderConnectionDraft
+    @State private var baseline: ProviderConnectionDraft
     @State private var credential = ""
     @State private var session = ""
     @State private var error: String?
     @State private var isSaving = false
+    @State private var confirmDiscard = false
+    private let draftStore = ProviderConnectionDraftStore()
 
     init(
         descriptor: ProviderDisplayDescriptor, selectedSite: String?,
@@ -1110,11 +1094,18 @@ private struct NativeProviderConnectionSheet: View {
         onCancel = nil
         self.onSaved = onSaved
         let connectionKind = ProviderAddConnectionKind(familyID: descriptor.familyID) ?? .generic
-        _kind = State(initialValue: connectionKind.rawValue)
-        _providerID = State(initialValue: descriptor.familyID)
-        _name = State(initialValue: descriptor.displayName)
-        _site = State(initialValue: selectedSite == "cn" ? "china" : selectedSite ?? "china")
-        _familyID = State(initialValue: descriptor.familyID)
+        let familyID = descriptor.familyID
+        let restored = ProviderConnectionDraftStore().load(
+            familyID: familyID, providerID: familyID
+        ) ?? ProviderConnectionDraft(
+            kind: connectionKind.rawValue,
+            providerID: familyID,
+            name: descriptor.displayName,
+            site: selectedSite == "cn" ? "china" : selectedSite ?? "china",
+            familyID: familyID
+        )
+        _draft = State(initialValue: restored)
+        _baseline = State(initialValue: restored)
     }
 
     init(
@@ -1127,11 +1118,18 @@ private struct NativeProviderConnectionSheet: View {
         optionOrigin = option.origin
         self.onCancel = onCancel
         self.onSaved = onSaved
-        _kind = State(initialValue: option.connectionKind.rawValue)
-        _providerID = State(initialValue: option.defaultProviderID)
-        _name = State(initialValue: option.descriptor.displayName)
-        _site = State(initialValue: selectedSite == "cn" ? "china" : selectedSite ?? "china")
-        _familyID = State(initialValue: option.descriptor.familyID)
+        let familyID = option.descriptor.familyID
+        let restored = ProviderConnectionDraftStore().load(
+            familyID: familyID, providerID: option.defaultProviderID
+        ) ?? ProviderConnectionDraft(
+            kind: option.connectionKind.rawValue,
+            providerID: option.defaultProviderID,
+            name: option.descriptor.displayName,
+            site: selectedSite == "cn" ? "china" : selectedSite ?? "china",
+            familyID: familyID
+        )
+        _draft = State(initialValue: restored)
+        _baseline = State(initialValue: restored)
     }
 
     var body: some View {
@@ -1160,7 +1158,7 @@ private struct NativeProviderConnectionSheet: View {
                         .foregroundStyle(.secondary)
                         .accessibilityElement(children: .combine)
                 }
-                Picker("Connection type", selection: $kind) {
+                Picker("Connection type", selection: $draft.kind) {
                     Text("Quota API").tag("generic")
                     Text("Daily Usage Feed").tag("daily_usage_feed")
                     if descriptor.familyID == "minimax" { Text("MiniMax").tag("minimax") }
@@ -1170,41 +1168,41 @@ private struct NativeProviderConnectionSheet: View {
                     if descriptor.familyID == "step_plan" { Text("Step Plan").tag("step_plan") }
                     if descriptor.familyID == "openai" { Text("OpenAI Organization").tag("openai_organization") }
                 }
-                TextField("Connection ID", text: $providerID)
-                TextField("Account label", text: $name)
-                if ["minimax", "moonshot", "step_plan"].contains(kind) {
-                    Picker("Site", selection: $site) {
+                TextField("Connection ID", text: $draft.providerID)
+                TextField("Account label", text: $draft.name)
+                if ["minimax", "moonshot", "step_plan"].contains(draft.kind) {
+                    Picker("Site", selection: $draft.site) {
                         Text("China").tag("china")
                         Text("International").tag("international")
                     }
                 }
-                if ["generic", "daily_usage_feed"].contains(kind) {
-                    TextField("Endpoint", text: $endpoint)
-                    TextField("Header name", text: $headerName)
-                    TextField("Authentication prefix", text: $authPrefix)
+                if ["generic", "daily_usage_feed"].contains(draft.kind) {
+                    TextField("Endpoint", text: $draft.endpoint)
+                    TextField("Header name", text: $draft.headerName)
+                    TextField("Authentication prefix", text: $draft.authPrefix)
                 }
-                if kind == "generic" {
-                    TextField("Primary field path", text: $primaryPath)
-                    TextField("Remaining percent path (optional)", text: $remainingPercentPath)
-                    TextField("Reset path (optional)", text: $resetPath)
-                    TextField("Detail path (optional)", text: $detailPath)
+                if draft.kind == "generic" {
+                    TextField("Primary field path", text: $draft.primaryPath)
+                    TextField("Remaining percent path (optional)", text: $draft.remainingPercentPath)
+                    TextField("Reset path (optional)", text: $draft.resetPath)
+                    TextField("Detail path (optional)", text: $draft.detailPath)
                 }
-                if kind == "daily_usage_feed" {
-                    TextField("Provider family ID", text: $familyID)
-                    TextField("Items path", text: $itemsPath)
-                    TextField("Date path", text: $datePath)
-                    TextField("Model path", text: $modelPath)
-                    TextField("Input tokens path", text: $inputTokensPath)
-                    TextField("Output tokens path", text: $outputTokensPath)
-                    TextField("Total tokens path", text: $totalTokensPath)
-                    TextField("Since parameter", text: $sinceParameter)
-                    TextField("Until parameter", text: $untilParameter)
+                if draft.kind == "daily_usage_feed" {
+                    TextField("Provider family ID", text: $draft.familyID)
+                    TextField("Items path", text: $draft.itemsPath)
+                    TextField("Date path", text: $draft.datePath)
+                    TextField("Model path", text: $draft.modelPath)
+                    TextField("Input tokens path", text: $draft.inputTokensPath)
+                    TextField("Output tokens path", text: $draft.outputTokensPath)
+                    TextField("Total tokens path", text: $draft.totalTokensPath)
+                    TextField("Since parameter", text: $draft.sinceParameter)
+                    TextField("Until parameter", text: $draft.untilParameter)
                 }
                 SecureField(
-                    AppLocalization.text(kind == "minimax" ? "Coding Plan key" : "API key"),
+                    AppLocalization.text(draft.kind == "minimax" ? "Coding Plan key" : "API key"),
                     text: $credential
                 )
-                if kind == "step_plan" {
+                if draft.kind == "step_plan" {
                     SecureField("Web session (optional)", text: $session)
                 }
                 if let error {
@@ -1227,7 +1225,18 @@ private struct NativeProviderConnectionSheet: View {
             .padding(18)
         }
         .frame(width: 620, height: 680)
+        .onChange(of: draft) { autosave() }
         .onDisappear(perform: clearSecrets)
+        .confirmationDialog(
+            "Discard unsaved changes?",
+            isPresented: $confirmDiscard,
+            titleVisibility: .visible
+        ) {
+            Button("Discard Changes", role: .destructive) { finishCancel() }
+            Button("Keep Editing", role: .cancel) {}
+        } message: {
+            Text("Your Provider form changes will be lost.")
+        }
     }
 
     private var sheetTitle: String {
@@ -1252,13 +1261,27 @@ private struct NativeProviderConnectionSheet: View {
     }
 
     private func cancel() {
+        if draft.hasChanges(from: baseline) {
+            confirmDiscard = true
+        } else {
+            finishCancel()
+        }
+    }
+
+    private func finishCancel() {
+        draftStore.clear(familyID: draft.familyID, providerID: draft.providerID)
         clearSecrets()
         if let onCancel { onCancel() } else { dismiss() }
     }
 
+    private func autosave() {
+        guard !isSaving else { return }
+        draftStore.save(draft, familyID: draft.familyID, providerID: draft.providerID)
+    }
+
     private func submit() {
-        let draft = makeDraft()
-        if let validation = draft.validation(action: .createConnection) {
+        let managed = makeDraft()
+        if let validation = managed.validation(action: .createConnection) {
             let message = switch validation {
             case .missingProviderID: "Connection ID is required."
             case .missingName: "Account label is required."
@@ -1279,11 +1302,14 @@ private struct NativeProviderConnectionSheet: View {
         error = nil
         Task { @MainActor in
             let result = await ProviderMutationService.submit(
-                draft.request(action: .createConnection), command: command
+                managed.request(action: .createConnection), command: command
             )
             isSaving = false
             switch result {
             case let .success(response) where response.ok:
+                draftStore.clear(
+                    familyID: draft.familyID, providerID: draft.providerID
+                )
                 clearSecrets()
                 onSaved()
             case let .success(response): error = response.message
@@ -1293,38 +1319,45 @@ private struct NativeProviderConnectionSheet: View {
     }
 
     private func makeDraft() -> ManagedConnectionDraft {
-        switch kind {
+        switch draft.kind {
         case "minimax": .minimax(
-            providerID: providerID, name: name, site: site,
+            providerID: draft.providerID, name: draft.name, site: draft.site,
             replacementCredential: credential
         )
         case "moonshot": .moonshot(
-            providerID: providerID, name: name, site: site,
+            providerID: draft.providerID, name: draft.name, site: draft.site,
             replacementCredential: credential
         )
         case "step_plan": .stepPlan(
-            providerID: providerID, name: name, site: site,
+            providerID: draft.providerID, name: draft.name, site: draft.site,
             replacementCredential: credential, replacementSession: session
         )
         case "openai_organization": .openAIOrganization(
-            providerID: providerID, name: name, replacementCredential: credential
+            providerID: draft.providerID, name: draft.name,
+            replacementCredential: credential
         )
         case "daily_usage_feed": .dailyUsageFeed(.init(
-            providerID: providerID, name: name, familyID: familyID,
-            endpoint: endpoint, headerName: headerName, authPrefix: authPrefix,
-            itemsPath: itemsPath, datePath: datePath, modelPath: modelPath,
-            inputTokensPath: inputTokensPath, outputTokensPath: outputTokensPath,
+            providerID: draft.providerID, name: draft.name, familyID: draft.familyID,
+            endpoint: draft.endpoint, headerName: draft.headerName,
+            authPrefix: draft.authPrefix,
+            itemsPath: draft.itemsPath, datePath: draft.datePath,
+            modelPath: draft.modelPath,
+            inputTokensPath: draft.inputTokensPath,
+            outputTokensPath: draft.outputTokensPath,
             cacheReadTokensPath: nil, cacheCreationTokensPath: nil,
-            reasoningTokensPath: nil, totalTokensPath: totalTokensPath,
-            sinceParameter: sinceParameter, untilParameter: untilParameter,
+            reasoningTokensPath: nil, totalTokensPath: draft.totalTokensPath,
+            sinceParameter: draft.sinceParameter,
+            untilParameter: draft.untilParameter,
             replacementCredential: credential
         ))
         default: .generic(.init(
-            providerID: providerID, name: name, familyID: familyID,
-            endpoint: endpoint, headerName: headerName, authPrefix: authPrefix,
-            primaryPath: primaryPath,
-            remainingPercentPath: emptyToNil(remainingPercentPath),
-            resetPath: emptyToNil(resetPath), detailPath: emptyToNil(detailPath),
+            providerID: draft.providerID, name: draft.name, familyID: draft.familyID,
+            endpoint: draft.endpoint, headerName: draft.headerName,
+            authPrefix: draft.authPrefix,
+            primaryPath: draft.primaryPath,
+            remainingPercentPath: emptyToNil(draft.remainingPercentPath),
+            resetPath: emptyToNil(draft.resetPath),
+            detailPath: emptyToNil(draft.detailPath),
             replacementCredential: credential
         ))
         }

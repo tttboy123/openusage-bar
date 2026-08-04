@@ -20,6 +20,7 @@ from openusage_bar.config import (
 from openusage_bar.cost_feed import DailyCostFeedImporter
 from openusage_bar.daily_feed import DailyUsageFeedImporter
 from openusage_bar.daily_history import OpenUsageDailyImporter
+from openusage_bar.deepseek_openusage import OpenUsageDeepSeekAdapter
 from openusage_bar.generic import GenericHTTPSAdapter
 from openusage_bar.kiro import KiroQuotaAdapter
 from openusage_bar.minimax import MiniMaxBillingImporter, MiniMaxCodingPlanAdapter
@@ -169,6 +170,7 @@ class AdapterRegistryTests(unittest.TestCase):
 
         expected = {
             "openusage": ((), (OpenUsageDailyImporter,), ()),
+            "deepseek": ((), (), (OpenUsageDeepSeekAdapter,)),
             "kiro_cli": ((KiroQuotaAdapter,), (), ()),
             "codex": (
                 (CodexSubscriptionAdapter,), (CodexLocalDailyImporter,), (),
@@ -202,6 +204,10 @@ class AdapterRegistryTests(unittest.TestCase):
         self.assertEqual(
             tuple(map(type, bindings["moonshot-work"].balance_sources)),
             (MoonshotBalanceAdapter,),
+        )
+        self.assertEqual(
+            tuple(map(type, bindings["deepseek"].balance_sources)),
+            (OpenUsageDeepSeekAdapter,),
         )
         self.assertIs(
             bindings["openai"].usage_sources[0],
