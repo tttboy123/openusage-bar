@@ -340,18 +340,14 @@ class CodexLocalDailyImporter:
             )
             if hasattr(os, "fchmod"):
                 os.fchmod(descriptor, 0o600)
-            else:
-                try:
-                    os.chmod(temporary, 0o600)
-                except (NotImplementedError, OSError, TypeError):
-                    pass
             with os.fdopen(descriptor, "wb") as handle:
                 handle.write(encoded)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, path)
             temporary = None
-            os.chmod(path, 0o600)
+            if hasattr(os, "getuid"):
+                os.chmod(path, 0o600)
             self._cache_digest = digest
         except OSError:
             pass

@@ -210,7 +210,8 @@ class CodexLocalDailyImporterTests(unittest.TestCase):
         self.assertIsInstance(restarted_result, UsageImportSuccess)
         self.assertEqual(restarted.parsed_lines, 1)
         self.assertEqual(sum(row.total_tokens for row in restarted_result.rows), 120)
-        self.assertEqual(cache_mode, 0o600)
+        if os.name != "nt":
+            self.assertEqual(cache_mode, 0o600)
         self.assertNotIn("private-session-name", cache_text)
         self.assertNotIn("private/not-persisted", cache_text)
         self.assertNotIn(str(root), cache_text)
