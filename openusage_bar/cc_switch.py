@@ -138,19 +138,33 @@ class CcSwitchCostImporter:
         sql = (
             "SELECT date, provider_id, model, "
             "input_tokens, output_tokens, cache_read_tokens, "
-            "cache_creation_tokens "
+            "cache_creation_tokens, total_cost_usd "
             "FROM usage_daily_rollups "
             "WHERE date >= ? AND date <= ? "
             "ORDER BY date, provider_id, model"
         )
         rows: list[DailyUsageRow] = []
         for raw in connection.execute(sql, (since.isoformat(), until.isoformat())):
-            day, upstream, model, input_tokens, output_tokens, cache_read, cache_creation = raw
+            (
+                day,
+                upstream,
+                model,
+                input_tokens,
+                output_tokens,
+                cache_read,
+                cache_creation,
+                total_cost_usd,
+            ) = raw
             input_tokens = 0 if input_tokens is None else int(input_tokens)
             output_tokens = 0 if output_tokens is None else int(output_tokens)
             cache_read = 0 if cache_read is None else int(cache_read)
             cache_creation = 0 if cache_creation is None else int(cache_creation)
             total = input_tokens + output_tokens + cache_read + cache_creation
+            cost_amount = (
+                None
+                if total_cost_usd is None
+                else str(Decimal(str(total_cost_usd)))
+            )
             rows.append(
                 DailyUsageRow(
                     day=day,
@@ -162,9 +176,11 @@ class CcSwitchCostImporter:
                     cache_creation_tokens=cache_creation,
                     reasoning_tokens=None,
                     total_tokens=total,
-                    cost_amount=None,
-                    cost_currency=None,
-                    cost_basis=None,
+                    cost_amount=cost_amount,
+                    cost_currency="USD" if cost_amount is not None else None,
+                    cost_basis=(
+                        "cc_switch.rollups" if cost_amount is not None else None
+                    ),
                     quality="upstream_declared",
                     account_ref=self.account_ref,
                     token_counting_convention="components_disjoint",

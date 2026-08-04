@@ -6,6 +6,7 @@ from datetime import datetime
 from ..codex_daily import CodexLocalDailyImporter
 from ..codex_subscription import CodexSubscriptionAdapter
 from ..cc_switch import CcSwitchCostImporter, CcSwitchStatusAdapter
+from ..claude_code_daily import ClaudeCodeLocalDailyImporter
 from ..config import (
     DailyCostFeedConfig,
     DailyUsageFeedConfig,
@@ -96,6 +97,12 @@ def default_registry(
         ),),
         usage_sources=(_performance_source(
             CodexLocalDailyImporter(clock=clock), "local_file"
+        ),),
+    ))
+    registry.register_global(lambda: ProviderBinding(
+        provider_id="claude_code", family_id="claude_code",
+        usage_sources=(_performance_source(
+            ClaudeCodeLocalDailyImporter(clock=clock), "local_file"
         ),),
     ))
     registry.register_global(lambda: ProviderBinding(

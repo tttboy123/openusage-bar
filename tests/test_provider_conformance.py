@@ -72,7 +72,7 @@ class ProviderConformanceTests(unittest.TestCase):
         self.assertEqual(
             {fixture.fixture_id for fixture in fixtures},
             {
-                "codex", "kiro", "minimax", "moonshot",
+                "codex", "claude_code", "kiro", "minimax", "moonshot",
                 "step_plan", "openusage", "custom",
                 "cc_switch", "omniroute", "deepseek",
             },

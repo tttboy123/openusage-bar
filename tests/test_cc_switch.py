@@ -101,6 +101,9 @@ class CcSwitchCostImporterTests(unittest.TestCase):
             self.assertEqual(row.input_tokens, 100)
             self.assertEqual(row.output_tokens, 50)
             self.assertEqual(row.total_tokens, 150)
+            self.assertEqual(row.cost_amount, "1.25")
+            self.assertEqual(row.cost_currency, "USD")
+            self.assertEqual(row.cost_basis, "cc_switch.rollups")
             self.assertEqual(row.token_counting_convention, "components_disjoint")
 
     def test_committed_cost_source_appears_in_snapshot_sources(self):

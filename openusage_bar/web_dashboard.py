@@ -10,7 +10,7 @@ primary surfaces; this page exists for cross-platform and headless users.
 from __future__ import annotations
 
 import html
-from datetime import date
+from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -30,7 +30,9 @@ def _pill(state: str) -> str:
     return f'<span class="pill pill-{kind}">{html.escape(state)}</span>'
 
 
-def render_dashboard(snapshot: dict[str, Any], today: str) -> str:
+def render_dashboard(
+    snapshot: dict[str, Any], today: str, model_summary: tuple[dict[str, Any], ...] = ()
+) -> str:
     summary = snapshot.get("summary") or {}
     today_tokens = summary.get("todayTokens")
     model_count = summary.get("modelCount")
@@ -45,6 +47,16 @@ def render_dashboard(snapshot: dict[str, Any], today: str) -> str:
         if model_count is not None
         else "暂无可聚合的 Token 事实"
     )
+    model_rows = "".join(
+        f"""
+        <tr>
+          <th scope="row">{html.escape(item["model"])}</th>
+          <td class="mono dim">{html.escape(item["source"])}</td>
+          <td class="mono">{html.escape(item["tokens"])}</td>
+          <td class="mono">{html.escape(item["cost_label"])}</td>
+        </tr>"""
+        for item in model_summary
+    ) or '<tr><td colspan="4" class="empty">近 7 天暂无模型用量</td></tr>'
 
     quota_rows = "".join(
         f"""
@@ -310,6 +322,19 @@ def render_dashboard(snapshot: dict[str, Any], today: str) -> str:
       </div>
     </section>
 
+    <section class="panel" aria-label="按模型消耗">
+      <div class="panel-head">
+        <h3>按模型消耗</h3>
+        <span>近 7 天</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">模型</th><th scope="col">来源</th><th scope="col">Token</th><th scope="col">费用</th></tr></thead>
+          <tbody>{model_rows}</tbody>
+        </table>
+      </div>
+    </section>
+
     <footer>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -368,7 +393,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         if self.path in {"/", "/index.html"}:
             self._write(
-                render_dashboard(snapshot, self._today.isoformat()).encode("utf-8"),
+                render_dashboard(
+                    snapshot,
+                    self._today.isoformat(),
+                    self._model_summary(),
+                ).encode("utf-8"),
                 "text/html; charset=utf-8",
             )
             return
@@ -381,6 +410,55 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._write(body, "application/json")
             return
         self.send_error(404)
+
+    def _model_summary(self) -> tuple[dict[str, Any], ...]:
+        """Aggregate last-7-day token and cost facts by (model, source)."""
+        from decimal import Decimal, InvalidOperation
+
+        start = self._today - timedelta(days=6)
+        try:
+            result = self._query.activity(start, self._today)
+        except Exception:
+            return ()
+        aggregated: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for row in result.rows:
+            currency = row.cost_currency or "USD"
+            key = (row.model_id, row.source_id, currency)
+            entry = aggregated.setdefault(
+                key,
+                {
+                    "model": row.model_id,
+                    "source": row.source_id,
+                    "currency": currency,
+                    "tokens": 0,
+                    "cost": Decimal("0"),
+                },
+            )
+            entry["tokens"] += row.total_tokens
+            if row.cost_amount:
+                try:
+                    entry["cost"] += Decimal(str(row.cost_amount))
+                except (InvalidOperation, ValueError):
+                    pass
+        ordered = sorted(
+            aggregated.values(), key=lambda item: item["tokens"], reverse=True
+        )[:12]
+        rendered: list[dict[str, Any]] = []
+        for item in ordered:
+            cost = item["cost"]
+            if cost:
+                label = f"{format(cost, '.6f').rstrip('0').rstrip('.')} {item['currency']}"
+            else:
+                label = "n/a"
+            rendered.append(
+                {
+                    "model": item["model"],
+                    "source": item["source"],
+                    "tokens": format(item["tokens"], ","),
+                    "cost_label": label,
+                }
+            )
+        return tuple(rendered)
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         return

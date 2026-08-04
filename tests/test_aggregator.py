@@ -230,7 +230,7 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         importer = refresher.collector.official_importers["codex"]
         self.assertIsInstance(importer, CodexLocalDailyImporter)
         self.assertEqual(importer.usage_source_id, "codex.local_sessions")
-        self.assertEqual(refresher.eager_usage_provider_ids, ("codex",))
+        self.assertEqual(refresher.eager_usage_provider_ids, ("claude_code", "codex"))
 
     def test_minimax_reuses_keychain_and_client_for_quota_and_daily_tokens(self):
         from openusage_bar.aggregator import build_headless_refresher
