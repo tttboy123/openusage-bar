@@ -1,4 +1,4 @@
-<!-- openusage-release-version: 0.6.0 -->
+<!-- openusage-release-version: 0.7.0 -->
 <div align="center">
 
 # UsageHub
@@ -64,7 +64,7 @@ flowchart LR
 
 ## Quick install
 
-[Download OpenUsage Bar v0.6.0 DMG for Apple Silicon](https://github.com/tttboy123/openusage-bar/releases/download/v0.6.0/OpenUsage-Bar-v0.6.0-macos-arm64.dmg)
+[Download OpenUsage Bar v0.7.0 DMG for Apple Silicon](https://github.com/tttboy123/openusage-bar/releases/download/v0.7.0/OpenUsage-Bar-v0.7.0-macos-arm64.dmg)
 
 1. Open the downloaded DMG.
 2. Drag **OpenUsage Bar** onto **Applications**.

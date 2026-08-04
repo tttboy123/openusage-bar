@@ -24,6 +24,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   `openusage-bar` CLI, Local API v1 contract) remains compatible; app-bundle
   renaming is scheduled with the cross-platform release.
 
+## 0.7.0 - 2026-08-04
+
+- Settings helper GUI: fix PyObjC selector crash and launcher naming
+- Release audit: verify CFBundleExecutable matches the on-disk launcher
+- Version bump across bundles, release state, and canary docs
+
 ## 0.6.0 - 2026-07-30
 
 ### Added
