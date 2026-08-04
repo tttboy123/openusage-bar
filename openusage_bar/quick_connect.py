@@ -15,23 +15,28 @@ class QuickConnect:
     family_id: str
     console_url: str
     auth_modes: tuple[str, ...]
+    api_key_url: str | None = None
 
 
 QUICK_CONNECT: dict[str, QuickConnect] = {
     "deepseek": QuickConnect(
-        "deepseek", "https://platform.deepseek.com", ("api_key", "auto_detect")
+        "deepseek", "https://platform.deepseek.com", ("api_key", "auto_detect"),
+        api_key_url="https://platform.deepseek.com/api_keys",
     ),
     "codex": QuickConnect(
-        "codex", "https://chatgpt.com/codex", ("oauth", "auto_detect")
+        "codex", "https://chatgpt.com/codex", ("oauth", "auto_detect"),
     ),
     "minimax": QuickConnect(
-        "minimax", "https://platform.minimaxi.com", ("api_key",)
+        "minimax", "https://platform.minimaxi.com", ("api_key",),
+        api_key_url="https://platform.minimaxi.com/user-center/basic-information/interface-key",
     ),
     "step_plan": QuickConnect(
-        "step_plan", "https://platform.stepfun.com", ("api_key", "auto_detect")
+        "step_plan", "https://platform.stepfun.com", ("api_key", "auto_detect"),
+        api_key_url="https://platform.stepfun.com/api-keys",
     ),
     "moonshot": QuickConnect(
-        "moonshot", "https://platform.moonshot.cn", ("api_key", "auto_detect")
+        "moonshot", "https://platform.moonshot.cn", ("api_key", "auto_detect"),
+        api_key_url="https://platform.moonshot.cn/console/api-keys",
     ),
     "omniroute": QuickConnect(
         "omniroute", "http://localhost:20128", ("auto_detect",)

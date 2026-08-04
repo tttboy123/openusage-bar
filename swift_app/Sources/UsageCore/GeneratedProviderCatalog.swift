@@ -1116,4 +1116,10 @@ public enum GeneratedProviderCatalog {
         "omniroute": "http://localhost:20128",
         "step_plan": "https://platform.stepfun.com",
     ]
+    public static let apiKeyURLs: [String: String] = [
+        "deepseek": "https://platform.deepseek.com/api_keys",
+        "minimax": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+        "moonshot": "https://platform.moonshot.cn/console/api-keys",
+        "step_plan": "https://platform.stepfun.com/api-keys",
+    ]
 }

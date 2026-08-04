@@ -9,6 +9,7 @@ struct DataHealthPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             PageHeading("Data Health", detail: "Sanitized collection status")
+            healthSummary
             if data.visibilityIssue {
                 StatusBanner(symbol: "eye.slash", text: "Provider visibility settings are invalid. All providers remain visible.")
             }
@@ -118,6 +119,31 @@ struct DataHealthPage: View {
                 Button("Repair in Provider Settings", systemImage: "wrench.and.screwdriver") { SettingsHelper.open() }
             }
         }
+    }
+
+    private var healthSummary: some View {
+        let issueCount = data.health.sources.filter {
+            ProviderSourceIssuePresentation.make(from: $0).isIssue
+        }.count
+        let healthyCount = data.health.sources.count - issueCount
+        return HStack(spacing: 10) {
+            Image(
+                systemName: issueCount == 0
+                    ? "checkmark.circle.fill"
+                    : "exclamationmark.triangle.fill"
+            )
+            .foregroundStyle(issueCount == 0 ? Color.green : Color.orange)
+            Text(
+                issueCount == 0
+                    ? "All \(healthyCount) sources are collecting normally."
+                    : "\(issueCount) of \(data.health.sources.count) sources need attention. "
+                        + "Items below show the fix."
+            )
+            .font(.callout)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 

@@ -427,6 +427,17 @@ private struct ProviderConnectionDetail: View {
                         }
                         .controlSize(.large)
                     }
+                    if let apiKeyURL = GeneratedProviderCatalog.apiKeyURLs[
+                        descriptor.familyID
+                    ], let url = URL(string: apiKeyURL) {
+                        Link(destination: url) {
+                            Label(
+                                AppLocalization.text("Get API Key"),
+                                systemImage: "key"
+                            )
+                        }
+                        .controlSize(.large)
+                    }
                 }
                 if connections.contains(where: { $0.isManaged }) {
                     Text("Existing app-managed accounts are edited in Connections above.")
@@ -898,6 +909,17 @@ private struct NativeProviderConnectionSheet: View {
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if let apiKeyURL = GeneratedProviderCatalog.apiKeyURLs[
+                    descriptor.familyID
+                ], let url = URL(string: apiKeyURL) {
+                    Link(destination: url) {
+                        Label(
+                            AppLocalization.text("Get API Key"),
+                            systemImage: "arrow.up.right.square"
+                        )
+                        .font(.callout)
+                    }
+                }
             }
             .padding(24)
             Divider()

@@ -233,6 +233,13 @@ def render() -> str:
                 for family_id, item in sorted(QUICK_CONNECT.items())
             ),
             "    ]",
+            "    public static let apiKeyURLs: [String: String] = [",
+            *(
+                f"        {swift_string(family_id)}: {swift_string(item.api_key_url)},"
+                for family_id, item in sorted(QUICK_CONNECT.items())
+                if item.api_key_url is not None
+            ),
+            "    ]",
             "}",
             "",
         ]
