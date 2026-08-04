@@ -3,7 +3,9 @@ import tempfile
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
+from openusage_bar import claude_code_daily
 from openusage_bar.claude_code_daily import ClaudeCodeLocalDailyImporter
 from openusage_bar.providers.contracts import ImportFailure, UsageImportSuccess
 
@@ -169,6 +171,234 @@ class ClaudeCodeLocalDailyImporterTests(unittest.TestCase):
             )
             result = importer.fetch_usage(date(2026, 7, 1), date(2026, 7, 10))
             self.assertEqual({row.model_id for row in result.rows}, {"claude-sonnet-4-6"})
+
+    def test_cache_round_trip_across_instances(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            projects = root / "projects"
+            projects.mkdir()
+            cache = root / "cache.json"
+            _build_session(
+                projects,
+                "session-a",
+                [
+                    _assistant_line(
+                        timestamp="2026-07-05T04:00:00Z",
+                        model="claude-sonnet-4-6",
+                        input_tokens=100,
+                        output_tokens=50,
+                    )
+                ],
+            )
+            first = ClaudeCodeLocalDailyImporter(
+                session_roots=(projects,),
+                cache_path=cache,
+                local_timezone=timezone.utc,
+            )
+            first_result = first.fetch_usage(date(2026, 7, 1), date(2026, 7, 31))
+            self.assertEqual(first_result.rows[0].total_tokens, 150)
+            self.assertTrue(cache.is_file())
+
+            second = ClaudeCodeLocalDailyImporter(
+                session_roots=(projects,),
+                cache_path=cache,
+                local_timezone=timezone.utc,
+            )
+            second_result = second.fetch_usage(date(2026, 7, 1), date(2026, 7, 31))
+            self.assertEqual(second_result.rows[0].total_tokens, 150)
+
+    def test_invalid_cache_payload_is_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            projects = root / "projects"
+            projects.mkdir()
+            cache = root / "cache.json"
+            cache.write_text("{not valid json", encoding="utf-8")
+            _build_session(
+                projects,
+                "session-a",
+                [
+                    _assistant_line(
+                        timestamp="2026-07-05T04:00:00Z",
+                        model="claude-sonnet-4-6",
+                        input_tokens=100,
+                        output_tokens=50,
+                    )
+                ],
+            )
+            importer = ClaudeCodeLocalDailyImporter(
+                session_roots=(projects,),
+                cache_path=cache,
+                local_timezone=timezone.utc,
+            )
+            result = importer.fetch_usage(date(2026, 7, 1), date(2026, 7, 31))
+            self.assertEqual(result.rows[0].total_tokens, 150)
+
+    def test_malformed_cache_state_is_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            projects = root / "projects"
+            projects.mkdir()
+            cache = root / "cache.json"
+            cache.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "states": {
+                            "deadbeef": {
+                                "key": "other",
+                                "device": True,
+                                "inode": 1,
+                                "offset": 0,
+                                "mtimeNs": 0,
+                                "tailDigest": "",
+                                "rows": [],
+                                "pending": [],
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _build_session(
+                projects,
+                "session-a",
+                [
+                    _assistant_line(
+                        timestamp="2026-07-05T04:00:00Z",
+                        model="claude-sonnet-4-6",
+                        input_tokens=100,
+                        output_tokens=50,
+                    )
+                ],
+            )
+            importer = ClaudeCodeLocalDailyImporter(
+                session_roots=(projects,),
+                cache_path=cache,
+                local_timezone=timezone.utc,
+            )
+            result = importer.fetch_usage(date(2026, 7, 1), date(2026, 7, 31))
+            self.assertEqual(result.rows[0].total_tokens, 150)
+
+    def test_relative_cache_path_rejected(self):
+        with self.assertRaises(ValueError):
+            ClaudeCodeLocalDailyImporter(cache_path=Path("relative.json"))
+
+    def test_invalid_request_range(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            importer = ClaudeCodeLocalDailyImporter(
+                session_roots=(root / "missing",),
+                cache_path=root / "cache.json",
+            )
+            result = importer.fetch_usage(date(2026, 7, 31), date(2026, 7, 1))
+            self.assertIsInstance(result, ImportFailure)
+            self.assertEqual(result.error_code, "invalid_request")
+
+    def test_oversized_line_returns_invalid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            projects = root / "projects"
+            projects.mkdir()
+            _build_session(
+                projects,
+                "session-a",
+                [
+                    _assistant_line(
+                        timestamp="2026-07-05T04:00:00Z",
+                        model="claude-sonnet-4-6",
+                        input_tokens=100,
+                        output_tokens=50,
+                    )
+                ],
+            )
+            importer = ClaudeCodeLocalDailyImporter(
+                session_roots=(projects,),
+                cache_path=root / "cache.json",
+                local_timezone=timezone.utc,
+            )
+            with patch.object(claude_code_daily, "MAX_RELEVANT_LINE_BYTES", 64):
+                result = importer.fetch_usage(date(2026, 7, 1), date(2026, 7, 31))
+            self.assertIsInstance(result, UsageImportSuccess)
+            self.assertEqual(result.rows, ())
+
+    def test_malformed_json_line_returns_invalid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            projects = root / "projects"
+            projects.mkdir()
+            _build_session(projects, "session-a", ['{"type": "assistant", broken'])
+            importer = ClaudeCodeLocalDailyImporter(
+                session_roots=(projects,),
+                cache_path=root / "cache.json",
+                local_timezone=timezone.utc,
+            )
+            result = importer.fetch_usage(date(2026, 7, 1), date(2026, 7, 31))
+            self.assertIsInstance(result, UsageImportSuccess)
+            self.assertEqual(result.rows, ())
+
+    def test_pending_rows_for_unknown_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            projects = root / "projects"
+            projects.mkdir()
+            line = json.dumps(
+                {
+                    "type": "assistant",
+                    "timestamp": "2026-07-05T04:00:00Z",
+                    "message": {
+                        "usage": {"input_tokens": 10, "output_tokens": 5}
+                    },
+                }
+            )
+            _build_session(projects, "session-a", [line])
+            importer = ClaudeCodeLocalDailyImporter(
+                session_roots=(projects,),
+                cache_path=root / "cache.json",
+                local_timezone=timezone.utc,
+            )
+            result = importer.fetch_usage(date(2026, 7, 1), date(2026, 7, 31))
+            self.assertEqual({row.model_id for row in result.rows}, {"unknown"})
+            self.assertEqual(result.rows[0].total_tokens, 15)
+
+    def test_session_boundary_exceeded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            projects = root / "projects"
+            projects.mkdir()
+            _build_session(
+                projects,
+                "session-a",
+                [
+                    _assistant_line(
+                        timestamp="2026-07-05T04:00:00Z",
+                        model="claude-sonnet-4-6",
+                        input_tokens=100,
+                        output_tokens=50,
+                    )
+                ],
+            )
+            _build_session(
+                projects,
+                "session-b",
+                [
+                    _assistant_line(
+                        timestamp="2026-07-05T05:00:00Z",
+                        model="claude-opus-4-8",
+                        input_tokens=30,
+                        output_tokens=4,
+                    )
+                ],
+            )
+            importer = ClaudeCodeLocalDailyImporter(
+                session_roots=(projects,),
+                cache_path=root / "cache.json",
+                local_timezone=timezone.utc,
+            )
+            with patch.object(claude_code_daily, "MAX_SESSION_FILES", 1):
+                result = importer.fetch_usage(date(2026, 7, 1), date(2026, 7, 31))
+            self.assertIsInstance(result, ImportFailure)
+            self.assertEqual(result.error_code, "sessions_invalid")
 
 
 if __name__ == "__main__":
