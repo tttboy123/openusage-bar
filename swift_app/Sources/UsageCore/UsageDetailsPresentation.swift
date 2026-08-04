@@ -745,7 +745,9 @@ public enum UsageDetailsAggregator {
             )
         }
         let points: [DailyModelPoint] = chartDays.flatMap { day -> [DailyModelPoint] in
-            guard day.state != ActivityDayState.missing, day.state != ActivityDayState.partial else {
+            // Partial days still carry the models that were observed; skipping
+            // them would render an empty chart even when records exist.
+            guard day.state != ActivityDayState.missing else {
                 return []
             }
             return day.composition.map { DailyModelPoint(day: day.day, modelID: $0.modelID, tokens: $0.tokens) }
