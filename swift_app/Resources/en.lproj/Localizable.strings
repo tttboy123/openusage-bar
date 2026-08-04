@@ -66,6 +66,7 @@
 "Add Account" = "Add Account";
 "Refresh Data" = "Refresh Data";
 "Open Console" = "Open Console";
+"Open Main Window" = "Open Main Window";
 "Existing app-managed accounts are edited in Connections above." = "Existing app-managed accounts are edited in Connections above.";
 "Data Source Issues" = "Data Source Issues";
 "These diagnostics do not mark the Provider connection as failed unless credentials need attention." = "These diagnostics do not mark the Provider connection as failed unless credentials need attention.";
