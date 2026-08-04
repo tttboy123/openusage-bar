@@ -11,7 +11,11 @@ from openusage_bar.cc_switch import (
     CcSwitchStatusAdapter,
 )
 from openusage_bar.models import ProviderStatus
-from openusage_bar.providers.contracts import CostImportSuccess, ImportFailure
+from openusage_bar.providers.contracts import (
+    CostImportSuccess,
+    ImportFailure,
+    UsageImportSuccess,
+)
 from openusage_bar.query import QueryService
 
 
@@ -79,6 +83,25 @@ class CcSwitchCostImporterTests(unittest.TestCase):
         ).fetch_costs(date(2026, 7, 31), date(2026, 7, 1))
 
         self.assertEqual(result, ImportFailure("invalid_request"))
+
+    def test_maps_rollups_into_usage_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "cc-switch.db"
+            _build_db(db)
+
+            result = CcSwitchCostImporter(db_path=db).fetch_usage(
+                date(2026, 7, 1), date(2026, 7, 31)
+            )
+
+            self.assertIsInstance(result, UsageImportSuccess)
+            self.assertEqual(len(result.rows), 1)
+            row = result.rows[0]
+            self.assertEqual(row.provider_id, "cc_switch")
+            self.assertEqual(row.model_id, "_codex_session.deepseek-v4-flash")
+            self.assertEqual(row.input_tokens, 100)
+            self.assertEqual(row.output_tokens, 50)
+            self.assertEqual(row.total_tokens, 150)
+            self.assertEqual(row.token_counting_convention, "components_disjoint")
 
     def test_committed_cost_source_appears_in_snapshot_sources(self):
         with tempfile.TemporaryDirectory() as directory:

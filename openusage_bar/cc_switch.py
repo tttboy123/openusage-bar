@@ -14,12 +14,14 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Callable
 
-from .activity_store import DailyCostRow
+from .activity_store import DailyCostRow, DailyUsageRow
 from .models import Category, ProviderCard, ProviderStatus
 from .providers.contracts import (
     CostImportResult,
     CostImportSuccess,
     ImportFailure,
+    UsageImportResult,
+    UsageImportSuccess,
 )
 
 
@@ -37,7 +39,7 @@ def _read_only_connection(path: Path) -> sqlite3.Connection:
 class CcSwitchCostImporter:
     """Import CC Switch daily cost rollups into the monetary ledger."""
 
-    usage_source_id = None
+    usage_source_id = "cc_switch.usage"
     cost_source_id = CC_SWITCH_COST_SOURCE_ID
     performance_source_class = "local_file"
 
@@ -105,6 +107,67 @@ class CcSwitchCostImporter:
                     basis="cc_switch.rollups",
                     quality="upstream_declared",
                     account_ref=self.account_ref,
+                )
+            )
+        return tuple(rows)
+
+    def fetch_usage(self, since: date, until: date) -> UsageImportResult:
+        """Import CC Switch per-model token rollups into the usage ledger."""
+        if since > until:
+            return ImportFailure("invalid_request")
+        if not self.db_path.is_file():
+            return ImportFailure("source_unavailable")
+        try:
+            connection = _read_only_connection(self.db_path)
+        except (OSError, sqlite3.Error):
+            return ImportFailure("source_unavailable")
+        try:
+            rows = self._usage_rows(connection, since, until)
+            return UsageImportSuccess(since, until, rows)
+        except (sqlite3.Error, InvalidOperation, ValueError):
+            return ImportFailure("import_failed")
+        finally:
+            connection.close()
+
+    def _usage_rows(
+        self,
+        connection: sqlite3.Connection,
+        since: date,
+        until: date,
+    ) -> tuple[DailyUsageRow, ...]:
+        sql = (
+            "SELECT date, provider_id, model, "
+            "input_tokens, output_tokens, cache_read_tokens, "
+            "cache_creation_tokens "
+            "FROM usage_daily_rollups "
+            "WHERE date >= ? AND date <= ? "
+            "ORDER BY date, provider_id, model"
+        )
+        rows: list[DailyUsageRow] = []
+        for raw in connection.execute(sql, (since.isoformat(), until.isoformat())):
+            day, upstream, model, input_tokens, output_tokens, cache_read, cache_creation = raw
+            input_tokens = 0 if input_tokens is None else int(input_tokens)
+            output_tokens = 0 if output_tokens is None else int(output_tokens)
+            cache_read = 0 if cache_read is None else int(cache_read)
+            cache_creation = 0 if cache_creation is None else int(cache_creation)
+            total = input_tokens + output_tokens + cache_read + cache_creation
+            rows.append(
+                DailyUsageRow(
+                    day=day,
+                    provider_id="cc_switch",
+                    model_id=f"{upstream}.{model}" if model else upstream,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read_tokens=cache_read,
+                    cache_creation_tokens=cache_creation,
+                    reasoning_tokens=None,
+                    total_tokens=total,
+                    cost_amount=None,
+                    cost_currency=None,
+                    cost_basis=None,
+                    quality="upstream_declared",
+                    account_ref=self.account_ref,
+                    token_counting_convention="components_disjoint",
                 )
             )
         return tuple(rows)
