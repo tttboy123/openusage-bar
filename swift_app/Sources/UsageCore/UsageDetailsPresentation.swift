@@ -966,7 +966,7 @@ public enum ProviderCatalog {
 }
 
 public enum UsageDetailsRoute: String, CaseIterable, Sendable, Hashable, Identifiable {
-    case activity, capacity, apiSpend, localTools, providersAndAccounts, dataHealth, automation
+    case activity, capacity, apiSpend, localTools, providersAndAccounts, routing, dataHealth, automation
     public var id: String { rawValue }
 
     public init(arguments: [String]) {
@@ -984,6 +984,7 @@ public enum UsageDetailsRoute: String, CaseIterable, Sendable, Hashable, Identif
         case "api-spend", "spend": self = .apiSpend
         case "local-tools", "local": self = .localTools
         case "providers", "accounts", "settings": self = .providersAndAccounts
+        case "routing", "router": self = .routing
         case "health", "data-health": self = .dataHealth
         case "automation", "api": self = .automation
         default: return nil
@@ -1011,6 +1012,7 @@ public extension UsageDetailsRoute {
         case .apiSpend: "api-spend"
         case .localTools: "local-tools"
         case .providersAndAccounts: "providers"
+        case .routing: "routing"
         case .dataHealth: "health"
         case .automation: "automation"
         default: rawValue

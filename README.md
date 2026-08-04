@@ -1,11 +1,13 @@
 <!-- openusage-release-version: 0.6.0 -->
 <div align="center">
 
+<img src="docs/assets/brand/openusage-bar-icon.png" width="124" alt="OpenUsage Bar App 图标">
+
 # OpenUsage Bar
 
-**一眼掌握 AI 订阅余量、Token 活动与 API 消耗。**
+### macOS 上的本地 AI 资源控制台
 
-原生 macOS 菜单栏工具。数据留在本机，人看界面，调度器读 JSON。
+**像 AI 账号与订阅的 iStat Menus：人看原生界面，调度器读可信 JSON。**
 
 [![Release](https://img.shields.io/github/v/release/tttboy123/openusage-bar?include_prereleases&style=flat-square&color=0A84FF)](https://github.com/tttboy123/openusage-bar/releases)
 ![macOS](https://img.shields.io/badge/macOS-15%2B-111111?style=flat-square&logo=apple&logoColor=white)
@@ -13,18 +15,60 @@
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-native-111111?style=flat-square&logo=swift&logoColor=white)
 ![Local First](https://img.shields.io/badge/Local--First-Keychain%20%2B%20SQLite-111111?style=flat-square)
 ![License](https://img.shields.io/badge/License-Apache--2.0-111111?style=flat-square)
+[![CI](https://img.shields.io/github/actions/workflow/status/tttboy123/openusage-bar/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/tttboy123/openusage-bar/actions/workflows/ci.yml)
 
-[English](README.en.md) | [路线图](ROADMAP.md) | [本地 API](docs/api/local-api-v1.md) | [Provider 支持](docs/provider-support.md) | [性能预算](docs/performance.md) | [安装指南](docs/release-quick-start.md)
+[下载应用](https://github.com/tttboy123/openusage-bar/releases) · [5 分钟安装](docs/release-quick-start.md) · [Provider 支持](docs/provider-support.md) · [本地 API](docs/api/local-api-v1.md) · [English](README.en.md)
 
 </div>
-
-OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Token 活动统一到一个原生 SwiftUI 客户端里：菜单栏用于快速判断，详情页用于分析，CLI JSON 和本地只读 API 供调度平台读取。
 
 <p align="center">
   <img src="docs/assets/openusage-bar-activity-demo-zh.png" width="1160" alt="OpenUsage Bar 中文 Activity 界面，展示年度 Token 热力图与每日模型趋势">
 </p>
 
-<p align="center"><sub>真实 SwiftUI 界面，使用隔离的合成账本生成。未读取用户账本、Keychain 或真实额度。</sub></p>
+<table>
+  <tr>
+    <td width="36%" align="center">
+      <img src="docs/assets/openusage-bar-menu-demo.png" width="310" alt="OpenUsage Bar 菜单栏容量总览"><br>
+      <sub><b>菜单栏</b> · 两秒判断今日 Token 与订阅余量</sub>
+    </td>
+    <td width="64%" align="center">
+      <img src="docs/assets/openusage-bar-provider-catalog-demo-zh.png" width="590" alt="OpenUsage Bar Provider 接入目录"><br>
+      <sub><b>Provider Center</b> · 内置连接、自定义接口与自动发现</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center"><sub>以上均为真实 SwiftUI 界面。Activity 与菜单栏使用隔离的合成账本生成；Provider 图只包含静态服务目录，未读取用户账本、Keychain、真实账号或额度。</sub></p>
+
+## 一个数据底座，四个产品界面
+
+OpenUsage Bar 把分散在 AI 厂商、本地编码客户端和 API 账单里的事实写入同一份本地账本，同时明确区分“订阅容量、Token 活动、API 费用、数据健康”。缺失值显示 `Unknown` 和原因，绝不用 `0` 伪装。
+
+| 界面 | 解决的问题 |
+| --- | --- |
+| **菜单栏** | 今天用了多少 Token、各订阅还剩多少、何时重置、哪条数据过期 |
+| **Usage Details** | 每日/周/月/年活动、输入/输出/缓存拆分、模型趋势、额度历史与 API 消耗 |
+| **Provider Center** | 内置 Provider、多账号、自定义 HTTPS 映射、每日用量 Feed、隐藏与刷新 |
+| **Local API / CLI** | 为 Loom 等调度器提供版本化 JSON、来源、质量、更新时间与 `dataRevision` |
+
+```mermaid
+flowchart LR
+  A[AI Provider 与本地客户端] --> B[受限采集器]
+  K[(macOS Keychain)] --> B
+  B --> D[(本地 SQLite 账本)]
+  D --> E[菜单栏]
+  D --> F[Usage Details]
+  D --> G[Provider Center]
+  D --> H[CLI JSON 与只读 API]
+```
+
+### 设计原则
+
+- **本地优先**：密钥留在 Keychain，账本留在 SQLite，默认不监听 TCP。
+- **来源可追溯**：每个事实带来源、质量、更新时间和缺失原因。
+- **不重复计算**：官方数据优先，OpenUsage 可作备选；同一批数据不会相加两次。
+- **独立可用**：不依赖 Loom；Loom 和其他调度器只是可选的只读 API 消费者。
+- **可扩展**：优先复用 OpenUsage 等成熟采集源，缺口通过 Provider Adapter Kit 补齐。
 
 > 当前公开预发布版：**0.6.0 RC**，用于自愿参加、无遥测的外部
 > Canary。当前合格外部机器仍为 **0 / 5**，30 天时钟为
@@ -32,35 +76,8 @@ OpenUsage Bar 把 AI 订阅额度、API 消耗、本地编码工具和每日 Tok
 > [Canary 跟踪 Issue #33](https://github.com/tttboy123/openusage-bar/issues/33)。
 > 支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple
 > Developer ID 公证包；若 macOS 显示“已损坏”，按下方指引仅移除本 App
-> 的下载隔离属性。
-
-## 为什么需要它
-
-AI 工具越来越多，但用量信息分散在不同地方：
-
-- Codex、Cursor、Kiro 这类订阅型工具关心剩余额度和重置周期。
-- MiniMax、StepFun、OpenAI Organization 这类 Provider 关心套餐余量、账单和 API 消耗。
-- Claude Code、OpenCode、Hermes、OpenClaw 等本地工具关心本地活动和 Token 历史。
-- 自动调度平台需要结构化数据，而不是去解析 UI 文本。
-
-OpenUsage Bar 的定位很明确：
-
-```text
-菜单栏：给人看，快速判断今天还能不能继续跑。
-详情页：给人分析，看每日 Token、模型趋势、额度历史和数据健康。
-本地 API：给调度系统读，稳定 JSON，不依赖 UI 文案。
-Keychain：放密钥；SQLite：放账本；日志：不放凭证。
-```
-
-```mermaid
-flowchart LR
-  A[AI Provider 与本地工具] --> B[受限 Python Collector]
-  K[(macOS Keychain)] --> B
-  B --> D[(本地 SQLite 账本)]
-  D --> E[菜单栏快照]
-  D --> F[Usage Details]
-  D --> G[CLI JSON 与只读 API]
-```
+> 的下载隔离属性。发布资格和真实账号验证状态会明确标注，不把 Fixture
+> 通过写成真实环境通过。
 
 ## 核心能力
 
@@ -99,8 +116,13 @@ xattr -dr com.apple.quarantine "/Applications/OpenUsage Bar.app"
 
 1. 点击菜单栏里的 **OpenUsage Bar**。
 2. 进入 **Open Usage Details** 查看账本。
-3. 进入 **Settings / Providers** 添加或编辑 Provider。
-4. 后续通常只需查看菜单栏；登录后自动启动，采集器每五分钟刷新。
+3. 进入 **Usage Details > Providers**，点击右上角 **新增 Provider**。
+4. 从完整目录选择服务商；MiniMax、Kimi/Moonshot、StepFun Step Plan 和
+   OpenAI Organization 使用内置连接器，其他 API 服务商会明确要求配置只读
+   HTTPS 字段映射。本机客户端与订阅应用由应用自动发现。
+5. 目录之外的服务选择 **自定义 Provider**；每日 Token 数据选择
+   **自定义每日用量 Feed**。凭证只写入 Keychain，保存后不会回显。
+6. 后续通常只需查看菜单栏；登录后自动启动，采集器每五分钟刷新。
 
 更多细节、SHA-256 校验和高级修复脚本见[安装指南](docs/release-quick-start.md)。
 
@@ -171,7 +193,13 @@ GET /v1/costs/daily?from=2026-07-01&to=2026-07-14
 GET /v1/quotas/history
 GET /v1/sources/status
 GET /v1/changes?after=0&limit=100
+GET /v1/runtime/summary?windowSeconds=3600
 ```
+
+`/v1/runtime/summary` 从独立的 24 小时 Runtime Ledger 返回有界、无内容的
+Token、状态、费用与延迟汇总。它同时携带 Local API 的 `dataRevision` 和独立
+`runtimeRevision`；两者不是同一事务。Runtime 数据库缺失或不可安全读取时返回
+`503 runtime_unavailable`，不会把缺失数据表达为零。
 
 `/v1/capabilities` 不只返回“是否有代码适配器”，还会按数据源声明
 Detection、Token Activity、Subscription Capacity、API Spend、权威程度、
@@ -196,6 +224,69 @@ COLLECTOR="$APP/Contents/MacOS/OpenUsage Collector"
 15 秒的独立采集边界；旧版 OpenUsage 继续使用最长 75 秒的全量 direct
 fallback，完整 OpenUsage daily import 最长 60 秒。超时不会把未知额度写成
 0，而是继续提供 last-good ledger 并报告刷新不可用。
+
+### 本地自动策略路由（开发中）
+
+0.8 开发分支已加入独立的 `router.sock`。它复用常驻 Python Controller，
+但拥有单独的 Schema、Handler 和有界证据库；路由不可用不会停止事实采集或
+上面的只读 Resource API。
+
+```bash
+"$COLLECTOR" route decide --format json < route-request.json
+"$COLLECTOR" route simulate --format json < route-request.json
+"$COLLECTOR" route history --format json --limit 20
+"$COLLECTOR" route shadow --format json < shadow-request.json
+"$COLLECTOR" route replay --format json < replay-fixture.json
+```
+
+Phase A 只返回可解释的 Provider/账号/模型选择，不发送模型请求，也不接收
+Prompt 或响应内容。显式 Execution Connection、Route Target 和自定义策略已可在
+Provider Center 的“智能路由”页面配置；自动发现 Provider 不会自动授予可执行
+路由能力。完整契约与退出码见 [Route Decision API v1](docs/routing-api-v1.md)。
+
+对于已经在 Provider Center 中显式配置的 MiniMax、Kimi/Moonshot 和 Step Plan，
+“复用 Provider Center”可以在用户确认后创建执行连接。站点对应的 Endpoint 由
+Controller 固定，SwiftUI 只提交 Provider、模型与启用状态；凭证在 Keychain 内
+复制到独立的路由账号，不会回显，也不会进入配置文件、命令参数或 JSON。OpenAI
+Organization Admin Key、额度 Feed 和通用额度接口不会被当作推理密钥复用。
+
+0.8 当前开发树还提供内容无关的 Shadow 比较与有界离线 Replay：前者比较实际
+目标和策略推荐，后者使用冻结事实评估策略；Replay 不读取实时事实，也不写
+证据。原生评测界面已经接入 Shadow 历史、紧凑汇总指标和本地 Replay JSON
+导入。
+
+默认关闭的本地执行代理也已进入开发版。先在“用量详情 → 智能路由”中配置
+Execution Connection 与 Route Target，启用决策 API，再显式启用
+“OpenAI 兼容聊天代理”。应用只在首次启用或轮换时显示 Bearer Token；原始令牌
+不会落盘，私有 `0600` 配置只保存不可逆 SHA-256 verifier，状态查询不会再次返回
+令牌。配置由常驻 Collector 自动热加载，不需要重启前台 App。
+
+```text
+Base URL  http://127.0.0.1:64123/v1
+API Key   <首次启用时复制的 Bearer Token>
+Model     openusage/auto
+```
+
+`openusage/auto` 使用界面中选择的默认策略；也可以显式填写
+`openusage/reliable` 或 `openusage/<自定义策略 ID>`。代理最多尝试三个候选，仅在
+尚未向客户端发送流式字节时处理 408、429、网络失败和部分 5xx；第一个字节发出后
+目标即锁定，绝不会换模型续写。Prompt、响应、工具内容和请求头只在内存中转发，
+不会进入决策/尝试证据。
+
+命令行也可管理同一配置：
+
+```bash
+openusage-bar proxy status --format json
+openusage-bar proxy enable --format json
+openusage-bar proxy rotate --format json
+openusage-bar proxy disable --format json
+```
+
+`enable` 与 `rotate` 的输出包含一次性 `bearerToken`；请勿把该 JSON 写入日志。
+本地 Phase B 已通过覆盖率、隐私、故障注入、性能、签名、事务升级与安装态热轮换
+验收，并完成 `0.8.2 → 0.8.1 → 0.8.2` 的本机真实回滚与恢复。公开版本仍保持
+`0.6.0`。后续本机 `0.8.3 (20)` 安全候选又补齐了执行请求的 DNS 固定地址
+传输；独立安全复核和外部资格完成后才会进入 0.8 发布流程。
 
 ## Provider 支持
 

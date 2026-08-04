@@ -8,7 +8,6 @@ from openusage_bar.activity_records import BalanceObservation
 from openusage_bar.activity_store import ActivityStore
 from openusage_bar.daily_history import ActivityCollector
 from openusage_bar.local_api import LocalAPIRouter
-from openusage_bar.models import Overview
 from openusage_bar.providers.contracts import BalanceFetchFailure, BalanceFetchSuccess
 from openusage_bar.query import QueryService, to_wire
 
@@ -71,13 +70,11 @@ class BalancePipelineTests(unittest.TestCase):
         )
         success = BalanceFetchSuccess((balance(),))
         self.assertTrue(collector.refresh(
-            Overview([]),
             balance_results=(
                 ("moonshot-main", "moonshot.balance", success),
             ),
         ))
         self.assertTrue(collector.refresh(
-            Overview([]),
             balance_results=(
                 (
                     "moonshot-main",
@@ -100,7 +97,6 @@ class BalancePipelineTests(unittest.TestCase):
         self.assertEqual(status.last_success_at, "2026-07-29T12:00:00.000000Z")
 
         self.assertTrue(collector.refresh(
-            Overview([]),
             balance_results=(
                 ("moonshot-main", "moonshot.balance", success),
             ),

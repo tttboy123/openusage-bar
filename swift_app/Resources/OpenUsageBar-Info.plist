@@ -5,6 +5,7 @@
   <key>CFBundleDisplayName</key><string>OpenUsage Bar</string>
   <key>CFBundleExecutable</key><string>OpenUsage Bar</string>
   <key>CFBundleIdentifier</key><string>com.lune.openusagebar</string>
+  <key>CFBundleIconFile</key><string>OpenUsageBar</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>OpenUsage Bar</string>
   <key>CFBundlePackageType</key><string>APPL</string>

@@ -9,7 +9,7 @@ import subprocess
 import sys
 import threading
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
@@ -23,6 +23,7 @@ from .query import QueryService, SCHEMA_VERSION, to_wire
 
 DEFAULT_LEDGER_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "activity.sqlite3"
 DEFAULT_API_SOCKET_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "openusage.sock"
+DEFAULT_RUNTIME_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "runtime.sqlite3"
 # An interactive attempt may legitimately use OpenUsage's bounded auto -> direct
 # fallback (12s + 75s) followed by a bounded daily-history import (60s). One
 # hundred sixty seconds avoids killing that slow path, but remains a hard limit;
@@ -152,6 +153,39 @@ def _parser() -> SafeArgumentParser:
     daemon = commands.add_parser("daemon")
     daemon.add_argument("--interval", required=True)
     daemon.add_argument("--api-socket", default=str(DEFAULT_API_SOCKET_PATH))
+    daemon.add_argument("--router-socket")
+    runtime_ingest = commands.add_parser("runtime-ingest")
+    runtime_ingest.add_argument("--database", default=str(DEFAULT_RUNTIME_PATH))
+    runtime_summary = commands.add_parser("runtime-summary")
+    runtime_summary.add_argument("--database", default=str(DEFAULT_RUNTIME_PATH))
+    runtime_summary.add_argument("--window-seconds", required=True)
+    route = commands.add_parser("route")
+    route_commands = route.add_subparsers(dest="route_command", required=True)
+    for name in ("decide", "simulate", "shadow", "replay"):
+        child = route_commands.add_parser(name)
+        child.add_argument("--format", choices=("json",), required=True)
+        child.add_argument("--socket", default=None)
+    history = route_commands.add_parser("history")
+    history.add_argument("--format", choices=("json",), required=True)
+    history.add_argument("--socket", default=None)
+    history.add_argument("--before")
+    history.add_argument("--limit", type=int, default=50)
+    shadow_history = route_commands.add_parser("shadow-history")
+    shadow_history.add_argument("--format", choices=("json",), required=True)
+    shadow_history.add_argument("--socket", default=None)
+    shadow_history.add_argument("--before")
+    shadow_history.add_argument("--limit", type=int, default=50)
+    proxy = commands.add_parser("proxy")
+    proxy_commands = proxy.add_subparsers(dest="proxy_command", required=True)
+    proxy_status = proxy_commands.add_parser("status")
+    proxy_status.add_argument("--format", choices=("json",), required=True)
+    proxy_enable = proxy_commands.add_parser("enable")
+    proxy_enable.add_argument("--format", choices=("json",), required=True)
+    proxy_enable.add_argument("--port", type=int)
+    proxy_disable = proxy_commands.add_parser("disable")
+    proxy_disable.add_argument("--format", choices=("json",), required=True)
+    proxy_rotate = proxy_commands.add_parser("rotate")
+    proxy_rotate.add_argument("--format", choices=("json",), required=True)
     return parser
 
 
@@ -193,6 +227,71 @@ def _write_jsonl(stdout: TextIO, rows: list[dict[str, Any]], checkpoint: dict[st
     for row in rows:
         _write_json(stdout, row)
     _write_json(stdout, checkpoint)
+
+
+def _runtime_database_path(value: str) -> Path:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise CLIError("invalid runtime database")
+    path = Path(value)
+    if not path.is_absolute() or path.is_symlink():
+        raise CLIError("invalid runtime database")
+    if path == DEFAULT_RUNTIME_PATH:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not path.parent.is_dir():
+        raise CLIError("invalid runtime database")
+    return path
+
+
+def _runtime_window_seconds(value: str) -> int:
+    if not isinstance(value, str) or re.fullmatch(r"[1-9][0-9]*", value) is None:
+        raise CLIError("invalid runtime window")
+    seconds = int(value)
+    if not 60 <= seconds <= 86_400:
+        raise CLIError("invalid runtime window")
+    return seconds
+
+
+def _run_runtime_command(
+    args: argparse.Namespace,
+    *,
+    stdin: TextIO,
+    stdout: TextIO,
+    clock: Callable[[], datetime] | None,
+) -> int:
+    from .runtime_observation import MAX_DOCUMENT_BYTES, decode_runtime_document
+    from .runtime_store import RuntimeStore, runtime_summary_wire
+
+    if args.offline or args.fresh or args.strict:
+        raise CLIError("invalid runtime option")
+    path = _runtime_database_path(args.database)
+    current = (clock or (lambda: datetime.now(timezone.utc)))()
+    if args.command == "runtime-ingest":
+        payload = stdin.read(MAX_DOCUMENT_BYTES + 1)
+        document = decode_runtime_document(payload)
+        store = RuntimeStore(path, clock=lambda: current)
+        try:
+            result = store.ingest(document.observations)
+        finally:
+            store.close()
+        _write_json(stdout, {
+            "schemaVersion": document.schema_version,
+            "runtimeRevision": result.revision,
+            "acceptedCount": result.accepted_count,
+            "duplicateCount": result.duplicate_count,
+            "expiredCount": result.expired_count,
+            "prunedCount": result.pruned_count,
+        })
+        return 0
+    if args.command == "runtime-summary":
+        seconds = _runtime_window_seconds(args.window_seconds)
+        store = RuntimeStore(path, clock=lambda: current)
+        try:
+            summary = store.summary(current - timedelta(seconds=seconds), current)
+        finally:
+            store.close()
+        _write_json(stdout, runtime_summary_wire(summary))
+        return 0
+    raise CLIError("invalid runtime command")
 
 
 @dataclass(frozen=True)
@@ -558,17 +657,37 @@ def _run_daemon_with_api(
     refresher: Any,
     query: QueryService,
     api_socket: str,
+    router_socket: str | None,
     *,
     stop_event: threading.Event,
     waiter: Callable[[int], bool],
     stderr: TextIO,
     catalog_monitor: Any | None = None,
+    clock: Callable[[], datetime] | None = None,
+    proxy_server_factory: Callable[..., Any] | None = None,
 ) -> int:
     from .local_api import create_unix_server
 
+    api_path = Path(api_socket).expanduser()
+    api_store: ActivityStore | None = None
+    api_query = query
     try:
-        server = create_unix_server(api_socket, query)
+        if query.store.path != ":memory:":
+            # The collector can hold its ActivityStore RLock while committing a
+            # large import. A dedicated SQLite connection lets the Resource and
+            # Routing APIs continue reading the last committed WAL snapshot
+            # instead of queueing behind the writer's in-process lock.
+            api_store = ActivityStore(query.store.path)
+            api_query = QueryService(api_store, clock=clock)
+        server = create_unix_server(
+            api_path,
+            api_query,
+            runtime_database=DEFAULT_RUNTIME_PATH,
+            clock=clock,
+        )
     except Exception:
+        if api_store is not None:
+            api_store.close()
         stderr.write("local API unavailable; daemon stopped\n")
         return 1
     server_thread = threading.Thread(
@@ -577,20 +696,174 @@ def _run_daemon_with_api(
         daemon=True,
     )
     server_thread.start()
+    routing_server = None
+    routing_thread = None
+    routing_store = None
+    proxy_supervisor = None
+    proxy_monitor_thread = None
+    proxy_monitor_stop = threading.Event()
+    selected_router = (
+        Path(router_socket).expanduser()
+        if router_socket is not None
+        else api_path.with_name("router.sock")
+    )
+    try:
+        from .routing_api import RoutingController, create_routing_unix_server
+        from .routing_execution import (
+            ExecutionConnectionStore,
+            ExecutionRegistry,
+            installed_execution_adapters,
+        )
+        from .routing_store import RoutingStore
+        from .routing_policy_store import RoutingPolicyStore
+        from .routing_preferences import RoutingPreferencesStore
+        from .routing_targets import RouteTargetStore
+        from .runtime_store import read_runtime_summary
+
+        routing_store = RoutingStore(
+            selected_router.with_name("routing.sqlite3"), clock=clock
+        )
+        target_store = RouteTargetStore(
+            selected_router.with_name("route-targets.json")
+        )
+        policy_store = RoutingPolicyStore(
+            selected_router.with_name("routing-policies.json")
+        )
+        preferences_store = RoutingPreferencesStore(
+            selected_router.with_name("routing-preferences.json")
+        )
+        connection_store = ExecutionConnectionStore(
+            selected_router.with_name("execution-connections.json")
+        )
+        execution_adapters = installed_execution_adapters()
+
+        def execution_registry() -> ExecutionRegistry:
+            return ExecutionRegistry(
+                adapters=execution_adapters,
+                connections=connection_store.load().connections,
+            )
+
+        def route_targets():
+            return target_store.load(
+                available_adapters=(
+                    adapter.adapter_id for adapter in execution_adapters
+                )
+            )
+
+        controller = RoutingController(
+            query=api_query,
+            target_loader=route_targets,
+            evidence_store=routing_store,
+            runtime_reader=lambda start, end: read_runtime_summary(
+                DEFAULT_RUNTIME_PATH, start, end, clock=clock
+            ),
+            available_connections=lambda: (
+                execution_registry().available_connection_refs()
+            ),
+            policy_loader=lambda: policy_store.load().policies,
+            preference_loader=preferences_store.load,
+            clock=clock,
+        )
+        routing_server = create_routing_unix_server(selected_router, controller)
+        routing_thread = threading.Thread(
+            target=routing_server.serve_forever,
+            name="openusage-routing-api",
+            daemon=True,
+        )
+        routing_thread.start()
+        try:
+            from .routing_proxy import (
+                RoutingProxyConfigurationStore,
+                RoutingProxyController,
+                RoutingProxySupervisor,
+                create_routing_proxy_server,
+            )
+
+            proxy_supervisor = RoutingProxySupervisor(
+                configuration_store=RoutingProxyConfigurationStore(
+                    selected_router.with_name("routing-proxy.json")
+                ),
+                controller=RoutingProxyController(
+                    decision_controller=controller,
+                    target_loader=route_targets,
+                    registry_loader=execution_registry,
+                    evidence_store=routing_store,
+                    default_policy_loader=lambda: (
+                        preferences_store.load().default_policy_id
+                    ),
+                    clock=clock,
+                ),
+                server_factory=(
+                    proxy_server_factory or create_routing_proxy_server
+                ),
+                on_error=lambda: stderr.write(
+                    "routing proxy unavailable; continuing without proxy\n"
+                ),
+            )
+            proxy_monitor_thread = threading.Thread(
+                target=proxy_supervisor.run,
+                args=(proxy_monitor_stop,),
+                name="openusage-routing-proxy-monitor",
+                daemon=True,
+            )
+            proxy_monitor_thread.start()
+        except Exception:
+            if proxy_supervisor is not None:
+                proxy_supervisor.close()
+                proxy_supervisor = None
+            stderr.write(
+                "routing proxy unavailable; continuing without proxy\n"
+            )
+    except Exception:
+        if routing_server is not None:
+            try:
+                routing_server.server_close()
+            except Exception:
+                pass
+            routing_server = None
+        if routing_store is not None:
+            routing_store.close()
+            routing_store = None
+        stderr.write("routing API unavailable; continuing without routing\n")
     try:
         return _run_daemon(
             interval, refresher, stop_event=stop_event, waiter=waiter,
             stderr=stderr, catalog_monitor=catalog_monitor,
         )
     finally:
-        server.shutdown()
-        server.server_close()
-        server_thread.join(5)
+        try:
+            try:
+                try:
+                    proxy_monitor_stop.set()
+                    if proxy_monitor_thread is not None:
+                        proxy_monitor_thread.join(5)
+                    if proxy_supervisor is not None:
+                        proxy_supervisor.close()
+                finally:
+                    if routing_server is not None:
+                        try:
+                            routing_server.shutdown()
+                        finally:
+                            routing_server.server_close()
+                    if routing_thread is not None:
+                        routing_thread.join(5)
+            finally:
+                if routing_store is not None:
+                    routing_store.close()
+        finally:
+            try:
+                server.shutdown()
+                server.server_close()
+                server_thread.join(5)
+            finally:
+                if api_store is not None:
+                    api_store.close()
 
 
 def main(
     argv: list[str] | None = None,
     *,
+    stdin: TextIO | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
     store: ActivityStore | None = None,
@@ -608,7 +881,11 @@ def main(
     refresh_entrypoint: Path | None = None,
     child_environment: dict[str, str] | None = None,
     catalog_monitor: Any | None = None,
+    proxy_server_factory: Callable[..., Any] | None = None,
+    proxy_config_store: Any | None = None,
+    proxy_token_factory: Callable[[], str] | None = None,
 ) -> int:
+    stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
     arguments = list(sys.argv[1:] if argv is None else argv)
@@ -629,6 +906,46 @@ def main(
     except CLIError:
         stderr.write("invalid command input\n")
         return 2
+
+    if args.command in {"runtime-ingest", "runtime-summary"}:
+        try:
+            return _run_runtime_command(
+                args, stdin=stdin, stdout=stdout, clock=clock
+            )
+        except CLIError:
+            stderr.write("invalid command input\n")
+            return 2
+        except ValueError as error:
+            from .runtime_observation import RuntimeObservationDecodeError
+
+            if isinstance(error, RuntimeObservationDecodeError):
+                stderr.write("invalid runtime input\n")
+            else:
+                stderr.write("invalid command input\n")
+            return 2
+        except Exception:
+            stderr.write("runtime observation unavailable\n")
+            return 1
+
+    if args.command == "route":
+        from .routing_cli import DEFAULT_ROUTER_SOCKET_PATH, run_route_command
+
+        if args.socket is None:
+            args.socket = str(DEFAULT_ROUTER_SOCKET_PATH)
+        return run_route_command(
+            args, stdin=stdin, stdout=stdout, stderr=stderr
+        )
+
+    if args.command == "proxy":
+        from .routing_proxy import run_proxy_command
+
+        return run_proxy_command(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            config_store=proxy_config_store,
+            token_factory=proxy_token_factory,
+        )
 
     active_store: ActivityStore | None = store
     refresh_outcome: RefreshOutcome | None = None
@@ -665,10 +982,13 @@ def main(
                 refresher,
                 active_query,
                 args.api_socket,
+                args.router_socket,
                 stop_event=active_stop,
                 waiter=active_waiter,
                 stderr=stderr,
                 catalog_monitor=catalog_monitor,
+                clock=clock,
+                proxy_server_factory=proxy_server_factory,
             )
 
         is_offline = offline or args.offline

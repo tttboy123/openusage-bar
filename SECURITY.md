@@ -30,7 +30,19 @@ bug bounty program.
   the user's global launchd environment.
 - The SQLite ledger and exported JSON exclude credentials, prompts, responses,
   and direct account identity.
+- The optional execution proxy is disabled by default, binds only to IPv4
+  loopback, requires a one-time high-entropy Bearer capability, and persists
+  only its SHA-256 verifier. Request and response content is forwarded in
+  memory and is excluded from routing evidence, logs, diagnostics and the
+  usage ledger.
+- Execution credentials are isolated per routing connection in Keychain.
+  Reusing a Provider Center credential requires an explicit foreground action;
+  the fixed Provider endpoint and secret never cross into SwiftUI or JSON.
 - Releases must pass the repository and Git-history secret scanner.
+
+Pre-release security reviews are maintained outside the public repository.
+Passing repository checks is not an independent security approval and does not
+make a local candidate a public release.
 
 ## Canary diagnostics
 

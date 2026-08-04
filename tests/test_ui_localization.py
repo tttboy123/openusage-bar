@@ -142,6 +142,20 @@ class UILocalizationTests(unittest.TestCase):
         self.assertIn('"$APP/Contents/Resources/$LANGUAGE.lproj"', source)
         self.assertIn('"$ACTIVITY_APP/Contents/Resources/$LANGUAGE.lproj"', source)
 
+    def test_routing_overview_keeps_dynamic_controls_separate_for_accessibility(self):
+        source = (
+            ROOT / "swift_app/Sources/OpenUsageActivity/RoutingViews.swift"
+        ).read_text(encoding="utf-8")
+        overview = source.split("private var overview", 1)[1].split(
+            "private var targets", 1
+        )[0]
+
+        self.assertNotIn(
+            ".accessibilityElement(children: .combine)", overview
+        )
+        self.assertIn('.accessibilityLabel("Decision API")', overview)
+        self.assertIn(".accessibilityValue(decisionAPIStatus)", overview)
+
 
 if __name__ == "__main__":
     unittest.main()

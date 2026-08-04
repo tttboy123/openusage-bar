@@ -74,12 +74,14 @@ class ActivityInstallProcessTests(unittest.TestCase):
         )
         return executable
 
-    def run_helper(self, body: str) -> subprocess.CompletedProcess[str]:
+    def run_helper(
+        self, body: str, *, timeout: float = 30
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["/bin/zsh", "-c", f'source "{HELPER}"\n{body}'],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout,
         )
 
     def wait_for_command(self, process: subprocess.Popen, expected: str) -> None:
@@ -356,6 +358,7 @@ class ActivityInstallProcessTests(unittest.TestCase):
                 "providers",
                 "health",
                 "automation",
+                "routing",
             )
             supported = [
                 subprocess.Popen([str(target), "--route", route])
@@ -467,7 +470,13 @@ class ActivityInstallProcessTests(unittest.TestCase):
             thread = threading.Thread(target=respawn)
             thread.start()
             try:
-                result = self.run_helper(f'stop_exact_activity_processes "{target}" 20 0.01')
+                # Six rounds still exercise TERM, KILL, replacement
+                # re-enumeration, and the two empty snapshots without making
+                # the fixture depend on the host-wide ``ps`` scan duration.
+                result = self.run_helper(
+                    f'stop_exact_activity_processes "{target}" 6 0.01',
+                    timeout=60,
+                )
                 thread.join(timeout=2)
                 self.assertFalse(thread.is_alive())
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -744,6 +753,9 @@ class ActivityInstallProcessTests(unittest.TestCase):
         rollback = source.index("rollback()")
         rollback_end = source.index("trap rollback", rollback)
         rollback_source = source[rollback:rollback_end]
+        self.assertIn("if (( ! MUTATED )); then", rollback_source)
+        self.assertIn('prepare_bundle_stage_cleanup "$NEW"', rollback_source)
+        self.assertIn('commit_bundle_transaction "$NEW"', rollback_source)
         self.assertIn(
             "if (( SWAPPED || FIRST_INSTALLED || ACTIVITY_STOPPED || SETTINGS_STOPPED )); then",
             rollback_source,
@@ -772,6 +784,53 @@ class ActivityInstallProcessTests(unittest.TestCase):
         self.assertLess(install_swap, post_swap_stop)
         self.assertLess(install_swap, post_swap_settings_stop)
         self.assertLess(installed_verify, success_reopen)
+        self.assertLess(installed_verify, success_settings_reopen)
+
+    def test_rollback_restarts_visible_activity_and_settings_helpers(self):
+        source = (ROOT / "scripts/rollback_app.sh").read_text(encoding="utf-8")
+
+        self.assertIn('source "$ROOT/scripts/activity_install_process.sh"', source)
+        self.assertIn(
+            'ACTIVITY_EXECUTABLE="$TARGET/Contents/Helpers/OpenUsage Activity.app/Contents/MacOS/OpenUsage Activity"',
+            source,
+        )
+        self.assertIn(
+            'SETTINGS_EXECUTABLE="$TARGET/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings"',
+            source,
+        )
+        self.assertIn('activity_has_exact_process "$ACTIVITY_EXECUTABLE" && ACTIVITY_WAS_RUNNING=1', source)
+        self.assertIn('activity_has_exact_process "$SETTINGS_EXECUTABLE" && SETTINGS_WAS_RUNNING=1', source)
+        self.assertIn('stop_exact_activity_processes "$ACTIVITY_EXECUTABLE"', source)
+        self.assertIn('stop_exact_activity_processes "$SETTINGS_EXECUTABLE"', source)
+        self.assertEqual(
+            source.count('reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"'),
+            2,
+        )
+        self.assertEqual(
+            source.count('reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE"'),
+            2,
+        )
+        self.assertNotIn("pkill", source)
+        self.assertNotIn("killall", source)
+        self.assertNotIn("osascript", source)
+
+        swap = source.index('"$ATOMIC_SWAP" "$TARGET" "$NEW"')
+        pre_swap_activity_stop = source.index(
+            'stop_exact_activity_processes "$ACTIVITY_EXECUTABLE"',
+        )
+        pre_swap_settings_stop = source.index(
+            'stop_exact_activity_processes "$SETTINGS_EXECUTABLE"',
+        )
+        success_activity_reopen = source.rindex(
+            'reopen_exact_activity "$ACTIVITY_APP" "$ACTIVITY_EXECUTABLE"',
+        )
+        success_settings_reopen = source.rindex(
+            'reopen_exact_activity "$SETTINGS_APP" "$SETTINGS_EXECUTABLE"',
+        )
+        installed_verify = source.rindex('validate_app_bundle "$TARGET"')
+        self.assertLess(pre_swap_activity_stop, swap)
+        self.assertLess(pre_swap_settings_stop, swap)
+        self.assertLess(installed_verify, success_activity_reopen)
         self.assertLess(installed_verify, success_settings_reopen)
 
 

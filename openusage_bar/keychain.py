@@ -365,14 +365,18 @@ def run_native_keychain_write(
 def _default_keychain_helper_command() -> tuple[str, ...]:
     if getattr(sys, "frozen", False):
         executable = Path(sys.executable)
+        launcher = executable.with_name("OpenUsage Provider Settings")
         if (
             not executable.is_absolute()
-            or "\x00" in str(executable)
-            or not executable.is_file()
-            or not os.access(executable, os.X_OK)
+            or executable.parent.name != "MacOS"
+            or executable.parent.parent.name != "Contents"
+            or "\x00" in str(launcher)
+            or launcher.is_symlink()
+            or not launcher.is_file()
+            or not os.access(launcher, os.X_OK)
         ):
             raise KeychainError("Keychain helper is unavailable")
-        return (str(executable),)
+        return (str(launcher),)
     entrypoint = Path(__file__).resolve().parent.parent / "openusage_settings.py"
     return (sys.executable, str(entrypoint))
 

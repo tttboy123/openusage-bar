@@ -24,7 +24,7 @@ import struct
 import threading
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -262,6 +262,7 @@ class LocalAPIRouter:
         "/v1/snapshot",
         "/v1/capabilities",
         "/v1/providers", "/v1/capacity", "/v1/activity/daily",
+        "/v1/runtime/summary",
         "/v1/balances",
         "/v1/costs/daily",
         "/v1/quotas/history",
@@ -278,6 +279,7 @@ class LocalAPIRouter:
         rate_limiter: TokenBucket | None = None,
         allowed_origins: Collection[str] = (),
         tcp_port: int | None = None,
+        runtime_summary_reader: Callable[[datetime, datetime], Any] | None = None,
     ) -> None:
         self.query = query
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -296,6 +298,7 @@ class LocalAPIRouter:
             raise ValueError("allowed origins must be explicit safe values")
         self.allowed_origins = origins
         self.tcp_port = tcp_port
+        self.runtime_summary_reader = runtime_summary_reader
 
     def handle(self, handler: "ReadOnlyHandler", *, include_body: bool) -> None:
         try:
@@ -407,6 +410,7 @@ class LocalAPIRouter:
             "/v1/capacity": ("limit",),
             "/v1/balances": ("limit",),
             "/v1/activity/daily": ("from", "to", "providerIds", "modelIds"),
+            "/v1/runtime/summary": ("windowSeconds",),
             "/v1/costs/daily": ("from", "to", "providerIds", "currencies"),
             "/v1/quotas/history": ("providerId", "accountRef", "from", "to", "limit"),
             "/v1/sources/status": (),
@@ -425,6 +429,45 @@ class LocalAPIRouter:
 
     def _payload(self, route: str, params: dict[str, str]) -> dict[str, Any]:
         try:
+            if route == "/v1/runtime/summary":
+                seconds = _integer(
+                    params.get("windowSeconds", "3600"),
+                    "windowSeconds",
+                    minimum=60,
+                    maximum=86_400,
+                )
+                if self.runtime_summary_reader is None:
+                    raise _error(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        "runtime_unavailable",
+                        "Runtime summary is unavailable.",
+                    )
+                current = self.clock()
+                if current.tzinfo is None:
+                    raise RuntimeError("runtime clock is unavailable")
+                end = current.astimezone(timezone.utc)
+                try:
+                    summary = self.runtime_summary_reader(
+                        end - timedelta(seconds=seconds), end
+                    )
+                    from .runtime_store import runtime_summary_wire
+
+                    runtime = runtime_summary_wire(summary)
+                except APIProblem:
+                    raise
+                except Exception as error:
+                    raise _error(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        "runtime_unavailable",
+                        "Runtime summary is unavailable.",
+                    ) from error
+                status = to_wire(self.query.source_status())
+                return {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "dataRevision": status["dataRevision"],
+                    "generatedAt": status["generatedAt"],
+                    "runtime": runtime,
+                }
             if route == "/v1/summary":
                 now = self.clock()
                 selected = _day(params["today"], "today") if "today" in params else now.astimezone().date()
@@ -1087,6 +1130,7 @@ def create_unix_server(
     client_timeout: float = DEFAULT_CLIENT_TIMEOUT,
     request_deadline: float = DEFAULT_REQUEST_DEADLINE,
     cleanup_hook: Callable[[Path], None] | None = None,
+    runtime_database: str | Path | None = None,
 ) -> UnixHTTPServer:
     if isinstance(max_threads, bool) or not isinstance(max_threads, int) or not 1 <= max_threads <= 256:
         raise ValueError("max_threads must be between 1 and 256")
@@ -1094,9 +1138,18 @@ def create_unix_server(
         raise ValueError("client_timeout must be between 0.1 and 60 seconds")
     if isinstance(request_deadline, bool) or not isinstance(request_deadline, (int, float)) or not 0.05 <= request_deadline <= 300:
         raise ValueError("request_deadline must be between 0.05 and 300 seconds")
+    runtime_reader = None
+    if runtime_database is not None:
+        from .runtime_store import read_runtime_summary
+
+        runtime_path = Path(runtime_database)
+        runtime_reader = lambda start, end: read_runtime_summary(
+            runtime_path, start, end, clock=clock
+        )
     router = LocalAPIRouter(
         query, clock=clock, provider_registry=provider_registry,
         allowed_origins=allowed_origins,
+        runtime_summary_reader=runtime_reader,
     )
     return UnixHTTPServer(
         Path(socket_path), router, max_threads=max_threads,
@@ -1120,6 +1173,7 @@ def create_tcp_server(
     rate_limit_capacity: int = DEFAULT_RATE_LIMIT_CAPACITY,
     rate_limit_refill_per_second: float = DEFAULT_RATE_LIMIT_REFILL_PER_SECOND,
     monotonic: Callable[[], float] = time.monotonic,
+    runtime_database: str | Path | None = None,
 ) -> LoopbackHTTPServer:
     """Create an explicitly opted-in IPv4 loopback server.
 
@@ -1146,10 +1200,19 @@ def create_tcp_server(
         rate_limit_refill_per_second,
         monotonic=monotonic,
     )
+    runtime_reader = None
+    if runtime_database is not None:
+        from .runtime_store import read_runtime_summary
+
+        runtime_path = Path(runtime_database)
+        runtime_reader = lambda start, end: read_runtime_summary(
+            runtime_path, start, end, clock=clock
+        )
     router = LocalAPIRouter(
         query, clock=clock, provider_registry=provider_registry,
         bearer_verifier=verifier, rate_limiter=rate_limiter,
         allowed_origins=allowed_origins,
+        runtime_summary_reader=runtime_reader,
     )
     server = LoopbackHTTPServer(
         router, port, max_threads=max_threads, client_timeout=client_timeout,

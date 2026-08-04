@@ -14,7 +14,8 @@ activity_command_matches() {
     "$expected --route local-tools"|\
     "$expected --route providers"|\
     "$expected --route health") return 0 ;;
-    "$expected --route automation") return 0 ;;
+    "$expected --route automation"|\
+    "$expected --route routing") return 0 ;;
   esac
   return 1
 }

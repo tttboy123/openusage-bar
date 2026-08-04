@@ -4,10 +4,15 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .config import GenericProviderConfig
-from .keychain import MacOSKeychain
+from .keychain import KeychainError, MacOSKeychain
 from .models import Category, ProviderCard, ProviderStatus
 from .network import AuthenticationRequired, BoundedHTTPClient, NetworkError, RateLimited
-from .providers.contracts import QuotaFetchFailure, QuotaFetchSuccess
+from .providers.contracts import (
+    QuotaCollectionResult,
+    QuotaFetchFailure,
+    QuotaFetchSuccess,
+    SourceAttribution,
+)
 from .providers.quota import percent_observation
 
 
@@ -37,6 +42,11 @@ def _parse_reset(value: Any) -> datetime:
 
 
 class GenericHTTPSAdapter:
+    _ATTRIBUTION = SourceAttribution(
+        credential_source="api_key",
+        source_kind="generic_https",
+    )
+
     def __init__(
         self,
         config: GenericProviderConfig,
@@ -113,6 +123,66 @@ class GenericHTTPSAdapter:
         except (NetworkError, MissingField, TypeError, ValueError):
             self.last_quota_result = QuotaFetchFailure("invalid_response")
             return self._error_card(ProviderStatus.ERROR, "Provider refresh failed", now)
+
+    def fetch_quota(self) -> QuotaCollectionResult:
+        now = self.clock()
+        try:
+            secret = self.keychain.get(self.config.provider_id)
+        except KeychainError:
+            return QuotaCollectionResult(
+                result=QuotaFetchFailure("keychain_unavailable"),
+                attribution=self._ATTRIBUTION,
+            )
+        if not secret:
+            result = QuotaFetchFailure("auth_required")
+        else:
+            value = f"{self.config.auth_prefix} {secret}".strip()
+            try:
+                payload = self.client.get_json(
+                    self.config.endpoint,
+                    {self.config.header_name: value},
+                )
+                if (
+                    self.config.remaining_percent_path is None
+                    or self.config.quota_window is None
+                ):
+                    result = QuotaFetchFailure("quota_unavailable")
+                else:
+                    remaining = float(extract_path(
+                        payload, self.config.remaining_percent_path
+                    ))
+                    if not 0 <= remaining <= 100:
+                        raise ValueError(
+                            "Remaining percentage must be between 0 and 100"
+                        )
+                    resets_at = (
+                        _parse_reset(extract_path(payload, self.config.reset_path))
+                        if self.config.reset_path
+                        else None
+                    )
+                    result = QuotaFetchSuccess((percent_observation(
+                        provider_id=self.config.provider_id,
+                        account_ref=self.config.account_ref,
+                        source_id="generic.quota",
+                        quota_name=self.config.quota_name,
+                        quota_window=self.config.quota_window,
+                        remaining_percent=remaining,
+                        resets_at=resets_at,
+                        observed_at=now,
+                        applies_to_kind="account",
+                    ),))
+            except AuthenticationRequired:
+                result = QuotaFetchFailure("auth_rejected")
+            except RateLimited:
+                result = QuotaFetchFailure("rate_limited")
+            except NetworkError:
+                result = QuotaFetchFailure("network_error")
+            except (MissingField, TypeError, ValueError, OverflowError):
+                result = QuotaFetchFailure("invalid_response")
+        return QuotaCollectionResult(
+            result=result,
+            attribution=self._ATTRIBUTION,
+        )
 
     def _error_card(self, status: ProviderStatus, error: str, now: datetime) -> ProviderCard:
         return ProviderCard(

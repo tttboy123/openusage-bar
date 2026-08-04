@@ -6,19 +6,69 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A native macOS application icon is embedded in the menu-bar host and both
+  helper apps. Public README assets now demonstrate the menu bar, activity
+  ledger, and Provider catalog using synthetic or static-data-only surfaces.
+- A bounded, content-free `GET /v1/runtime/summary` Local API route exposes the
+  separate 24-hour Runtime Ledger to local schedulers with an independent
+  `runtimeRevision`; unsafe or unavailable state fails closed instead of
+  fabricating zero usage.
 - A machine-readable release state now keeps the public version, build, Local
   API version, release channel, and external Canary clock under one strict
   validation boundary.
 - ADR 0001 freezes ownership of durable resource facts, bounded request
   telemetry, scheduler reservations, and policy decisions.
+- A standalone, deterministic Route Decision API now selects explicit execution
+  targets from quota, balance, freshness and runtime facts without receiving or
+  proxying model content. Native Provider Center controls, explainable dry runs,
+  content-free Shadow comparisons and bounded frozen-fact Replay reports share
+  the same private routing contract.
+- Provider Center can explicitly reuse inference credentials already managed for
+  MiniMax, Kimi/Moonshot and Step Plan. The Controller owns the site-specific
+  endpoint, copies the credential into an isolated routing Keychain account only
+  after confirmation, and never returns the credential to SwiftUI or JSON.
 
 ### Changed
 
+- The public README is product-first and bilingual, while internal execution
+  plans have been removed from the distributable source tree. Release scanning
+  now rejects machine-specific development paths outside test fixtures.
 - Provider source contracts are OS-neutral; the OpenUsage Bar distribution
   separately verifies that every source registered in its shipped catalog
   supports macOS.
+- The native routing connection flow now distinguishes manual connections from
+  Provider Center reuse, offers conservative model suggestions and optional
+  quota-target creation, and fails closed when native Keychain access is not
+  available.
 - The public roadmap now reports the released v0.6.0 RC baseline and keeps the
   0 / 5 external Canary state distinct from repository test results.
+
+### Fixed
+
+- OpenUsage executable discovery no longer includes a developer-specific
+  project directory; only standard user and system tool locations are added to
+  the credential-free child `PATH`.
+- Execution requests now pin one already validated public numeric address for
+  the TCP connection while retaining the original Provider hostname for TLS
+  SNI and certificate verification. This removes the DNS validation/connection
+  rebinding window without changing non-execution Provider collection.
+- Active Usage Details and Provider Settings helpers are now stopped and
+  reopened across an explicit rollback, preventing an already visible window
+  from continuing to run the replaced app image. Rollback cleanup first
+  restores write permission on the signed integration stage, so a successful
+  rollback no longer reports failure merely because the previous bundle is
+  read-only.
+- Install failures before the atomic swap now remove their read-only staged
+  bundle, and uninstall stops both visible helpers before safely removing the
+  signed app. Data purge applies the same bounded cleanup to app backups, so
+  release smoke and real uninstall do not leave immutable bundle residue.
+- Visible Usage Details windows opened on the Smart Routing route are now part
+  of the installer's exact process allowlist, so transactional upgrades stop
+  and reopen the helper instead of leaving an old image across the bundle swap.
+- Provider execution template discovery uses the bounded read-only Keychain
+  path and no longer waits on an invisible native authorization prompt. A
+  failed read marks only that credential unavailable and keeps the template
+  list usable.
 
 ## 0.6.0 - 2026-07-30
 

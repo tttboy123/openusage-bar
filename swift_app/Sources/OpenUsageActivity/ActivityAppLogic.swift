@@ -100,13 +100,13 @@ enum DetailsCopy {
 
 enum ActivityRouteLoadingPolicy {
     static func loadsLedgerOnAppear(_ route: UsageDetailsRoute) -> Bool {
-        route != .automation
+        route != .automation && route != .routing
     }
 
     static func loadsLedgerAfterSelection(
         from current: UsageDetailsRoute, to selected: UsageDetailsRoute
     ) -> Bool {
-        current == .automation && selected != .automation
+        current == .automation && selected != .automation && selected != .routing
     }
 }
 
@@ -557,6 +557,61 @@ struct ProviderMutationCommand: Sendable, Hashable {
         activityExecutableURL: URL,
         isExecutable: (URL) -> Bool = { FileManager.default.isExecutableFile(atPath: $0.path) }
     ) -> Self? {
+        resolve(
+            activityBundleURL: activityBundleURL,
+            activityExecutableURL: activityExecutableURL,
+            subcommand: "provider-mutate",
+            isExecutable: isExecutable
+        )
+    }
+
+    static func resolveRouting(
+        activityBundleURL: URL,
+        activityExecutableURL: URL,
+        isExecutable: (URL) -> Bool = { FileManager.default.isExecutableFile(atPath: $0.path) }
+    ) -> Self? {
+        resolve(
+            activityBundleURL: activityBundleURL,
+            activityExecutableURL: activityExecutableURL,
+            subcommand: "routing-mutate",
+            isExecutable: isExecutable
+        )
+    }
+
+    static func resolveProxy(
+        action: RoutingProxyAction,
+        activityBundleURL: URL,
+        activityExecutableURL: URL,
+        isExecutable: (URL) -> Bool = { FileManager.default.isExecutableFile(atPath: $0.path) }
+    ) -> Self? {
+        resolve(
+            activityBundleURL: activityBundleURL,
+            activityExecutableURL: activityExecutableURL,
+            arguments: ["proxy", action.rawValue, "--format", "json"],
+            isExecutable: isExecutable
+        )
+    }
+
+    private static func resolve(
+        activityBundleURL: URL,
+        activityExecutableURL: URL,
+        subcommand: String,
+        isExecutable: (URL) -> Bool
+    ) -> Self? {
+        resolve(
+            activityBundleURL: activityBundleURL,
+            activityExecutableURL: activityExecutableURL,
+            arguments: [subcommand],
+            isExecutable: isExecutable
+        )
+    }
+
+    private static func resolve(
+        activityBundleURL: URL,
+        activityExecutableURL: URL,
+        arguments: [String],
+        isExecutable: (URL) -> Bool
+    ) -> Self? {
         let helperDirectory = activityBundleURL.pathExtension.lowercased() == "app"
             ? activityBundleURL.deletingLastPathComponent()
             : activityExecutableURL.deletingLastPathComponent()
@@ -564,13 +619,13 @@ struct ProviderMutationCommand: Sendable, Hashable {
             .appendingPathComponent("OpenUsage Provider Settings.app")
             .appendingPathComponent("Contents/MacOS/OpenUsage Provider Settings")
         if isExecutable(bundled) {
-            return Self(executableURL: bundled, arguments: ["provider-mutate"])
+            return Self(executableURL: bundled, arguments: arguments)
         }
         let fallbacks = ["OpenUsageSettings", "openusage_settings"].map {
             helperDirectory.appendingPathComponent($0)
         }
         guard let executable = fallbacks.first(where: isExecutable) else { return nil }
-        return Self(executableURL: executable, arguments: ["provider-mutate"])
+        return Self(executableURL: executable, arguments: arguments)
     }
 }
 
@@ -690,6 +745,7 @@ enum APISpendCoverage: String, Sendable, Hashable { case missing, partial, compl
 struct APISpendSummary: Sendable, Hashable {
     let totals: [APISpendTotal]
     let coverage: APISpendCoverage
+    let balances: [BalanceRecord]
 }
 
 enum APISpendAggregator {
@@ -697,7 +753,8 @@ enum APISpendAggregator {
         costs: DailyCostDataset,
         legacyRecords: [DailyUsage],
         range: ClosedRange<LocalDay>,
-        isLegacyCoverageComplete: Bool
+        isLegacyCoverageComplete: Bool,
+        balances: [BalanceRecord] = []
     ) -> APISpendSummary {
         let nativeScopes = costs.knownScopes
         let nativeRows = costs.records.filter { range.contains($0.day) }.compactMap {
@@ -749,7 +806,13 @@ enum APISpendAggregator {
         let coverage: APISpendCoverage = !hasKnownCoverage
             ? .missing
             : (nativeCoverageComplete && legacyCoverageComplete ? .complete : .partial)
-        return APISpendSummary(totals: totals, coverage: coverage)
+        return APISpendSummary(
+            totals: totals, coverage: coverage,
+            balances: balances.sorted {
+                $0.providerID == $1.providerID
+                    ? $0.currency < $1.currency : $0.providerID < $1.providerID
+            }
+        )
     }
 }
 

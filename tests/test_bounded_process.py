@@ -53,7 +53,9 @@ class BoundedProcessTests(unittest.TestCase):
                 "open(sys.argv[1],'w').write(str(child))\n",
             )
             with self.assertRaises(BoundedProcessError) as raised:
-                run_bounded([str(helper), str(pidfile)], timeout=1)
+                # This exercises descendant cleanup, not Python interpreter
+                # startup latency. Keep headroom for a loaded release build.
+                run_bounded([str(helper), str(pidfile)], timeout=5)
             self.assertEqual(raised.exception.code, "timeout")
             pid = int(pidfile.read_text())
             state = ""

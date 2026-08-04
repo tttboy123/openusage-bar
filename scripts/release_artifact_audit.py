@@ -16,6 +16,7 @@ from pathlib import Path, PurePosixPath
 ARCHIVE_PATTERN = re.compile(r"^OpenUsage-Bar-v(\d+\.\d+\.\d+)-macos-arm64\.zip$")
 ALLOWED_SCRIPTS = frozenset({
     "activity_schema.py",
+    "routing_schema.py",
     "activity_install_process.sh", "install_app.sh",
     "install_location.sh", "install_app_transaction.sh", "rollback_app.sh",
     "uninstall_app.sh",
@@ -25,7 +26,9 @@ ALLOWED_SCRIPTS = frozenset({
 })
 SENSITIVE_NAMES = frozenset({
     ".env", "providers.json", "activity.sqlite3", "activity.sqlite3-wal",
-    "activity.sqlite3-shm", "keychain", "cookies", "credentials",
+    "activity.sqlite3-shm", "routing.sqlite3", "routing.sqlite3-wal",
+    "routing.sqlite3-shm", "route-targets.json", "router.sock",
+    "keychain", "cookies", "credentials",
 })
 MAX_MEMBER_BYTES = 256 * 1024 * 1024
 MAX_TOTAL_BYTES = 1024 * 1024 * 1024

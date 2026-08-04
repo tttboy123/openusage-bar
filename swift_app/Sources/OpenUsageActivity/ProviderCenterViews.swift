@@ -13,6 +13,11 @@ struct ProvidersPage: View {
     @State private var searchText = ""
     @State private var configuredConnections: [ProviderConnectionSummary] = []
     @State private var discoveredConnections: [ProviderInstanceRecord] = []
+    @State private var showingAddProvider = false
+
+    private var addCatalog: ProviderAddCatalog {
+        ProviderAddCatalog(descriptors: ProviderCatalog.allDescriptors)
+    }
 
     private var providerInstances: [ProviderInstanceRecord] {
         discoveredConnections.isEmpty ? data.providerInstances : discoveredConnections
@@ -101,6 +106,13 @@ struct ProvidersPage: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 260)
                     .accessibilityLabel("Search providers or clients")
+                Button("Add Provider", systemImage: "plus") {
+                    showingAddProvider = true
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .accessibilityHint("Choose a built-in service or configure a custom data source")
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 20)
@@ -143,6 +155,16 @@ struct ProvidersPage: View {
         .onChange(of: selectedCategory) { synchronizeSelection() }
         .onChange(of: searchText) { synchronizeSelection() }
         .onChange(of: selectedFamilyID) { _, _ in synchronizeRegion() }
+        .sheet(isPresented: $showingAddProvider) {
+            ProviderAddFlowSheet(
+                catalog: addCatalog,
+                onSaved: { option in
+                    showingAddProvider = false
+                    loadConfiguredConnections(selecting: option.descriptor.familyID)
+                    reload()
+                }
+            )
+        }
     }
 
     private var providerList: some View {
@@ -231,7 +253,7 @@ struct ProvidersPage: View {
         }
     }
 
-    private func loadConfiguredConnections() {
+    private func loadConfiguredConnections(selecting preferredFamilyID: String? = nil) {
         Task { @MainActor in
             let loaded = await Task.detached(priority: .utility) { () -> (
                 [ProviderConnectionSummary], [ProviderInstanceRecord]
@@ -244,8 +266,227 @@ struct ProvidersPage: View {
             }.value
             configuredConnections = loaded.0
             discoveredConnections = loaded.1
-            synchronizeSelection()
+            if let preferredFamilyID {
+                selectedCategory = .all
+                searchText = ""
+                selectedFamilyID = preferredFamilyID
+                synchronizeRegion()
+            } else {
+                synchronizeSelection()
+            }
         }
+    }
+}
+
+private struct ProviderAddFlowSheet: View {
+    let catalog: ProviderAddCatalog
+    let onSaved: (ProviderAddOption) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+    @State private var selectedOption: ProviderAddOption?
+
+    var body: some View {
+        Group {
+            if let selectedOption {
+                NativeProviderConnectionSheet(
+                    option: selectedOption,
+                    selectedSite: selectedOption.descriptor.regions.sorted().first,
+                    onCancel: { self.selectedOption = nil },
+                    onSaved: { onSaved(selectedOption) }
+                )
+            } else {
+                chooser
+            }
+        }
+    }
+
+    private var chooser: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Add Provider").font(.title2.weight(.semibold))
+                    Text("Choose a service, or connect your own quota or daily usage endpoint.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(24)
+
+            TextField("Search service providers", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Search service providers")
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
+
+            Divider()
+
+            List {
+                if !customOptions.isEmpty {
+                    Section("Custom Sources") {
+                        ForEach(customOptions) { option in
+                            optionButton(option)
+                        }
+                    }
+                }
+                if !builtInOptions.isEmpty {
+                    Section("Built-in Connections") {
+                        ForEach(builtInOptions) { option in
+                            optionButton(option)
+                        }
+                    }
+                }
+                if !endpointOptions.isEmpty {
+                    Section("Service Provider Catalog") {
+                        ForEach(endpointOptions) { option in
+                            optionButton(option)
+                        }
+                    }
+                }
+                if !automaticDescriptors.isEmpty {
+                    Section {
+                        ForEach(automaticDescriptors, id: \.familyID) { descriptor in
+                            ProviderAutomaticDiscoveryRow(descriptor: descriptor)
+                        }
+                    } header: {
+                        Text("Automatically Discovered")
+                    } footer: {
+                        Text("Local clients and subscription apps appear after they are used on this Mac; no credential setup is required here.")
+                    }
+                }
+                if customOptions.isEmpty && builtInOptions.isEmpty
+                    && endpointOptions.isEmpty && automaticDescriptors.isEmpty
+                {
+                    ContentUnavailableView.search(text: searchText)
+                }
+            }
+            .listStyle(.inset)
+        }
+        .frame(width: 680, height: 720)
+    }
+
+    private var filteredServices: [ProviderAddOption] {
+        catalog.filteredServiceOptions(query: searchText)
+    }
+
+    private var builtInOptions: [ProviderAddOption] {
+        filteredServices.filter(\.connectionKind.isBuiltIn)
+    }
+
+    private var endpointOptions: [ProviderAddOption] {
+        filteredServices.filter { !$0.connectionKind.isBuiltIn }
+    }
+
+    private var customOptions: [ProviderAddOption] {
+        catalog.filteredCustomOptions(query: searchText)
+    }
+
+    private var automaticDescriptors: [ProviderDisplayDescriptor] {
+        catalog.filteredAutomaticDescriptors(query: searchText)
+    }
+
+    private func optionButton(_ option: ProviderAddOption) -> some View {
+        Button {
+            selectedOption = option
+        } label: {
+            ProviderAddOptionRow(option: option)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ProviderAddOptionRow: View {
+    let option: ProviderAddOption
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 34, height: 34)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(AppLocalization.text(option.descriptor.displayName))
+                    .font(.body.weight(.medium))
+                Text(detail)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(kindLabel)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(tint.opacity(0.1), in: Capsule())
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var symbol: String {
+        switch option.origin {
+        case .customProvider: "slider.horizontal.3"
+        case .customUsageFeed: "chart.bar.doc.horizontal"
+        case .catalog: option.connectionKind.isBuiltIn ? "checkmark.seal" : "network"
+        }
+    }
+
+    private var tint: Color {
+        option.origin == .catalog && option.connectionKind.isBuiltIn ? .green : .accentColor
+    }
+
+    private var detail: String {
+        switch option.origin {
+        case .customProvider:
+            AppLocalization.text("Map any HTTPS quota response to capacity facts.")
+        case .customUsageFeed:
+            AppLocalization.text("Import daily model and Token records from an HTTPS feed.")
+        case .catalog where option.connectionKind.isBuiltIn:
+            AppLocalization.text("Validated built-in connector with managed credentials.")
+        case .catalog:
+            AppLocalization.text("Provider identity is ready; an HTTPS endpoint mapping is required.")
+        }
+    }
+
+    private var kindLabel: String {
+        switch option.origin {
+        case .customProvider: AppLocalization.text("Custom")
+        case .customUsageFeed: AppLocalization.text("Usage Feed")
+        case .catalog where option.connectionKind.isBuiltIn: AppLocalization.text("Built in")
+        case .catalog: AppLocalization.text("Custom endpoint")
+        }
+    }
+}
+
+private struct ProviderAutomaticDiscoveryRow: View {
+    let descriptor: ProviderDisplayDescriptor
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "desktopcomputer")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+                .background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(descriptor.displayName).font(.body.weight(.medium))
+                Text("Detected from local app data; no manual connection is needed.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("Automatic")
+                .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -829,33 +1070,19 @@ private struct ProviderConnectionDetail: View {
 private struct NativeProviderConnectionSheet: View {
     let descriptor: ProviderDisplayDescriptor
     let selectedSite: String?
+    let optionOrigin: ProviderAddOption.Origin?
+    let onCancel: (() -> Void)?
     let onSaved: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var kind: String
-    @State private var providerID: String
-    @State private var name: String
-    @State private var site: String
-    @State private var endpoint = ""
-    @State private var familyID: String
-    @State private var headerName = "Authorization"
-    @State private var authPrefix = "Bearer"
-    @State private var primaryPath = "data.remaining"
-    @State private var remainingPercentPath = ""
-    @State private var resetPath = ""
-    @State private var detailPath = ""
-    @State private var itemsPath = "data.items"
-    @State private var datePath = "date"
-    @State private var modelPath = "model"
-    @State private var inputTokensPath = "input_tokens"
-    @State private var outputTokensPath = "output_tokens"
-    @State private var totalTokensPath = "total_tokens"
-    @State private var sinceParameter = "since"
-    @State private var untilParameter = "until"
+    @State private var draft: ProviderConnectionDraft
+    @State private var baseline: ProviderConnectionDraft
     @State private var credential = ""
     @State private var session = ""
     @State private var error: String?
     @State private var isSaving = false
+    @State private var confirmDiscard = false
+    private let draftStore = ProviderConnectionDraftStore()
 
     init(
         descriptor: ProviderDisplayDescriptor, selectedSite: String?,
@@ -863,26 +1090,60 @@ private struct NativeProviderConnectionSheet: View {
     ) {
         self.descriptor = descriptor
         self.selectedSite = selectedSite
+        optionOrigin = nil
+        onCancel = nil
         self.onSaved = onSaved
-        let initialKind = switch descriptor.familyID {
-        case "minimax": "minimax"
-        case "moonshot": "moonshot"
-        case "step_plan": "step_plan"
-        case "openai": "openai_organization"
-        default: "generic"
-        }
-        _kind = State(initialValue: initialKind)
-        _providerID = State(initialValue: descriptor.familyID)
-        _name = State(initialValue: descriptor.displayName)
-        _site = State(initialValue: selectedSite == "cn" ? "china" : selectedSite ?? "china")
-        _familyID = State(initialValue: descriptor.familyID)
+        let connectionKind = ProviderAddConnectionKind(familyID: descriptor.familyID) ?? .generic
+        let familyID = descriptor.familyID
+        let restored = ProviderConnectionDraftStore().load(
+            familyID: familyID, providerID: familyID
+        ) ?? ProviderConnectionDraft(
+            kind: connectionKind.rawValue,
+            providerID: familyID,
+            name: descriptor.displayName,
+            site: selectedSite == "cn" ? "china" : selectedSite ?? "china",
+            familyID: familyID
+        )
+        _draft = State(initialValue: restored)
+        _baseline = State(initialValue: restored)
+    }
+
+    init(
+        option: ProviderAddOption, selectedSite: String?,
+        onCancel: @escaping () -> Void,
+        onSaved: @escaping () -> Void
+    ) {
+        descriptor = option.descriptor
+        self.selectedSite = selectedSite
+        optionOrigin = option.origin
+        self.onCancel = onCancel
+        self.onSaved = onSaved
+        let familyID = option.descriptor.familyID
+        let restored = ProviderConnectionDraftStore().load(
+            familyID: familyID, providerID: option.defaultProviderID
+        ) ?? ProviderConnectionDraft(
+            kind: option.connectionKind.rawValue,
+            providerID: option.defaultProviderID,
+            name: option.descriptor.displayName,
+            site: selectedSite == "cn" ? "china" : selectedSite ?? "china",
+            familyID: familyID
+        )
+        _draft = State(initialValue: restored)
+        _baseline = State(initialValue: restored)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
+                if onCancel != nil {
+                    Button("Back", systemImage: "chevron.left", action: cancel)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .disabled(isSaving)
+                        .accessibilityHint("Return to the Provider catalog")
+                }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Add Connection").font(.title2.weight(.semibold))
+                    Text(sheetTitle).font(.title2.weight(.semibold))
                     Text("Credentials are written to Keychain and never displayed again.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
@@ -891,7 +1152,13 @@ private struct NativeProviderConnectionSheet: View {
             .padding(24)
             Divider()
             Form {
-                Picker("Connection type", selection: $kind) {
+                if let setupNote {
+                    Label(setupNote, systemImage: "info.circle")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .accessibilityElement(children: .combine)
+                }
+                Picker("Connection type", selection: $draft.kind) {
                     Text("Quota API").tag("generic")
                     Text("Daily Usage Feed").tag("daily_usage_feed")
                     if descriptor.familyID == "minimax" { Text("MiniMax").tag("minimax") }
@@ -901,41 +1168,41 @@ private struct NativeProviderConnectionSheet: View {
                     if descriptor.familyID == "step_plan" { Text("Step Plan").tag("step_plan") }
                     if descriptor.familyID == "openai" { Text("OpenAI Organization").tag("openai_organization") }
                 }
-                TextField("Connection ID", text: $providerID)
-                TextField("Account label", text: $name)
-                if ["minimax", "moonshot", "step_plan"].contains(kind) {
-                    Picker("Site", selection: $site) {
+                TextField("Connection ID", text: $draft.providerID)
+                TextField("Account label", text: $draft.name)
+                if ["minimax", "moonshot", "step_plan"].contains(draft.kind) {
+                    Picker("Site", selection: $draft.site) {
                         Text("China").tag("china")
                         Text("International").tag("international")
                     }
                 }
-                if ["generic", "daily_usage_feed"].contains(kind) {
-                    TextField("Endpoint", text: $endpoint)
-                    TextField("Header name", text: $headerName)
-                    TextField("Authentication prefix", text: $authPrefix)
+                if ["generic", "daily_usage_feed"].contains(draft.kind) {
+                    TextField("Endpoint", text: $draft.endpoint)
+                    TextField("Header name", text: $draft.headerName)
+                    TextField("Authentication prefix", text: $draft.authPrefix)
                 }
-                if kind == "generic" {
-                    TextField("Primary field path", text: $primaryPath)
-                    TextField("Remaining percent path (optional)", text: $remainingPercentPath)
-                    TextField("Reset path (optional)", text: $resetPath)
-                    TextField("Detail path (optional)", text: $detailPath)
+                if draft.kind == "generic" {
+                    TextField("Primary field path", text: $draft.primaryPath)
+                    TextField("Remaining percent path (optional)", text: $draft.remainingPercentPath)
+                    TextField("Reset path (optional)", text: $draft.resetPath)
+                    TextField("Detail path (optional)", text: $draft.detailPath)
                 }
-                if kind == "daily_usage_feed" {
-                    TextField("Provider family ID", text: $familyID)
-                    TextField("Items path", text: $itemsPath)
-                    TextField("Date path", text: $datePath)
-                    TextField("Model path", text: $modelPath)
-                    TextField("Input tokens path", text: $inputTokensPath)
-                    TextField("Output tokens path", text: $outputTokensPath)
-                    TextField("Total tokens path", text: $totalTokensPath)
-                    TextField("Since parameter", text: $sinceParameter)
-                    TextField("Until parameter", text: $untilParameter)
+                if draft.kind == "daily_usage_feed" {
+                    TextField("Provider family ID", text: $draft.familyID)
+                    TextField("Items path", text: $draft.itemsPath)
+                    TextField("Date path", text: $draft.datePath)
+                    TextField("Model path", text: $draft.modelPath)
+                    TextField("Input tokens path", text: $draft.inputTokensPath)
+                    TextField("Output tokens path", text: $draft.outputTokensPath)
+                    TextField("Total tokens path", text: $draft.totalTokensPath)
+                    TextField("Since parameter", text: $draft.sinceParameter)
+                    TextField("Until parameter", text: $draft.untilParameter)
                 }
                 SecureField(
-                    AppLocalization.text(kind == "minimax" ? "Coding Plan key" : "API key"),
+                    AppLocalization.text(draft.kind == "minimax" ? "Coding Plan key" : "API key"),
                     text: $credential
                 )
-                if kind == "step_plan" {
+                if draft.kind == "step_plan" {
                     SecureField("Web session (optional)", text: $session)
                 }
                 if let error {
@@ -947,7 +1214,7 @@ private struct NativeProviderConnectionSheet: View {
             Divider()
             HStack {
                 Spacer()
-                Button("Cancel") { clearSecrets(); dismiss() }
+                Button(onCancel == nil ? "Cancel" : "Back") { cancel() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(isSaving)
                 Button("Add Connection") { submit() }
@@ -958,12 +1225,63 @@ private struct NativeProviderConnectionSheet: View {
             .padding(18)
         }
         .frame(width: 620, height: 680)
+        .onChange(of: draft) { autosave() }
         .onDisappear(perform: clearSecrets)
+        .confirmationDialog(
+            "Discard unsaved changes?",
+            isPresented: $confirmDiscard,
+            titleVisibility: .visible
+        ) {
+            Button("Discard Changes", role: .destructive) { finishCancel() }
+            Button("Keep Editing", role: .cancel) {}
+        } message: {
+            Text("Your Provider form changes will be lost.")
+        }
+    }
+
+    private var sheetTitle: String {
+        switch optionOrigin {
+        case .customProvider: AppLocalization.text("Add Custom Provider")
+        case .customUsageFeed: AppLocalization.text("Add Daily Usage Feed")
+        case .catalog: AppLocalization.format("Connect %@", descriptor.displayName)
+        case nil: AppLocalization.text("Add Connection")
+        }
+    }
+
+    private var setupNote: String? {
+        switch optionOrigin {
+        case .catalog where ProviderAddConnectionKind(familyID: descriptor.familyID) == nil:
+            AppLocalization.text("This catalog entry does not have a built-in connector yet. Configure a read-only HTTPS endpoint and response field mapping.")
+        case .customProvider:
+            AppLocalization.text("Use a stable HTTPS endpoint that returns quota, balance, credits, or remaining capacity.")
+        case .customUsageFeed:
+            AppLocalization.text("Use a stable HTTPS endpoint that returns daily records. Official and fallback sources are never summed together.")
+        default: nil
+        }
+    }
+
+    private func cancel() {
+        if draft.hasChanges(from: baseline) {
+            confirmDiscard = true
+        } else {
+            finishCancel()
+        }
+    }
+
+    private func finishCancel() {
+        draftStore.clear(familyID: draft.familyID, providerID: draft.providerID)
+        clearSecrets()
+        if let onCancel { onCancel() } else { dismiss() }
+    }
+
+    private func autosave() {
+        guard !isSaving else { return }
+        draftStore.save(draft, familyID: draft.familyID, providerID: draft.providerID)
     }
 
     private func submit() {
-        let draft = makeDraft()
-        if let validation = draft.validation(action: .createConnection) {
+        let managed = makeDraft()
+        if let validation = managed.validation(action: .createConnection) {
             let message = switch validation {
             case .missingProviderID: "Connection ID is required."
             case .missingName: "Account label is required."
@@ -984,11 +1302,14 @@ private struct NativeProviderConnectionSheet: View {
         error = nil
         Task { @MainActor in
             let result = await ProviderMutationService.submit(
-                draft.request(action: .createConnection), command: command
+                managed.request(action: .createConnection), command: command
             )
             isSaving = false
             switch result {
             case let .success(response) where response.ok:
+                draftStore.clear(
+                    familyID: draft.familyID, providerID: draft.providerID
+                )
                 clearSecrets()
                 onSaved()
             case let .success(response): error = response.message
@@ -998,38 +1319,45 @@ private struct NativeProviderConnectionSheet: View {
     }
 
     private func makeDraft() -> ManagedConnectionDraft {
-        switch kind {
+        switch draft.kind {
         case "minimax": .minimax(
-            providerID: providerID, name: name, site: site,
+            providerID: draft.providerID, name: draft.name, site: draft.site,
             replacementCredential: credential
         )
         case "moonshot": .moonshot(
-            providerID: providerID, name: name, site: site,
+            providerID: draft.providerID, name: draft.name, site: draft.site,
             replacementCredential: credential
         )
         case "step_plan": .stepPlan(
-            providerID: providerID, name: name, site: site,
+            providerID: draft.providerID, name: draft.name, site: draft.site,
             replacementCredential: credential, replacementSession: session
         )
         case "openai_organization": .openAIOrganization(
-            providerID: providerID, name: name, replacementCredential: credential
+            providerID: draft.providerID, name: draft.name,
+            replacementCredential: credential
         )
         case "daily_usage_feed": .dailyUsageFeed(.init(
-            providerID: providerID, name: name, familyID: familyID,
-            endpoint: endpoint, headerName: headerName, authPrefix: authPrefix,
-            itemsPath: itemsPath, datePath: datePath, modelPath: modelPath,
-            inputTokensPath: inputTokensPath, outputTokensPath: outputTokensPath,
+            providerID: draft.providerID, name: draft.name, familyID: draft.familyID,
+            endpoint: draft.endpoint, headerName: draft.headerName,
+            authPrefix: draft.authPrefix,
+            itemsPath: draft.itemsPath, datePath: draft.datePath,
+            modelPath: draft.modelPath,
+            inputTokensPath: draft.inputTokensPath,
+            outputTokensPath: draft.outputTokensPath,
             cacheReadTokensPath: nil, cacheCreationTokensPath: nil,
-            reasoningTokensPath: nil, totalTokensPath: totalTokensPath,
-            sinceParameter: sinceParameter, untilParameter: untilParameter,
+            reasoningTokensPath: nil, totalTokensPath: draft.totalTokensPath,
+            sinceParameter: draft.sinceParameter,
+            untilParameter: draft.untilParameter,
             replacementCredential: credential
         ))
         default: .generic(.init(
-            providerID: providerID, name: name, familyID: familyID,
-            endpoint: endpoint, headerName: headerName, authPrefix: authPrefix,
-            primaryPath: primaryPath,
-            remainingPercentPath: emptyToNil(remainingPercentPath),
-            resetPath: emptyToNil(resetPath), detailPath: emptyToNil(detailPath),
+            providerID: draft.providerID, name: draft.name, familyID: draft.familyID,
+            endpoint: draft.endpoint, headerName: draft.headerName,
+            authPrefix: draft.authPrefix,
+            primaryPath: draft.primaryPath,
+            remainingPercentPath: emptyToNil(draft.remainingPercentPath),
+            resetPath: emptyToNil(draft.resetPath),
+            detailPath: emptyToNil(draft.detailPath),
             replacementCredential: credential
         ))
         }

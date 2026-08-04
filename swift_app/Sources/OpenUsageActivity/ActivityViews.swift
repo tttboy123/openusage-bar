@@ -41,7 +41,7 @@ struct ActivityRootView: View {
                 .navigationTitle(coordinator.route.title)
                 .toolbar {
                     ToolbarItem {
-                        if coordinator.route != .automation {
+                        if coordinator.route != .automation && coordinator.route != .routing {
                             Button("Refresh", systemImage: "arrow.clockwise") { store.reload() }
                                 .disabled(store.isLoading)
                         }
@@ -49,7 +49,8 @@ struct ActivityRootView: View {
                 }
         }
         .overlay {
-            if coordinator.route != .automation, onboardingPhase != .hidden {
+            if coordinator.route != .automation, coordinator.route != .routing,
+               onboardingPhase != .hidden {
                 OnboardingView(
                     phase: onboardingPhase,
                     primaryAction: performOnboardingAction,
@@ -133,7 +134,9 @@ struct ActivityRootView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if coordinator.route == .automation {
+        if coordinator.route == .routing {
+            RoutingPage()
+        } else if coordinator.route == .automation {
             AutomationPage()
                 .background(.background)
         } else if let data = store.displayData {
@@ -164,6 +167,7 @@ struct ActivityRootView: View {
                             case .apiSpend: APISpendPage(data: data)
                             case .localTools: LocalToolsPage(store: store, data: data)
                             case .providersAndAccounts: EmptyView()
+                            case .routing: EmptyView()
                             case .dataHealth: DataHealthPage(data: data, retry: store.reload)
                             case .automation: EmptyView()
                             }

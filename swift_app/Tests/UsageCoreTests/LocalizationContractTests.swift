@@ -25,10 +25,85 @@ struct LocalizationContractTests {
         }
     }
 
+    @Test("Routing connection editor copy is available in both languages")
+    func routingConnectionEditorCopy() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let resources = root.appendingPathComponent("swift_app/Resources")
+        let english = try Catalog(
+            url: resources.appendingPathComponent("en.lproj/Localizable.strings")
+        )
+        let chinese = try Catalog(
+            url: resources.appendingPathComponent("zh-Hans.lproj/Localizable.strings")
+        )
+        let requiredKeys = [
+            "Add execution connection",
+            "Edit execution connection",
+            "Execution connections",
+            "Add connection",
+            "No execution connections",
+            "Inference API key",
+            "Leave blank to keep the current key",
+            "%lld models",
+            "Add routing target",
+            "Edit routing target",
+            "Execution and model",
+            "Resource facts",
+            "Model profile",
+            "Optional cost metadata",
+            "Remove routing target",
+            "Custom policies",
+            "Add policy",
+            "Add custom policy",
+            "Edit custom policy",
+            "OpenAI-compatible chat proxy",
+            "Optional local execution endpoint for OpenAI-compatible clients",
+            "Enable proxy",
+            "Disable proxy",
+            "Rotate token",
+            "Save your proxy token",
+            "Copy token",
+        ]
+
+        for key in requiredKeys {
+            #expect(english.values[key] != nil)
+            #expect(chinese.values[key] != nil)
+        }
+    }
+
     @Test("Parameterized copy has a deterministic English fallback")
     func formattedFallback() {
         #expect(AppLocalization.format("Collected %@", "Jul 18") == "Collected Jul 18")
         #expect(AppLocalization.format("%lld days", Int64(3)) == "3 days")
+    }
+
+    @Test("Add Provider flow is complete in both languages")
+    func addProviderFlowCopy() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let resources = root.appendingPathComponent("swift_app/Resources")
+        let english = try Catalog(
+            url: resources.appendingPathComponent("en.lproj/Localizable.strings")
+        )
+        let chinese = try Catalog(
+            url: resources.appendingPathComponent("zh-Hans.lproj/Localizable.strings")
+        )
+        let requiredKeys = [
+            "Add Provider",
+            "Built-in Connections",
+            "Service Provider Catalog",
+            "Custom Provider",
+            "Custom Daily Usage Feed",
+            "Automatically Discovered",
+            "This catalog entry does not have a built-in connector yet. Configure a read-only HTTPS endpoint and response field mapping.",
+        ]
+
+        for key in requiredKeys {
+            #expect(english.values[key] != nil)
+            #expect(chinese.values[key] != nil)
+        }
     }
 }
 

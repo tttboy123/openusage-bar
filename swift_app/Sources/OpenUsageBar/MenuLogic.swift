@@ -41,7 +41,7 @@ public enum MenuCopy {
     public static let footerActions = ["Open Usage Details", "Data Health", "Settings"]
     public static let allVisibleText = [
         "OpenUsage Bar", "Updated", "Refresh", "Today Token", "Capacity",
-        "Most urgent first", "View all providers", "Open Usage Details", "Data Health", "Settings",
+        "Most urgent first", "Open Provider Center", "Open Usage Details", "Data Health", "Settings",
     ]
 }
 

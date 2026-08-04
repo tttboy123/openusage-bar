@@ -14,13 +14,10 @@ from .activity_store import (
     ActivityStore,
     DailyUsageRow,
     ProviderInstance,
-    QuotaObservation,
 )
 from .bounded_process import BoundedProcessError, run_bounded
-from .capabilities import MetricFamily, registry, state_from_card
 from .codex_attribution import CodexAttributionResolver
 from .config import ID_PATTERN
-from .models import Overview, ProviderCard
 from .model_ids import InvalidModelID, canonical_model_id
 from .openusage_adapter import (
     child_subprocess_environment,
@@ -31,11 +28,18 @@ from .openusage_catalog import (
     CatalogDiagnostic,
     OpenUsageCatalogDiscovery,
 )
+from .openusage_export_v1 import (
+    ExportCapabilityProbe,
+    ExportDecodeError,
+    decode_capabilities,
+    decode_daily,
+)
 from .providers.contracts import (
     BalanceFetchFailure,
     BalanceFetchSuccess,
     CostImportSuccess,
     ImportFailure,
+    ProviderDiscoveryObservation,
     QuotaFetchFailure,
     QuotaFetchSuccess,
     UsageImportSuccess,
@@ -49,6 +53,13 @@ from .openai_organization import COST_SOURCE_ID, USAGE_SOURCE_ID
 
 
 DAILY_TIMEOUT_SECONDS = 60
+EXPORT_V1_PROBE_TIMEOUT_SECONDS = 3
+EXPORT_V1_PROBE_BYTES = 128 * 1024
+EXPORT_V1_SOURCE_ID = "openusage.export.v1"
+EXPORT_V1_PAGE_SIZE = 500
+EXPORT_V1_MAX_PAGES = 100
+EXPORT_V1_MAX_ROWS = 200_000
+EXPORT_V1_MAX_MODELS_PER_DAY = 512
 MAX_DAILY_EXPORT_BYTES = 16 * 1024 * 1024
 MAX_DAILY_DAYS = 5000
 MAX_DAILY_MODELS_PER_DAY = 4096
@@ -147,9 +158,15 @@ class DailyImportResult:
     ok: bool
     rows: tuple[DailyUsageRow, ...]
     error_code: str | None = None
+    source_id: str = DAILY_SOURCE_ID
+    covered_zero: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "rows", tuple(self.rows))
+        if ID_PATTERN.fullmatch(self.source_id) is None:
+            raise ValueError("source_id must use the stable identifier grammar")
+        if self.covered_zero and (not self.ok or self.rows):
+            raise ValueError("covered zero requires a successful empty result")
 
 
 class OpenUsageDailyImporter:
@@ -169,6 +186,57 @@ class OpenUsageDailyImporter:
         self.path_exists = path_exists
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.codex_attribution = codex_attribution or CodexAttributionResolver()
+        self._export_v1_probe: ExportCapabilityProbe | None = None
+        self._export_v1_probe_lock = threading.Lock()
+
+    def export_v1_capabilities(self) -> ExportCapabilityProbe:
+        with self._export_v1_probe_lock:
+            if self._export_v1_probe is not None:
+                return self._export_v1_probe
+            command = [
+                self.openusage_path,
+                "export",
+                "--output",
+                "-",
+                "--format",
+                "json",
+                "--contract",
+                "openusage-export/v1",
+                "--kind",
+                "capabilities",
+            ]
+            try:
+                runner = self.runner or run_bounded
+                options = {}
+                if self.runner is None:
+                    options = {
+                        "stdout_limit": EXPORT_V1_PROBE_BYTES,
+                        "stderr_limit": EXPORT_V1_PROBE_BYTES,
+                    }
+                completed = runner(
+                    command,
+                    shell=False,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=EXPORT_V1_PROBE_TIMEOUT_SECONDS,
+                    env=child_subprocess_environment(
+                        self.environment, self.path_exists
+                    ),
+                    **options,
+                )
+                if completed.returncode != 0:
+                    raise ExportDecodeError()
+                capabilities = decode_capabilities(completed.stdout)
+                result = ExportCapabilityProbe(True, capabilities)
+            except Exception:
+                result = ExportCapabilityProbe(False)
+            self._export_v1_probe = result
+            return result
 
     @staticmethod
     def _valid_request(provider_id: str, since: date, until: date) -> bool:
@@ -385,11 +453,158 @@ class OpenUsageDailyImporter:
                 repaired[identity] = candidate
         return tuple(repaired.values())
 
-    def fetch(
+    def _run_daily_command(
+        self, command: list[str]
+    ) -> subprocess.CompletedProcess:
+        runner = self.runner or run_bounded
+        options = {}
+        if self.runner is None:
+            options = {
+                "stdout_limit": MAX_DAILY_EXPORT_BYTES,
+                "stderr_limit": 64 * 1024,
+            }
+        return runner(
+            command,
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=DAILY_TIMEOUT_SECONDS,
+            env=child_subprocess_environment(self.environment, self.path_exists),
+            **options,
+        )
+
+    def _fetch_export_v1(
         self, provider_id: str, since: date, until: date
     ) -> DailyImportResult:
-        if not self._valid_request(provider_id, since, until):
-            return DailyImportResult(False, (), "invalid_request")
+        if (until - since).days >= 366:
+            return DailyImportResult(
+                False, (), "range_too_large", EXPORT_V1_SOURCE_ID
+            )
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        wire_rows = []
+        previous_key: tuple[date, str] | None = None
+        for _page_number in range(EXPORT_V1_MAX_PAGES):
+            command = [
+                self.openusage_path,
+                "export",
+                "--output",
+                "-",
+                "--format",
+                "json",
+                "--contract",
+                "openusage-export/v1",
+                "--kind",
+                "daily_usage",
+                "--provider",
+                provider_id,
+                "--since",
+                since.isoformat(),
+                "--until",
+                until.isoformat(),
+                "--limit",
+                str(EXPORT_V1_PAGE_SIZE),
+            ]
+            if cursor is not None:
+                command.extend(("--cursor", cursor))
+            try:
+                completed = self._run_daily_command(command)
+            except BoundedProcessError as error:
+                code = "timeout" if error.code == "timeout" else "output_too_large"
+                return DailyImportResult(False, (), code, EXPORT_V1_SOURCE_ID)
+            except subprocess.TimeoutExpired:
+                return DailyImportResult(False, (), "timeout", EXPORT_V1_SOURCE_ID)
+            except OSError:
+                return DailyImportResult(False, (), "start_failed", EXPORT_V1_SOURCE_ID)
+            except Exception:
+                return DailyImportResult(False, (), "runner_failed", EXPORT_V1_SOURCE_ID)
+            if completed.returncode != 0:
+                return DailyImportResult(False, (), "command_failed", EXPORT_V1_SOURCE_ID)
+            try:
+                page = decode_daily(completed.stdout)
+            except ExportDecodeError:
+                return DailyImportResult(False, (), "invalid_export_v1", EXPORT_V1_SOURCE_ID)
+            if (
+                page.request.provider_id != provider_id
+                or page.request.since != since
+                or page.request.until != until
+                or page.request.limit != EXPORT_V1_PAGE_SIZE
+                or page.request.cursor != cursor
+            ):
+                return DailyImportResult(False, (), "scope_mismatch", EXPORT_V1_SOURCE_ID)
+            if page.coverage.state != "complete":
+                return DailyImportResult(False, (), "incomplete_coverage", EXPORT_V1_SOURCE_ID)
+            for row in page.rows:
+                key = (row.day, row.model_id)
+                if previous_key is not None and key <= previous_key:
+                    return DailyImportResult(False, (), "invalid_page_order", EXPORT_V1_SOURCE_ID)
+                previous_key = key
+                wire_rows.append(row)
+            if len(wire_rows) > EXPORT_V1_MAX_ROWS:
+                return DailyImportResult(False, (), "too_many_rows", EXPORT_V1_SOURCE_ID)
+            if page.complete:
+                break
+            next_cursor = page.next_cursor
+            if not page.rows or next_cursor is None or next_cursor in seen_cursors:
+                return DailyImportResult(False, (), "invalid_cursor", EXPORT_V1_SOURCE_ID)
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+        else:
+            return DailyImportResult(False, (), "too_many_pages", EXPORT_V1_SOURCE_ID)
+
+        imported_at = self.clock().astimezone(timezone.utc).isoformat()
+        rows: list[DailyUsageRow] = []
+        canonical_identities: set[tuple[str, str]] = set()
+        models_per_day: dict[str, int] = {}
+        try:
+            for wire in wire_rows:
+                day = wire.day.isoformat()
+                model_id = self._canonical_model_id(wire.model_id)
+                identity = (day, model_id)
+                if identity in canonical_identities:
+                    raise ValueError("canonical model collision")
+                canonical_identities.add(identity)
+                models_per_day[day] = models_per_day.get(day, 0) + 1
+                if models_per_day[day] > EXPORT_V1_MAX_MODELS_PER_DAY:
+                    raise ValueError("too many models")
+                rows.append(DailyUsageRow(
+                    day=day,
+                    provider_id=provider_id,
+                    model_id=model_id,
+                    input_tokens=wire.input_tokens,
+                    output_tokens=wire.output_tokens,
+                    cache_read_tokens=wire.cache_read_tokens,
+                    cache_creation_tokens=wire.cache_creation_tokens,
+                    reasoning_tokens=wire.reasoning_tokens,
+                    total_tokens=wire.total_tokens,
+                    cost_amount=None,
+                    cost_currency=None,
+                    cost_basis=None,
+                    quality=wire.quality,
+                    imported_at=imported_at,
+                    token_counting_convention=wire.token_counting_convention,
+                ))
+        except Exception:
+            return DailyImportResult(False, (), "invalid_import_rows", EXPORT_V1_SOURCE_ID)
+        materialized = tuple(rows)
+        if provider_id == "codex":
+            materialized = self._repair_codex_unknown(materialized, since, until)
+        return DailyImportResult(
+            True,
+            materialized,
+            None,
+            EXPORT_V1_SOURCE_ID,
+            covered_zero=not materialized,
+        )
+
+    def _fetch_legacy(
+        self, provider_id: str, since: date, until: date
+    ) -> DailyImportResult:
         command = [
             self.openusage_path,
             "daily",
@@ -404,27 +619,7 @@ class OpenUsageDailyImporter:
             until.isoformat(),
         ]
         try:
-            runner = self.runner or run_bounded
-            options = {}
-            if self.runner is None:
-                options = {
-                    "stdout_limit": MAX_DAILY_EXPORT_BYTES,
-                    "stderr_limit": 64 * 1024,
-                }
-            completed = runner(
-                command,
-                shell=False,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=DAILY_TIMEOUT_SECONDS,
-                env=child_subprocess_environment(self.environment, self.path_exists),
-                **options,
-            )
+            completed = self._run_daily_command(command)
         except BoundedProcessError as error:
             code = "timeout" if error.code == "timeout" else "output_too_large"
             return DailyImportResult(False, (), code)
@@ -449,6 +644,18 @@ class OpenUsageDailyImporter:
         if provider_id == "codex":
             rows = self._repair_codex_unknown(rows, since, until)
         return DailyImportResult(True, rows)
+
+    def fetch(
+        self, provider_id: str, since: date, until: date
+    ) -> DailyImportResult:
+        if not self._valid_request(provider_id, since, until):
+            return DailyImportResult(False, (), "invalid_request")
+        probe = self.export_v1_capabilities()
+        if probe.supported:
+            result = self._fetch_export_v1(provider_id, since, until)
+            if result.ok:
+                return result
+        return self._fetch_legacy(provider_id, since, until)
 
 
 class ActivityCollector:
@@ -563,13 +770,14 @@ class ActivityCollector:
         error_code: str,
         attempted_at: datetime,
         account_ref: str = "",
+        source_id: str = DAILY_SOURCE_ID,
     ) -> None:
         """Keep last-good usage visible while marking a failed refresh stale."""
         try:
             if self.store.has_daily_history(provider_id, account_ref):
                 self.store.record_source_status(
                     provider_id,
-                    DAILY_SOURCE_ID,
+                    source_id,
                     "stale",
                     attempted_at,
                     error_code,
@@ -578,7 +786,7 @@ class ActivityCollector:
         except Exception:
             pass
         self._safe_source_failure(
-            provider_id, error_code, attempted_at, DAILY_SOURCE_ID
+            provider_id, error_code, attempted_at, source_id
         )
 
     def _refresh_official_costs(
@@ -633,190 +841,85 @@ class ActivityCollector:
         self._safe_source_failure(provider_id, error_code, attempted_at, source_id)
 
     @staticmethod
-    def _provider_instance(
-        card: ProviderCard, observed_at: datetime
-    ) -> ProviderInstance | None:
-        if (
-            card.provider_id == "openusage"
-            or not card.family_id
-            or not card.credential_source
-            or not card.source_kind
-        ):
-            return None
-        category = (
-            "local_tool" if card.category.value == "local" else card.category.value
-        )
-        return ProviderInstance(
-            provider_id=card.provider_id,
-            family_id=card.family_id,
-            display_name=card.name,
-            category=category,
-            credential_source=card.credential_source,
-            source_kind=card.source_kind,
-            observed_at=observed_at.isoformat(),
-        )
-
-    @staticmethod
-    def _quota_observation(card: ProviderCard) -> QuotaObservation | None:
-        remaining = card.remaining_percent
-        if (
-            isinstance(remaining, bool)
-            or not isinstance(remaining, (int, float))
-            or not math.isfinite(remaining)
-            or not 0 <= remaining <= 100
-        ):
-            return None
-        observed_at = card.refreshed_at
-        if (
-            not isinstance(observed_at, datetime)
-            or observed_at.tzinfo is None
-            or observed_at.utcoffset() is None
-        ):
-            raise ValueError("quota observation time must include a timezone")
-        reset = card.resets_at
-        return QuotaObservation(
-            record_id=(
-                f"{card.provider_id}."
-                f"{card.account_ref + '.' if card.account_ref else ''}subscription"
-            ),
-            observed_at=observed_at.astimezone(timezone.utc).isoformat(),
-            provider_id=card.provider_id,
-            account_ref=card.account_ref,
-            quota_name="Subscription",
-            unit="percent",
-            used=str(100 - float(remaining)),
-            quota_limit="100",
-            remaining=str(float(remaining)),
-            remaining_ratio=float(remaining) / 100,
-            resets_at=None if reset is None else reset.astimezone(timezone.utc).isoformat(),
-            period_start=None,
-            period_end=None,
-            state=state_from_card(card.status, card.stale).value,
-            quality="direct",
-            stale=card.stale,
-            source_id="current.quota",
-            quota_window="subscription",
-            applies_to_kind="account",
-            applies_to_model_ids=(),
-        )
-
-    @staticmethod
-    def _tracks_current_quota(card: ProviderCard) -> bool:
-        try:
-            descriptor = registry.require(card.family_id or card.provider_id)
-        except KeyError:
-            return True
-        return MetricFamily.SUBSCRIPTION_QUOTA in descriptor.metric_families
-
-    def _persist_current_quotas(
-        self, overview: Overview, attempted_at: datetime,
-        explicit_provider_ids: frozenset[str] = frozenset(),
-    ) -> None:
-        for card in overview.cards:
-            if card.provider_id in explicit_provider_ids:
-                continue
-            if not self._tracks_current_quota(card):
-                try:
-                    self.store.delete_source_status(
-                        card.provider_id, "current.quota", attempted_at
-                    )
-                except Exception:
-                    pass
-                continue
-            try:
-                observation = self._quota_observation(card)
-            except (TypeError, ValueError):
-                try:
-                    self.store.record_source_status(
-                        card.provider_id,
-                        "current.quota",
-                        "temporarily_unavailable",
-                        attempted_at,
-                        "invalid_observation_time",
-                    )
-                except Exception:
-                    pass
-                continue
-            if observation is None:
-                state = state_from_card(card.status, card.stale)
-                if state.value != "ok":
-                    try:
-                        self.store.record_source_status(
-                            card.provider_id,
-                            "current.quota",
-                            state.value,
-                            attempted_at,
-                            "quota_unavailable",
-                        )
-                    except Exception:
-                        pass
-                continue
-            try:
-                self.store.record_quota(observation)
-            except Exception:
-                try:
-                    self.store.record_source_status(
-                        card.provider_id,
-                        "current.quota",
-                        "temporarily_unavailable",
-                        attempted_at,
-                        "quota_persistence_failed",
-                    )
-                except Exception:
-                    pass
-                continue
-            state = state_from_card(card.status, card.stale)
-            try:
-                if state.value == "ok":
-                    self.store.record_source_success(
-                        card.provider_id, "current.quota", attempted_at
-                    )
-                else:
-                    self.store.record_source_status(
-                        card.provider_id,
-                        "current.quota",
-                        state.value,
-                        attempted_at,
-                        "quota_unavailable",
-                    )
-            except Exception:
-                pass
-
-    @staticmethod
     def _provider_ids(
-        overview: Overview, official_importers: Mapping[str, Any]
+        provider_instances: tuple[ProviderInstance, ...],
+        official_importers: Mapping[str, Any],
+        provider_families: Mapping[str, str] | None = None,
     ) -> tuple[str, ...]:
         return tuple(sorted(
             {
-                card.provider_id
-                for card in overview.cards
-                if card.provider_id != "openusage"
+                instance.provider_id
+                for instance in provider_instances
+                if instance.provider_id != "openusage"
             }
             | set(official_importers)
+            | set(provider_families or {})
         ))
 
     def _publish_provider_instances(
-        self, overview: Overview, attempted_at: datetime
+        self,
+        provider_instances: tuple[ProviderInstance, ...] = (),
     ) -> None:
-        for card in sorted(overview.cards, key=lambda item: item.provider_id):
+        for instance in sorted(
+            provider_instances, key=lambda item: item.provider_id
+        ):
             try:
-                instance = self._provider_instance(card, attempted_at)
-                if instance is not None:
-                    self.store.upsert_provider_instance(instance)
+                self.store.upsert_provider_instance(instance)
             except Exception:
                 pass
 
+    def _refresh_discovery_sources(
+        self,
+        observations: tuple[ProviderDiscoveryObservation, ...],
+        failures: tuple[tuple[str, str, str], ...],
+        attempted_at: datetime,
+    ) -> None:
+        for observation in observations:
+            descriptor = observation.descriptor
+            try:
+                self.store.upsert_provider_instance(descriptor.observed(
+                    observation.observed_at, observation.attribution
+                ))
+                if observation.state in {"available", "near_limit", "limited"}:
+                    self.store.record_source_success(
+                        descriptor.provider_id,
+                        observation.source_id,
+                        attempted_at,
+                    )
+                else:
+                    state = {
+                        "auth_required": "auth_required",
+                        "unsupported": "unsupported",
+                        "error": "temporarily_unavailable",
+                        "unknown": "unknown",
+                    }.get(observation.state, "unknown")
+                    self.store.record_source_status(
+                        descriptor.provider_id,
+                        observation.source_id,
+                        state,
+                        attempted_at,
+                        None if state == "unknown" else "provider_unavailable",
+                    )
+            except Exception:
+                self._safe_source_failure(
+                    descriptor.provider_id,
+                    "persistence_failed",
+                    attempted_at,
+                    observation.source_id,
+                )
+        for provider_id, source_id, error_code in failures:
+            self._safe_source_failure(
+                provider_id, error_code, attempted_at, source_id
+            )
+
     def _refresh_quota_sources(
         self,
-        overview: Overview,
         attempted_at: datetime,
         quota_results: tuple[tuple[str, str, object], ...],
     ) -> None:
         # Current capacity publishes before slower history sources and remains an
         # independent failure domain.
-        explicit_provider_ids: set[str] = set()
         for provider_id, source_id, result in quota_results:
-            explicit_provider_ids.add(provider_id)
             if isinstance(result, QuotaFetchSuccess):
                 try:
                     if any(
@@ -827,9 +930,22 @@ class ActivityCollector:
                         raise ValueError("quota result scope mismatch")
                     for observation in result.observations:
                         self.store.record_quota(observation)
-                    self.store.record_source_success(
-                        provider_id, source_id, attempted_at
-                    )
+                    if any(
+                        observation.stale
+                        or observation.state in {"stale", "unknown"}
+                        for observation in result.observations
+                    ):
+                        self.store.record_source_status(
+                            provider_id,
+                            source_id,
+                            "stale",
+                            attempted_at,
+                            "quota_unavailable",
+                        )
+                    else:
+                        self.store.record_source_success(
+                            provider_id, source_id, attempted_at
+                        )
                 except Exception:
                     self._safe_source_failure(
                         provider_id, "persistence_failed", attempted_at, source_id
@@ -842,12 +958,6 @@ class ActivityCollector:
                 self._safe_source_failure(
                     provider_id, "invalid_import_result", attempted_at, source_id
                 )
-        try:
-            self._persist_current_quotas(
-                overview, attempted_at, frozenset(explicit_provider_ids)
-            )
-        except Exception:
-            pass
 
     def _refresh_balance_sources(
         self,
@@ -894,15 +1004,12 @@ class ActivityCollector:
 
     def _refresh_usage_sources(
         self,
-        overview: Overview,
         provider_ids: tuple[str, ...],
         today: date,
         attempted_at: datetime,
+        provider_families: Mapping[str, str] | None = None,
     ) -> None:
-        fallback_families = {
-            card.provider_id: card.family_id or card.provider_id
-            for card in overview.cards
-        }
+        fallback_families = dict(provider_families or {})
         fallback_family_counts: dict[str, int] = {}
         for configured_id in self.official_importers:
             family_id = fallback_families.get(configured_id, configured_id)
@@ -1056,11 +1163,13 @@ class ActivityCollector:
                     result.error_code or "import_failed",
                     attempted_at,
                     account_ref,
+                    result.source_id,
                 )
                 continue
-            if not result.rows:
+            if not result.rows and not result.covered_zero:
                 self._safe_openusage_failure(
-                    provider_id, "empty_result", attempted_at, account_ref
+                    provider_id, "empty_result", attempted_at, account_ref,
+                    result.source_id,
                 )
                 continue
             selected_rows = tuple(
@@ -1081,12 +1190,13 @@ class ActivityCollector:
                 continue
             try:
                 self.store.commit_usage_import_success(
-                    provider_id, DAILY_SOURCE_ID, since, today,
+                    provider_id, result.source_id, since, today,
                     selected_rows, attempted_at, account_ref=account_ref,
                 )
             except Exception:
                 self._safe_openusage_failure(
-                    provider_id, "persistence_failed", attempted_at, account_ref
+                    provider_id, "persistence_failed", attempted_at, account_ref,
+                    result.source_id,
                 )
 
     def _refresh_cost_sources(
@@ -1107,8 +1217,11 @@ class ActivityCollector:
 
     def refresh(
         self,
-        overview: Overview,
         *,
+        provider_instances: tuple[ProviderInstance, ...] = (),
+        provider_families: Mapping[str, str] | None = None,
+        discovery_observations: tuple[ProviderDiscoveryObservation, ...] = (),
+        discovery_failures: tuple[tuple[str, str, str], ...] = (),
         balance_results: tuple[tuple[str, str, object], ...] = (),
         quota_results: tuple[tuple[str, str, object], ...] = (),
     ) -> bool:
@@ -1118,12 +1231,20 @@ class ActivityCollector:
             current = self.clock()
             attempted_at = current.astimezone(timezone.utc)
             today = current.astimezone(self.local_timezone).date()
-            provider_ids = self._provider_ids(overview, self.official_importers)
-            self._publish_provider_instances(overview, attempted_at)
+            provider_ids = self._provider_ids(
+                provider_instances, self.official_importers, provider_families
+            )
+            self._publish_provider_instances(provider_instances)
+            self._refresh_discovery_sources(
+                discovery_observations, discovery_failures, attempted_at
+            )
             self._refresh_balance_sources(attempted_at, balance_results)
-            self._refresh_quota_sources(overview, attempted_at, quota_results)
+            self._refresh_quota_sources(attempted_at, quota_results)
             self._refresh_usage_sources(
-                overview, provider_ids, today, attempted_at
+                provider_ids,
+                today,
+                attempted_at,
+                provider_families,
             )
             self._refresh_cost_sources(provider_ids, today, attempted_at)
             try:
@@ -1150,7 +1271,7 @@ class ActivityCollector:
             attempted_at = current.astimezone(timezone.utc)
             today = current.astimezone(self.local_timezone).date()
             self._refresh_usage_sources(
-                Overview([]), selected, today, attempted_at
+                selected, today, attempted_at
             )
             return True
         finally:

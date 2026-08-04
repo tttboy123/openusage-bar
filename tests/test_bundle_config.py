@@ -38,6 +38,7 @@ class BundleConfigTests(unittest.TestCase):
         self.assertEqual(BUNDLE_ID, "com.lune.openusagebar.settings")
         self.assertEqual(plist["CFBundleIdentifier"], BUNDLE_ID)
         self.assertEqual(plist["CFBundleDisplayName"], "OpenUsage Provider Settings")
+        self.assertEqual(plist["CFBundleIconFile"], "OpenUsageBar")
         self.assertNotIn("LSUIElement", plist)
         self.assertEqual(plist["LSMinimumSystemVersion"], "15.0")
 
@@ -53,6 +54,7 @@ class BundleConfigTests(unittest.TestCase):
             with (resources / name).open("rb") as handle:
                 payload = plistlib.load(handle)
             self.assertEqual((payload["CFBundleShortVersionString"], payload["CFBundleVersion"]), expected)
+            self.assertEqual(payload["CFBundleIconFile"], "OpenUsageBar")
         release_state = json.loads(
             Path("openusage_bar/resources/release-state.v1.json").read_text("utf-8")
         )

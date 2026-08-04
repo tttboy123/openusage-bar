@@ -1,0 +1,13 @@
+{
+  "contract": "openusage-export/v1",
+  "schema_version": "1",
+  "generated_at": "2026-08-01T00:00:00Z",
+  "openusage_version": "v0.24.0",
+  "kind": "daily_usage",
+  "request": {"provider_id": "codex", "since": "2026-07-01", "until": "2026-07-02", "limit": 500},
+  "coverage": {"state": "complete", "since": "2026-07-01", "until": "2026-07-02"},
+  "rows": [
+    {"day": "2026-07-01", "provider_id": "codex", "model_id": "gpt-5", "input_tokens": 2, "output_tokens": 1, "cache_read_tokens": 0, "cache_creation_tokens": 0, "reasoning_tokens": null, "total_tokens": 3, "token_counting_convention": "components_disjoint", "quality": "direct"}
+  ],
+  "page": {"next_cursor": null, "complete": true}
+}

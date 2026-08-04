@@ -1,0 +1,11 @@
+{
+  "contract": "openusage-export/v1",
+  "schema_version": "1",
+  "generated_at": "2026-08-01T00:00:00Z",
+  "openusage_version": "v0.24.0",
+  "kind": "daily_usage",
+  "request": {"provider_id": "codex", "since": "2026-07-01", "until": "2026-07-02", "limit": 500},
+  "coverage": {"state": "complete", "since": "2026-07-01", "until": "2026-07-02"},
+  "rows": [],
+  "page": {"next_cursor": null, "complete": true}
+}

@@ -4,13 +4,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock
 
-from openusage_bar.activity_store import ActivityStore
+from openusage_bar.activity_store import ActivityStore, ProviderInstance
 from openusage_bar.config import GenericProviderConfig
 from openusage_bar.daily_history import ActivityCollector, DailyImportResult
 from openusage_bar.generic import GenericHTTPSAdapter, MissingField, extract_path
+from openusage_bar.keychain import KeychainError
 from openusage_bar.models import Overview, ProviderStatus
 from openusage_bar.network import NetworkError
-from openusage_bar.providers.contracts import QuotaFetchSuccess
+from openusage_bar.providers.contracts import (
+    QuotaCollectionResult,
+    QuotaFetchSuccess,
+)
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
@@ -44,7 +48,16 @@ class GenericProviderTests(unittest.TestCase):
             path = Path(directory) / "ledger.sqlite3"
             with ActivityStore(path) as store:
                 ActivityCollector(store, importer, clock=lambda: NOW).refresh(
-                    Overview([card])
+                    provider_instances=(ProviderInstance(
+                        provider_id="demo",
+                        family_id="demo",
+                        display_name=card.name,
+                        category="api",
+                        credential_source="api_key",
+                        source_kind="generic_https",
+                        observed_at=NOW.isoformat(),
+                    ),),
+                    provider_families={"demo": "demo"},
                 )
                 instances = store.provider_instances()
                 self.assertEqual(len(instances), 1)
@@ -104,6 +117,41 @@ class GenericProviderTests(unittest.TestCase):
         for private in (endpoint, api_key):
             self.assertNotIn(private, repr(card))
             self.assertNotIn(private, ledger)
+
+    def test_collects_quota_once_without_building_identity_from_card(self):
+        keychain = Mock()
+        keychain.get.return_value = "bounded-key"
+        client = Mock()
+        client.get_json.return_value = {
+            "data": {
+                "remaining": 73,
+                "percent": 73,
+                "reset_at": "2026-07-15T00:00:00Z",
+                "plan": "Pro",
+            }
+        }
+        adapter = GenericHTTPSAdapter(
+            config(), keychain, client, lambda: NOW
+        )
+
+        collection = adapter.fetch_quota()
+
+        self.assertIsInstance(collection, QuotaCollectionResult)
+        self.assertIsInstance(collection.result, QuotaFetchSuccess)
+        self.assertEqual(client.get_json.call_count, 1)
+        self.assertEqual(collection.attribution.credential_source, "api_key")
+        self.assertEqual(collection.attribution.source_kind, "generic_https")
+
+    def test_direct_quota_sanitizes_keychain_failures(self):
+        keychain = Mock()
+        keychain.get.side_effect = KeychainError("private system detail")
+        client = Mock()
+        adapter = GenericHTTPSAdapter(config(), keychain, client, lambda: NOW)
+
+        collection = adapter.fetch_quota()
+
+        self.assertEqual(collection.result.error_code, "keychain_unavailable")
+        client.get_json.assert_not_called()
 
     def test_error_card_still_publishes_identity_without_error_secrets(self):
         endpoint = "https://api.example.com/private-error"

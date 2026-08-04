@@ -1,0 +1,584 @@
+{
+  "$defs": {
+    "counter": {
+      "maximum": 1000000000000,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "currency": {
+      "pattern": "^[A-Z][A-Z0-9_]{2,7}$",
+      "type": "string"
+    },
+    "decisionContext": {
+      "additionalProperties": false,
+      "properties": {
+        "dataRevision": {
+          "$ref": "#/$defs/counter"
+        },
+        "expiresAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "runtimeRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/counter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "dataRevision",
+        "expiresAt",
+        "generatedAt",
+        "runtimeRevision"
+      ],
+      "type": "object"
+    },
+    "decisionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "clientRequestRef": {
+          "pattern": "^req_[0-9a-f]{16,64}$",
+          "type": "string"
+        },
+        "constraints": {
+          "additionalProperties": false,
+          "properties": {
+            "allowProviders": {
+              "$ref": "#/$defs/idList"
+            },
+            "allowTargets": {
+              "$ref": "#/$defs/idList"
+            },
+            "costCurrency": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/currency"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "denyProviders": {
+              "$ref": "#/$defs/idList"
+            },
+            "denyTargets": {
+              "$ref": "#/$defs/idList"
+            },
+            "maximumEstimatedCostMicrounits": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/counter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "allowProviders",
+            "allowTargets",
+            "costCurrency",
+            "denyProviders",
+            "denyTargets",
+            "maximumEstimatedCostMicrounits"
+          ],
+          "type": "object"
+        },
+        "policyId": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "budgetCurrency": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/currency"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "remainingBudgetMicrounits": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/counter"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reserveMicrounits": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/counter"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sessionRef": {
+                  "pattern": "^anon_[0-9a-f]{16,64}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "budgetCurrency",
+                "remainingBudgetMicrounits",
+                "reserveMicrounits",
+                "sessionRef"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "task": {
+          "additionalProperties": false,
+          "properties": {
+            "estimatedInputTokens": {
+              "$ref": "#/$defs/counter"
+            },
+            "kind": {
+              "enum": [
+                "audio",
+                "chat",
+                "code",
+                "embedding",
+                "image",
+                "other",
+                "reasoning"
+              ]
+            },
+            "maxOutputTokens": {
+              "$ref": "#/$defs/counter"
+            },
+            "minimumContextWindowTokens": {
+              "$ref": "#/$defs/counter"
+            },
+            "privacy": {
+              "enum": [
+                "allow_proxy",
+                "direct_provider",
+                "local_only"
+              ]
+            },
+            "regions": {
+              "$ref": "#/$defs/idList"
+            },
+            "requiredCapabilities": {
+              "$ref": "#/$defs/idList"
+            }
+          },
+          "required": [
+            "estimatedInputTokens",
+            "kind",
+            "maxOutputTokens",
+            "minimumContextWindowTokens",
+            "privacy",
+            "regions",
+            "requiredCapabilities"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "policyId",
+        "task"
+      ],
+      "type": "object"
+    },
+    "id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "type": "string"
+    },
+    "idList": {
+      "items": {
+        "$ref": "#/$defs/id"
+      },
+      "maxItems": 50,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "replayCase": {
+      "additionalProperties": false,
+      "properties": {
+        "actualTargetId": {
+          "$ref": "#/$defs/id"
+        },
+        "caseId": {
+          "$ref": "#/$defs/id"
+        },
+        "context": {
+          "$ref": "#/$defs/decisionContext"
+        },
+        "request": {
+          "$ref": "#/$defs/decisionRequest"
+        },
+        "targetFacts": {
+          "items": {
+            "$ref": "#/$defs/targetFacts"
+          },
+          "maxItems": 128,
+          "type": "array"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/routeTarget"
+          },
+          "maxItems": 128,
+          "type": "array"
+        }
+      },
+      "required": [
+        "actualTargetId",
+        "caseId",
+        "context",
+        "request",
+        "targetFacts",
+        "targets"
+      ],
+      "type": "object"
+    },
+    "routeTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "accountRef": {
+          "$ref": "#/$defs/id"
+        },
+        "adapterAvailable": {
+          "type": "boolean"
+        },
+        "balanceCurrency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/currency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capabilities": {
+          "$ref": "#/$defs/idList"
+        },
+        "connectionRef": {
+          "$ref": "#/$defs/id"
+        },
+        "contextWindowTokens": {
+          "$ref": "#/$defs/counter"
+        },
+        "costCurrency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/currency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "executionAdapterId": {
+          "$ref": "#/$defs/id"
+        },
+        "executionClass": {
+          "enum": [
+            "direct_api",
+            "openai_compatible",
+            "self_hosted",
+            "subscription_cli"
+          ]
+        },
+        "factAccountRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inputCostMicrosPerMillion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/counter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "modelId": {
+          "$ref": "#/$defs/id"
+        },
+        "outputCostMicrosPerMillion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/counter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "privacyClass": {
+          "enum": [
+            "direct_provider",
+            "local_only",
+            "proxy"
+          ]
+        },
+        "providerId": {
+          "$ref": "#/$defs/id"
+        },
+        "qualityTier": {
+          "maximum": 5,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "regions": {
+          "$ref": "#/$defs/idList"
+        },
+        "resourceMode": {
+          "enum": [
+            "balance",
+            "quota"
+          ]
+        },
+        "runtimeScopeRef": {
+          "anyOf": [
+            {
+              "pattern": "^anon_[0-9a-f]{16,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targetId": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": [
+        "accountRef",
+        "adapterAvailable",
+        "balanceCurrency",
+        "capabilities",
+        "connectionRef",
+        "contextWindowTokens",
+        "costCurrency",
+        "enabled",
+        "executionAdapterId",
+        "executionClass",
+        "factAccountRef",
+        "inputCostMicrosPerMillion",
+        "modelId",
+        "outputCostMicrosPerMillion",
+        "privacyClass",
+        "providerId",
+        "qualityTier",
+        "regions",
+        "resourceMode",
+        "runtimeScopeRef",
+        "targetId"
+      ],
+      "type": "object"
+    },
+    "targetFacts": {
+      "additionalProperties": false,
+      "properties": {
+        "balanceCurrency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/currency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "balanceMicrounits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/counter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connectionState": {
+          "enum": [
+            "available",
+            "unavailable"
+          ]
+        },
+        "durationP95Milliseconds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/counter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "errorCount": {
+          "$ref": "#/$defs/counter"
+        },
+        "estimatedCostCurrency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/currency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "estimatedCostMicrounits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/counter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "headroomBasisPoints": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observationCount": {
+          "$ref": "#/$defs/counter"
+        },
+        "resourceMode": {
+          "enum": [
+            "balance",
+            "quota"
+          ]
+        },
+        "resourceState": {
+          "enum": [
+            "complete",
+            "missing",
+            "partial",
+            "stale"
+          ]
+        },
+        "runtimeState": {
+          "enum": [
+            "complete",
+            "missing",
+            "partial"
+          ]
+        },
+        "sourceState": {
+          "enum": [
+            "authentication_failed",
+            "error",
+            "ok",
+            "unavailable",
+            "unknown"
+          ]
+        },
+        "targetId": {
+          "$ref": "#/$defs/id"
+        },
+        "ttftP95Milliseconds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/counter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "balanceCurrency",
+        "balanceMicrounits",
+        "connectionState",
+        "durationP95Milliseconds",
+        "errorCount",
+        "estimatedCostCurrency",
+        "estimatedCostMicrounits",
+        "headroomBasisPoints",
+        "observationCount",
+        "resourceMode",
+        "resourceState",
+        "runtimeState",
+        "sourceState",
+        "targetId",
+        "ttftP95Milliseconds"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://openusage.bar/schemas/routing-replay-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/replayCase"
+      },
+      "maxItems": 256,
+      "minItems": 1,
+      "type": "array"
+    },
+    "policyId": {
+      "$ref": "#/$defs/id"
+    },
+    "schemaVersion": {
+      "const": "1.0"
+    }
+  },
+  "required": [
+    "cases",
+    "policyId",
+    "schemaVersion"
+  ],
+  "title": "OpenUsage Bar Routing Replay Request",
+  "type": "object"
+}

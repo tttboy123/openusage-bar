@@ -320,6 +320,14 @@ public final class UsageRepository {
         }
     }
 
+    public func balances() throws -> [BalanceRecord] {
+        try withReadTransaction { database in
+            let version = try scalarInt64(database, sql: "PRAGMA user_version")
+            guard version >= 2 else { return [] }
+            return try queryBalances(database)
+        }
+    }
+
     public func quotaHistory(
         providerID: String? = nil,
         accountRef: String? = nil,

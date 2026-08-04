@@ -43,6 +43,57 @@ class SettingsEntrypointTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 0)
         collector.assert_called_once_with(arguments[1:])
 
+    def test_runtime_commands_are_available_from_the_packaged_entrypoint(self):
+        for command, arguments in (
+            ("runtime-ingest", ["--database", "/tmp/runtime.sqlite3"]),
+            (
+                "runtime-summary",
+                [
+                    "--database", "/tmp/runtime.sqlite3",
+                    "--window-seconds", "3600",
+                ],
+            ),
+        ):
+            with self.subTest(command=command), patch.object(
+                sys, "argv", ["openusage_settings.py", command, *arguments]
+            ), patch(
+                "openusage_bar.collector_cli.main", return_value=0
+            ) as collector, patch.dict(sys.modules, {"openusage_bar.ui": None}):
+                with self.assertRaises(SystemExit) as raised:
+                    runpy.run_path("openusage_settings.py", run_name="__main__")
+
+            self.assertEqual(raised.exception.code, 0)
+            collector.assert_called_once_with([command, *arguments])
+
+    def test_route_command_is_available_from_the_packaged_entrypoint(self):
+        arguments = [
+            "route", "history", "--format", "json", "--limit", "10",
+            "--socket", "/tmp/router.sock",
+        ]
+        with patch.object(
+            sys, "argv", ["openusage_settings.py", *arguments]
+        ), patch(
+            "openusage_bar.collector_cli.main", return_value=3
+        ) as collector, patch.dict(sys.modules, {"openusage_bar.ui": None}):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path("openusage_settings.py", run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 3)
+        collector.assert_called_once_with(arguments)
+
+    def test_proxy_command_is_available_from_the_packaged_entrypoint(self):
+        arguments = ["proxy", "status", "--format", "json"]
+        with patch.object(
+            sys, "argv", ["openusage_settings.py", *arguments]
+        ), patch(
+            "openusage_bar.collector_cli.main", return_value=0
+        ) as collector, patch.dict(sys.modules, {"openusage_bar.ui": None}):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path("openusage_settings.py", run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 0)
+        collector.assert_called_once_with(arguments)
+
     def test_real_packaging_entry_script_serves_providers_json_offline(self):
         with tempfile.TemporaryDirectory() as home:
             completed = subprocess.run(
@@ -109,6 +160,18 @@ class SettingsEntrypointTests(unittest.TestCase):
             sys, "argv", ["openusage_settings.py", "provider-mutate"]
         ), patch(
             "openusage_bar.provider_commands.run_provider_mutation", return_value=0
+        ) as mutate, patch.dict(sys.modules, {"openusage_bar.ui": None}):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path("openusage_settings.py", run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 0)
+        mutate.assert_called_once_with(sys.stdin, sys.stdout)
+
+    def test_routing_mutation_is_dispatched_without_opening_appkit(self):
+        with patch.object(
+            sys, "argv", ["openusage_settings.py", "routing-mutate"]
+        ), patch(
+            "openusage_bar.routing_commands.run_routing_mutation", return_value=0
         ) as mutate, patch.dict(sys.modules, {"openusage_bar.ui": None}):
             with self.assertRaises(SystemExit) as raised:
                 runpy.run_path("openusage_settings.py", run_name="__main__")

@@ -118,15 +118,15 @@ class OpenUsageAdapterTests(unittest.TestCase):
 
         self.assertEqual(run.call_args.kwargs["env"]["PATH"], "/usr/bin")
 
-    def test_headless_path_discovers_user_local_and_project_tool_bins(self):
+    def test_headless_path_discovers_standard_user_tool_bins(self):
         local = os.path.expanduser("~/.local/bin")
-        project = os.path.expanduser("~/Documents/Codex/devtools/npm/bin")
+        pnpm = os.path.expanduser("~/Library/pnpm")
         run = Mock(return_value=completed(envelope(snapshot())))
         adapter = OpenUsageAdapter(
             clock=lambda: NOW,
             runner=run,
             environment={"PATH": "/usr/bin", "SECRET_TOKEN": "must-not-pass"},
-            path_exists=lambda path: path in {local, project},
+            path_exists=lambda path: path in {local, pnpm},
         )
 
         adapter.fetch()
@@ -134,7 +134,7 @@ class OpenUsageAdapterTests(unittest.TestCase):
         child = run.call_args.kwargs["env"]
         parts = child["PATH"].split(os.pathsep)
         self.assertIn(local, parts)
-        self.assertIn(project, parts)
+        self.assertIn(pnpm, parts)
         self.assertNotIn("SECRET_TOKEN", child)
 
     def test_child_environment_uses_minimal_allowlist_and_drops_credentials(self):

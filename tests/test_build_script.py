@@ -16,6 +16,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn('python3', source)
         self.assertIn('-m venv "$VENV"', source)
         self.assertIn('pip==26.1.2', requirements)
+        self.assertIn('jsonschema==4.26.0', requirements)
         self.assertIn(
             '--no-deps --require-hashes --requirement "$REQUIREMENTS"', source
         )
@@ -40,6 +41,8 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("-warnings-as-errors", source)
         self.assertIn("OpenUsageBar", source)
         self.assertIn("OpenUsageActivity", source)
+        self.assertIn('OpenUsageBar.icns', source)
+        self.assertIn('CFBundleIconFile', source)
         self.assertIn("codesign --verify --deep --strict", source)
         self.assertNotIn("curl ", source)
         self.assertNotIn("npm ", source)
@@ -69,14 +72,40 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("release-state.v1.json", source)
         self.assertIn("GeneratedProviderCatalog.swift", source)
         self.assertIn("generate_local_api_schema.py --output", source)
+        self.assertIn("generate_routing_api_schema.py --output", source)
         self.assertIn("generate_swift_activity_schema.py --output", source)
         self.assertIn("GeneratedActivitySchema.swift", source)
         self.assertIn("local-api-v1.schema.json", source)
+        self.assertIn("routing-api-v1.schema.json", source)
+        self.assertIn("routing-shadow-v1.schema.json", source)
+        self.assertIn("routing-replay-v1.schema.json", source)
         self.assertIn("python_coverage_gate.py", source)
         self.assertIn("--module unittest discover -s tests -v", source)
         self.assertIn('--package-root "$ROOT/openusage_bar"', source)
+        self.assertIn('--package-root "$ROOT/integrations"', source)
+        self.assertEqual(source.count("scripts/python_coverage_gate.py"), 2)
         self.assertNotIn("PYTHON_TOUCHED_MODULES", source)
         self.assertIn('actual=${SWIFT_LINE_COVERAGE}%', source)
+
+    def test_routing_schema_generator_covers_decision_shadow_and_replay(self):
+        generator = ROOT / "scripts/generate_routing_api_schema.py"
+        resources = ROOT / "openusage_bar/resources"
+
+        with tempfile.TemporaryDirectory() as temp:
+            for kind, name in (
+                ("decision", "routing-api-v1.schema.json"),
+                ("shadow", "routing-shadow-v1.schema.json"),
+                ("replay", "routing-replay-v1.schema.json"),
+            ):
+                output = Path(temp) / name
+                subprocess.run(
+                    [
+                        str(ROOT / ".build-venv/bin/python"), str(generator),
+                        "--kind", kind, "--output", str(output),
+                    ],
+                    cwd=ROOT, check=True,
+                )
+                self.assertEqual(output.read_bytes(), (resources / name).read_bytes())
 
     def test_ci_and_release_pin_the_same_xcode_toolchain_as_local_release_validation(self):
         for name in ("ci.yml", "release.yml"):
@@ -217,7 +246,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertNotIn('mv "$TARGET" "$PREVIOUS"', source)
         self.assertIn('install_bundle_transaction "$ATOMIC_SWAP" "$TARGET" "$NEW"', source)
         self.assertIn('commit_bundle_transaction "$NEW"', source)
-        commit = source.index('commit_bundle_transaction "$NEW"')
+        commit = source.rindex('commit_bundle_transaction "$NEW"')
         trap_off = source.index('trap - EXIT INT TERM', source.index('codesign --verify --deep --strict "$TARGET"'))
         cleanup = source.index('cleanup_legacy_previous_bundles', trap_off)
         self.assertLess(trap_off, commit)
@@ -267,6 +296,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("scripts/verify_canary_surfaces.py", package)
         self.assertIn("scripts/verify_canary_candidate.py", package)
         self.assertIn("openusage_bar/activity_schema.py", package)
+        self.assertIn("openusage_bar/routing_schema.py", package)
         self.assertIn("docs/canary.md", package)
         self.assertIn("THIRD_PARTY_NOTICES.md", package)
         self.assertIn("shasum -a 256", package)
@@ -312,6 +342,88 @@ class BuildScriptContractTests(unittest.TestCase):
             with self.subTest(workflow=workflow_name):
                 self.assertIn("scripts/audit_dependencies.sh", workflow)
                 self.assertIn("scripts/release_smoke.sh", workflow)
+
+    def test_build_smokes_packaged_runtime_observation_commands(self):
+        build = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
+        smoke = ROOT / "scripts/runtime_observation_smoke.py"
+
+        self.assertTrue(smoke.is_file())
+        self.assertIn("runtime_observation_smoke.py", build)
+        self.assertIn("runtime-observation-v1.json", build)
+        source = smoke.read_text(encoding="utf-8")
+        self.assertIn('"runtime-ingest"', source)
+        self.assertIn('"runtime-summary"', source)
+        self.assertIn("runtime_observation_smoke_ok", source)
+
+    def test_build_packages_and_smokes_litellm_runtime_producer(self):
+        build = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
+        integration = ROOT / "integrations/litellm_openusage.py"
+        smoke = ROOT / "scripts/runtime_producer_smoke.py"
+
+        self.assertTrue(integration.is_file())
+        self.assertTrue(smoke.is_file())
+        self.assertIn("Contents/Resources/Integrations", build)
+        self.assertIn("litellm_openusage.py", build)
+        self.assertIn("runtime_producer_smoke.py", build)
+        self.assertIn("runtime-producers/litellm-success-v1.json", build)
+        self.assertIn('chmod 555 "$INTEGRATIONS"', build)
+        self.assertGreater(
+            build.rindex('codesign --verify --deep --strict "$APP"'),
+            build.index('scripts/runtime_producer_smoke.py'),
+        )
+        smoke_source = smoke.read_text(encoding="utf-8")
+        self.assertIn("integration.parent.stat().st_mode & 0o222", smoke_source)
+        self.assertIn('integration.parent / "__pycache__"', smoke_source)
+        self.assertIn("runtime_producer_smoke_ok", smoke_source)
+        self.assertIn("litellm.callback.v1", smoke_source)
+
+    def test_build_packages_and_smokes_versioned_runtime_adapters(self):
+        build = (ROOT / "scripts/build_app.sh").read_text(encoding="utf-8")
+        integration = ROOT / "integrations/otel_genai_openusage.py"
+        go_module = ROOT / "integrations/cliproxyapi-openusage/go.mod"
+        smoke = ROOT / "scripts/runtime_adapter_smoke.py"
+
+        self.assertTrue(integration.is_file())
+        self.assertTrue(go_module.is_file())
+        self.assertTrue(smoke.is_file())
+        self.assertIn("otel_genai_openusage.py", build)
+        self.assertIn("runtime_adapter_smoke.py", build)
+        self.assertIn("otel-genai-f77b923-success-v1.json", build)
+        self.assertIn("cliproxyapi-openusage", build)
+        self.assertIn("GOTOOLCHAIN=local go test -race ./...", build)
+        self.assertIn("GOTOOLCHAIN=local go vet ./...", build)
+        self.assertIn('chmod u+w "$INTEGRATIONS"', build)
+        self.assertLess(
+            build.index('chmod u+w "$INTEGRATIONS"'),
+            build.index('rm -rf "$BUILD_ROOT" "$DIST"'),
+        )
+        self.assertGreater(
+            build.rindex('codesign --verify --deep --strict "$APP"'),
+            build.index("scripts/runtime_adapter_smoke.py"),
+        )
+        smoke_source = smoke.read_text(encoding="utf-8")
+        self.assertIn("integration.parent.stat().st_mode & 0o222", smoke_source)
+        self.assertIn('integration.parent / "__pycache__"', smoke_source)
+        self.assertIn("runtime_adapter_smoke_ok", smoke_source)
+        self.assertIn("otel.genai.f77b923.v1", smoke_source)
+
+    def test_ci_and_release_pin_the_cli_proxy_plugin_toolchain(self):
+        pin_manifest = (ROOT / ".github/action-pins.json").read_text(
+            encoding="utf-8"
+        )
+        for workflow_name in ("ci.yml", "release.yml"):
+            workflow = (
+                ROOT / ".github" / "workflows" / workflow_name
+            ).read_text(encoding="utf-8")
+            with self.subTest(workflow=workflow_name):
+                self.assertIn("actions/setup-go@", workflow)
+                self.assertIn(
+                    "integrations/cliproxyapi-openusage/go.mod", workflow
+                )
+                self.assertIn(
+                    "integrations/cliproxyapi-openusage/go.sum", workflow
+                )
+        self.assertIn('"repository": "actions/setup-go"', pin_manifest)
 
     def test_atomic_swap_helper_exchanges_two_directories_without_a_missing_target_window(self):
         helper = ROOT / "scripts/atomic_swap.c"
@@ -413,6 +525,48 @@ cleanup_legacy_previous_bundles "{root}" || true
             self.assertFalse(marker.exists())
             self.assertEqual((target / "version").read_text(encoding="utf-8"), "new")
             self.assertFalse(staged.exists())
+
+    def test_commit_prepares_read_only_integration_directory_for_cleanup(self):
+        transaction = ROOT / "scripts/install_app_transaction.sh"
+        with tempfile.TemporaryDirectory() as temp:
+            staged = Path(temp) / "OpenUsage Bar.app.new"
+            integrations = staged / "Contents/Resources/Integrations"
+            integrations.mkdir(parents=True)
+            integrations.joinpath("litellm_openusage.py").write_text(
+                "adapter", encoding="utf-8"
+            )
+            integrations.chmod(0o555)
+            script = f'''source "{transaction}"
+prepare_bundle_stage_cleanup "{staged}"
+commit_bundle_transaction "{staged}"
+'''
+            result = subprocess.run(
+                ["/bin/zsh", "-c", script], capture_output=True, text=True
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(staged.exists())
+
+    def test_stage_cleanup_never_changes_a_symlinked_integration_directory(self):
+        transaction = ROOT / "scripts/install_app_transaction.sh"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            staged = root / "OpenUsage Bar.app.new"
+            resources = staged / "Contents/Resources"
+            resources.mkdir(parents=True)
+            outside = root / "outside"
+            outside.mkdir()
+            outside.chmod(0o555)
+            resources.joinpath("Integrations").symlink_to(outside)
+            script = f'''source "{transaction}"
+prepare_bundle_stage_cleanup "{staged}"
+'''
+            result = subprocess.run(
+                ["/bin/zsh", "-c", script], capture_output=True, text=True
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(outside.stat().st_mode & 0o777, 0o555)
 
     def test_commit_partial_delete_failure_never_rolls_back_healthy_target(self):
         helper = ROOT / "scripts/atomic_swap.c"

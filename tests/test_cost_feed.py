@@ -166,7 +166,7 @@ class DailyCostFeedImporterTests(unittest.TestCase):
                     store, openusage,
                     official_importers={"cost-work": importer},
                     clock=lambda: NOW,
-                ).refresh(Overview([]))
+                ).refresh()
 
                 costs = store.snapshot_daily_costs("2026-07-17", "2026-07-17")
                 usage = store.snapshot_daily_usage("2026-07-17", "2026-07-17")

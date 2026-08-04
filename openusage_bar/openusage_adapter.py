@@ -13,7 +13,15 @@ from typing import Any, Callable
 
 from .bounded_process import BoundedProcessError, run_bounded
 from .models import Category, Overview, ProviderCard, ProviderStatus
+from .openusage_export_v1 import ExportDecodeError, decode_providers
 from .provider_catalog import catalog
+from .providers.contracts import (
+    DiscoveryFetchFailure,
+    DiscoveryFetchSuccess,
+    ProviderDescriptor,
+    ProviderDiscoveryObservation,
+    SourceAttribution,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -39,7 +47,6 @@ CHILD_CLI_DIRECTORIES = CURSOR_CLI_DIRECTORIES + (
     os.path.expanduser("~/Library/pnpm"),
     os.path.expanduser("~/.bun/bin"),
     os.path.expanduser("~/.cargo/bin"),
-    os.path.expanduser("~/Documents/Codex/devtools/npm/bin"),
     "/opt/homebrew/bin",
     "/usr/local/bin",
 )
@@ -67,6 +74,8 @@ _CHILD_ENVIRONMENT_KEYS = frozenset(
         "XDG_STATE_HOME",
     }
 )
+
+OPENUSAGE_DISCOVERY_SOURCE_ID = "openusage.discovery"
 
 
 class ProviderRetryBackoff:
@@ -197,6 +206,111 @@ def _status(value: Any) -> ProviderStatus:
         return ProviderStatus(normalized)
     except ValueError:
         return ProviderStatus.UNKNOWN
+
+
+class OpenUsageDiscoveryAdapter:
+    """Fact-only OpenUsage Provider discovery for the headless ledger path."""
+
+    source_id = OPENUSAGE_DISCOVERY_SOURCE_ID
+    source_priority = 10
+
+    def __init__(
+        self,
+        clock: Callable[[], datetime] | None = None,
+        runner=None,
+        openusage_path: str | None = None,
+        capability_probe=None,
+        environment: dict[str, str] | None = None,
+        path_exists: Callable[[str], bool] | None = None,
+    ) -> None:
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.runner = runner
+        self.openusage_path = openusage_path or globals()["openusage_path"]()
+        self.capability_probe = capability_probe
+        self.environment = environment
+        self.path_exists = path_exists
+
+    def fetch_discovery(self):
+        try:
+            probe = self.capability_probe() if self.capability_probe else None
+        except Exception:
+            return DiscoveryFetchFailure("unsupported_contract")
+        if probe is None or not getattr(probe, "supported", False):
+            return DiscoveryFetchFailure("unsupported_contract")
+        command = [
+            self.openusage_path,
+            "export",
+            "--output",
+            "-",
+            "--format",
+            "json",
+            "--contract",
+            "openusage-export/v1",
+            "--kind",
+            "providers",
+        ]
+        try:
+            runner = self.runner or run_bounded
+            options: dict[str, Any] = {}
+            if self.runner is None:
+                options = {
+                    "stdout_limit": MAX_EXPORT_BYTES,
+                    "stderr_limit": 128 * 1024,
+                }
+            completed = runner(
+                command,
+                shell=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=DIRECT_TIMEOUT_SECONDS,
+                env=child_subprocess_environment(
+                    self.environment, self.path_exists
+                ),
+                **options,
+            )
+            if completed.returncode != 0:
+                return DiscoveryFetchFailure("export_failed")
+            exported = decode_providers(completed.stdout)
+        except (ExportDecodeError, ValueError, TypeError):
+            return DiscoveryFetchFailure("invalid_export_v1")
+        except Exception:
+            return DiscoveryFetchFailure("export_failed")
+        if exported.coverage_state == "partial":
+            return DiscoveryFetchFailure("partial_coverage")
+        if exported.coverage_state != "complete":
+            return DiscoveryFetchFailure("no_coverage")
+
+        attribution = SourceAttribution(
+            credential_source="openusage",
+            source_kind="openusage",
+        )
+        observations: list[ProviderDiscoveryObservation] = []
+        try:
+            for row in exported.rows:
+                family = catalog.resolve(
+                    row.provider_id,
+                    row.provider_id.replace("_", " ").title(),
+                )
+                observations.append(ProviderDiscoveryObservation(
+                    descriptor=ProviderDescriptor(
+                        provider_id=row.provider_id,
+                        family_id=family.family_id,
+                        display_name=family.display_name,
+                        category=family.category,
+                    ),
+                    attribution=attribution,
+                    source_id=self.source_id,
+                    state=row.state,
+                    observed_at=row.observed_at,
+                ))
+            return DiscoveryFetchSuccess(tuple(observations))
+        except (TypeError, ValueError):
+            return DiscoveryFetchFailure("invalid_export_v1")
 
 
 def _validate_export_shape(value: Any, depth: int = 0) -> None:

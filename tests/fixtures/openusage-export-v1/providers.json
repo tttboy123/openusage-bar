@@ -1,0 +1,17 @@
+{
+  "contract": "openusage-export/v1",
+  "schema_version": "1",
+  "generated_at": "2026-08-01T00:00:00Z",
+  "openusage_version": "v0.24.0",
+  "kind": "providers",
+  "coverage": {
+    "state": "complete"
+  },
+  "rows": [
+    {
+      "provider_id": "codex",
+      "state": "available",
+      "observed_at": "2026-08-01T00:00:00Z"
+    }
+  ]
+}

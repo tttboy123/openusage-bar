@@ -229,6 +229,97 @@ class UnixLocalAPITests(unittest.TestCase):
                     value = value[key]
                 self.assertIsNone(value)
 
+    def test_runtime_summary_route_reads_bounded_separate_runtime_ledger(self):
+        from openusage_bar.runtime_store import RuntimeStore
+        from tests.test_runtime_store import observation
+
+        runtime_path = self.root / "runtime.sqlite3"
+        writer = RuntimeStore(runtime_path, clock=lambda: NOW)
+        try:
+            writer.ingest((observation(1, completed_at=NOW),))
+        finally:
+            writer.close()
+        server = create_unix_server(
+            self.root / "runtime-api.sock",
+            self.query,
+            clock=lambda: NOW,
+            runtime_database=runtime_path,
+        )
+        thread = start(server)
+        try:
+            status, headers, body = unix_request(
+                server.path, "/v1/runtime/summary?windowSeconds=3600"
+            )
+            head_status, head_headers, head_body = unix_request(
+                server.path,
+                "/v1/runtime/summary?windowSeconds=3600",
+                method="HEAD",
+            )
+            cached_status, cached_headers, cached_body = unix_request(
+                server.path,
+                "/v1/runtime/summary?windowSeconds=3600",
+                headers={"If-None-Match": headers["etag"]},
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+
+        payload = json.loads(body)
+        cli_stdout = io.StringIO()
+        cli_stderr = io.StringIO()
+        cli_code = collector_main(
+            [
+                "runtime-summary", "--database", str(runtime_path),
+                "--window-seconds", "3600",
+            ],
+            stdout=cli_stdout,
+            stderr=cli_stderr,
+            clock=lambda: NOW,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual((cli_code, cli_stderr.getvalue()), (0, ""))
+        self.assertEqual(payload["schemaVersion"], "1.0")
+        self.assertEqual(payload["dataRevision"], self.store.current_change_seq)
+        self.assertEqual(payload["runtime"]["schemaVersion"], 1)
+        self.assertEqual(payload["runtime"]["runtimeRevision"], 1)
+        self.assertEqual(payload["runtime"]["tokens"]["total"], 20)
+        self.assertEqual(payload["runtime"]["groups"][0]["providerId"], "openai")
+        self.assertEqual(payload["runtime"], json.loads(cli_stdout.getvalue()))
+        self.assertLess(len(body), 1024 * 1024)
+        self.assertEqual(headers["cache-control"], "private, no-cache")
+        self.assertEqual((head_status, head_body), (200, b""))
+        self.assertEqual(head_headers["etag"], headers["etag"])
+        self.assertEqual(head_headers["content-length"], headers["content-length"])
+        self.assertEqual((cached_status, cached_body), (304, b""))
+        self.assertEqual(cached_headers["etag"], headers["etag"])
+        lowered = body.decode().lower()
+        for forbidden in (
+            "prompt", "response", "apikey", "authorization", "requestid",
+            "sourceid",
+        ):
+            self.assertNotIn(forbidden, lowered)
+
+    def test_runtime_summary_missing_store_and_invalid_windows_fail_closed(self):
+        status, _, body = self.request("/v1/runtime/summary")
+        self.assertEqual(status, 503)
+        self.assertEqual(json.loads(body), {
+            "error": {
+                "code": "runtime_unavailable",
+                "message": "Runtime summary is unavailable.",
+            }
+        })
+        for target in (
+            "/v1/runtime/summary?windowSeconds=59",
+            "/v1/runtime/summary?windowSeconds=86401",
+            "/v1/runtime/summary?windowSeconds=true",
+            "/v1/runtime/summary?unknown=1",
+        ):
+            with self.subTest(target=target):
+                status, _, body = self.request(target)
+                self.assertEqual(status, 400)
+                self.assertNotIn(str(self.root), body.decode())
+
     def test_machine_schema_route_serves_the_committed_draft(self):
         status, _, body = self.request("/v1/schema.json")
         payload = json.loads(body)
@@ -623,6 +714,7 @@ class UnixLocalAPITests(unittest.TestCase):
         status, _, body = self.request("/v1/schema")
         self.assertEqual(status, 200)
         self.assertIn("/v1/providers", json.loads(body)["routes"])
+        self.assertIn("/v1/runtime/summary", json.loads(body)["routes"])
 
     def test_head_has_get_headers_without_a_body(self):
         get_status, get_headers, _ = self.request("/v1/capacity")

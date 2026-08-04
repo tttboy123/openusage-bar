@@ -36,7 +36,10 @@ cp \
   "$ROOT/scripts/verify_canary_surfaces.py" \
   "$ROOT/scripts/verify_local_api.py" \
   "$STAGE/scripts/"
-cp "$ROOT/openusage_bar/activity_schema.py" "$STAGE/scripts/"
+cp \
+  "$ROOT/openusage_bar/activity_schema.py" \
+  "$ROOT/openusage_bar/routing_schema.py" \
+  "$STAGE/scripts/"
 cp \
   "$ROOT/LICENSE" \
   "$ROOT/THIRD_PARTY_NOTICES.md" \

@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
 from openusage_bar.config import MiniMaxConfig
+from openusage_bar.keychain import KeychainError
 from openusage_bar.minimax import (
     MINIMAX_BILLING_SOURCE_ID,
     MiniMaxBillingImporter,
@@ -14,7 +15,10 @@ from openusage_bar.minimax import (
 )
 from openusage_bar.models import ProviderStatus
 from openusage_bar.openai_organization import ImportFailure, UsageImportSuccess
-from openusage_bar.providers.contracts import QuotaFetchSuccess
+from openusage_bar.providers.contracts import (
+    QuotaCollectionResult,
+    QuotaFetchSuccess,
+)
 
 
 NOW = datetime(2026, 7, 14, tzinfo=timezone.utc)
@@ -292,6 +296,46 @@ class MiniMaxAdapterTests(unittest.TestCase):
                 "Content-Type": "application/json",
             },
         )
+
+    def test_collects_quota_once_with_builtin_api_attribution(self):
+        keychain = Mock()
+        keychain.get.return_value = "subscription-key"
+        client = Mock()
+        client.get_json.return_value = {
+            "model_remains": [
+                {
+                    "model_name": "general",
+                    "current_interval_remaining_percent": 75,
+                }
+            ],
+            "base_resp": {"status_code": 0},
+        }
+        adapter = MiniMaxCodingPlanAdapter(
+            MiniMaxConfig("m", "MiniMax"), keychain, client, lambda: NOW
+        )
+
+        collection = adapter.fetch_quota()
+
+        self.assertIsInstance(collection, QuotaCollectionResult)
+        self.assertIsInstance(collection.result, QuotaFetchSuccess)
+        self.assertEqual(client.get_json.call_count, 1)
+        self.assertEqual(
+            collection.attribution.credential_source, "minimax_builtin_api"
+        )
+        self.assertEqual(collection.attribution.source_kind, "builtin_api")
+
+    def test_direct_quota_sanitizes_keychain_failures(self):
+        keychain = Mock()
+        keychain.get.side_effect = KeychainError("private system detail")
+        client = Mock()
+        adapter = MiniMaxCodingPlanAdapter(
+            MiniMaxConfig("m", "MiniMax"), keychain, client, lambda: NOW
+        )
+
+        collection = adapter.fetch_quota()
+
+        self.assertEqual(collection.result.error_code, "keychain_unavailable")
+        client.get_json.assert_not_called()
 
     def test_fetch_uses_international_token_plan_endpoint_without_cross_retry(self):
         keychain = Mock()

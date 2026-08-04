@@ -1,0 +1,195 @@
+{
+  "$defs": {
+    "counter": {
+      "maximum": 1000000000000,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "currency": {
+      "pattern": "^[A-Z][A-Z0-9_]{2,7}$",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "type": "string"
+    },
+    "idList": {
+      "items": {
+        "$ref": "#/$defs/id"
+      },
+      "maxItems": 50,
+      "type": "array",
+      "uniqueItems": true
+    }
+  },
+  "$id": "https://openusage.bar/schemas/routing-api-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "clientRequestRef": {
+      "pattern": "^req_[0-9a-f]{16,64}$",
+      "type": "string"
+    },
+    "constraints": {
+      "additionalProperties": false,
+      "properties": {
+        "allowProviders": {
+          "$ref": "#/$defs/idList"
+        },
+        "allowTargets": {
+          "$ref": "#/$defs/idList"
+        },
+        "costCurrency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/currency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "denyProviders": {
+          "$ref": "#/$defs/idList"
+        },
+        "denyTargets": {
+          "$ref": "#/$defs/idList"
+        },
+        "maximumEstimatedCostMicrounits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/counter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "allowProviders",
+        "allowTargets",
+        "costCurrency",
+        "denyProviders",
+        "denyTargets",
+        "maximumEstimatedCostMicrounits"
+      ],
+      "type": "object"
+    },
+    "policyId": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "session": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "budgetCurrency": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/currency"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "remainingBudgetMicrounits": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/counter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reserveMicrounits": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/counter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sessionRef": {
+              "pattern": "^anon_[0-9a-f]{16,64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "budgetCurrency",
+            "remainingBudgetMicrounits",
+            "reserveMicrounits",
+            "sessionRef"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "task": {
+      "additionalProperties": false,
+      "properties": {
+        "estimatedInputTokens": {
+          "$ref": "#/$defs/counter"
+        },
+        "kind": {
+          "enum": [
+            "audio",
+            "chat",
+            "code",
+            "embedding",
+            "image",
+            "other",
+            "reasoning"
+          ]
+        },
+        "maxOutputTokens": {
+          "$ref": "#/$defs/counter"
+        },
+        "minimumContextWindowTokens": {
+          "$ref": "#/$defs/counter"
+        },
+        "privacy": {
+          "enum": [
+            "allow_proxy",
+            "direct_provider",
+            "local_only"
+          ]
+        },
+        "regions": {
+          "$ref": "#/$defs/idList"
+        },
+        "requiredCapabilities": {
+          "$ref": "#/$defs/idList"
+        }
+      },
+      "required": [
+        "estimatedInputTokens",
+        "kind",
+        "maxOutputTokens",
+        "minimumContextWindowTokens",
+        "privacy",
+        "regions",
+        "requiredCapabilities"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "policyId",
+    "task"
+  ],
+  "title": "OpenUsage Bar Route Decision API",
+  "type": "object"
+}

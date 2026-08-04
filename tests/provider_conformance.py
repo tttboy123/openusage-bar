@@ -219,6 +219,7 @@ def runtime_inventory(bindings: Iterable[object]) -> tuple[tuple[str, str, str],
     rows: list[tuple[str, str, str]] = []
     for binding in bindings:
         for fact, attribute in (
+            ("discovery", "discovery_sources"),
             ("balance", "balance_sources"),
             ("quota", "quota_sources"),
             ("usage", "usage_sources"),

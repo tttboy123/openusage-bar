@@ -118,6 +118,21 @@ class LocalAPISchemaTests(unittest.TestCase):
         )
         self.assertIn("tokenCountingConvention", row["required"])
 
+    def test_runtime_summary_schema_keeps_runtime_and_ledger_revisions_distinct(self):
+        runtime = next(
+            branch
+            for branch in render_schema()["oneOf"]
+            if "runtime" in branch.get("properties", {})
+        )
+        nested = runtime["properties"]["runtime"]
+
+        self.assertEqual(runtime["properties"]["schemaVersion"], {"const": "1.0"})
+        self.assertIn("dataRevision", runtime["required"])
+        self.assertEqual(nested["properties"]["schemaVersion"], {"const": 1})
+        self.assertIn("runtimeRevision", nested["required"])
+        self.assertIn("groups", nested["required"])
+        self.assertFalse(nested["additionalProperties"])
+
     def test_snapshot_contract_rejects_missing_revision_private_fields_and_unknown_values(self):
         store = ActivityStore(":memory:")
         try:

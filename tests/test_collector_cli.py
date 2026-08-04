@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import hashlib
 import re
 import tempfile
 import threading
@@ -12,7 +13,7 @@ import socket
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from openusage_bar.activity_store import (
     ActivityStore,
@@ -31,6 +32,12 @@ from openusage_bar.collector_cli import _default_refresh_command
 from openusage_bar.daily_history import DAILY_TIMEOUT_SECONDS
 from openusage_bar.openusage_adapter import AUTO_TIMEOUT_SECONDS, DIRECT_TIMEOUT_SECONDS
 from openusage_bar.query import QueryService, to_wire
+from openusage_bar.routing_contract import RouteTarget
+from openusage_bar.routing_execution import (
+    ExecutionConnection,
+    ExecutionConnectionStore,
+)
+from openusage_bar.routing_targets import RouteTargetStore
 
 
 NOW = datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc)
@@ -447,25 +454,87 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual((code, err, refresher.calls), (0, "", 0))
         self.assertTrue(out)
 
+    def test_proxy_cli_enables_disables_and_returns_bearer_only_once(self):
+        from openusage_bar.routing_proxy import RoutingProxyConfigurationStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            config_store = RoutingProxyConfigurationStore(
+                Path(directory) / "routing-proxy.json"
+            )
+            token = "generated-proxy-token-0123456789abcdef"
+
+            code, out, err = self.run_cli(
+                ["proxy", "status", "--format", "json"],
+                proxy_config_store=config_store,
+                proxy_token_factory=lambda: token,
+            )
+            self.assertEqual((code, err), (0, ""))
+            self.assertEqual(json.loads(out)["enabled"], False)
+            self.assertNotIn("token", out.casefold())
+
+            code, out, err = self.run_cli(
+                ["proxy", "enable", "--port", "64124", "--format", "json"],
+                proxy_config_store=config_store,
+                proxy_token_factory=lambda: token,
+            )
+            self.assertEqual((code, err), (0, ""))
+            enabled = json.loads(out)
+            self.assertEqual(enabled["endpoint"], "http://127.0.0.1:64124/v1")
+            self.assertEqual(enabled["bearerToken"], token)
+            self.assertFalse(enabled["restartRequired"])
+            self.assertTrue(config_store.load().enabled)
+            self.assertNotIn(token, config_store.path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                config_store.load().token_digest,
+                hashlib.sha256(token.encode()).hexdigest(),
+            )
+
+            code, out, err = self.run_cli(
+                ["proxy", "status", "--format", "json"],
+                proxy_config_store=config_store,
+            )
+            self.assertEqual((code, err), (0, ""))
+            self.assertTrue(json.loads(out)["enabled"])
+            self.assertNotIn(token, out)
+
+            code, out, err = self.run_cli(
+                ["proxy", "disable", "--format", "json"],
+                proxy_config_store=config_store,
+            )
+            self.assertEqual((code, err), (0, ""))
+            self.assertFalse(json.loads(out)["enabled"])
+            self.assertNotIn(token, out + err)
+            self.assertFalse(config_store.load().enabled)
+
     def test_daemon_serves_private_unix_api_and_cleans_socket_on_stop(self):
         with tempfile.TemporaryDirectory() as directory:
             socket_path = Path(directory) / "openusage.sock"
+            router_path = Path(directory) / "router.sock"
             stop = threading.Event()
             result = []
 
             thread = threading.Thread(
                 target=lambda: result.append(main(
-                    ["daemon", "--interval", "60", "--api-socket", str(socket_path)],
+                    [
+                        "daemon", "--interval", "60",
+                        "--api-socket", str(socket_path),
+                        "--router-socket", str(router_path),
+                    ],
                     stderr=io.StringIO(), store=self.store, query=self.query,
                     refresher=FakeRefresher(), stop_event=stop,
                 ))
             )
             thread.start()
             deadline = time.monotonic() + 3
-            while not socket_path.exists() and time.monotonic() < deadline:
+            while (
+                (not socket_path.exists() or not router_path.exists())
+                and time.monotonic() < deadline
+            ):
                 time.sleep(0.01)
             self.assertTrue(socket_path.exists())
             self.assertEqual(socket_path.stat().st_mode & 0o777, 0o600)
+            self.assertTrue(router_path.exists())
+            self.assertEqual(router_path.stat().st_mode & 0o777, 0o600)
 
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             client.settimeout(2)
@@ -481,11 +550,514 @@ class CollectorCLITests(unittest.TestCase):
             self.assertIn(b"HTTP/1.1 200", response)
             self.assertIn(b'"schemaVersion":"1.0"', response)
 
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(2)
+            client.connect(str(router_path))
+            client.sendall(b"GET /v1/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            routing_response = b""
+            while True:
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                routing_response += chunk
+            client.close()
+            self.assertIn(b"HTTP/1.1 200", routing_response)
+            self.assertIn(b'"targetCount":0', routing_response)
+
             stop.set()
             thread.join(3)
             self.assertFalse(thread.is_alive())
             self.assertEqual(result, [0])
             self.assertFalse(socket_path.exists())
+            self.assertFalse(router_path.exists())
+
+    def test_daemon_starts_proxy_only_after_explicit_private_opt_in(self):
+        from openusage_bar.routing_proxy import (
+            RoutingProxyConfiguration,
+            RoutingProxyConfigurationStore,
+        )
+
+        class FakeProxyServer:
+            def __init__(self) -> None:
+                self.started = threading.Event()
+                self.stopped = threading.Event()
+                self.closed = False
+
+            def serve_forever(self) -> None:
+                self.started.set()
+                self.stopped.wait(3)
+
+            def shutdown(self) -> None:
+                self.stopped.set()
+
+            def server_close(self) -> None:
+                self.closed = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            socket_path = root / "openusage.sock"
+            router_path = root / "router.sock"
+            config_store = RoutingProxyConfigurationStore(
+                root / "routing-proxy.json"
+            )
+            digest = hashlib.sha256(b"proxy-token").hexdigest()
+            config_store.save(
+                RoutingProxyConfiguration(1, 1, True, 64124, digest)
+            )
+            proxy_server = FakeProxyServer()
+            factory = Mock(return_value=proxy_server)
+            stop = threading.Event()
+            result: list[int] = []
+
+            thread = threading.Thread(target=lambda: result.append(main(
+                [
+                    "daemon", "--interval", "60",
+                    "--api-socket", str(socket_path),
+                    "--router-socket", str(router_path),
+                ],
+                stderr=io.StringIO(), store=self.store, query=self.query,
+                refresher=FakeRefresher(), stop_event=stop, clock=lambda: NOW,
+                proxy_server_factory=factory,
+            )))
+            thread.start()
+            self.assertTrue(proxy_server.started.wait(3))
+            self.assertEqual(factory.call_args.kwargs["port"], 64124)
+            self.assertEqual(
+                factory.call_args.kwargs["bearer_token_digest"], digest
+            )
+            stop.set()
+            thread.join(3)
+
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result, [0])
+            self.assertTrue(proxy_server.closed)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stop = threading.Event()
+            factory = Mock()
+            thread = threading.Thread(target=lambda: main(
+                [
+                    "daemon", "--interval", "60",
+                    "--api-socket", str(root / "openusage.sock"),
+                    "--router-socket", str(root / "router.sock"),
+                ],
+                stderr=io.StringIO(), store=self.store, query=self.query,
+                refresher=FakeRefresher(), stop_event=stop, clock=lambda: NOW,
+                proxy_server_factory=factory,
+            ))
+            thread.start()
+            deadline = time.monotonic() + 3
+            while not (root / "router.sock").exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            stop.set()
+            thread.join(3)
+            factory.assert_not_called()
+
+    def test_daemon_hot_reloads_proxy_enable_and_disable_without_restart(self):
+        from openusage_bar.routing_proxy import (
+            RoutingProxyConfiguration,
+            RoutingProxyConfigurationStore,
+        )
+
+        class FakeProxyServer:
+            def __init__(self) -> None:
+                self.started = threading.Event()
+                self.stopped = threading.Event()
+                self.closed = threading.Event()
+                self.digests: list[str] = []
+
+            def serve_forever(self) -> None:
+                self.started.set()
+                self.stopped.wait(4)
+
+            def shutdown(self) -> None:
+                self.stopped.set()
+
+            def server_close(self) -> None:
+                self.closed.set()
+
+            def replace_bearer_token_digest(self, value: str) -> None:
+                self.digests.append(value)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            socket_path = root / "openusage.sock"
+            router_path = root / "router.sock"
+            config_store = RoutingProxyConfigurationStore(
+                root / "routing-proxy.json"
+            )
+            first_digest = hashlib.sha256(b"first").hexdigest()
+            second_digest = hashlib.sha256(b"second").hexdigest()
+            created: list[FakeProxyServer] = []
+
+            def factory(*args, **kwargs):
+                server = FakeProxyServer()
+                created.append(server)
+                return server
+
+            stop = threading.Event()
+            result: list[int] = []
+            thread = threading.Thread(target=lambda: result.append(main(
+                [
+                    "daemon", "--interval", "60",
+                    "--api-socket", str(socket_path),
+                    "--router-socket", str(router_path),
+                ],
+                stderr=io.StringIO(), store=self.store, query=self.query,
+                refresher=FakeRefresher(), stop_event=stop, clock=lambda: NOW,
+                proxy_server_factory=factory,
+            )))
+            thread.start()
+            try:
+                deadline = time.monotonic() + 3
+                while not router_path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(router_path.exists())
+                self.assertEqual(created, [])
+
+                config_store.save(RoutingProxyConfiguration(
+                    1, 1, True, 64124, first_digest
+                ))
+                deadline = time.monotonic() + 3
+                while not created and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertEqual(len(created), 1)
+                self.assertTrue(created[0].started.wait(2))
+
+                config_store.save(RoutingProxyConfiguration(
+                    1, 2, True, 64124, second_digest
+                ))
+                deadline = time.monotonic() + 3
+                while not created[0].digests and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertEqual(len(created), 1)
+                self.assertEqual(created[0].digests, [second_digest])
+                self.assertFalse(created[0].closed.is_set())
+
+                config_store.save(RoutingProxyConfiguration(
+                    1, 3, False, 64124, second_digest
+                ))
+                self.assertTrue(created[0].closed.wait(3))
+            finally:
+                stop.set()
+                thread.join(4)
+
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result, [0])
+
+    def test_daemon_resource_api_reads_do_not_wait_for_writer_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = seeded_store(root / "activity.sqlite3")
+            socket_path = root / "openusage.sock"
+            router_path = root / "router.sock"
+            RouteTargetStore(root / "route-targets.json").save((
+                RouteTarget(
+                    target_id="minimax.work.minimax-m2",
+                    provider_id="minimax",
+                    account_ref="account-1",
+                    model_id="minimax-m2",
+                    connection_ref="conn_0123456789abcdef",
+                    execution_class="openai_compatible",
+                    execution_adapter_id="openai_compatible.direct",
+                    resource_mode="quota",
+                    fact_account_ref=None,
+                    runtime_scope_ref=None,
+                    balance_currency=None,
+                    cost_currency=None,
+                    input_cost_micros_per_million=None,
+                    output_cost_micros_per_million=None,
+                    enabled=True,
+                    adapter_available=False,
+                    regions=("global",),
+                    privacy_class="direct_provider",
+                    capabilities=("chat",),
+                    context_window_tokens=128_000,
+                    quality_tier=3,
+                ),
+            ), revision=1)
+            ExecutionConnectionStore(root / "execution-connections.json").save((
+                ExecutionConnection(
+                    connection_ref="conn_0123456789abcdef",
+                    provider_id="minimax",
+                    account_ref="account-1",
+                    execution_class="openai_compatible",
+                    execution_adapter_id="openai_compatible.direct",
+                    base_url="https://api.minimax.chat/v1",
+                    enabled=True,
+                    models=("minimax-m2",),
+                ),
+            ), revision=1)
+            stop = threading.Event()
+            writer_locked = threading.Event()
+            release_writer = threading.Event()
+            result: list[int] = []
+
+            class LockedWriterRefresher:
+                def refresh(self) -> None:
+                    with store._lock:
+                        writer_locked.set()
+                        release_writer.wait(2)
+
+            thread = threading.Thread(
+                target=lambda: result.append(main(
+                    [
+                        "daemon", "--interval", "60",
+                        "--api-socket", str(socket_path),
+                        "--router-socket", str(router_path),
+                    ],
+                    stderr=io.StringIO(),
+                    store=store,
+                    query=QueryService(store, clock=lambda: NOW),
+                    refresher=LockedWriterRefresher(),
+                    stop_event=stop,
+                    clock=lambda: NOW,
+                    catalog_monitor=Mock(),
+                ))
+            )
+            thread.start()
+            try:
+                self.assertTrue(writer_locked.wait(2))
+                client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                client.settimeout(0.5)
+                response = b""
+                try:
+                    client.connect(str(socket_path))
+                    client.sendall(
+                        b"GET /v1/health HTTP/1.1\r\n"
+                        b"Host: localhost\r\nConnection: close\r\n\r\n"
+                    )
+                    while True:
+                        chunk = client.recv(65536)
+                        if not chunk:
+                            break
+                        response += chunk
+                except TimeoutError:
+                    pass
+                finally:
+                    client.close()
+                self.assertIn(b"HTTP/1.1 200", response)
+
+                payload = {
+                    "schemaVersion": "1.0",
+                    "clientRequestRef": "req_0123456789abcdef",
+                    "policyId": "reliable",
+                    "task": {
+                        "kind": "chat",
+                        "requiredCapabilities": ["chat"],
+                        "estimatedInputTokens": 1000,
+                        "maxOutputTokens": 1000,
+                        "minimumContextWindowTokens": 2000,
+                        "privacy": "direct_provider",
+                        "regions": ["global"],
+                    },
+                    "constraints": {
+                        "allowProviders": [],
+                        "denyProviders": [],
+                        "allowTargets": [],
+                        "denyTargets": [],
+                        "maximumEstimatedCostMicrounits": None,
+                        "costCurrency": None,
+                    },
+                    "session": None,
+                }
+                encoded = json.dumps(
+                    payload, separators=(",", ":")
+                ).encode("utf-8")
+                client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                client.settimeout(0.5)
+                routing_response = b""
+                try:
+                    client.connect(str(router_path))
+                    client.sendall(
+                        b"POST /v1/simulations HTTP/1.1\r\n"
+                        b"Host: localhost\r\nContent-Type: application/json\r\n"
+                        + f"Content-Length: {len(encoded)}\r\n".encode("ascii")
+                        + b"Connection: close\r\n\r\n"
+                        + encoded
+                    )
+                    while True:
+                        chunk = client.recv(65536)
+                        if not chunk:
+                            break
+                        routing_response += chunk
+                except TimeoutError:
+                    pass
+                finally:
+                    client.close()
+                self.assertIn(b"HTTP/1.1 200", routing_response)
+                self.assertIn(
+                    b'"targetId":"minimax.work.minimax-m2"',
+                    routing_response,
+                )
+            finally:
+                stop.set()
+                release_writer.set()
+                thread.join(3)
+                store.close()
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result, [0])
+
+    def test_daemon_routes_only_through_installed_adapter_and_connection(self):
+        self.store.record_quota(QuotaObservation(
+            record_id="minimax.current", observed_at="2026-07-14T09:59:00Z",
+            provider_id="minimax", quota_name="Five hour", unit="percent",
+            used="20", quota_limit="100", remaining="80", remaining_ratio=0.8,
+            resets_at="2026-07-14T12:00:00Z", period_start=None, period_end=None,
+            state="ok", quality="direct", stale=False,
+        ))
+        self.store.record_source_success("minimax", "current.quota", NOW)
+        with tempfile.TemporaryDirectory() as directory:
+            socket_path = Path(directory) / "openusage.sock"
+            router_path = Path(directory) / "router.sock"
+            RouteTargetStore(router_path.with_name("route-targets.json")).save((
+                RouteTarget(
+                    target_id="minimax.work.minimax-m2",
+                    provider_id="minimax",
+                    account_ref="account-1",
+                    model_id="minimax-m2",
+                    connection_ref="conn_0123456789abcdef",
+                    execution_class="openai_compatible",
+                    execution_adapter_id="openai_compatible.direct",
+                    resource_mode="quota",
+                    fact_account_ref=None,
+                    runtime_scope_ref=None,
+                    balance_currency=None,
+                    cost_currency=None,
+                    input_cost_micros_per_million=None,
+                    output_cost_micros_per_million=None,
+                    enabled=True,
+                    adapter_available=False,
+                    regions=("global",),
+                    privacy_class="direct_provider",
+                    capabilities=("chat",),
+                    context_window_tokens=128_000,
+                    quality_tier=3,
+                ),
+            ), revision=1)
+            ExecutionConnectionStore(
+                router_path.with_name("execution-connections.json")
+            ).save((ExecutionConnection(
+                connection_ref="conn_0123456789abcdef",
+                provider_id="minimax",
+                account_ref="account-1",
+                execution_class="openai_compatible",
+                execution_adapter_id="openai_compatible.direct",
+                base_url="https://api.minimax.chat/v1",
+                enabled=True,
+                models=("minimax-m2",),
+            ),), revision=1)
+            stop = threading.Event()
+            result: list[int] = []
+            thread = threading.Thread(target=lambda: result.append(main(
+                [
+                    "daemon", "--interval", "60",
+                    "--api-socket", str(socket_path),
+                    "--router-socket", str(router_path),
+                ],
+                stderr=io.StringIO(), store=self.store, query=self.query,
+                refresher=FakeRefresher(), stop_event=stop, clock=lambda: NOW,
+            )))
+            thread.start()
+            deadline = time.monotonic() + 3
+            while not router_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(router_path.exists())
+
+            payload = {
+                "schemaVersion": "1.0",
+                "clientRequestRef": "req_0123456789abcdef",
+                "policyId": "reliable",
+                "task": {
+                    "kind": "chat", "requiredCapabilities": ["chat"],
+                    "estimatedInputTokens": 1000, "maxOutputTokens": 1000,
+                    "minimumContextWindowTokens": 2000,
+                    "privacy": "direct_provider", "regions": ["global"],
+                },
+                "constraints": {
+                    "allowProviders": [], "denyProviders": [],
+                    "allowTargets": [], "denyTargets": [],
+                    "maximumEstimatedCostMicrounits": None, "costCurrency": None,
+                },
+                "session": None,
+            }
+            encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(2)
+            client.connect(str(router_path))
+            client.sendall(
+                b"POST /v1/simulations HTTP/1.1\r\nHost: localhost\r\n"
+                + f"Content-Length: {len(encoded)}\r\n".encode("ascii")
+                + b"Content-Type: application/json\r\nConnection: close\r\n\r\n"
+                + encoded
+            )
+            response = b""
+            while True:
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                response += chunk
+            client.close()
+            self.assertIn(b"HTTP/1.1 200", response)
+            self.assertIn(b'"targetId":"minimax.work.minimax-m2"', response)
+
+            stop.set()
+            thread.join(3)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result, [0])
+
+    def test_routing_start_failure_does_not_stop_collection_or_resource_api(self):
+        with tempfile.TemporaryDirectory() as directory:
+            socket_path = Path(directory) / "openusage.sock"
+            router_path = Path(directory) / "router.sock"
+            router_path.write_text("occupied", encoding="utf-8")
+            stop = threading.Event()
+            result = []
+            stderr = io.StringIO()
+            thread = threading.Thread(
+                target=lambda: result.append(main(
+                    [
+                        "daemon", "--interval", "60",
+                        "--api-socket", str(socket_path),
+                        "--router-socket", str(router_path),
+                    ],
+                    stderr=stderr,
+                    store=self.store,
+                    query=self.query,
+                    refresher=FakeRefresher(),
+                    stop_event=stop,
+                ))
+            )
+            thread.start()
+            deadline = time.monotonic() + 3
+            while not socket_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(socket_path.exists())
+            self.assertEqual(router_path.read_text(encoding="utf-8"), "occupied")
+
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(2)
+            client.connect(str(socket_path))
+            client.sendall(b"GET /v1/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            response = b""
+            while True:
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                response += chunk
+            client.close()
+            self.assertIn(b"HTTP/1.1 200", response)
+
+            stop.set()
+            thread.join(3)
+            self.assertEqual(result, [0])
+            self.assertIn(
+                "routing API unavailable; continuing without routing\n",
+                stderr.getvalue(),
+            )
+            self.assertFalse(socket_path.exists())
+            self.assertEqual(router_path.read_text(encoding="utf-8"), "occupied")
 
     def test_fresh_timeout_is_real_and_returns_last_good_without_sleep(self):
         blocker = threading.Event()
@@ -714,7 +1286,10 @@ class CollectorCLITests(unittest.TestCase):
             code, out, err = self.run_cli(
                 ["status", "--format", "json", "--fresh"],
                 refresh_entrypoint=helper,
-                fresh_timeout=1,
+                # Line tracing can delay interpreter startup substantially on
+                # slower macOS runners. Keep the timeout bounded while giving
+                # the helper enough time to fork and publish its child PID.
+                fresh_timeout=3,
             )
             self.assertEqual(code, 0)
             self.assertEqual(json.loads(out)["todayTokens"], 100)
@@ -970,6 +1545,52 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual(refresher.max_active, 1)
         self.assertEqual(catalog_monitor.calls, 2)
 
+    def test_daemon_local_api_exposes_default_runtime_summary_read_only(self):
+        from openusage_bar.runtime_store import RuntimeStore
+        from tests.test_local_api import unix_request
+        from tests.test_runtime_store import observation
+
+        stop = threading.Event()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime_path = root / "runtime.sqlite3"
+            socket_path = root / "api.sock"
+            runtime = RuntimeStore(runtime_path, clock=lambda: NOW)
+            try:
+                runtime.ingest((observation(1, completed_at=NOW),))
+            finally:
+                runtime.close()
+            responses = []
+
+            def wait(_seconds):
+                responses.append(
+                    unix_request(
+                        socket_path,
+                        "/v1/runtime/summary?windowSeconds=3600",
+                    )
+                )
+                stop.set()
+                return True
+
+            with patch(
+                "openusage_bar.collector_cli.DEFAULT_RUNTIME_PATH", runtime_path
+            ):
+                code, out, err = self.run_cli(
+                    [
+                        "daemon", "--interval", "60",
+                        "--api-socket", str(socket_path),
+                    ],
+                    refresher=FakeRefresher(),
+                    stop_event=stop,
+                    waiter=wait,
+                )
+
+        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual(responses[0][0], 200)
+        payload = json.loads(responses[0][2])
+        self.assertEqual(payload["runtime"]["runtimeRevision"], 1)
+        self.assertEqual(payload["runtime"]["tokens"]["total"], 20)
+
     def test_daemon_rejects_zero_bool_and_too_small_interval(self):
         for interval in ("0", "1", "true"):
             code, out, err = self.run_cli(["daemon", "--interval", interval], refresher=FakeRefresher())
@@ -1049,6 +1670,158 @@ class CollectorCLITests(unittest.TestCase):
             payload["health"]["openusageCatalog"]["status"],
             "provider_catalog_drift",
         )
+
+
+class RuntimeObservationCLITests(unittest.TestCase):
+    def test_runtime_ingest_reads_stdin_without_opening_activity_store(self):
+        from tests.test_runtime_observation import document
+
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime.sqlite3"
+            stdout, stderr = io.StringIO(), io.StringIO()
+            activity_factory = Mock(side_effect=AssertionError("must not open"))
+
+            code = main(
+                ["runtime-ingest", "--database", str(runtime)],
+                stdin=io.StringIO(document()),
+                stdout=stdout,
+                stderr=stderr,
+                store_factory=activity_factory,
+                clock=lambda: datetime(2026, 8, 1, 0, 1, tzinfo=timezone.utc),
+            )
+
+            self.assertEqual((code, stderr.getvalue()), (0, ""))
+            self.assertEqual(json.loads(stdout.getvalue()), {
+                "acceptedCount": 1,
+                "duplicateCount": 0,
+                "expiredCount": 0,
+                "prunedCount": 0,
+                "runtimeRevision": 1,
+                "schemaVersion": 1,
+            })
+            self.assertNotIn("openai", stdout.getvalue())
+            self.assertNotIn("gpt-5", stdout.getvalue())
+            self.assertTrue(runtime.is_file())
+            activity_factory.assert_not_called()
+            self.assertFalse((Path(directory) / "activity.sqlite3").exists())
+
+    def test_runtime_ingest_retry_is_idempotent(self):
+        from tests.test_runtime_observation import document
+
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime.sqlite3"
+            for expected in (
+                {"acceptedCount": 1, "duplicateCount": 0, "runtimeRevision": 1},
+                {"acceptedCount": 0, "duplicateCount": 1, "runtimeRevision": 1},
+            ):
+                stdout = io.StringIO()
+                code = main(
+                    ["runtime-ingest", "--database", str(runtime)],
+                    stdin=io.StringIO(document()),
+                    stdout=stdout,
+                    stderr=io.StringIO(),
+                    clock=lambda: datetime(2026, 8, 1, 0, 1, tzinfo=timezone.utc),
+                )
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(code, 0)
+                for key, value in expected.items():
+                    self.assertEqual(payload[key], value)
+
+    def test_runtime_summary_is_stable_bounded_json(self):
+        from tests.test_runtime_observation import document
+
+        current = datetime(2026, 8, 1, 0, 1, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime.sqlite3"
+            self.assertEqual(main(
+                ["runtime-ingest", "--database", str(runtime)],
+                stdin=io.StringIO(document()),
+                stdout=io.StringIO(),
+                stderr=io.StringIO(),
+                clock=lambda: current,
+            ), 0)
+            stdout, stderr = io.StringIO(), io.StringIO()
+            activity_factory = Mock(side_effect=AssertionError("must not open"))
+
+            code = main(
+                [
+                    "runtime-summary", "--database", str(runtime),
+                    "--window-seconds", "3600",
+                ],
+                stdin=io.StringIO("must-not-read"),
+                stdout=stdout,
+                stderr=stderr,
+                store_factory=activity_factory,
+                clock=lambda: current,
+            )
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual((code, stderr.getvalue()), (0, ""))
+            self.assertEqual(payload["schemaVersion"], 1)
+            self.assertEqual(payload["runtimeRevision"], 1)
+            self.assertEqual(payload["coverage"], {
+                "state": "complete", "omittedGroupCount": 0,
+            })
+            self.assertEqual(payload["observationCount"], 1)
+            self.assertEqual(payload["tokens"]["total"], 20)
+            self.assertEqual(payload["statusCounts"], {"completed": 1})
+            self.assertEqual(payload["costs"], [{"currency": "usd", "micros": 25}])
+            self.assertEqual(payload["latency"]["durationP95Ms"], 3000)
+            self.assertEqual(payload["groups"][0]["providerId"], "openai")
+            self.assertEqual(payload["groups"][0]["modelId"], "gpt-5")
+            self.assertEqual(
+                payload["groups"][0]["scopeRef"], "anon_0123456789abcdef"
+            )
+            self.assertNotIn("sourceId", stdout.getvalue())
+            self.assertNotIn("requestId", stdout.getvalue())
+            activity_factory.assert_not_called()
+
+    def test_invalid_or_private_runtime_input_is_sanitized_and_not_persisted(self):
+        from openusage_bar.runtime_observation import MAX_DOCUMENT_BYTES
+        from tests.test_runtime_observation import document, valid_observation
+
+        private = valid_observation()
+        private["prompt"] = "do not echo this private value"
+        payloads = (
+            document([private]),
+            "{" + " " * MAX_DOCUMENT_BYTES + "}",
+        )
+        for payload in payloads:
+            with self.subTest(size=len(payload)), tempfile.TemporaryDirectory() as directory:
+                runtime = Path(directory) / "runtime.sqlite3"
+                stdout, stderr = io.StringIO(), io.StringIO()
+                code = main(
+                    ["runtime-ingest", "--database", str(runtime)],
+                    stdin=io.StringIO(payload),
+                    stdout=stdout,
+                    stderr=stderr,
+                    clock=lambda: datetime(2026, 8, 1, 0, 1, tzinfo=timezone.utc),
+                )
+                self.assertEqual(code, 2)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue(), "invalid runtime input\n")
+                self.assertNotIn("private", stderr.getvalue())
+                self.assertFalse(runtime.exists())
+
+    def test_runtime_paths_and_windows_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target.sqlite3"
+            target.touch()
+            symlink = root / "runtime.sqlite3"
+            symlink.symlink_to(target)
+            for arguments in (
+                ["runtime-summary", "--database", "relative.sqlite3", "--window-seconds", "60"],
+                ["runtime-summary", "--database", str(symlink), "--window-seconds", "60"],
+                ["runtime-summary", "--database", str(root / "valid.sqlite3"), "--window-seconds", "59"],
+                ["runtime-summary", "--database", str(root / "valid.sqlite3"), "--window-seconds", "86401"],
+            ):
+                with self.subTest(arguments=arguments):
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    code = main(arguments, stdout=stdout, stderr=stderr)
+                    self.assertEqual(code, 2)
+                    self.assertEqual(stdout.getvalue(), "")
+                    self.assertEqual(stderr.getvalue(), "invalid command input\n")
 
 
 if __name__ == "__main__":

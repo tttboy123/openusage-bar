@@ -8,12 +8,17 @@ from urllib.parse import urlencode
 
 from .activity_store import DailyUsageRow
 from .config import MiniMaxConfig
-from .keychain import MacOSKeychain
+from .keychain import KeychainError, MacOSKeychain
 from .model_ids import InvalidModelID, canonical_model_id
 from .models import Category, ProviderCard, ProviderStatus
 from .network import AuthenticationRequired, BoundedHTTPClient, NetworkError, RateLimited
 from .providers.contracts import ImportFailure, UsageImportResult, UsageImportSuccess
-from .providers.contracts import QuotaFetchFailure, QuotaFetchSuccess
+from .providers.contracts import (
+    QuotaCollectionResult,
+    QuotaFetchFailure,
+    QuotaFetchSuccess,
+    SourceAttribution,
+)
 from .providers.quota import percent_observation
 
 
@@ -383,6 +388,11 @@ class MiniMaxBillingImporter:
 
 
 class MiniMaxCodingPlanAdapter:
+    _ATTRIBUTION = SourceAttribution(
+        credential_source="minimax_builtin_api",
+        source_kind="builtin_api",
+    )
+
     def __init__(
         self,
         config: MiniMaxConfig,
@@ -543,6 +553,42 @@ class MiniMaxCodingPlanAdapter:
         except NetworkError:
             self.last_quota_result = QuotaFetchFailure("network_error")
             return self._error_card(ProviderStatus.ERROR, "MiniMax refresh failed", now)
+
+    def fetch_quota(self) -> QuotaCollectionResult:
+        now = self.clock()
+        try:
+            secret = self.keychain.get(self.config.provider_id)
+        except KeychainError:
+            return QuotaCollectionResult(
+                result=QuotaFetchFailure("keychain_unavailable"),
+                attribution=self._ATTRIBUTION,
+            )
+        if not secret:
+            result = QuotaFetchFailure("auth_required")
+        else:
+            try:
+                payload = self.client.get_json(
+                    self.endpoints.quota,
+                    {
+                        "Authorization": f"Bearer {secret}",
+                        "Content-Type": "application/json",
+                    },
+                )
+                result = parse_minimax_quota_observations(
+                    self.config, payload, now
+                )
+            except AuthenticationRequired:
+                result = QuotaFetchFailure("auth_rejected")
+            except RateLimited:
+                result = QuotaFetchFailure("rate_limited")
+            except NetworkError:
+                result = QuotaFetchFailure("network_error")
+            except (MiniMaxParseError, TypeError, ValueError, OverflowError):
+                result = QuotaFetchFailure("invalid_response")
+        return QuotaCollectionResult(
+            result=result,
+            attribution=self._ATTRIBUTION,
+        )
 
     def _error_card(self, status: ProviderStatus, error: str, now: datetime) -> ProviderCard:
         return ProviderCard(

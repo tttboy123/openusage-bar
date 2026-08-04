@@ -17,6 +17,11 @@ dist/
 dist.failed-*/
 dist.pre-*/
 deployed-backups/
+docs/adr/
+docs/internal/
+docs/research/
+docs/security/*-review.md
+docs/superpowers/
 installed-python.pre-*/
 swift_app/.build/
 *.xcresult

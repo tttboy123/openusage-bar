@@ -377,6 +377,15 @@ enum APISpendText {
             ?? NSDecimalNumber(decimal: amount).stringValue
         return "\(currency) \(number)"
     }
+
+    static func displayBalance(available: String?, currency: String) -> String {
+        guard let available,
+              let decimal = Decimal(
+                string: available, locale: Locale(identifier: "en_US_POSIX")
+              )
+        else { return "\(currency) \(AppLocalization.text("Unavailable"))" }
+        return display(amount: decimal, currency: currency)
+    }
 }
 
 enum DateText {
@@ -417,6 +426,7 @@ extension UsageDetailsRoute {
         case .apiSpend: AppLocalization.text("API Spend")
         case .localTools: AppLocalization.text("Local Tools")
         case .providersAndAccounts: AppLocalization.text("Providers")
+        case .routing: AppLocalization.text("Routing")
         case .dataHealth: AppLocalization.text("Data Health")
         case .automation: AppLocalization.text("Automation")
         }
@@ -426,6 +436,7 @@ extension UsageDetailsRoute {
         case .activity: "chart.bar.xaxis"; case .capacity: "gauge.with.dots.needle.50percent"
         case .apiSpend: "dollarsign.circle"
         case .localTools: "terminal"; case .providersAndAccounts: "bolt.horizontal.circle"
+        case .routing: "arrow.triangle.branch"
         case .dataHealth: "waveform.path.ecg"
         case .automation: "terminal.fill"
         }
