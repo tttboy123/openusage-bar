@@ -11,7 +11,7 @@ public struct StatusLabel: Sendable, Hashable {
     public static func compact(remainingRatio: Double?) -> Self {
         let values = remainingRatio.map { [Format.percent($0)] } ?? []
         return Self(
-            values: values, accessibilityTitle: "OpenUsage Bar",
+            values: values, accessibilityTitle: AppLocalization.text("UsageHub"),
             accessibilityValue: values.first.map {
                 AppLocalization.format("Most urgent capacity, %@ remaining", $0)
             } ?? AppLocalization.text("Capacity unavailable")
@@ -21,7 +21,7 @@ public struct StatusLabel: Sendable, Hashable {
     public static func activity(tokens: Int64) -> Self {
         let value = Format.tokens(tokens)
         return Self(
-            values: [value], accessibilityTitle: "OpenUsage Bar",
+            values: [value], accessibilityTitle: AppLocalization.text("UsageHub"),
             accessibilityValue: AppLocalization.format("Today Token, %@", value)
         )
     }
@@ -29,7 +29,7 @@ public struct StatusLabel: Sendable, Hashable {
     public static func custom(values: [String]) -> Self {
         let short = Array(values.filter { !$0.isEmpty }.prefix(2))
         return Self(
-            values: short, accessibilityTitle: "OpenUsage Bar",
+            values: short, accessibilityTitle: AppLocalization.text("UsageHub"),
             accessibilityValue: short.isEmpty
                 ? AppLocalization.text("Usage unavailable") : short.joined(separator: ", ")
         )
@@ -40,7 +40,7 @@ public enum MenuCopy {
     public static let topLevelSections = ["Today Token", "Capacity"]
     public static let footerActions = ["Open Usage Details", "Data Health", "Settings"]
     public static let allVisibleText = [
-        "OpenUsage Bar", "Updated", "Refresh", "Today Token", "Capacity",
+        "UsageHub", "Updated", "Refresh", "Today Token", "Capacity",
         "Most urgent first", "View all providers", "Open Usage Details", "Data Health", "Settings",
     ]
 }

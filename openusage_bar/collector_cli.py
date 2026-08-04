@@ -23,6 +23,8 @@ from .query import QueryService, SCHEMA_VERSION, to_wire
 
 DEFAULT_LEDGER_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "activity.sqlite3"
 DEFAULT_API_SOCKET_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "openusage.sock"
+DEFAULT_API_TOKEN_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "openusage.token"
+DEFAULT_API_TCP_PORT = 17821
 # An interactive attempt may legitimately use OpenUsage's bounded auto -> direct
 # fallback (12s + 75s) followed by a bounded daily-history import (60s). One
 # hundred sixty seconds avoids killing that slow path, but remains a hard limit;
@@ -152,6 +154,37 @@ def _parser() -> SafeArgumentParser:
     daemon = commands.add_parser("daemon")
     daemon.add_argument("--interval", required=True)
     daemon.add_argument("--api-socket", default=str(DEFAULT_API_SOCKET_PATH))
+    daemon.add_argument(
+        "--api-transport",
+        choices=("auto", "unix", "tcp"),
+        default="auto",
+    )
+    daemon.add_argument("--api-port", type=int, default=0)
+    daemon.add_argument("--api-token-path", default=str(DEFAULT_API_TOKEN_PATH))
+    service = commands.add_parser("service")
+    service.add_argument(
+        "action",
+        choices=("install", "uninstall", "print"),
+    )
+    service.add_argument("--interval", default="300")
+    reconcile = commands.add_parser("reconcile")
+    reconcile.add_argument("--format", choices=("json",), required=True)
+    reconcile.add_argument("--from", dest="from_day", required=True)
+    reconcile.add_argument("--to", dest="to_day", required=True)
+    executor = commands.add_parser("executor")
+    executor.add_argument(
+        "action",
+        choices=("list", "state", "verify", "switch"),
+    )
+    executor.add_argument("--plugin", choices=("cc_switch", "omniroute"))
+    executor.add_argument("--target")
+    executor.add_argument("--auto-apply", action="store_true")
+    executor.add_argument("--format", choices=("json",), required=True)
+    dashboard = commands.add_parser("dashboard")
+    dashboard.add_argument("--port", type=int, default=0)
+    connect = commands.add_parser("connect")
+    connect.add_argument("--family", required=True)
+    connect.add_argument("--format", choices=("json",), required=True)
     return parser
 
 
@@ -173,6 +206,25 @@ def _interval(value: str) -> int:
     if str(interval) != value or interval < MIN_DAEMON_INTERVAL_SECONDS:
         raise CLIError("invalid interval")
     return interval
+
+
+def _api_port(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 65535:
+        raise CLIError("invalid api port")
+    return value
+
+
+def _resolve_api_transport(
+    transport: str,
+    api_port: int,
+) -> tuple[str, int]:
+    resolved = transport
+    if resolved == "auto":
+        resolved = "tcp" if sys.platform == "win32" else "unix"
+    port = api_port
+    if resolved == "tcp" and port == 0 and sys.platform == "win32":
+        port = DEFAULT_API_TCP_PORT
+    return resolved, port
 
 
 def _fresh_timeout(value: int) -> int:
@@ -559,15 +611,25 @@ def _run_daemon_with_api(
     query: QueryService,
     api_socket: str,
     *,
+    transport: str = "unix",
+    api_port: int = 0,
+    api_token_path: str | None = None,
     stop_event: threading.Event,
     waiter: Callable[[int], bool],
     stderr: TextIO,
     catalog_monitor: Any | None = None,
 ) -> int:
-    from .local_api import create_unix_server
+    from .local_api import create_tcp_server, create_unix_server
 
     try:
-        server = create_unix_server(api_socket, query)
+        if transport == "tcp":
+            server = create_tcp_server(
+                query,
+                port=api_port,
+                token_path=api_token_path,
+            )
+        else:
+            server = create_unix_server(api_socket, query)
     except Exception:
         stderr.write("local API unavailable; daemon stopped\n")
         return 1
@@ -622,10 +684,11 @@ def main(
     parser = _parser()
     try:
         args = parser.parse_args(arguments)
-        if args.command == "daemon":
+        if args.command in ("daemon", "service"):
             interval = _interval(args.interval)
         else:
             interval = None
+        api_port = _api_port(args.api_port) if args.command == "daemon" else 0
     except CLIError:
         stderr.write("invalid command input\n")
         return 2
@@ -641,6 +704,168 @@ def main(
                 DEFAULT_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
                 active_store = ActivityStore(DEFAULT_LEDGER_PATH)
         active_query = query or QueryService(active_store, clock=clock)
+
+        if args.command == "service":
+            from . import platform_services
+
+            if args.action == "print":
+                stdout.write(
+                    platform_services.render_current_platform(interval=interval)
+                )
+                stdout.write("\n")
+                return 0
+            try:
+                if args.action == "install":
+                    platform_services.install_service(interval=interval)
+                else:
+                    platform_services.uninstall_service()
+            except Exception:
+                stderr.write("service action failed\n")
+                return 1
+            return 0
+
+        if args.command == "reconcile":
+            from .reconciliation import reconciliation_from_local_sources
+
+            since_day = _day(args.from_day)
+            until_day = _day(args.to_day)
+            report = reconciliation_from_local_sources(
+                since=since_day,
+                until=until_day,
+            )
+            payload = {
+                "schemaVersion": "1.0",
+                "since": report.since.isoformat(),
+                "until": report.until.isoformat(),
+                "sourceStatuses": [
+                    {
+                        "providerId": provider_id,
+                        "sourceId": source_id,
+                        "state": state,
+                    }
+                    for provider_id, source_id, state in report.source_statuses
+                ],
+                "rows": [
+                    {
+                        "day": row.day,
+                        "codexTokenTotal": row.codex_token_total,
+                        "ccSwitchCostUsd": row.cc_switch_cost_usd,
+                        "omnirouteCostUsd": row.omniroute_cost_usd,
+                        "ccSwitchCovered": row.cc_switch_covered,
+                        "omnirouteCovered": row.omniroute_covered,
+                        "notes": list(row.notes),
+                    }
+                    for row in report.rows
+                ],
+            }
+            stdout.write(
+                json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+            )
+            stdout.write("\n")
+            return 0
+
+        if args.command == "executor":
+            from .executors import apply_executor_switch, default_executors
+
+            plugins = {plugin.plugin_id: plugin for plugin in default_executors()}
+            if args.action == "list":
+                payload = {
+                    "schemaVersion": "1.0",
+                    "executors": [
+                        {
+                            "pluginId": plugin.plugin_id,
+                            "available": plugin.state().available,
+                            "activeTarget": plugin.state().active_target,
+                        }
+                        for plugin in plugins.values()
+                    ],
+                }
+            else:
+                if args.plugin is None or args.plugin not in plugins:
+                    stderr.write("invalid executor plugin\n")
+                    return 2
+                plugin = plugins[args.plugin]
+                if args.action == "state":
+                    state = plugin.state()
+                    payload = {
+                        "schemaVersion": "1.0",
+                        "pluginId": state.plugin_id,
+                        "available": state.available,
+                        "activeTarget": state.active_target,
+                        "detail": state.detail,
+                    }
+                elif args.action == "verify":
+                    payload = {
+                        "schemaVersion": "1.0",
+                        "pluginId": plugin.plugin_id,
+                        "verified": plugin.verify(),
+                    }
+                else:
+                    if not args.target:
+                        stderr.write("invalid executor target\n")
+                        return 2
+                    result = apply_executor_switch(
+                        plugin,
+                        args.target,
+                        enabled=args.auto_apply,
+                    )
+                    payload = {
+                        "schemaVersion": "1.0",
+                        "pluginId": result.plugin_id,
+                        "target": result.target,
+                        "ok": result.ok,
+                        "detail": result.detail,
+                    }
+            stdout.write(
+                json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+            )
+            stdout.write("\n")
+            return 0
+
+        if args.command == "connect":
+            from .quick_connect import quick_connect
+
+            try:
+                item = quick_connect(args.family)
+            except ValueError:
+                stderr.write("invalid provider family\n")
+                return 2
+            payload = {
+                "schemaVersion": "1.0",
+                "familyId": item.family_id,
+                "consoleUrl": item.console_url,
+                "authModes": list(item.auth_modes),
+            }
+            stdout.write(
+                json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+            )
+            stdout.write("\n")
+            return 0
+
+        if args.command == "dashboard":
+            from .web_dashboard import make_dashboard_server
+
+            port = args.port
+            if (
+                isinstance(port, bool)
+                or not isinstance(port, int)
+                or not 0 <= port <= 65535
+            ):
+                stderr.write("invalid dashboard port\n")
+                return 2
+            today = (clock or (lambda: datetime.now(timezone.utc)))().astimezone().date()
+            server = make_dashboard_server(active_query, port=port, today=today)
+            stdout.write(
+                f"UsageHub dashboard on http://127.0.0.1:{server.server_address[1]}\n"
+            )
+            stdout.flush()
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                server.server_close()
+            return 0
 
         if args.command == "daemon":
             if catalog_monitor is None:
@@ -660,11 +885,18 @@ def main(
                 signal.signal(signal.SIGTERM, stop)
                 signal.signal(signal.SIGINT, stop)
             active_waiter = waiter or active_stop.wait
+            resolved_transport, resolved_port = _resolve_api_transport(
+                args.api_transport,
+                api_port,
+            )
             return _run_daemon_with_api(
                 interval or MIN_DAEMON_INTERVAL_SECONDS,
                 refresher,
                 active_query,
                 args.api_socket,
+                transport=resolved_transport,
+                api_port=resolved_port,
+                api_token_path=args.api_token_path,
                 stop_event=active_stop,
                 waiter=active_waiter,
                 stderr=stderr,

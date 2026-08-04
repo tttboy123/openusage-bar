@@ -36,6 +36,7 @@ from openusage_bar.query import QueryService, to_wire
 NOW = datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc)
 
 
+@unittest.skipIf(sys.platform == "win32", "POSIX process-group helper test")
 class FrozenRefreshCommandTests(unittest.TestCase):
     def test_cursor_direct_export_has_measured_runtime_margin(self):
         # A sanitized standalone probe completed in 38.41 seconds, while the
@@ -447,6 +448,7 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual((code, err, refresher.calls), (0, "", 0))
         self.assertTrue(out)
 
+    @unittest.skipIf(sys.platform == "win32", "Windows uses loopback TCP transport")
     def test_daemon_serves_private_unix_api_and_cleans_socket_on_stop(self):
         with tempfile.TemporaryDirectory() as directory:
             socket_path = Path(directory) / "openusage.sock"
@@ -465,7 +467,12 @@ class CollectorCLITests(unittest.TestCase):
             while not socket_path.exists() and time.monotonic() < deadline:
                 time.sleep(0.01)
             self.assertTrue(socket_path.exists())
-            self.assertEqual(socket_path.stat().st_mode & 0o777, 0o600)
+            mode = socket_path.stat().st_mode & 0o777
+            deadline = time.monotonic() + 3
+            while mode != 0o600 and time.monotonic() < deadline:
+                time.sleep(0.01)
+                mode = socket_path.stat().st_mode & 0o777
+            self.assertEqual(mode, 0o600)
 
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             client.settimeout(2)
@@ -486,6 +493,107 @@ class CollectorCLITests(unittest.TestCase):
             self.assertFalse(thread.is_alive())
             self.assertEqual(result, [0])
             self.assertFalse(socket_path.exists())
+
+    def test_service_print_renders_current_platform(self):
+        code, out, err = self.run_cli(
+            ["service", "print", "--interval", "300"],
+            refresher=FakeRefresher(),
+        )
+
+        self.assertEqual((code, err), (0, ""))
+        self.assertTrue(out)
+
+    def test_executor_list_returns_both_plugins(self):
+        code, out, err = self.run_cli(
+            ["executor", "list", "--format", "json"],
+            refresher=FakeRefresher(),
+        )
+
+        self.assertEqual((code, err), (0, ""))
+        payload = json.loads(out)
+        self.assertEqual(payload["schemaVersion"], "1.0")
+        self.assertEqual(
+            {item["pluginId"] for item in payload["executors"]},
+            {"cc_switch", "omniroute"},
+        )
+
+    def test_connect_returns_console_url(self):
+        code, out, err = self.run_cli(
+            ["connect", "--family", "deepseek", "--format", "json"]
+        )
+
+        self.assertEqual((code, err), (0, ""))
+        payload = json.loads(out)
+        self.assertEqual(payload["consoleUrl"], "https://platform.deepseek.com")
+        self.assertIn("api_key", payload["authModes"])
+
+    def test_connect_unknown_family_fails(self):
+        code, out, err = self.run_cli(
+            ["connect", "--family", "not-a-family", "--format", "json"]
+        )
+
+        self.assertEqual((code, err), (2, "invalid provider family\n"))
+
+    def test_dashboard_invalid_port_fails(self):
+        code, out, err = self.run_cli(["dashboard", "--port", "70000"])
+
+        self.assertEqual((code, err), (2, "invalid dashboard port\n"))
+
+    def test_daemon_serves_loopback_tcp_api_with_bearer_token(self):
+        import http.client
+
+        with tempfile.TemporaryDirectory() as directory:
+            probe = socket.socket()
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+            probe.close()
+            token_path = Path(directory) / "api.token"
+            stop = threading.Event()
+            result = []
+
+            thread = threading.Thread(
+                target=lambda: result.append(main(
+                    [
+                        "daemon", "--interval", "60",
+                        "--api-transport", "tcp",
+                        "--api-port", str(port),
+                        "--api-token-path", str(token_path),
+                    ],
+                    stderr=io.StringIO(), store=self.store, query=self.query,
+                    refresher=FakeRefresher(), stop_event=stop,
+                ))
+            )
+            thread.start()
+            deadline = time.monotonic() + 3
+            token = None
+            while not token_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            token = token_path.read_text(encoding="utf-8").strip()
+            self.assertGreaterEqual(len(token), 43)
+
+            body = b""
+            status = 0
+            while time.monotonic() < deadline:
+                try:
+                    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                    connection.request(
+                        "GET", "/v1/health",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    response = connection.getresponse()
+                    status = response.status
+                    body = response.read()
+                    connection.close()
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            self.assertEqual(status, 200)
+            self.assertIn(b'"schemaVersion":"1.0"', body)
+
+            stop.set()
+            thread.join(3)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result, [0])
 
     def test_fresh_timeout_is_real_and_returns_last_good_without_sleep(self):
         blocker = threading.Event()
@@ -571,6 +679,7 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(json.loads(out)["todayTokens"], 999)
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX path/process-group test")
     def test_default_fresh_uses_secret_safe_bounded_subprocess_and_requeries(self):
         calls = []
 
@@ -696,6 +805,7 @@ class CollectorCLITests(unittest.TestCase):
             calls[0][1]["timeout"], DEFAULT_FRESH_TIMEOUT_SECONDS
         )
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX process-group test")
     def test_default_fresh_timeout_kills_and_reaps_forked_descendant(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -517,7 +517,17 @@ private struct ModelChartSection: View {
                 detail: "Most recent 30 days, up to 12 named models"
             )
             if model.chartDays.isEmpty || presentation.displayState == .noSeries {
-                EmptyDataView(title: "No model trend", description: "No matching model activity is available.")
+                HStack(spacing: 8) {
+                    Image(systemName: "chart.bar.xaxis")
+                    Text(
+                        AppLocalization.text(
+                            "No model activity matches the current filters. Switch the period or Provider to see a trend."
+                        )
+                    )
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 10)
             } else {
                 Chart(presentation.seriesPoints) { point in
                     BarMark(

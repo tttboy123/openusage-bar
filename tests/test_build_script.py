@@ -2,12 +2,14 @@ import plistlib
 import subprocess
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS Xcode build test")
 class BuildScriptContractTests(unittest.TestCase):
     def test_bootstrap_creates_the_local_build_environment_from_pinned_dependencies(self):
         source = (ROOT / "scripts/bootstrap.sh").read_text(encoding="utf-8")

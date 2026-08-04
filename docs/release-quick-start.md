@@ -1,11 +1,11 @@
 # OpenUsage Bar 安装指南 / Install guide
 
-OpenUsage Bar 0.6.0 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
+OpenUsage Bar 0.7.1 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
 
 ## 图形化安装（推荐）
 
-1. 从 [v0.6.0 发布页](https://github.com/tttboy123/openusage-bar/releases/tag/v0.6.0)
-   下载 `OpenUsage-Bar-v0.6.0-macos-arm64.dmg`。
+1. 从 [v0.7.1 发布页](https://github.com/tttboy123/openusage-bar/releases/tag/v0.7.1)
+   下载 `OpenUsage-Bar-v0.7.1-macos-arm64.dmg`。
 2. 双击 DMG，将 **OpenUsage Bar** 拖入 **Applications**。
 3. 在访达“应用程序”中打开。App 会自动注册登录项和内置采集器。
 4. 若 macOS 显示“OpenUsage Bar 已损坏”，确认下载来源和 SHA-256 后执行
@@ -17,7 +17,7 @@ OpenUsage Bar 是菜单栏工具，不会出现在 Dock 或 Command-Tab。采集
 
 ## Install (English)
 
-Download the v0.6.0 DMG, open it, drag **OpenUsage Bar** to **Applications**,
+Download the v0.7.1 DMG, open it, drag **OpenUsage Bar** to **Applications**,
 then open it from Finder. The app registers its login item and bundled collector
 on first launch. If macOS says the app is damaged, verify the download and run
 `xattr -dr com.apple.quarantine "/Applications/OpenUsage Bar.app"` for this app
@@ -29,7 +29,7 @@ Items** if macOS requests background approval.
 将 DMG 和 `.dmg.sha256` 放在同一目录后执行：
 
 ```bash
-shasum -a 256 -c OpenUsage-Bar-v0.6.0-macos-arm64.dmg.sha256
+shasum -a 256 -c OpenUsage-Bar-v0.7.1-macos-arm64.dmg.sha256
 ```
 
 ## 高级修复与自动化 / Advanced repair
@@ -37,9 +37,9 @@ shasum -a 256 -c OpenUsage-Bar-v0.6.0-macos-arm64.dmg.sha256
 普通用户不需要执行脚本。ZIP 中仍附带事务式安装、回滚和卸载工具：
 
 ```bash
-shasum -a 256 -c OpenUsage-Bar-v0.6.0-macos-arm64.zip.sha256
-unzip OpenUsage-Bar-v0.6.0-macos-arm64.zip
-cd OpenUsage-Bar-v0.6.0-macos-arm64
+shasum -a 256 -c OpenUsage-Bar-v0.7.1-macos-arm64.zip.sha256
+unzip OpenUsage-Bar-v0.7.1-macos-arm64.zip
+cd OpenUsage-Bar-v0.7.1-macos-arm64
 scripts/install_app.sh
 ```
 
@@ -110,15 +110,15 @@ GitHub CLI. Then the packaged candidate verifier checks the manifest, SBOM,
 checksums, every release asset and all attestations:
 
 ```bash
-gh attestation verify OpenUsage-Bar-v0.6.0-macos-arm64.zip \
+gh attestation verify OpenUsage-Bar-v0.7.1-macos-arm64.zip \
   --repo tttboy123/openusage-bar \
   --signer-workflow tttboy123/openusage-bar/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.6.0 \
+  --source-ref refs/tags/v0.7.1 \
   --deny-self-hosted-runners
-shasum -a 256 -c OpenUsage-Bar-v0.6.0-macos-arm64.zip.sha256
-unzip OpenUsage-Bar-v0.6.0-macos-arm64.zip
-cd OpenUsage-Bar-v0.6.0-macos-arm64
-scripts/verify_canary_candidate.py --assets-dir .. --version 0.6.0
+shasum -a 256 -c OpenUsage-Bar-v0.7.1-macos-arm64.zip.sha256
+unzip OpenUsage-Bar-v0.7.1-macos-arm64.zip
+cd OpenUsage-Bar-v0.7.1-macos-arm64
+scripts/verify_canary_candidate.py --assets-dir .. --version 0.7.1
 ```
 
 After installing the verified candidate, a tester may explicitly create a

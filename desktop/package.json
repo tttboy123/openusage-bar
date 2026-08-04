@@ -1,0 +1,13 @@
+{
+  "name": "usagehub-desktop",
+  "version": "0.1.0",
+  "description": "UsageHub cross-platform desktop client (Electron) wrapping the local web dashboard",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "electron": "^43.2.0"
+  }
+}

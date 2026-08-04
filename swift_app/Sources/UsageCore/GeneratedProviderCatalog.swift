@@ -151,6 +151,34 @@ public enum GeneratedProviderCatalog {
                 ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
             ]
         ),
+        "cc_switch": ProviderDisplayDescriptor(
+            providerID: "cc_switch",
+            familyID: "cc_switch",
+            displayName: "CC Switch",
+            aliases: [],
+            category: .localTool,
+            metricFamilies: [.operational],
+            regions: [],
+            supportsAccounts: false,
+            credentialSourceTypes: [.local],
+            acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "cc_switch.rollups", sourceKind: "local_database"), ProviderIdentitySource(credentialSource: "cc_switch.status", sourceKind: "local_database")],
+            capabilityProfile: ProviderCapabilityProfile(
+                quotaWindows: .unknown,
+                tokenHistory: .unknown,
+                modelBreakdown: .unknown,
+                resetTimestamps: .unknown,
+                billing: .unknown,
+                credits: .unknown,
+                balance: .unknown,
+                cost: .unknown,
+                rateLimits: .unknown,
+                serviceStatus: .unknown
+            ),
+            sourceCapabilities: [
+                ProviderSourceCapability(sourceID: "cc_switch.status", sourceKind: "local_database", operatingSystems: [.macOS], stability: .stable, provenance: .openUsageBarBuiltIn, factFamilies: [.detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .unverified),
+                ProviderSourceCapability(sourceID: "cc_switch.rollups", sourceKind: "local_database", operatingSystems: [.macOS], stability: .stable, provenance: .openUsageBarBuiltIn, factFamilies: [.detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .aggregate, verification: .unverified),
+            ]
+        ),
         "claude_code": ProviderDisplayDescriptor(
             providerID: "claude_code",
             familyID: "claude_code",
@@ -323,8 +351,8 @@ public enum GeneratedProviderCatalog {
             metricFamilies: [.billing, .operational],
             regions: [],
             supportsAccounts: false,
-            credentialSourceTypes: [.none],
-            acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
+            credentialSourceTypes: [.apiKey, .none],
+            acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "deepseek_official_api", sourceKind: "official_api"), ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
                 quotaWindows: .unknown,
                 tokenHistory: .unknown,
@@ -338,6 +366,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
+                ProviderSourceCapability(sourceID: "deepseek_official_api", sourceKind: "official_api", operatingSystems: [.macOS], stability: .stable, provenance: .providerOfficial, factFamilies: [.detection], authority: .providerOfficial, accountScope: .configuredAccount, modelScope: .aggregate, verification: .unverified),
                 ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
             ]
         ),
@@ -724,6 +753,33 @@ public enum GeneratedProviderCatalog {
                 ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
+        "omniroute": ProviderDisplayDescriptor(
+            providerID: "omniroute",
+            familyID: "omniroute",
+            displayName: "OmniRoute",
+            aliases: [],
+            category: .localTool,
+            metricFamilies: [.operational],
+            regions: [],
+            supportsAccounts: false,
+            credentialSourceTypes: [.local],
+            acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "omniroute.usage", sourceKind: "local_database")],
+            capabilityProfile: ProviderCapabilityProfile(
+                quotaWindows: .unknown,
+                tokenHistory: .unknown,
+                modelBreakdown: .unknown,
+                resetTimestamps: .unknown,
+                billing: .unknown,
+                credits: .unknown,
+                balance: .unknown,
+                cost: .unknown,
+                rateLimits: .unknown,
+                serviceStatus: .unknown
+            ),
+            sourceCapabilities: [
+                ProviderSourceCapability(sourceID: "omniroute.usage", sourceKind: "local_database", operatingSystems: [.macOS], stability: .experimental, provenance: .openUsageBarBuiltIn, factFamilies: [.detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .aggregate, verification: .unverified),
+            ]
+        ),
         "openai": ProviderDisplayDescriptor(
             providerID: "openai",
             familyID: "openai",
@@ -1050,5 +1106,20 @@ public enum GeneratedProviderCatalog {
                 ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
+    ]
+    public static let quickConnectURLs: [String: String] = [
+        "cc_switch": "https://ccswitch.io",
+        "codex": "https://chatgpt.com/codex",
+        "deepseek": "https://platform.deepseek.com",
+        "minimax": "https://platform.minimaxi.com",
+        "moonshot": "https://platform.moonshot.cn",
+        "omniroute": "http://localhost:20128",
+        "step_plan": "https://platform.stepfun.com",
+    ]
+    public static let apiKeyURLs: [String: String] = [
+        "deepseek": "https://platform.deepseek.com/api_keys",
+        "minimax": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+        "moonshot": "https://platform.moonshot.cn/console/api-keys",
+        "step_plan": "https://platform.stepfun.com/api-keys",
     ]
 }

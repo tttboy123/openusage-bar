@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -84,7 +85,7 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
         report = self.module.verify_surfaces(
             api_get=lambda: next(api_values),
             cli_get=lambda: cli_value,
-            product={"version": "0.6.0", "build": "9"},
+            product={"version": "0.7.1", "build": "11"},
             captured_at="2026-07-30T00:00:03Z",
         )
 
@@ -96,7 +97,7 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
                 "visualMenu": "pending_manual",
             },
             "dataRevision": 7,
-            "product": {"build": "9", "version": "0.6.0"},
+            "product": {"build": "11", "version": "0.7.1"},
             "schemaVersion": "openusage-canary-surfaces-1",
         })
         encoded = json.dumps(report, sort_keys=True).lower()
@@ -120,7 +121,7 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
         report = self.module.verify_surfaces(
             api_get=lambda: next(api_values),
             cli_get=lambda: next(cli_values),
-            product={"version": "0.6.0", "build": "9"},
+            product={"version": "0.7.1", "build": "11"},
             captured_at="2026-07-30T00:00:05Z",
             attempts=2,
         )
@@ -139,7 +140,7 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
             self.module.verify_surfaces(
                 api_get=lambda: api_value,
                 cli_get=lambda: cli_value,
-                product={"version": "0.6.0", "build": "9"},
+                product={"version": "0.7.1", "build": "11"},
                 captured_at="2026-07-30T00:00:02Z",
             )
 
@@ -159,17 +160,19 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
                     next(revisions),
                     generated_at="2026-07-30T00:00:00Z",
                 ),
-                product={"version": "0.6.0", "build": "9"},
+                product={"version": "0.7.1", "build": "11"},
                 captured_at="2026-07-30T00:00:02Z",
                 attempts=2,
             )
 
     def test_private_report_writer_is_atomic_and_mode_0600(self):
+        if sys.platform == "win32":
+            self.skipTest("POSIX mode assertion")
         report = {
             "schemaVersion": "openusage-canary-surfaces-1",
             "capturedAt": "2026-07-30T00:00:03Z",
             "dataRevision": 7,
-            "product": {"version": "0.6.0", "build": "9"},
+            "product": {"version": "0.7.1", "build": "11"},
             "checks": {
                 "apiCliSnapshot": "pass",
                 "sourceHealthAgreement": "pass",
@@ -185,6 +188,8 @@ class CanarySurfaceVerifierTests(unittest.TestCase):
             self.assertEqual(os.stat(output).st_mode & 0o777, 0o600)
 
     def test_signature_verification_is_fixed_shell_free_and_bounded(self):
+        if sys.platform == "win32":
+            self.skipTest("POSIX shell-free verifier test")
         process = mock.Mock()
         process.wait.return_value = 0
         process.poll.return_value = 0

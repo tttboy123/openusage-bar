@@ -1,1 +1,1 @@
-"""OpenUsage Bar local provider aggregation and macOS UI package."""
+"""UsageHub (formerly OpenUsage Bar) local provider aggregation package."""

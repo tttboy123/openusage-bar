@@ -136,6 +136,7 @@ class KiroCredentialTests(unittest.TestCase):
                     SecurityKiroTokenReader(runner=runner).read()
                 self.assertNotIn(SECRET, str(raised.exception))
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX security reader test")
     def test_default_security_reader_bounds_output_and_reaps_descendant(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

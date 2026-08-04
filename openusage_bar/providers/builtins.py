@@ -5,6 +5,8 @@ from datetime import datetime
 
 from ..codex_daily import CodexLocalDailyImporter
 from ..codex_subscription import CodexSubscriptionAdapter
+from ..cc_switch import CcSwitchCostImporter, CcSwitchStatusAdapter
+from ..claude_code_daily import ClaudeCodeLocalDailyImporter
 from ..config import (
     DailyCostFeedConfig,
     DailyUsageFeedConfig,
@@ -17,6 +19,8 @@ from ..config import (
 from ..cost_feed import DailyCostFeedCardAdapter, DailyCostFeedImporter
 from ..daily_feed import DailyUsageFeedCardAdapter, DailyUsageFeedImporter
 from ..daily_history import OpenUsageDailyImporter
+from ..deepseek import DeepSeekBalanceAdapter
+from ..deepseek_openusage import OpenUsageDeepSeekAdapter
 from ..generic import GenericHTTPSAdapter
 from ..kiro import KiroQuotaAdapter
 from ..minimax import (
@@ -31,6 +35,7 @@ from ..openai_organization import (
     OpenAIOrganizationImporter,
 )
 from ..openusage_adapter import OpenUsageAdapter
+from ..omniroute import OmniRouteCostImporter
 from ..step_plan import StepPlanAdapter, endpoints_for_site
 from .contracts import ProviderBinding
 from .registry import AdapterRegistry
@@ -94,6 +99,41 @@ def default_registry(
             CodexLocalDailyImporter(clock=clock), "local_file"
         ),),
     ))
+    registry.register_global(lambda: ProviderBinding(
+        provider_id="claude_code", family_id="claude_code",
+        usage_sources=(_performance_source(
+            ClaudeCodeLocalDailyImporter(clock=clock), "local_file"
+        ),),
+    ))
+    registry.register_global(lambda: ProviderBinding(
+        provider_id="cc_switch", family_id="cc_switch",
+        quota_sources=(_quota_source(
+            CcSwitchStatusAdapter(), "cc_switch.status", 30, "local_file"
+        ),),
+        cost_sources=(_performance_source(
+            CcSwitchCostImporter(), "local_file"
+        ),),
+    ))
+    registry.register_global(lambda: ProviderBinding(
+        provider_id="omniroute", family_id="omniroute",
+        cost_sources=(_performance_source(
+            OmniRouteCostImporter(), "local_file"
+        ),),
+    ))
+    def deepseek_openusage() -> ProviderBinding:
+        openusage_adapter = OpenUsageDeepSeekAdapter(clock=clock)
+        return ProviderBinding(
+            provider_id="deepseek", family_id="deepseek",
+            balance_sources=(
+                _performance_source(DeepSeekBalanceAdapter(), "network"),
+                _performance_source(openusage_adapter, "child_process"),
+            ),
+            cost_sources=(
+                _performance_source(openusage_adapter, "child_process"),
+            ),
+        )
+
+    registry.register_global(deepseek_openusage)
 
     def minimax(config: MiniMaxConfig) -> ProviderBinding:
         endpoints = minimax_endpoints_for_site(config.site)

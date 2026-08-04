@@ -50,7 +50,7 @@ class PrivacyScanTests(unittest.TestCase):
             with self.subTest(payload=payload), tempfile.TemporaryDirectory() as temp:
                 candidate = Path(temp) / "payload.json"
                 candidate.write_text(payload, encoding="utf-8")
-                result = subprocess.run([str(scanner), str(candidate)], capture_output=True, text=True)
+                result = subprocess.run([sys.executable, str(scanner), str(candidate)], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, "")
                 self.assertNotIn(payload, result.stderr)
@@ -60,7 +60,7 @@ class PrivacyScanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             candidate = Path(temp) / "health.json"
             candidate.write_text('{"schemaVersion":"1.0","todayTokens":0}', encoding="utf-8")
-            result = subprocess.run([str(scanner), str(candidate)], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(scanner), str(candidate)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "privacy_scan_matches=0 files=1\n")
 
@@ -72,7 +72,7 @@ class PrivacyScanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             candidate = Path(temp) / "catalog.json"
             candidate.write_text(payload, encoding="utf-8")
-            result = subprocess.run([str(scanner), str(candidate)], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(scanner), str(candidate)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_scans_nested_directories_and_structurally_scans_canonical_sqlite(self):
@@ -86,7 +86,7 @@ class PrivacyScanTests(unittest.TestCase):
             from openusage_bar.activity_store import ActivityStore
             store = ActivityStore(root / "activity.sqlite3")
             store.close()
-            result = subprocess.run([str(scanner), str(root)], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(scanner), str(root)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "privacy_scan_matches=0 files=1 sqlite_files=1\n")
 
@@ -100,7 +100,7 @@ class PrivacyScanTests(unittest.TestCase):
                 if mode=="table": db.execute("CREATE TABLE secrets(value TEXT)")
                 else: db.execute("INSERT INTO ledger_meta VALUES('note',?)",("sk-"+"X"*30,))
                 db.commit(); db.close()
-                result=subprocess.run([str(scanner),str(path)],capture_output=True,text=True)
+                result=subprocess.run([sys.executable, str(scanner),str(path)],capture_output=True,text=True)
                 self.assertNotEqual(result.returncode,0)
                 self.assertEqual(result.stderr,"privacy_scan_forbidden_material\n")
                 self.assertNotIn("sk-",result.stderr)
@@ -118,7 +118,7 @@ class PrivacyScanTests(unittest.TestCase):
             self.assertTrue(wal.exists())
             before = {candidate: candidate.read_bytes() for candidate in (path, wal)}
             result = subprocess.run(
-                [str(scanner), str(path)], capture_output=True, text=True
+                [sys.executable, str(scanner), str(path)], capture_output=True, text=True
             )
             after = {candidate: candidate.read_bytes() for candidate in (path, wal)}
             store.close()
@@ -131,7 +131,7 @@ class PrivacyScanTests(unittest.TestCase):
             root = Path(temp)
             secret = root / "private-name.json"
             secret.write_text('{"refreshToken":"not-printed"}', encoding="utf-8")
-            result = subprocess.run([str(scanner), str(root)], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(scanner), str(root)], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(result.stdout, "")
             self.assertEqual(result.stderr, "privacy_scan_forbidden_material\n")
@@ -148,7 +148,7 @@ class PrivacyScanTests(unittest.TestCase):
             for target in (link, root / "missing.json"):
                 with self.subTest(target=target.name):
                     result = subprocess.run(
-                        [str(scanner), str(target)], capture_output=True, text=True
+                        [sys.executable, str(scanner), str(target)], capture_output=True, text=True
                     )
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(result.stderr, "privacy_scan_forbidden_material\n")

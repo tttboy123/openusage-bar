@@ -11,14 +11,19 @@ from unittest.mock import Mock
 from openusage_bar.bounded_process import BoundedProcessError
 from openusage_bar.keychain import (
     BoundedMacOSKeychain,
+    HeadlessKeychain,
     InteractiveKeychainAuthorizer,
     KeychainAuthorizationState,
     KeychainError,
+    LinuxSecretServiceAPI,
     MacOSKeychain,
+    UnsupportedPlatformKeychainError,
+    WindowsCredentialManagerAPI,
     run_native_keychain_write,
 )
 
 
+@unittest.skipIf(sys.platform == "win32", "macOS bounded keychain behavior")
 class KeychainTests(unittest.TestCase):
     def test_uses_fixed_service_and_provider_account(self):
         api = Mock()
@@ -238,6 +243,72 @@ class KeychainTests(unittest.TestCase):
             with self.assertRaises(KeychainError) as raised:
                 keychain.set("step-plan-main.oasis-token", "never-in-error")
             self.assertNotIn("never-in-error", str(raised.exception))
+
+
+class CrossPlatformKeychainTests(unittest.TestCase):
+    def test_headless_keychain_maps_account_to_fixed_service(self):
+        api = Mock()
+        api.get.return_value = b"secret"
+
+        self.assertEqual(HeadlessKeychain(api).get("minimax-main"), "secret")
+        api.get.assert_called_once_with(
+            {"service": "com.lune.openusage-menubar", "account": "minimax-main"}
+        )
+
+    def test_headless_keychain_adds_when_update_reports_missing(self):
+        api = Mock()
+        api.update.return_value = False
+
+        HeadlessKeychain(api).set("demo", "secret")
+
+        api.add.assert_called_once_with(
+            {"service": "com.lune.openusage-menubar", "account": "demo"}, b"secret"
+        )
+
+    def test_headless_keychain_rejects_invalid_utf8(self):
+        api = Mock()
+        api.get.return_value = b"\xff\xfe"
+
+        with self.assertRaises(KeychainError):
+            HeadlessKeychain(api).get("demo")
+
+    @unittest.skipIf(sys.platform == "win32", "Windows backend is native on Windows")
+    def test_windows_backend_requires_windows(self):
+        with self.assertRaises(UnsupportedPlatformKeychainError):
+            WindowsCredentialManagerAPI()
+
+    def test_windows_backend_maps_service_account_and_persists(self):
+        native = Mock()
+        native.read.return_value = None
+        api = WindowsCredentialManagerAPI(native=native)
+        query = {"service": "com.lune.openusage-menubar", "account": "demo"}
+
+        self.assertIsNone(api.get(query))
+        native.read.assert_called_once_with("com.lune.openusage-menubar\\demo")
+        self.assertFalse(api.update(query, b"value"))
+        native.write.assert_called_once_with("com.lune.openusage-menubar\\demo", b"value")
+
+        api.add(query, b"value")
+        api.delete(query)
+        native.delete.assert_called_once_with("com.lune.openusage-menubar\\demo")
+
+    @unittest.skipIf(sys.platform.startswith("linux"), "Linux backend is native on Linux")
+    def test_linux_backend_requires_linux(self):
+        with self.assertRaises(UnsupportedPlatformKeychainError):
+            LinuxSecretServiceAPI()
+
+    def test_linux_backend_maps_attributes_and_secret(self):
+        backend = Mock()
+        backend.get.return_value = b"secret"
+        api = LinuxSecretServiceAPI(backend=backend)
+        query = {"service": "com.lune.openusage-menubar", "account": "demo"}
+
+        self.assertEqual(api.get(query), b"secret")
+        self.assertTrue(api.update(query, b"new"))
+        backend.set.assert_called_once_with(query, b"new")
+        api.add(query, b"new")
+        api.delete(query)
+        backend.delete.assert_called_once_with(query)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import posixpath
 import plistlib
 import re
@@ -145,6 +146,28 @@ def verify_versions(root: Path, expected_version: str) -> None:
         raise ArtifactError("version_mismatch")
 
 
+def verify_executable_names(root: Path) -> None:
+    """Every bundle must declare a CFBundleExecutable that exists on disk."""
+    app = root / "dist/OpenUsage Bar.app"
+    bundles = (
+        app,
+        app / "Contents/Helpers/OpenUsage Activity.app",
+        app / "Contents/Helpers/OpenUsage Provider Settings.app",
+    )
+    for bundle in bundles:
+        info = bundle / "Contents/Info.plist"
+        try:
+            value = plistlib.loads(info.read_bytes())
+            executable = value["CFBundleExecutable"]
+        except (OSError, plistlib.InvalidFileException, KeyError, TypeError) as error:
+            raise ArtifactError("plist") from error
+        if not isinstance(executable, str) or not executable:
+            raise ArtifactError("plist")
+        candidate = bundle / "Contents/MacOS" / executable
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            raise ArtifactError("binary")
+
+
 def _is_macho(path: Path) -> bool:
     try:
         with path.open("rb") as handle:
@@ -195,6 +218,7 @@ def audit(path: Path) -> None:
                 raise ArtifactError("archive")
             root = Path(directory) / expected_root
             verify_versions(root, match.group(1))
+            verify_executable_names(root)
             verify_binaries(root)
 
 

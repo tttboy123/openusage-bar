@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Iterable
 
 from .activity_store import ActivityStore
@@ -116,6 +117,17 @@ class BalanceItem:
     stale: bool
     revision: int
     source_id: str
+
+
+@dataclass(frozen=True)
+class QuotaHubItem:
+    currency: str
+    total_available: str
+    provider_count: int
+    provenance: tuple[tuple[str, str, str], ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "provenance", tuple(self.provenance))
 
 
 @dataclass(frozen=True)
@@ -299,6 +311,7 @@ class ResourceSnapshotResult(ResultEnvelope):
     summary: SnapshotSummary
     balances: tuple[BalanceItem, ...]
     quota_windows: tuple[CapacityProvider, ...]
+    quota_hub: tuple[QuotaHubItem, ...]
     providers: tuple[ProviderInstanceItem, ...]
     sources: tuple[SourceStatusItem, ...]
     catalog_revision: str
@@ -306,6 +319,7 @@ class ResourceSnapshotResult(ResultEnvelope):
     def __post_init__(self) -> None:
         object.__setattr__(self, "balances", tuple(self.balances))
         object.__setattr__(self, "quota_windows", tuple(self.quota_windows))
+        object.__setattr__(self, "quota_hub", tuple(self.quota_hub))
         object.__setattr__(self, "providers", tuple(self.providers))
         object.__setattr__(self, "sources", tuple(self.sources))
 
@@ -417,6 +431,40 @@ class QueryService:
         )
 
     @staticmethod
+    def _quota_hub(balance_states: Iterable[Any]) -> tuple[QuotaHubItem, ...]:
+        grouped: dict[str, list[tuple[Decimal, str, str, str]]] = {}
+        for state in balance_states:
+            available = getattr(state, "available", None)
+            if available is None:
+                continue
+            try:
+                amount = Decimal(str(available))
+            except InvalidOperation:
+                continue
+            currency = getattr(state, "currency", None) or "UNKNOWN"
+            grouped.setdefault(currency, []).append(
+                (
+                    amount,
+                    getattr(state, "provider_id", "unknown"),
+                    getattr(state, "source_id", "current.balance"),
+                    getattr(state, "quality", "unverified"),
+                )
+            )
+        items: list[QuotaHubItem] = []
+        for currency, entries in sorted(grouped.items()):
+            total = sum(entry[0] for entry in entries)
+            provenance = tuple(sorted({(p, s, q) for _, p, s, q in entries}))
+            items.append(
+                QuotaHubItem(
+                    currency=currency,
+                    total_available=format(total, "f"),
+                    provider_count=len({p for _, p, _, _ in entries}),
+                    provenance=provenance,
+                )
+            )
+        return tuple(items)
+
+    @staticmethod
     def _provider_instance_item(row: Any) -> ProviderInstanceItem:
         return ProviderInstanceItem(
             provider_id=row.provider_id,
@@ -464,6 +512,7 @@ class QueryService:
                 self._capacity_provider(state, generated_dt)
                 for state in snapshot.quota_states
             ),
+            quota_hub=self._quota_hub(snapshot.balance_states),
             providers=tuple(
                 self._provider_instance_item(row)
                 for row in snapshot.provider_instances

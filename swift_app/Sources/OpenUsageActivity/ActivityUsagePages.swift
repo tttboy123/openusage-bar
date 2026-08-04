@@ -2,11 +2,16 @@ import SwiftUI
 import UsageCore
 
 struct APISpendPage: View {
+    @Bindable var store: ActivityViewStore
     let data: ActivityLoadedData
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             PageHeading("API Spend", detail: "Native currency values only")
+            if !data.apiSpend.balances.isEmpty {
+                balanceSection
+                Divider()
+            }
             if data.apiSpend.totals.isEmpty {
                 EmptyDataView(
                     title: data.apiSpend.coverage == .complete
@@ -26,6 +31,74 @@ struct APISpendPage: View {
                         Text(APISpendText.display(amount: total.amount, currency: total.currency)).monospacedDigit()
                     }
                     Divider()
+                }
+            }
+            if !data.records.isEmpty {
+                Divider()
+                tokenSection
+            }
+        }
+    }
+
+    private var tokenSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(AppLocalization.text("Token Usage")).font(.headline)
+            Text(AppLocalization.format("%@ Tokens", store.period.title))
+                .font(.callout).foregroundStyle(.secondary)
+            let rows = tokenRows
+            if rows.isEmpty {
+                Text(
+                    AppLocalization.text(
+                        "No token activity matches the current filters."
+                    )
+                )
+                    .font(.callout).foregroundStyle(.secondary)
+            } else {
+                ForEach(rows) { row in
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(data.providerDescriptor(for: row.providerID).displayName)
+                        Spacer()
+                        Text(TokenText.compact(row.tokens)).monospacedDigit()
+                    }
+                    if row.id != rows.last?.id { Divider() }
+                }
+            }
+        }
+    }
+
+    private var tokenRows: [TokenUsageRow] {
+        let filtered = data.records.filter {
+            store.providerID == nil || $0.providerID == store.providerID
+        }
+        var totals: [String: Int64] = [:]
+        for record in filtered {
+            totals[record.providerID, default: 0] += record.totalTokens
+        }
+        return totals
+            .map { TokenUsageRow(providerID: $0.key, tokens: $0.value) }
+            .sorted { $0.tokens > $1.tokens }
+    }
+
+    private struct TokenUsageRow: Identifiable {
+        let providerID: String
+        let tokens: Int64
+        var id: String { providerID }
+    }
+
+    private var balanceSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Balance").font(.headline)
+            ForEach(data.apiSpend.balances, id: \.recordID) { balance in
+                HStack {
+                    Text(data.providerDescriptor(for: balance.providerID).displayName)
+                    Spacer()
+                    Text(
+                        APISpendText.displayBalance(
+                            available: balance.available, currency: balance.currency
+                        )
+                    )
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
                 }
             }
         }
@@ -54,7 +127,12 @@ struct LocalToolsPage: View {
                 detail: "Token activity from local runtime logs, separate from subscription quota"
             )
             if summaries.isEmpty {
-                EmptyDataView(title: "No local tools", description: "Hermes and OpenClaw appear here when detected.")
+                EmptyDataView(
+                    title: AppLocalization.text("No local tool activity yet"),
+                    description: AppLocalization.text(
+                        "Local runtimes such as Hermes and OpenClaw appear here after they produce Token usage on this device."
+                    )
+                )
             } else {
                 ForEach(summaries) { summary in
                     VStack(alignment: .leading, spacing: 14) {

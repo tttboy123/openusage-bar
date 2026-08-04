@@ -173,7 +173,7 @@ public struct ProviderSourceStrategyPresentation: Sendable, Hashable {
     private static func provenanceTitle(_ provenance: ProviderSourceProvenance) -> String {
         switch provenance {
         case .openUsageUpstream: AppLocalization.text("OpenUsage upstream")
-        case .openUsageBarBuiltIn: AppLocalization.text("OpenUsage Bar built-in")
+        case .openUsageBarBuiltIn: AppLocalization.text("UsageHub built-in")
         case .providerOfficial: AppLocalization.text("Provider official")
         case .providerLocal: AppLocalization.text("Provider local")
         case .userSession: AppLocalization.text("User session")

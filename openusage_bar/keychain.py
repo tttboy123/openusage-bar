@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import time
+import ctypes
 from enum import Enum
 from pathlib import Path
 from typing import BinaryIO, Callable, Protocol, Sequence
@@ -473,3 +474,279 @@ class BoundedMacOSKeychain:
         })
         if set(response) != {"version", "ok"} or response.get("ok") is not True:
             raise KeychainError("Keychain helper failed")
+
+
+class UnsupportedPlatformKeychainError(KeychainError):
+    """Raised when the current platform has no usable credential backend."""
+
+
+class HeadlessKeychain:
+    """Keychain facade over any KeychainAPI for headless collectors.
+
+    Matches the ``get`` / ``set`` / ``delete`` surface used by provider
+    adapters and the aggregation pipeline without macOS-specific subprocesses.
+    """
+
+    def __init__(self, api: KeychainAPI) -> None:
+        if api is None:
+            raise ValueError("Keychain API is required")
+        self._api = api
+
+    @staticmethod
+    def _query(account: str) -> dict[str, str]:
+        if not account:
+            raise ValueError("Keychain account must not be empty")
+        return {"service": SERVICE, "account": account}
+
+    def get(self, account: str) -> str | None:
+        value = self._api.get(self._query(account))
+        if value is None:
+            return None
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise KeychainError("Keychain value is not valid UTF-8") from error
+
+    def set(self, account: str, secret: str) -> None:
+        if not secret:
+            raise ValueError("Secret must not be empty")
+        query = self._query(account)
+        value = secret.encode("utf-8")
+        if not self._api.update(query, value):
+            self._api.add(query, value)
+
+    def delete(self, account: str) -> None:
+        self._api.delete(self._query(account))
+
+
+def _win_target(query: dict[str, str]) -> str:
+    service = query.get("service") or SERVICE
+    account = query.get("account") or ""
+    if not _valid_account(account):
+        raise ValueError("Credential Manager account must not be empty")
+    return f"{service}\\{account}"
+
+
+class _WinCredential(ctypes.Structure):
+    _fields_ = [
+        ("Flags", ctypes.c_uint32),
+        ("Type", ctypes.c_uint32),
+        ("TargetName", ctypes.c_wchar_p),
+        ("Comment", ctypes.c_wchar_p),
+        ("LastWritten", ctypes.c_uint64),
+        ("CredentialBlobSize", ctypes.c_uint32),
+        ("CredentialBlob", ctypes.POINTER(ctypes.c_ubyte)),
+        ("Persist", ctypes.c_uint32),
+        ("AttributeCount", ctypes.c_uint32),
+        ("Attributes", ctypes.c_void_p),
+        ("TargetAlias", ctypes.c_wchar_p),
+        ("UserName", ctypes.c_wchar_p),
+    ]
+
+
+class _WinCredentialNative:
+    """Minimal advapi32 Credential Manager binding (Windows only)."""
+
+    CRED_TYPE_GENERIC = 1
+    CRED_PERSIST_LOCAL_MACHINE = 2
+    ERROR_NOT_FOUND = 1168
+
+    def __init__(self) -> None:
+        if sys.platform != "win32":
+            raise UnsupportedPlatformKeychainError(
+                "Windows Credential Manager binding requires Windows"
+            )
+        import ctypes as _ctypes
+        from ctypes import wintypes
+
+        self._ctypes = _ctypes
+        self._wintypes = wintypes
+        advapi32 = _ctypes.WinDLL("advapi32", use_last_error=True)
+        self._cred_read = advapi32.CredReadW
+        self._cred_read.argtypes = [
+            wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+            _ctypes.POINTER(_ctypes.POINTER(_WinCredential)),
+        ]
+        self._cred_read.restype = wintypes.BOOL
+        self._cred_write = advapi32.CredWriteW
+        self._cred_write.argtypes = [_ctypes.POINTER(_WinCredential), wintypes.DWORD]
+        self._cred_write.restype = wintypes.BOOL
+        self._cred_delete = advapi32.CredDeleteW
+        self._cred_delete.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD]
+        self._cred_delete.restype = wintypes.BOOL
+        self._cred_free = advapi32.CredFree
+        self._cred_free.argtypes = [_ctypes.c_void_p]
+        self._cred_free.restype = None
+        self._get_last_error = _ctypes.get_last_error
+
+    def read(self, target: str) -> bytes | None:
+        credential = self._ctypes.POINTER(_WinCredential)()
+        if not self._cred_read(target, self.CRED_TYPE_GENERIC, 0, _ctypes.byref(credential)):
+            if self._get_last_error() == self.ERROR_NOT_FOUND:
+                return None
+            raise KeychainError("Credential Manager read failed")
+        try:
+            size = int(credential.contents.CredentialBlobSize)
+            if size <= 0 or credential.contents.CredentialBlob is None:
+                return b""
+            return bytes(
+                _ctypes.string_at(credential.contents.CredentialBlob, size)
+            )
+        finally:
+            self._cred_free(credential)
+
+    def write(self, target: str, value: bytes) -> None:
+        if len(value) > MAX_KEYCHAIN_VALUE_BYTES:
+            raise KeychainError("Credential value is too large")
+        blob = self._ctypes.create_string_buffer(value)
+        credential = _WinCredential()
+        credential.Type = self.CRED_TYPE_GENERIC
+        credential.TargetName = target
+        credential.CredentialBlobSize = len(value)
+        credential.CredentialBlob = self._ctypes.cast(blob, self._ctypes.POINTER(self._ctypes.c_ubyte))
+        credential.Persist = self.CRED_PERSIST_LOCAL_MACHINE
+        credential.UserName = None
+        if not self._cred_write(self._ctypes.byref(credential), 0):
+            raise KeychainError("Credential Manager write failed")
+
+    def delete(self, target: str) -> None:
+        if not self._cred_delete(target, self.CRED_TYPE_GENERIC, 0):
+            if self._get_last_error() == self.ERROR_NOT_FOUND:
+                return
+            raise KeychainError("Credential Manager delete failed")
+
+
+class WindowsCredentialManagerAPI(KeychainAPI):
+    """Generic Credential Manager backend (win32) implementing KeychainAPI."""
+
+    def __init__(self, *, native: object | None = None) -> None:
+        if sys.platform != "win32" and native is None:
+            raise UnsupportedPlatformKeychainError(
+                "Windows Credential Manager backend requires Windows"
+            )
+        self._native = native if native is not None else _WinCredentialNative()
+
+    def get(self, query: dict[str, str]) -> bytes | None:
+        return self._native.read(_win_target(query))
+
+    def update(self, query: dict[str, str], value: bytes) -> bool:
+        target = _win_target(query)
+        existed = self._native.read(target) is not None
+        self._native.write(target, value)
+        return existed
+
+    def add(self, query: dict[str, str], value: bytes) -> None:
+        self._native.write(_win_target(query), value)
+
+    def delete(self, query: dict[str, str]) -> None:
+        self._native.delete(_win_target(query))
+
+
+class _SecretServiceBackend:
+    """org.freedesktop.secrets backend through the optional secretstorage module."""
+
+    def __init__(self) -> None:
+        self._secretstorage = None
+        self._bus = None
+
+    def _connect(self):
+        if self._secretstorage is not None:
+            return self._bus
+        try:
+            import secretstorage
+        except ImportError as error:
+            raise KeychainError(
+                "Linux Secret Service requires the optional 'secretstorage' dependency"
+            ) from error
+        self._secretstorage = secretstorage
+        self._bus = secretstorage.dbus_init()
+        return self._bus
+
+    def _collection(self):
+        return self._secretstorage.get_default_collection(self._connect())
+
+    @staticmethod
+    def _attributes(query: dict[str, str]) -> dict[str, str]:
+        account = query.get("account") or ""
+        if not _valid_account(account):
+            raise ValueError("Secret Service account must not be empty")
+        return {"application": SERVICE, "account": account}
+
+    def get(self, query: dict[str, str]) -> bytes | None:
+        collection = self._collection()
+        items = collection.search_items(self._attributes(query))
+        for item in items:
+            if getattr(item, "is_locked", False):
+                item.unlock()
+            secret = item.get_secret()
+            if isinstance(secret, str):
+                return secret.encode("utf-8")
+            return bytes(secret)
+        return None
+
+    def set(self, query: dict[str, str], value: bytes) -> None:
+        if len(value) > MAX_KEYCHAIN_VALUE_BYTES:
+            raise KeychainError("Secret Service value is too large")
+        account = query.get("account") or ""
+        if not _valid_account(account):
+            raise ValueError("Secret Service account must not be empty")
+        self._collection().create_item(
+            f"openusage-bar:{account}",
+            self._attributes(query),
+            value.decode("utf-8"),
+            replace=True,
+        )
+
+    def delete(self, query: dict[str, str]) -> None:
+        for item in self._collection().search_items(self._attributes(query)):
+            item.delete()
+
+
+class LinuxSecretServiceAPI(KeychainAPI):
+    """Secret Service backend (linux) implementing KeychainAPI."""
+
+    def __init__(self, *, backend: object | None = None) -> None:
+        if sys.platform != "linux" and backend is None:
+            raise UnsupportedPlatformKeychainError(
+                "Linux Secret Service backend requires Linux"
+            )
+        self._backend = backend if backend is not None else _SecretServiceBackend()
+
+    def get(self, query: dict[str, str]) -> bytes | None:
+        value = self._backend.get(query)
+        if value is None:
+            return None
+        if len(value) > MAX_KEYCHAIN_VALUE_BYTES:
+            raise KeychainError("Secret Service value is too large")
+        return value
+
+    def update(self, query: dict[str, str], value: bytes) -> bool:
+        existed = self._backend.get(query) is not None
+        self._backend.set(query, value)
+        return existed
+
+    def add(self, query: dict[str, str], value: bytes) -> None:
+        self._backend.set(query, value)
+
+    def delete(self, query: dict[str, str]) -> None:
+        self._backend.delete(query)
+
+
+def default_keychain_api() -> KeychainAPI:
+    """Return the platform-native KeychainAPI implementation."""
+    if sys.platform == "darwin":
+        return SecurityFrameworkAPI()
+    if sys.platform == "win32":
+        return WindowsCredentialManagerAPI()
+    if sys.platform.startswith("linux"):
+        return LinuxSecretServiceAPI()
+    raise UnsupportedPlatformKeychainError(
+        f"no credential backend for platform {sys.platform}"
+    )
+
+
+def default_keychain() -> object:
+    """Return the bounded headless keychain for the current platform."""
+    if sys.platform == "darwin":
+        return BoundedMacOSKeychain()
+    return HeadlessKeychain(default_keychain_api())

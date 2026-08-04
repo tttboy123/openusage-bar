@@ -34,7 +34,7 @@ struct ActivityRootView: View {
             List(UsageDetailsRoute.allCases, selection: routeBinding) { route in
                 Label(route.title, systemImage: route.symbol).tag(route)
             }
-            .navigationTitle("OpenUsage")
+            .navigationTitle(AppLocalization.text("UsageHub"))
             .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 250)
         } detail: {
             content
@@ -66,7 +66,11 @@ struct ActivityRootView: View {
             if ActivityRouteLoadingPolicy.loadsLedgerOnAppear(coordinator.route) { store.reload() }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            if store.data != nil { store.revalidateSelection() }
+            // Do not interrupt an in-progress Provider configuration when the
+            // window regains focus (e.g. returning from another Space or app).
+            if store.data != nil, coordinator.route != .providersAndAccounts {
+                store.revalidateSelection()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: OnboardingRouteMessage.notification)) { _ in
             showOnboardingManually = true
@@ -161,7 +165,7 @@ struct ActivityRootView: View {
                             switch coordinator.route {
                             case .activity: ActivityPage(store: store, data: data)
                             case .capacity: CapacityPage(data: data)
-                            case .apiSpend: APISpendPage(data: data)
+                            case .apiSpend: APISpendPage(store: store, data: data)
                             case .localTools: LocalToolsPage(store: store, data: data)
                             case .providersAndAccounts: EmptyView()
                             case .dataHealth: DataHealthPage(data: data, retry: store.reload)

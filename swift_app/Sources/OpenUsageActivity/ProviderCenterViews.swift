@@ -175,7 +175,7 @@ struct ProvidersPage: View {
                                             in: RoundedRectangle(cornerRadius: 8)
                                         )
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("OpenUsage").font(.body.weight(.medium))
+                                        Text(AppLocalization.text("UsageHub")).font(.body.weight(.medium))
                                         Text(systemIntegrationSummary)
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
@@ -416,6 +416,28 @@ private struct ProviderConnectionDetail: View {
                     .controlSize(.large)
                     Button("Refresh Data", systemImage: "arrow.clockwise", action: reload)
                         .controlSize(.large)
+                    if let consoleURL = GeneratedProviderCatalog.quickConnectURLs[
+                        descriptor.familyID
+                    ], let url = URL(string: consoleURL) {
+                        Link(destination: url) {
+                            Label(
+                                AppLocalization.text("Open Console"),
+                                systemImage: "arrow.up.right.square"
+                            )
+                        }
+                        .controlSize(.large)
+                    }
+                    if let apiKeyURL = GeneratedProviderCatalog.apiKeyURLs[
+                        descriptor.familyID
+                    ], let url = URL(string: apiKeyURL) {
+                        Link(destination: url) {
+                            Label(
+                                AppLocalization.text("Get API Key"),
+                                systemImage: "key"
+                            )
+                        }
+                        .controlSize(.large)
+                    }
                 }
                 if connections.contains(where: { $0.isManaged }) {
                     Text("Existing app-managed accounts are edited in Connections above.")
@@ -462,7 +484,7 @@ private struct ProviderConnectionDetail: View {
     private var capabilitySection: some View {
         ProviderDetailSection(
             title: "Available Data",
-            detail: "Unknown means OpenUsage Bar has no reliable declaration. It is not zero."
+            detail: "Unknown means UsageHub has no reliable declaration. It is not zero."
         ) {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(capability.groups, id: \.state) { group in
@@ -887,6 +909,17 @@ private struct NativeProviderConnectionSheet: View {
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if let apiKeyURL = GeneratedProviderCatalog.apiKeyURLs[
+                    descriptor.familyID
+                ], let url = URL(string: apiKeyURL) {
+                    Link(destination: url) {
+                        Label(
+                            AppLocalization.text("Get API Key"),
+                            systemImage: "arrow.up.right.square"
+                        )
+                        .font(.callout)
+                    }
+                }
             }
             .padding(24)
             Divider()

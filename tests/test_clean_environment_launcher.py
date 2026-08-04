@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+import sys
 from pathlib import Path
 
 from openusage_bar.openusage_adapter import _CHILD_ENVIRONMENT_KEYS
@@ -57,6 +58,7 @@ int main(int argc, char **argv) {
 """
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS environment launcher test")
 class CleanEnvironmentLauncherTests(unittest.TestCase):
     maxDiff = None
 

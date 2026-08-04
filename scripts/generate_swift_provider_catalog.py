@@ -15,6 +15,7 @@ from openusage_bar.provider_catalog import (  # noqa: E402
     QuotaWindowCapability,
     load_provider_catalog,
 )
+from openusage_bar.quick_connect import QUICK_CONNECT  # noqa: E402
 
 
 MANIFEST = ROOT / "openusage_bar/resources/provider-catalog.v1.json"
@@ -223,7 +224,26 @@ def render() -> str:
                 "        ),",
             ]
         )
-    lines.extend(["    ]", "}", ""])
+    lines.extend(["    ]"])
+    lines.extend(
+        [
+            "    public static let quickConnectURLs: [String: String] = [",
+            *(
+                f"        {swift_string(family_id)}: {swift_string(item.console_url)},"
+                for family_id, item in sorted(QUICK_CONNECT.items())
+            ),
+            "    ]",
+            "    public static let apiKeyURLs: [String: String] = [",
+            *(
+                f"        {swift_string(family_id)}: {swift_string(item.api_key_url)},"
+                for family_id, item in sorted(QUICK_CONNECT.items())
+                if item.api_key_url is not None
+            ),
+            "    ]",
+            "}",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 

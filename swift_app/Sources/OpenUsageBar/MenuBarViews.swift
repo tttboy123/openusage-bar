@@ -18,6 +18,20 @@ struct MenuBarPopover: View {
         VStack(spacing: 0) {
             header
             Divider()
+            Button {
+                HelperLauncher.openActivity(route: "health")
+            } label: {
+                Label(
+                    AppLocalization.text("Open Main Window"),
+                    systemImage: "macwindow"
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            Divider()
             today
             capacityHeader
             ScrollView {
@@ -50,7 +64,7 @@ struct MenuBarPopover: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("OpenUsage Bar").font(.headline)
+                Text(AppLocalization.text("UsageHub")).font(.headline)
                 Text(model.updatedAge).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()

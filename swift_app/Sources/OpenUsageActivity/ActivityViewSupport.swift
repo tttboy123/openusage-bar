@@ -9,6 +9,7 @@ struct DataHealthPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             PageHeading("Data Health", detail: "Sanitized collection status")
+            healthSummary
             if data.visibilityIssue {
                 StatusBanner(symbol: "eye.slash", text: "Provider visibility settings are invalid. All providers remain visible.")
             }
@@ -42,7 +43,7 @@ struct DataHealthPage: View {
                 let issue = ProviderSourceIssuePresentation.make(from: source)
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
-                        Text("OpenUsage").font(.headline)
+                        Text(AppLocalization.text("UsageHub")).font(.headline)
                         Text(AppLocalization.text(issue.title)).foregroundStyle(.secondary)
                         Spacer()
                         StateLabel(state: source.effectiveState)
@@ -118,6 +119,36 @@ struct DataHealthPage: View {
                 Button("Repair in Provider Settings", systemImage: "wrench.and.screwdriver") { SettingsHelper.open() }
             }
         }
+    }
+
+    private var healthSummary: some View {
+        let issueCount = data.health.sources.filter {
+            ProviderSourceIssuePresentation.make(from: $0).isIssue
+        }.count
+        let healthyCount = data.health.sources.count - issueCount
+        return HStack(spacing: 10) {
+            Image(
+                systemName: issueCount == 0
+                    ? "checkmark.circle.fill"
+                    : "exclamationmark.triangle.fill"
+            )
+            .foregroundStyle(issueCount == 0 ? Color.green : Color.orange)
+            Text(
+                issueCount == 0
+                    ? AppLocalization.format(
+                        "All %lld sources are collecting normally.",
+                        Int64(healthyCount)
+                    )
+                    : AppLocalization.format(
+                        "%lld of %lld sources need attention. Items below show the fix.",
+                        Int64(issueCount), Int64(data.health.sources.count)
+                    )
+            )
+            .font(.callout)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -337,7 +368,7 @@ enum SettingsHelper {
             let alert = NSAlert()
             alert.messageText = AppLocalization.text("Provider Settings unavailable")
             alert.informativeText = AppLocalization.text(
-                "Reinstall OpenUsage Bar to restore the settings helper."
+                "Reinstall UsageHub to restore the settings helper."
             )
             alert.runModal()
     }
@@ -376,6 +407,15 @@ enum APISpendText {
         let number = formatter.string(from: NSDecimalNumber(decimal: amount))
             ?? NSDecimalNumber(decimal: amount).stringValue
         return "\(currency) \(number)"
+    }
+
+    static func displayBalance(available: String?, currency: String) -> String {
+        guard let available,
+              let decimal = Decimal(
+                string: available, locale: Locale(identifier: "en_US_POSIX")
+              )
+        else { return "\(currency) \(AppLocalization.text("Unavailable"))" }
+        return display(amount: decimal, currency: currency)
     }
 }
 

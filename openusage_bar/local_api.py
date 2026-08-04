@@ -266,6 +266,7 @@ class LocalAPIRouter:
         "/v1/costs/daily",
         "/v1/quotas/history",
         "/v1/sources/status", "/v1/changes",
+        "/v1/quick-connect",
     )
 
     def __init__(
@@ -444,6 +445,23 @@ class LocalAPIRouter:
                     params["limit"], "limit", minimum=1, maximum=MAX_LIMIT
                 ) if "limit" in params else None
                 return to_wire(self.query.balances(limit))
+            if route == "/v1/quick-connect":
+                from .quick_connect import QUICK_CONNECT
+
+                return {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "providers": [
+                        {
+                            "familyId": item.family_id,
+                            "consoleUrl": item.console_url,
+                            "authModes": list(item.auth_modes),
+                        }
+                        for item in sorted(
+                            QUICK_CONNECT.values(),
+                            key=lambda item: item.family_id,
+                        )
+                    ],
+                }
             if route == "/v1/activity/daily":
                 if "from" not in params or "to" not in params:
                     raise _error(HTTPStatus.BAD_REQUEST, "missing_parameter", "Required parameter is missing.")
@@ -828,47 +846,61 @@ class _BoundedThreads:
         super().server_close()
 
 
-class UnixHTTPServer(_BoundedThreads, socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-    allow_reuse_address = False
-    request_queue_size = DEFAULT_MAX_THREADS
+if hasattr(socketserver, "UnixStreamServer"):
 
-    def __init__(
-        self,
-        path: Path,
-        router: LocalAPIRouter,
-        *,
-        max_threads: int,
-        client_timeout: float,
-        request_deadline: float,
-        cleanup_hook: Callable[[Path], None] | None,
-    ) -> None:
-        self.path = path
-        self.router = router
-        self._created_identity: tuple[int, int] | None = None
-        self._cleanup_hook = cleanup_hook
-        _prepare_socket_path(path)
-        try:
-            super().__init__(str(path), ReadOnlyHandler)
-            current = path.lstat()
-            self._created_identity = (current.st_dev, current.st_ino)
-            os.chmod(path, 0o600, follow_symlinks=False)
-            self._configure_threads(max_threads, client_timeout, request_deadline)
-        except Exception:
-            if self._created_identity is not None:
-                _unlink_socket_if(path, self._created_identity)
-            raise
+    class UnixHTTPServer(
+        _BoundedThreads,
+        socketserver.ThreadingMixIn,
+        socketserver.UnixStreamServer,
+    ):
+        allow_reuse_address = False
+        request_queue_size = DEFAULT_MAX_THREADS
 
-    def verify_request(self, request: socket.socket, client_address: Any) -> bool:
-        return _peer_is_current_user(request)
+        def __init__(
+            self,
+            path: Path,
+            router: LocalAPIRouter,
+            *,
+            max_threads: int,
+            client_timeout: float,
+            request_deadline: float,
+            cleanup_hook: Callable[[Path], None] | None,
+        ) -> None:
+            self.path = path
+            self.router = router
+            self._created_identity: tuple[int, int] | None = None
+            self._cleanup_hook = cleanup_hook
+            _prepare_socket_path(path)
+            try:
+                super().__init__(str(path), ReadOnlyHandler)
+                current = path.lstat()
+                self._created_identity = (current.st_dev, current.st_ino)
+                os.chmod(path, 0o600, follow_symlinks=False)
+                self._configure_threads(max_threads, client_timeout, request_deadline)
+            except Exception:
+                if self._created_identity is not None:
+                    _unlink_socket_if(path, self._created_identity)
+                raise
 
-    def server_close(self) -> None:
-        try:
-            super().server_close()
-        finally:
-            _unlink_socket_if(
-                self.path,
-                self._created_identity,
-                after_quarantine=self._cleanup_hook,
+        def verify_request(self, request: socket.socket, client_address: Any) -> bool:
+            return _peer_is_current_user(request)
+
+        def server_close(self) -> None:
+            try:
+                super().server_close()
+            finally:
+                _unlink_socket_if(
+                    self.path,
+                    self._created_identity,
+                    after_quarantine=self._cleanup_hook,
+                )
+
+else:
+
+    class UnixHTTPServer:  # pragma: no cover - Windows uses loopback TCP.
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise OSError(
+                "Unix-domain HTTP is unavailable on this platform; use TCP"
             )
 
 
@@ -927,7 +959,22 @@ def _rename_exclusive(parent_fd: int, source: str, destination: str) -> None:
     libc = ctypes.CDLL(None, use_errno=True)
     renameatx = getattr(libc, "renameatx_np", None)
     if renameatx is None:
-        raise OSError(errno.ENOTSUP, "exclusive rename is unavailable")
+        # Portable fallback for Linux/Windows: rename relative to the same
+        # open directory. The caller re-verifies the quarantined node identity
+        # before unlinking, so a non-exclusive rename stays safe for the
+        # local socket lifecycle.
+        try:
+            os.rename(
+                source,
+                destination,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+            )
+        except (NotImplementedError, OSError, TypeError) as error:
+            if not isinstance(error, OSError) or error.errno == errno.ENOTSUP:
+                raise OSError(errno.ENOTSUP, "exclusive rename is unavailable") from error
+            raise
+        return
     renameatx.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
     renameatx.restype = ctypes.c_int
     result = renameatx(
@@ -1009,9 +1056,12 @@ def _prepare_private_parent(path: Path, purpose: str) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.parent.is_symlink() or not path.parent.is_dir():
         raise OSError(f"{purpose} parent must be a directory")
-    if path.parent.stat().st_uid != os.getuid():
+    if hasattr(os, "getuid") and path.parent.stat().st_uid != os.getuid():
         raise OSError(f"{purpose} parent must be owned by the current user")
-    os.chmod(path.parent, 0o700, follow_symlinks=False)
+    try:
+        os.chmod(path.parent, 0o700, follow_symlinks=False)
+    except (NotImplementedError, OSError, TypeError):
+        os.chmod(path.parent, 0o700)
 
 
 def _read_token(path: Path) -> str:
@@ -1024,8 +1074,13 @@ def _read_token(path: Path) -> str:
         content = os.read(descriptor, 257)
         if (
             not stat.S_ISREG(current.st_mode)
-            or current.st_uid != os.getuid()
-            or stat.S_IMODE(current.st_mode) != 0o600
+            or (
+                hasattr(os, "getuid")
+                and (
+                    current.st_uid != os.getuid()
+                    or stat.S_IMODE(current.st_mode) != 0o600
+                )
+            )
         ):
             raise OSError("existing token file is unsafe")
     finally:
@@ -1045,7 +1100,13 @@ def _create_token(path: Path, token: str) -> bool:
     except FileExistsError:
         return False
     try:
-        os.fchmod(descriptor, 0o600)
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        else:
+            try:
+                os.chmod(path, 0o600)
+            except (NotImplementedError, OSError, TypeError):
+                pass
         content = memoryview(token.encode("ascii"))
         while content:
             written = os.write(descriptor, content)

@@ -98,11 +98,18 @@ _EXPECTED_UPSTREAM_FAMILY_IDS = tuple(
         }
     )
 )
-_EXPECTED_BUILTIN_FAMILY_IDS = ("minimax", "step_plan")
+_EXPECTED_BUILTIN_FAMILY_IDS = (
+    "cc_switch",
+    "minimax",
+    "omniroute",
+    "step_plan",
+)
 _EXPECTED_FAMILY_IDS = tuple(
     sorted(_EXPECTED_UPSTREAM_FAMILY_IDS + _EXPECTED_BUILTIN_FAMILY_IDS)
 )
 _SPECIAL_SOURCE_IDS = {
+    "cc_switch": ("cc_switch.status", "cc_switch.rollups"),
+    "deepseek": ("deepseek_official_api", "openusage"),
     "openai": ("openai_admin_api", "openusage"),
     "codex": ("codex_local_log", "openusage"),
     "kiro_cli": ("kiro_keychain", "kiro_codewhisperer_api", "openusage"),
@@ -112,9 +119,11 @@ _SPECIAL_SOURCE_IDS = {
         "openusage",
     ),
     "moonshot": ("moonshot_official_api", "openusage"),
+    "omniroute": ("omniroute.usage",),
     "step_plan": ("step_plan_browser_session", "step_plan_official_api"),
 }
 _EXPECTED_CREDENTIAL_SCOPES = {
+    ("deepseek", "deepseek_official_api"): "deepseek_api_key",
     ("openai", "openai_admin_api"): "openai_admin_api_key",
     ("kiro_cli", "kiro_keychain"): "kiro",
     ("kiro_cli", "kiro_codewhisperer_api"): "kiro",

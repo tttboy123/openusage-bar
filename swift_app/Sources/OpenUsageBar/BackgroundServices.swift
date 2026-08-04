@@ -124,7 +124,7 @@ enum BackgroundServicePresenter {
         alert.messageText = AppLocalization.text("Background access needs attention")
         if result.requiresApproval {
             alert.informativeText = AppLocalization.text(
-                "Allow OpenUsage Bar in System Settings > General > Login Items so capacity and Token data can refresh automatically."
+                "Allow UsageHub in System Settings > General > Login Items so capacity and Token data can refresh automatically."
             )
             alert.addButton(withTitle: AppLocalization.text("Open Login Items"))
             alert.addButton(withTitle: AppLocalization.text("Later"))
@@ -133,7 +133,7 @@ enum BackgroundServicePresenter {
             }
         } else {
             alert.informativeText = AppLocalization.text(
-                "OpenUsage Bar could not start its bundled collector. Reinstall the app from the official DMG or use the advanced repair package."
+                "UsageHub could not start its bundled collector. Reinstall the app from the official DMG or use the advanced repair package."
             )
             alert.addButton(withTitle: AppLocalization.text("OK"))
             alert.runModal()

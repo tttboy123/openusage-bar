@@ -30,6 +30,7 @@ def load_module():
     return module
 
 
+@unittest.skipIf(sys.platform == "win32", "macOS/POSIX reboot recovery test")
 class RebootRecoveryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -37,13 +37,13 @@ class BundleConfigTests(unittest.TestCase):
 
         self.assertEqual(BUNDLE_ID, "com.lune.openusagebar.settings")
         self.assertEqual(plist["CFBundleIdentifier"], BUNDLE_ID)
-        self.assertEqual(plist["CFBundleDisplayName"], "OpenUsage Provider Settings")
+        self.assertEqual(plist["CFBundleDisplayName"], "UsageHub Provider Settings")
         self.assertNotIn("LSUIElement", plist)
         self.assertEqual(plist["LSMinimumSystemVersion"], "15.0")
 
     def test_all_three_bundles_share_the_canonical_version(self):
         expected = (APP_VERSION, BUILD_VERSION)
-        self.assertEqual(expected, ("0.6.0", "9"))
+        self.assertEqual(expected, ("0.7.1", "11"))
         self.assertEqual(
             (info_plist()["CFBundleShortVersionString"], info_plist()["CFBundleVersion"]),
             expected,

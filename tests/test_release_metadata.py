@@ -4,6 +4,7 @@ import re
 import subprocess
 import tempfile
 import unittest
+import sys
 import os
 from pathlib import Path
 
@@ -28,6 +29,7 @@ def unpinned_official_actions(source):
     ]
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS release metadata test")
 class ReleaseMetadataTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -236,6 +238,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS release workflow test")
 class CommittedWorkflowMetadataTests(unittest.TestCase):
     def test_mismatched_human_version_comment_is_rejected(self):
         commit = "3d3c42e5aac5ba805825da76410c181273ba90b1"
@@ -300,6 +303,7 @@ class CommittedWorkflowMetadataTests(unittest.TestCase):
             )
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS action pin test")
 class ActionPinRepositoryTests(unittest.TestCase):
     def test_exact_manifest_pin_and_version_comment_pass(self):
         with tempfile.TemporaryDirectory() as temporary:

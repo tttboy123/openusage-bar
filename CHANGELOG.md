@@ -19,6 +19,23 @@ This project follows [Semantic Versioning](https://semver.org/).
   supports macOS.
 - The public roadmap now reports the released v0.6.0 RC baseline and keeps the
   0 / 5 external Canary state distinct from repository test results.
+- Product branding: user-facing docs now use the **UsageHub** name (formerly
+  OpenUsage Bar). The `openusage` technical namespace (config paths, sockets,
+  `openusage-bar` CLI, Local API v1 contract) remains compatible; app-bundle
+  renaming is scheduled with the cross-platform release.
+
+## 0.7.1 - 2026-08-04
+
+- Native UI: render model trend points on partial days (chart was empty)
+- Native UI: keep Provider configuration stable when switching Spaces or apps
+- Native UI: add per-Provider Token Usage to API Spend, Get API Key links,
+  Data Health summary, and clearer Local Tools empty state
+
+## 0.7.0 - 2026-08-04
+
+- Settings helper GUI: fix PyObjC selector crash and launcher naming
+- Release audit: verify CFBundleExecutable matches the on-disk launcher
+- Version bump across bundles, release state, and canary docs
 
 ## 0.6.0 - 2026-07-30
 

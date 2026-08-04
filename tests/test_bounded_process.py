@@ -4,10 +4,14 @@ import sys
 import tempfile
 import time
 import unittest
+import sys
 from pathlib import Path
 
 
 class BoundedProcessTests(unittest.TestCase):
+    if sys.platform == "win32":
+        __unittest_skip__ = True
+        __unittest_skip_why__ = "POSIX process-group test"
     def helper(self, root: Path, body: str) -> Path:
         path = root / "helper"
         path.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")

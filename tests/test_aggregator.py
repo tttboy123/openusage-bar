@@ -63,6 +63,9 @@ class TimedAdapter(Adapter):
 
 
 class BoundedReadOnlyKeychainTests(unittest.TestCase):
+    if sys.platform == "win32":
+        __unittest_skip__ = True
+        __unittest_skip_why__ = "POSIX security reader test"
     def test_read_is_shell_free_bounded_and_returns_only_stdout(self):
         with tempfile.TemporaryDirectory() as directory:
             helper = Path(directory) / "security-helper"
@@ -148,6 +151,7 @@ class BoundedReadOnlyKeychainTests(unittest.TestCase):
             self.assertFalse(keychain.last_process_alive)
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS bounded keychain assertions")
 class HeadlessRefresherFactoryTests(unittest.TestCase):
     def test_eager_local_usage_is_collected_before_slow_quota_refresh(self):
         events = []
@@ -226,7 +230,7 @@ class HeadlessRefresherFactoryTests(unittest.TestCase):
         importer = refresher.collector.official_importers["codex"]
         self.assertIsInstance(importer, CodexLocalDailyImporter)
         self.assertEqual(importer.usage_source_id, "codex.local_sessions")
-        self.assertEqual(refresher.eager_usage_provider_ids, ("codex",))
+        self.assertEqual(refresher.eager_usage_provider_ids, ("claude_code", "codex"))
 
     def test_minimax_reuses_keychain_and_client_for_quota_and_daily_tokens(self):
         from openusage_bar.aggregator import build_headless_refresher

@@ -167,6 +167,7 @@ class PerformanceMeasurementTests(unittest.TestCase):
             ["--performance-output", str(timing)],
         )
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX process-group test")
     def test_refresh_timeout_reaps_the_process_group(self):
         with tempfile.TemporaryDirectory() as temp:
             survived = Path(temp) / "survived"

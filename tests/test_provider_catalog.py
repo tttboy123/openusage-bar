@@ -27,7 +27,7 @@ EXPECTED_UPSTREAM = {
     "kilo_code", "kiro_cli", "zed", "codebuff", "kimi_cli", "openclaw", "pi",
     "qwen_cli", "ollama",
 }
-EXPECTED_BUILTIN = {"minimax", "step_plan"}
+EXPECTED_BUILTIN = {"cc_switch", "minimax", "omniroute", "step_plan"}
 EXPECTED_CATEGORIES = {
     "subscription": {
         "claude_code", "codex", "copilot", "cursor", "gemini_cli", "opencode",
@@ -36,7 +36,7 @@ EXPECTED_CATEGORIES = {
     "local_tool": {
         "amp", "goose", "hermes", "mux", "droid", "crush", "roocode",
         "kilo_code", "zed", "codebuff", "kimi_cli", "openclaw", "pi",
-        "qwen_cli", "ollama",
+        "qwen_cli", "ollama", "cc_switch", "omniroute",
     },
     "api": {
         "openai", "anthropic", "azure_openai", "alibaba_cloud", "openrouter",
@@ -54,7 +54,7 @@ class ProviderCatalogTests(unittest.TestCase):
         self.assertEqual(
             set(self.catalog.family_ids), EXPECTED_UPSTREAM | EXPECTED_BUILTIN
         )
-        self.assertEqual(len(self.catalog.family_ids), 37)
+        self.assertEqual(len(self.catalog.family_ids), 39)
         self.assertEqual(self.catalog.upstream_version, "0.23.0")
         self.assertEqual(self.catalog.upstream_revision, "3059f1b")
         self.assertEqual(set(self.catalog.upstream_family_ids), EXPECTED_UPSTREAM)
@@ -125,6 +125,8 @@ class ProviderCatalogTests(unittest.TestCase):
             "minimax": {"subscription_quota", "token_activity"},
             "step_plan": {"subscription_quota"},
             "ollama": {"token_activity"},
+            "cc_switch": {"operational"},
+            "omniroute": {"operational"},
         }
         for family_id in {
             "amp", "goose", "hermes", "mux", "droid", "crush", "roocode",
@@ -349,7 +351,7 @@ class ProviderCatalogTests(unittest.TestCase):
                     self.assertIn(source.model_scope, MODEL_SCOPES)
                     self.assertIn(source.verification, SOURCE_VERIFICATIONS)
 
-    def test_all_37_families_encode_only_conservative_known_capabilities(self):
+    def test_all_39_families_encode_only_conservative_known_capabilities(self):
         quota_windows = {
             "codex": ["five_hour", "weekly"],
             "cursor": ["billing_cycle"],
@@ -360,7 +362,7 @@ class ProviderCatalogTests(unittest.TestCase):
         reset_providers = {"codex", "kiro_cli", "minimax", "step_plan"}
         credit_providers = {"kiro_cli", "step_plan"}
 
-        self.assertEqual(len(self.catalog.families), 37)
+        self.assertEqual(len(self.catalog.families), 39)
         for family in self.catalog.families:
             with self.subTest(family=family.family_id):
                 capabilities = family.capabilities
@@ -407,6 +409,9 @@ class ProviderCatalogTests(unittest.TestCase):
             "openusage": ("pinned", "openusage_upstream"),
             "openai_admin_api": ("stable", "provider_official"),
             "codex_local_log": ("stable", "provider_local"),
+            "cc_switch.status": ("stable", "openusage_bar_builtin"),
+            "cc_switch.rollups": ("stable", "openusage_bar_builtin"),
+            "deepseek_official_api": ("stable", "provider_official"),
             "kiro_keychain": ("stable", "provider_local"),
             "kiro_codewhisperer_api": ("stable", "provider_official"),
             "minimax_builtin_api": ("stable", "openusage_bar_builtin"),
@@ -415,6 +420,7 @@ class ProviderCatalogTests(unittest.TestCase):
                 "openusage_bar_builtin",
             ),
             "moonshot_official_api": ("stable", "provider_official"),
+            "omniroute.usage": ("experimental", "openusage_bar_builtin"),
             "step_plan_browser_session": ("experimental", "user_session"),
             "step_plan_official_api": ("stable", "provider_official"),
         }
@@ -741,6 +747,8 @@ class ProviderCatalogTests(unittest.TestCase):
     def test_source_order_and_credential_scopes_are_an_exact_boundary(self):
         special = {
             "codex": ["codex_local_log", "openusage"],
+            "cc_switch": ["cc_switch.status", "cc_switch.rollups"],
+            "deepseek": ["deepseek_official_api", "openusage"],
             "kiro_cli": [
                 "kiro_keychain", "kiro_codewhisperer_api", "openusage"
             ],
@@ -750,16 +758,18 @@ class ProviderCatalogTests(unittest.TestCase):
                 "openusage",
             ],
             "moonshot": ["moonshot_official_api", "openusage"],
+            "omniroute": ["omniroute.usage"],
             "openai": ["openai_admin_api", "openusage"],
             "step_plan": [
                 "step_plan_browser_session", "step_plan_official_api"
             ],
         }
         for family_id in EXPECTED_UPSTREAM - {
-            "codex", "kiro_cli", "moonshot", "openai"
+            "codex", "kiro_cli", "moonshot", "openai", "deepseek"
         }:
             special[family_id] = ["openusage"]
         expected_scopes = {
+            ("deepseek", "deepseek_official_api"): "deepseek_api_key",
             ("openai", "openai_admin_api"): "openai_admin_api_key",
             ("kiro_cli", "kiro_keychain"): "kiro",
             ("kiro_cli", "kiro_codewhisperer_api"): "kiro",
@@ -1046,6 +1056,10 @@ class ProviderCatalogTests(unittest.TestCase):
                 "openusage_bar_builtin",
             ),
             "moonshot_official_api": ("stable", "provider_official"),
+            "cc_switch.status": ("stable", "openusage_bar_builtin"),
+            "cc_switch.rollups": ("stable", "openusage_bar_builtin"),
+            "deepseek_official_api": ("stable", "provider_official"),
+            "omniroute.usage": ("experimental", "openusage_bar_builtin"),
             "step_plan_browser_session": ("experimental", "user_session"),
             "step_plan_official_api": ("stable", "provider_official"),
         }

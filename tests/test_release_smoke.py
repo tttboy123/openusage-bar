@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+import sys
 from pathlib import Path
 
 
@@ -91,6 +92,7 @@ def make_signed_app(path: Path, version: str, build: str) -> None:
     )
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS release smoke test")
 class ReleaseSmokeTests(unittest.TestCase):
     def test_local_api_probe_requires_health_schema_and_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

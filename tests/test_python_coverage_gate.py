@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 GATE = ROOT / "scripts/python_coverage_gate.py"
 
 
+@unittest.skipUnless(
+    sys.platform == "darwin",
+    "coverage gate runs inside the macOS build environment",
+)
 class PythonCoverageGateTests(unittest.TestCase):
     def run_gate(self, report: str, files=("aggregator.py",)):
         with tempfile.TemporaryDirectory() as temporary:

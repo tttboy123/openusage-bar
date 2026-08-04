@@ -1,6 +1,7 @@
 import subprocess
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 
 
@@ -8,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCANNER = ROOT / "scripts/release_secret_scan.py"
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS release secret scan test")
 class ReleaseSecretScanTests(unittest.TestCase):
     def run_scan(self, repo: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

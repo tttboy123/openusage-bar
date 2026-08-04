@@ -107,7 +107,7 @@ struct ProviderCatalogTests {
         #expect(manifest.upstream.revision == GeneratedProviderCatalog.upstreamRevision)
         #expect(GeneratedProviderCatalog.upstreamFamilyIDs == Set(manifest.upstream.familyIDs))
         #expect(GeneratedProviderCatalog.upstreamFamilyIDs.count == 35)
-        #expect(manifest.families.count == 37)
+        #expect(manifest.families.count == 39)
         #expect(Set(GeneratedProviderCatalog.families.keys) == Set(manifest.families.map(\.id)))
 
         for family in manifest.families {
@@ -284,6 +284,7 @@ struct ProviderCatalogTests {
         #expect(categories[.localTool] == [
             "amp", "codebuff", "crush", "droid", "goose", "hermes", "kilo_code", "kimi_cli",
             "mux", "ollama", "openclaw", "pi", "qwen_cli", "roocode", "zed",
+            "cc_switch", "omniroute",
         ])
         #expect(categories[.api]?.count == 13)
     }
@@ -296,7 +297,7 @@ struct ProviderCatalogTests {
         let sortedDisplayNames = displayNames.sorted {
             $0.localizedStandardCompare($1) == .orderedAscending
         }
-        #expect(descriptors.count == 37)
+        #expect(descriptors.count == 39)
         #expect(familyIDs == Set(GeneratedProviderCatalog.families.keys))
         #expect(displayNames == sortedDisplayNames)
     }

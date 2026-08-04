@@ -126,6 +126,56 @@ class BalancePipelineTests(unittest.TestCase):
         self.assertEqual(capacity["providers"], [])
         self.assertEqual(snapshot["quotaWindows"], [])
 
+    def test_snapshot_quota_hub_aggregates_balances_with_provenance(self):
+        self.store.record_balance(balance())
+        self.store.record_balance(
+            BalanceObservation(
+                record_id="deepseek.balance",
+                observed_at="2026-07-29T12:00:00Z",
+                provider_id="deepseek",
+                account_ref="deepseek",
+                currency="CNY",
+                available="10.50",
+                voucher=None,
+                cash=None,
+                state="ok",
+                quality="direct",
+                stale=False,
+                source_id="deepseek.balance",
+            )
+        )
+        self.store.record_balance(
+            BalanceObservation(
+                record_id="moonshot-usd.balance",
+                observed_at="2026-07-29T12:00:00Z",
+                provider_id="moonshot-usd",
+                account_ref="usd",
+                currency="USD",
+                available="5",
+                voucher=None,
+                cash=None,
+                state="ok",
+                quality="direct",
+                stale=False,
+                source_id="moonshot.balance",
+            )
+        )
+        query = QueryService(self.store, clock=lambda: NOW)
+
+        hub = to_wire(query.resource_snapshot(date(2026, 7, 29)))["quotaHub"]
+
+        self.assertEqual(len(hub), 2)
+        cny = next(item for item in hub if item["currency"] == "CNY")
+        usd = next(item for item in hub if item["currency"] == "USD")
+        self.assertEqual(cny["totalAvailable"], "133.95")
+        self.assertEqual(cny["providerCount"], 2)
+        self.assertIn(
+            ["deepseek", "deepseek.balance", "direct"],
+            cny["provenance"],
+        )
+        self.assertEqual(usd["totalAvailable"], "5")
+        self.assertEqual(usd["providerCount"], 1)
+
     def test_balance_value_rejects_negative_or_unknown_numeric_facts(self):
         with self.assertRaises(ValueError):
             balance(available="-1")

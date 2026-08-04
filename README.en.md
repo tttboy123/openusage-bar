@@ -1,7 +1,7 @@
-<!-- openusage-release-version: 0.6.0 -->
+<!-- openusage-release-version: 0.7.1 -->
 <div align="center">
 
-# OpenUsage Bar
+# UsageHub
 
 **See AI subscription capacity, token activity, and API spend at a glance.**
 
@@ -17,7 +17,7 @@ A native macOS menu-bar utility. Data stays local; people read the UI and schedu
 
 </div>
 
-OpenUsage Bar is a local-first native macOS dashboard for AI subscriptions, API providers, local coding tools, and daily token activity.
+UsageHub (formerly OpenUsage Bar) is a local-first native macOS dashboard for AI subscriptions, API providers, local coding tools, and daily token activity.
 
 <p align="center">
   <img src="docs/assets/openusage-bar-activity-demo-zh.png" width="1160" alt="OpenUsage Bar Activity view showing the yearly token heatmap and daily model trend">
@@ -33,6 +33,16 @@ OpenUsage Bar is a local-first native macOS dashboard for AI subscriptions, API 
 > Developer ID notarization is not available yet; if macOS reports the app as
 > damaged, remove the download quarantine from this app only as described
 > below.
+
+## Branding and naming
+
+The product brand is **UsageHub** (formerly OpenUsage Bar). The technical
+namespace stays compatible: `~/.config/openusage-bar`,
+`~/.local/state/openusage-bar`, `openusage.sock`, the `openusage-bar` CLI, and
+the Local API v1 contract are unchanged for the foreseeable future. The app
+bundle (`OpenUsage Bar.app`) and script-level identifiers migrate with the
+cross-platform release so existing installs, LaunchAgents, and rollback paths
+are not broken by this stage.
 
 ## What it does
 
@@ -54,7 +64,7 @@ flowchart LR
 
 ## Quick install
 
-[Download OpenUsage Bar v0.6.0 DMG for Apple Silicon](https://github.com/tttboy123/openusage-bar/releases/download/v0.6.0/OpenUsage-Bar-v0.6.0-macos-arm64.dmg)
+[Download OpenUsage Bar v0.7.1 DMG for Apple Silicon](https://github.com/tttboy123/openusage-bar/releases/download/v0.7.1/OpenUsage-Bar-v0.7.1-macos-arm64.dmg)
 
 1. Open the downloaded DMG.
 2. Drag **OpenUsage Bar** onto **Applications**.
