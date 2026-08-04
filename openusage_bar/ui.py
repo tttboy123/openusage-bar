@@ -801,6 +801,8 @@ def _build_aggregator(store: ProviderConfigStore, keychain: MacOSKeychain) -> Ag
 
 
 def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised through launchd/AppKit smoke tests.
+    import objc
+
     from AppKit import (
         NSAlert,
         NSAlertFirstButtonReturn,
@@ -934,6 +936,7 @@ def _run_appkit(*, settings_only: bool) -> None:  # pragma: no cover - exercised
                 60.0, self, "updateRefreshAge:", None, True
             )
 
+        @objc.python_method
         def _text(self, key):
             return localized_ui_text(key, self.ui_language)
 

@@ -7,7 +7,13 @@ import zipfile
 from contextlib import redirect_stderr
 from pathlib import Path
 
-from scripts.release_artifact_audit import ArtifactError, inspect_members, main, verify_versions
+from scripts.release_artifact_audit import (
+    ArtifactError,
+    inspect_members,
+    main,
+    verify_executable_names,
+    verify_versions,
+)
 
 
 ROOT_NAME = "OpenUsage-Bar-v0.4.0-macos-arm64"
@@ -111,6 +117,41 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
                 }))
             with self.assertRaises(ArtifactError):
                 verify_versions(root, "0.4.0")
+
+    def test_executable_names_must_match_declared_launchers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = root / "dist/OpenUsage Bar.app"
+            bundles = (
+                app,
+                app / "Contents/Helpers/OpenUsage Activity.app",
+                app / "Contents/Helpers/OpenUsage Provider Settings.app",
+            )
+            for bundle in bundles:
+                info = bundle / "Contents/Info.plist"
+                info.parent.mkdir(parents=True, exist_ok=True)
+                info.write_bytes(plistlib.dumps({
+                    "CFBundleShortVersionString": "0.4.0",
+                    "CFBundleVersion": "4",
+                    "CFBundleExecutable": "OpenUsage",
+                }))
+                executable = bundle / "Contents/MacOS/OpenUsage"
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                executable.write_bytes(b"\xcf\xfa\xed\xfe")
+                executable.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+            verify_executable_names(root)
+
+            mismatch = (
+                app
+                / "Contents/Helpers/OpenUsage Provider Settings.app/Contents/Info.plist"
+            )
+            mismatch.write_bytes(plistlib.dumps({
+                "CFBundleShortVersionString": "0.4.0",
+                "CFBundleVersion": "4",
+                "CFBundleExecutable": "Missing Launcher",
+            }))
+            with self.assertRaises(ArtifactError):
+                verify_executable_names(root)
 
 
 if __name__ == "__main__":
