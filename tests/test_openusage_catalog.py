@@ -65,6 +65,7 @@ class OpenUsageCatalogParserTests(unittest.TestCase):
         self.assertNotIn("/private", str(caught.exception))
 
 
+@unittest.skipIf(sys.platform == "win32", "spawns the POSIX openusage binary")
 class OpenUsageCatalogDiscoveryTests(unittest.TestCase):
     def _discover(self, script: str) -> CatalogDiagnostic:
         return OpenUsageCatalogDiscovery(openusage_path=script, clock=lambda: NOW).run()
@@ -247,6 +248,7 @@ else:
             self.assertNotIn("PRIVATE_VALUE", names)
 
 
+@unittest.skipIf(sys.platform == "win32", "spawns the POSIX openusage binary")
 class OpenUsageCatalogMonitorTests(unittest.TestCase):
     def test_startup_then_at_most_once_per_24_hours_across_restart(self):
         with tempfile.TemporaryDirectory() as temp:

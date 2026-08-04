@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -159,6 +160,7 @@ def split_raw_response(response: bytes):
     return lines[0], headers, body
 
 
+@unittest.skipIf(sys.platform == "win32", "Windows uses loopback TCP transport")
 class UnixLocalAPITests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -833,6 +835,7 @@ class UnixLocalAPITests(unittest.TestCase):
         self.assertEqual(results, [200] * 12)
 
 
+@unittest.skipIf(sys.platform == "win32", "Windows uses loopback TCP transport")
 class SocketLifecycleTests(unittest.TestCase):
     def test_symlink_regular_file_and_live_socket_are_never_clobbered(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -908,6 +911,7 @@ class SocketLifecycleTests(unittest.TestCase):
                     store.close()
 
 
+@unittest.skipIf(sys.platform == "win32", "Windows uses loopback TCP transport")
 class DeadlineTests(unittest.TestCase):
     def test_absolute_deadline_evicts_slow_drip_and_releases_only_slot(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1062,7 +1066,8 @@ class TCPLocalAPITests(unittest.TestCase):
 
     def test_tcp_is_loopback_only_and_token_file_is_0600(self):
         self.assertEqual(self.server.server_address[0], "127.0.0.1")
-        self.assertEqual(stat.S_IMODE(self.token_path.stat().st_mode), 0o600)
+        if os.name != "nt":
+            self.assertEqual(stat.S_IMODE(self.token_path.stat().st_mode), 0o600)
         self.assertEqual(self.token_path.read_text(encoding="utf-8"), TOKEN)
 
     def test_provider_contract_matches_unix_transport_shape(self):
@@ -1198,7 +1203,8 @@ class TCPLocalAPITests(unittest.TestCase):
         server = create_tcp_server(self.query, port=0, token_path=generated_path)
         try:
             self.assertGreaterEqual(len(server.bearer_token), 43)
-            self.assertEqual(stat.S_IMODE(generated_path.stat().st_mode), 0o600)
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(generated_path.stat().st_mode), 0o600)
         finally:
             server.server_close()
 

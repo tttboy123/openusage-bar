@@ -29,6 +29,9 @@ jobs:
           python-version: "3.13"
       - name: Install the core package
         run: pip install -e .
+      - name: Install Windows timezone data
+        if: runner.os == 'Windows'
+        run: pip install tzdata
       - name: Run the core Python test suite
         run: python -m unittest discover -s tests -p "test_*.py"
 

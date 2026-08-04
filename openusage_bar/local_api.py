@@ -846,47 +846,61 @@ class _BoundedThreads:
         super().server_close()
 
 
-class UnixHTTPServer(_BoundedThreads, socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-    allow_reuse_address = False
-    request_queue_size = DEFAULT_MAX_THREADS
+if hasattr(socketserver, "UnixStreamServer"):
 
-    def __init__(
-        self,
-        path: Path,
-        router: LocalAPIRouter,
-        *,
-        max_threads: int,
-        client_timeout: float,
-        request_deadline: float,
-        cleanup_hook: Callable[[Path], None] | None,
-    ) -> None:
-        self.path = path
-        self.router = router
-        self._created_identity: tuple[int, int] | None = None
-        self._cleanup_hook = cleanup_hook
-        _prepare_socket_path(path)
-        try:
-            super().__init__(str(path), ReadOnlyHandler)
-            current = path.lstat()
-            self._created_identity = (current.st_dev, current.st_ino)
-            os.chmod(path, 0o600, follow_symlinks=False)
-            self._configure_threads(max_threads, client_timeout, request_deadline)
-        except Exception:
-            if self._created_identity is not None:
-                _unlink_socket_if(path, self._created_identity)
-            raise
+    class UnixHTTPServer(
+        _BoundedThreads,
+        socketserver.ThreadingMixIn,
+        socketserver.UnixStreamServer,
+    ):
+        allow_reuse_address = False
+        request_queue_size = DEFAULT_MAX_THREADS
 
-    def verify_request(self, request: socket.socket, client_address: Any) -> bool:
-        return _peer_is_current_user(request)
+        def __init__(
+            self,
+            path: Path,
+            router: LocalAPIRouter,
+            *,
+            max_threads: int,
+            client_timeout: float,
+            request_deadline: float,
+            cleanup_hook: Callable[[Path], None] | None,
+        ) -> None:
+            self.path = path
+            self.router = router
+            self._created_identity: tuple[int, int] | None = None
+            self._cleanup_hook = cleanup_hook
+            _prepare_socket_path(path)
+            try:
+                super().__init__(str(path), ReadOnlyHandler)
+                current = path.lstat()
+                self._created_identity = (current.st_dev, current.st_ino)
+                os.chmod(path, 0o600, follow_symlinks=False)
+                self._configure_threads(max_threads, client_timeout, request_deadline)
+            except Exception:
+                if self._created_identity is not None:
+                    _unlink_socket_if(path, self._created_identity)
+                raise
 
-    def server_close(self) -> None:
-        try:
-            super().server_close()
-        finally:
-            _unlink_socket_if(
-                self.path,
-                self._created_identity,
-                after_quarantine=self._cleanup_hook,
+        def verify_request(self, request: socket.socket, client_address: Any) -> bool:
+            return _peer_is_current_user(request)
+
+        def server_close(self) -> None:
+            try:
+                super().server_close()
+            finally:
+                _unlink_socket_if(
+                    self.path,
+                    self._created_identity,
+                    after_quarantine=self._cleanup_hook,
+                )
+
+else:
+
+    class UnixHTTPServer:  # pragma: no cover - Windows uses loopback TCP.
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise OSError(
+                "Unix-domain HTTP is unavailable on this platform; use TCP"
             )
 
 

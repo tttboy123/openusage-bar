@@ -1,6 +1,7 @@
 import hashlib
 import json
 import plistlib
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,7 @@ COMMIT = "a" * 40
 COMMIT_TIME = "2026-07-18T12:00:00+00:00"
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS release manifest test")
 class ReleaseManifestTests(unittest.TestCase):
     def test_swift_dependency_paths_outside_the_repository_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:

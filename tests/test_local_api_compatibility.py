@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import socket
+import sys
 import tempfile
 import threading
 import unittest
@@ -67,6 +68,7 @@ class OneShotUnixServer:
         self.close()
 
 
+@unittest.skipIf(sys.platform == "win32", "Windows uses loopback TCP transport")
 class LocalAPIV1CompatibilityTests(unittest.TestCase):
     def test_frozen_n_minus_one_schema_is_exact_release_evidence(self):
         schema = fixture("v0.4.2.schema.json")

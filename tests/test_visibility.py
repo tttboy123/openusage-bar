@@ -1,4 +1,5 @@
 import json
+import os
 import stat
 import tempfile
 import unittest
@@ -48,7 +49,8 @@ class ProviderVisibilityStoreTests(unittest.TestCase):
             store.save({"openclaw", "claude_code"})
 
             self.assertEqual(store.load(), {"claude_code", "openclaw"})
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
             self.assertEqual(
                 json.loads(path.read_text(encoding="utf-8")),
                 {

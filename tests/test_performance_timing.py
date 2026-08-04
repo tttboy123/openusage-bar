@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -99,7 +100,8 @@ class PerformanceTimingTests(unittest.TestCase):
 
             write_timing_report(output, recorder.snapshot())
 
-            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                self.assertEqual(output.stat().st_mode & 0o777, 0o600)
             with self.assertRaises(FileExistsError):
                 write_timing_report(output, recorder.snapshot())
 
