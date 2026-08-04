@@ -262,10 +262,11 @@ class CodexLocalDailyImporter:
         except OSError:
             self._cache_writable = False
             return {}
+        posix = hasattr(os, "getuid")
         if (
             not stat.S_ISREG(details.st_mode)
-            or details.st_uid != os.getuid()
-            or details.st_mode & 0o077
+            or (posix and details.st_uid != os.getuid())
+            or (posix and details.st_mode & 0o077)
             or details.st_size > MAX_CACHE_BYTES
         ):
             self._cache_writable = False
@@ -337,7 +338,13 @@ class CodexLocalDailyImporter:
             descriptor, temporary = tempfile.mkstemp(
                 prefix=".codex-session-cache.", dir=path.parent
             )
-            os.fchmod(descriptor, 0o600)
+            if hasattr(os, "fchmod"):
+                os.fchmod(descriptor, 0o600)
+            else:
+                try:
+                    os.chmod(temporary, 0o600)
+                except (NotImplementedError, OSError, TypeError):
+                    pass
             with os.fdopen(descriptor, "wb") as handle:
                 handle.write(encoded)
                 handle.flush()
