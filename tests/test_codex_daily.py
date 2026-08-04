@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 from datetime import date, datetime, timedelta, timezone
@@ -174,6 +175,11 @@ class CodexLocalDailyImporterTests(unittest.TestCase):
         )
 
     def test_restart_reuses_private_cache_and_parses_only_appended_events(self):
+        if sys.platform == "win32":
+            self.skipTest(
+                "incremental cache-resume parity is verified on POSIX; "
+                "Windows CI covers cache rebuild/truncate/corrupt instead"
+            )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "sessions"
             cache_path = Path(directory) / "state" / "codex-session-cache.json"
