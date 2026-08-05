@@ -1,0 +1,53 @@
+name: desktop-build
+
+on:
+  push:
+    paths:
+      - "web/**"
+      - "desktop/**"
+      - ".github/workflows/desktop-build.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "desktop/**"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            args: --mac
+            artifact: UsageHub-*.dmg
+          - os: windows-latest
+            args: --win
+            artifact: UsageHub-*.exe
+          - os: ubuntu-latest
+            args: --linux
+            artifact: UsageHub-*.AppImage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Build web frontend
+        working-directory: web
+        run: npm run build
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Package desktop app
+        working-directory: desktop
+        run: npx electron-builder ${{ matrix.args }} --publish never
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: usagehub-${{ matrix.os }}
+          path: dist-desktop/${{ matrix.artifact }}
+          if-no-files-found: error
