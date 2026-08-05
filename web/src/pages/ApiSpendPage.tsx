@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import {
   fetchActivity,
   fetchCosts,
+  fetchProviders,
   type ActivityRow,
   type CostRow,
+  type ProviderItem,
 } from "../api";
 import PeriodSelector, {
   periodDays,
@@ -37,16 +39,18 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
   const [period, setPeriod] = useState<Period>("week");
   const [costs, setCosts] = useState<CostRow[]>([]);
   const [activity, setActivity] = useState<ActivityRow[]>([]);
+  const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const { from, to } = rangeFor(periodDays(period));
     setLoading(true);
-    Promise.all([fetchCosts(from, to), fetchActivity(from, to)])
-      .then(([c, a]) => {
+    Promise.all([fetchCosts(from, to), fetchActivity(from, to), fetchProviders()])
+      .then(([c, a, p]) => {
         setCosts(c);
         setActivity(a);
+        setProviders(p);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "failed"))
       .finally(() => setLoading(false));
@@ -78,6 +82,11 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
     }
     return map;
   }, [costs]);
+
+  const categoryByProvider = useMemo(
+    () => new Map(providers.map((p) => [p.providerId, p.category ?? ""])),
+    [providers],
+  );
 
   const modelRows = useMemo(() => {
     const map = new Map<string, ModelRow>();
@@ -129,6 +138,17 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
   }, [activity, providerCost]);
 
   function modelCostCell(row: ModelRow) {
+    const category = categoryByProvider.get(row.provider);
+    if (category === "subscription") {
+      return (
+        <span className="dim" title={t.subscriptionNoApiCost}>
+          {t.subscription}
+        </span>
+      );
+    }
+    if (category === "local_tool") {
+      return <span className="dim">—</span>;
+    }
     if (row.costAmount != null && Number(row.costAmount) > 0) {
       return (
         <span className="mono">
@@ -149,6 +169,12 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
     );
   }
 
+  function categoryLabel(category: string | undefined): string {
+    if (category === "subscription") return t.subscription;
+    if (category === "local_tool") return t.localTool;
+    return t.apiPaid;
+  }
+
   return (
     <>
       <PeriodSelector value={period} onChange={setPeriod} t={t} />
@@ -158,10 +184,13 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
         <>
           <section className="panel">
             <div className="panel-head">
-              <h3>{t.navApiSpend}</h3>
+              <h3>{t.apiPaid}</h3>
               <span>{t[PERIOD_LABEL[period]]}</span>
             </div>
             <div className="panel-body">
+              <p className="dim" style={{ margin: "0 0 10px", fontSize: "0.74rem" }}>
+                {t.apiPaidHint}
+              </p>
               {totals.map((total) => (
                 <p
                   key={total.currency}
@@ -223,6 +252,7 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
                 <thead>
                   <tr>
                     <th scope="col">{t.providerCol}</th>
+                    <th scope="col">{t.categoryCol}</th>
                     <th scope="col">{t.tokensCol}</th>
                     <th scope="col">{t.amountCol}</th>
                   </tr>
@@ -231,17 +261,22 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
                   {providerRows.map((row) => (
                     <tr key={row.provider}>
                       <th scope="row">{row.provider}</th>
+                      <td>{categoryLabel(categoryByProvider.get(row.provider))}</td>
                       <td className="mono">{row.tokenCount.toLocaleString()}</td>
                       <td className="mono">
-                        {row.amounts.length > 0
-                          ? row.amounts.join(" · ")
-                          : "—"}
+                        {categoryByProvider.get(row.provider) === "subscription" ? (
+                          <span className="dim">{t.subscriptionNoApiCost}</span>
+                        ) : row.amounts.length > 0 ? (
+                          row.amounts.join(" · ")
+                        ) : (
+                          "—"
+                        )}
                       </td>
                     </tr>
                   ))}
                   {providerRows.length === 0 ? (
                     <tr>
-                      <td colSpan={3} className="empty">
+                      <td colSpan={4} className="empty">
                         {t.noSpend}
                       </td>
                     </tr>

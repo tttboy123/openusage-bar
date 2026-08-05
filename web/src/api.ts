@@ -16,6 +16,7 @@ export interface ProviderItem {
   displayName?: string;
   sourceKind?: string;
   familyId?: string;
+  category?: string;
 }
 
 export interface Snapshot {
