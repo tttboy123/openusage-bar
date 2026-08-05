@@ -95,7 +95,9 @@ export default function ActivityPage({ t }: { t: Messages }) {
 
       {error ? <p className="empty">{error}</p> : null}
 
-      <h2 className="section-title">{t.quotaHub}</h2>
+      <h2 className="section-title">
+        {t.quotaHub} <span className="dim">· free quota aggregation</span>
+      </h2>
       <div className="quota-grid">
         {quotas.map((item, index) => (
           <article className="quota" key={index}>

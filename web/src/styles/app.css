@@ -98,6 +98,7 @@ td { color: var(--text-dim); white-space: nowrap; }
 }
 .icon-btn:hover { background: var(--surface-alt); }
 .icon-btn:disabled { opacity: 0.5; cursor: default; }
+.quick-connect { max-width: 180px; }
 
 .trend-bars { display: flex; align-items: flex-end; gap: 3px; height: 180px; }
 .trend-bar { flex: 1; min-width: 4px; background: var(--accent); border-radius: 2px 2px 0 0; opacity: 0.75; }

@@ -20,6 +20,7 @@ import ProvidersPage from "./pages/ProvidersPage";
 import DataHealthPage from "./pages/DataHealthPage";
 import AutomationPage from "./pages/AutomationPage";
 import UsageDetailsPage from "./pages/UsageDetailsPage";
+import { fetchQuickConnect, type QuickConnectItem } from "./api";
 import { detectLang, setLang, messages, type Lang, type Messages } from "./i18n";
 
 const NAV = [
@@ -46,11 +47,16 @@ const TITLES: Record<string, keyof Messages> = {
 
 export default function App() {
   const [lang, setLangState] = useState<Lang>(() => detectLang());
+  const [quick, setQuick] = useState<QuickConnectItem[]>([]);
   const t: Messages = messages[lang];
 
   useEffect(() => {
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   }, [lang]);
+
+  useEffect(() => {
+    void fetchQuickConnect().then(setQuick).catch(() => {});
+  }, []);
 
   function switchLang() {
     const next: Lang = lang === "zh" ? "en" : "zh";
@@ -96,6 +102,26 @@ export default function App() {
             <p className="sub">{t.localFirst}</p>
           </div>
           <div className="toolbar">
+            <select
+              className="icon-btn quick-connect"
+              aria-label="Quick connect"
+              defaultValue=""
+              onChange={(event) => {
+                if (event.target.value) {
+                  window.open(event.target.value, "_blank", "noopener");
+                  event.target.value = "";
+                }
+              }}
+            >
+              <option value="" disabled>
+                Quick Connect
+              </option>
+              {quick.map((item) => (
+                <option key={item.familyId} value={item.consoleUrl}>
+                  {item.familyId}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               className="lang-switch"

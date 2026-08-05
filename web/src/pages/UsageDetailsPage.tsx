@@ -1,33 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchActivity, type ActivityRow } from "../api";
+import PeriodSelector, {
+  periodDays,
+  rangeFor,
+  type Period,
+} from "../components/PeriodSelector";
 import { type Messages } from "../i18n";
 
-const PERIODS = [
-  { key: "day", days: 1 },
-  { key: "week", days: 7 },
-  { key: "month", days: 30 },
-  { key: "year", days: 365 },
-] as const;
-
-function range(days: number) {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(from.getDate() - days + 1);
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
-  };
-}
-
 export default function UsageDetailsPage({ t }: { t: Messages }) {
-  const [period, setPeriod] = useState<(typeof PERIODS)[number]["key"]>("week");
+  const [period, setPeriod] = useState<Period>("week");
   const [rows, setRows] = useState<ActivityRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const days = PERIODS.find((p) => p.key === period)!.days;
+  const days = periodDays(period);
 
   useEffect(() => {
-    const { from, to } = range(days);
+    const { from, to } = rangeFor(days);
     void fetchActivity(from, to)
       .then(setRows)
       .catch((e) => setError(e instanceof Error ? e.message : "failed"));
@@ -60,22 +48,7 @@ export default function UsageDetailsPage({ t }: { t: Messages }) {
 
   return (
     <>
-      <div className="toolbar" style={{ marginBottom: 16 }}>
-        {PERIODS.map((p) => (
-          <button
-            type="button"
-            key={p.key}
-            className={`icon-btn${period === p.key ? "" : ""}`}
-            style={{
-              background: period === p.key ? "var(--accent-soft)" : undefined,
-              color: period === p.key ? "var(--accent)" : undefined,
-            }}
-            onClick={() => setPeriod(p.key)}
-          >
-            {p.key}
-          </button>
-        ))}
-      </div>
+      <PeriodSelector value={period} onChange={setPeriod} />
 
       <div className="metrics">
         <div className="metric">

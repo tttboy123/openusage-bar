@@ -1,29 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchActivity, fetchCosts, type ActivityRow, type CostRow } from "../api";
+import PeriodSelector, {
+  periodDays,
+  rangeFor,
+  type Period,
+} from "../components/PeriodSelector";
 import { type Messages } from "../i18n";
 
-const today = () => new Date().toISOString().slice(0, 10);
-const daysAgo = (n: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
-};
-
 export default function ApiSpendPage({ t }: { t: Messages }) {
+  const [period, setPeriod] = useState<Period>("week");
   const [costs, setCosts] = useState<CostRow[]>([]);
   const [activity, setActivity] = useState<ActivityRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const from = daysAgo(6);
-    const to = today();
+    const { from, to } = rangeFor(periodDays(period));
     Promise.all([fetchCosts(from, to), fetchActivity(from, to)])
       .then(([c, a]) => {
         setCosts(c);
         setActivity(a);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "failed"));
-  }, []);
+  }, [period]);
 
   const totals = useMemo(() => {
     const byCurrency: Record<string, number> = {};
@@ -51,6 +49,7 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
 
   return (
     <>
+      <PeriodSelector value={period} onChange={setPeriod} />
       <section className="panel">
         <div className="panel-head">
           <h3>{t.navApiSpend}</h3>
