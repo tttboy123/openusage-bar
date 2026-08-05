@@ -46,8 +46,9 @@ struct ActivityRootView: View {
                                 .disabled(store.isLoading)
                         }
                     }
-                }
+            }
         }
+        .tint(DesignTokens.accent)
         .overlay {
             if coordinator.route != .automation, onboardingPhase != .hidden {
                 OnboardingView(

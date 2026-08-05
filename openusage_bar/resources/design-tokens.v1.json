@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "color": {
+    "bg": { "light": "#F7F7F5", "dark": "#0B0C0E" },
+    "surface": { "light": "#FFFFFF", "dark": "#121316" },
+    "surfaceAlt": { "light": "#F0F0EE", "dark": "#181A1E" },
+    "text": { "light": "#1A1B1E", "dark": "#E8EAED" },
+    "textDim": { "light": "#5B5F66", "dark": "#A7ADB8" },
+    "textFaint": { "light": "#6A707A", "dark": "#7B818C" },
+    "hairline": { "light": "#E3E4E1", "dark": "#23262C" },
+    "accent": { "light": "#087F52", "dark": "#34D399" },
+    "accentSoft": { "light": "rgba(8,127,82,0.12)", "dark": "rgba(52,211,153,0.14)" },
+    "warn": { "light": "#B45309", "dark": "#FBBF24" },
+    "warnSoft": { "light": "rgba(180,83,9,0.12)", "dark": "rgba(251,191,36,0.14)" },
+    "bad": { "light": "#C0392B", "dark": "#F87171" },
+    "badSoft": { "light": "rgba(192,57,43,0.12)", "dark": "rgba(248,113,113,0.14)" }
+  },
+  "font": {
+    "sans": [
+      "-apple-system", "BlinkMacSystemFont", "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", "sans-serif"
+    ],
+    "mono": [
+      "ui-monospace", "SFMono-Regular", "SF Mono", "Menlo",
+      "Consolas", "Liberation Mono", "monospace"
+    ]
+  },
+  "radius": 12,
+  "spacing": {
+    "dense": 4,
+    "control": 8,
+    "panel": 16,
+    "section": 26
+  },
+  "motion": {
+    "fast": 150,
+    "base": 200,
+    "slow": 300,
+    "ease": "cubic-bezier(0.16, 1, 0.3, 1)"
+  }
+}

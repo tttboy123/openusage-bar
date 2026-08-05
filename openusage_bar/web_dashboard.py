@@ -10,14 +10,44 @@ primary surfaces; this page exists for cross-platform and headless users.
 from __future__ import annotations
 
 import html
+import json
+import re
 from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib import resources
 from typing import Any
 
 from .query import QueryService, to_wire
 
 
 DEFAULT_DASHBOARD_PORT = 17822
+
+
+def _css_token_key(key: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "-", key).lower()
+
+
+def _design_tokens() -> dict[str, Any]:
+    try:
+        text = (
+            resources.files("openusage_bar.resources")
+            .joinpath("design-tokens.v1.json")
+            .read_text(encoding="utf-8")
+        )
+        return json.loads(text)
+    except Exception:
+        return {}
+
+
+def _token_css(mode: str) -> str:
+    colors = _design_tokens().get("color", {})
+    lines: list[str] = []
+    for key, entry in colors.items():
+        css_key = _css_token_key(key)
+        value = entry.get(mode)
+        if value:
+            lines.append(f"      --{css_key}: {value};")
+    return "\n".join(lines)
 
 
 def _pill(state: str) -> str:
@@ -33,6 +63,8 @@ def _pill(state: str) -> str:
 def render_dashboard(
     snapshot: dict[str, Any], today: str, model_summary: tuple[dict[str, Any], ...] = ()
 ) -> str:
+    light_tokens = _token_css("light")
+    dark_tokens = _token_css("dark")
     summary = snapshot.get("summary") or {}
     today_tokens = summary.get("todayTokens")
     model_count = summary.get("modelCount")
@@ -107,19 +139,7 @@ def render_dashboard(
   <style>
     :root {{
       color-scheme: light dark;
-      --bg: #F7F7F5;
-      --surface: #FFFFFF;
-      --surface-alt: #F0F0EE;
-      --text: #1A1B1E;
-      --text-dim: #5B5F66;
-      --text-faint: #6A707A;
-      --hairline: #E3E4E1;
-      --accent: #087F52;
-      --accent-soft: rgba(8, 127, 82, 0.12);
-      --warn: #B45309;
-      --warn-soft: rgba(180, 83, 9, 0.12);
-      --bad: #C0392B;
-      --bad-soft: rgba(192, 57, 43, 0.12);
+{light_tokens}
       --radius: 12px;
       --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
         "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -128,19 +148,7 @@ def render_dashboard(
     }}
     @media (prefers-color-scheme: dark) {{
       :root {{
-        --bg: #0B0C0E;
-        --surface: #121316;
-        --surface-alt: #181A1E;
-        --text: #E8EAED;
-        --text-dim: #A7ADB8;
-        --text-faint: #7B818C;
-        --hairline: #23262C;
-        --accent: #34D399;
-        --accent-soft: rgba(52, 211, 153, 0.14);
-        --warn: #FBBF24;
-        --warn-soft: rgba(251, 191, 36, 0.14);
-        --bad: #F87171;
-        --bad-soft: rgba(248, 113, 113, 0.14);
+{dark_tokens}
       }}
     }}
     * {{ box-sizing: border-box; }}

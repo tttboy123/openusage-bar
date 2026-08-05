@@ -27,15 +27,24 @@ cd "$ROOT"
 "$PYTHON" scripts/release_secret_scan.py
 "$PYTHON" scripts/verify_action_pins.py
 CATALOG_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-provider-catalog.XXXXXX")
+DESIGN_TOKENS_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-design-tokens.XXXXXX")
 LOCAL_API_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-local-api-schema.XXXXXX")
 ACTIVITY_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-activity-schema.XXXXXX")
 PYTHON_COVERAGE_REPORT=$(mktemp "${TMPDIR:-/tmp}/openusage-python-coverage.XXXXXX")
 PYTHON_COVERAGE_DIR="${TMPDIR:-/tmp}/openusage-build-trace-$$"
-trap 'rm -f "$CATALOG_TMP" "$LOCAL_API_SCHEMA_TMP" "$ACTIVITY_SCHEMA_TMP" "$PYTHON_COVERAGE_REPORT"; rm -rf "$PYTHON_COVERAGE_DIR"' EXIT
+trap 'rm -f "$CATALOG_TMP" "$DESIGN_TOKENS_TMP" "$LOCAL_API_SCHEMA_TMP" "$ACTIVITY_SCHEMA_TMP" "$PYTHON_COVERAGE_REPORT"; rm -rf "$PYTHON_COVERAGE_DIR"' EXIT
 "$PYTHON" scripts/generate_swift_provider_catalog.py --output "$CATALOG_TMP"
 if ! cmp -s "$CATALOG_TMP" "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift"; then
   print -u2 "generated Swift provider catalog is stale"
   diff -u "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift" "$CATALOG_TMP" || true
+  exit 1
+fi
+"$PYTHON" scripts/generate_design_tokens.py \
+  --source "$ROOT/openusage_bar/resources/design-tokens.v1.json" \
+  --output "$DESIGN_TOKENS_TMP"
+if ! cmp -s "$DESIGN_TOKENS_TMP" "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedDesignTokens.swift"; then
+  print -u2 "generated Swift design tokens are stale"
+  diff -u "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedDesignTokens.swift" "$DESIGN_TOKENS_TMP" || true
   exit 1
 fi
 "$PYTHON" scripts/generate_local_api_schema.py --output "$LOCAL_API_SCHEMA_TMP"

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UsageCore
 
 @MainActor
 final class AppLaunchDelegate: NSObject, NSApplicationDelegate {
@@ -95,6 +96,7 @@ final class StatusItemController: NSObject {
         popover.contentSize = NSSize(width: 400, height: 540)
         popover.contentViewController = NSHostingController(
             rootView: MenuBarPopover(model: model)
+                .tint(DesignTokens.accent)
         )
     }
 
