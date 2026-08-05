@@ -1,0 +1,148 @@
+import { useEffect, useState } from "react";
+import { NavLink, Route, Routes } from "react-router-dom";
+import {
+  ChartLineUp,
+  Gauge,
+  CurrencyDollar,
+  Wrench,
+  PlugsConnected,
+  Heartbeat,
+  Lightning,
+  ChartBar,
+  ArrowClockwise,
+  ChartLineUp as UsageIcon,
+} from "@phosphor-icons/react";
+import ActivityPage from "./pages/ActivityPage";
+import PlaceholderPage from "./pages/PlaceholderPage";
+import { detectLang, setLang, messages, type Lang, type Messages } from "./i18n";
+
+const NAV = [
+  { to: "/activity", key: "navActivity", icon: ChartLineUp },
+  { to: "/usage-details", key: "navUsageDetails", icon: UsageIcon },
+  { to: "/capacity", key: "navCapacity", icon: Gauge },
+  { to: "/api-spend", key: "navApiSpend", icon: CurrencyDollar },
+  { to: "/local-tools", key: "navLocalTools", icon: Wrench },
+  { to: "/providers", key: "navProviders", icon: PlugsConnected },
+  { to: "/data-health", key: "navDataHealth", icon: Heartbeat },
+  { to: "/automation", key: "navAutomation", icon: Lightning },
+] as const;
+
+const TITLES: Record<string, keyof Messages> = {
+  "/activity": "navActivity",
+  "/usage-details": "navUsageDetails",
+  "/capacity": "navCapacity",
+  "/api-spend": "navApiSpend",
+  "/local-tools": "navLocalTools",
+  "/providers": "navProviders",
+  "/data-health": "navDataHealth",
+  "/automation": "navAutomation",
+};
+
+export default function App() {
+  const [lang, setLangState] = useState<Lang>(() => detectLang());
+  const [refreshKey, setRefreshKey] = useState(0);
+  const t: Messages = messages[lang];
+
+  useEffect(() => {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  }, [lang]);
+
+  function switchLang() {
+    const next: Lang = lang === "zh" ? "en" : "zh";
+    setLang(next);
+    setLangState(next);
+  }
+
+  return (
+    <div className="shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            <ChartBar size={18} />
+          </span>
+          <div>
+            <h1>UsageHub</h1>
+            <p>{t.localFirst}</p>
+          </div>
+        </div>
+        {NAV.map((item) => {
+          const Icon = item.icon;
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                `nav-link${isActive ? " active" : ""}`
+              }
+            >
+              <Icon />
+              {t[item.key]}
+            </NavLink>
+          );
+        })}
+      </aside>
+
+      <main className="content">
+        <header>
+          <div>
+            <h2>
+              {t[TITLES[window.location.pathname] ?? "navActivity"]}
+            </h2>
+            <p className="sub">{t.localFirst}</p>
+          </div>
+          <div className="toolbar">
+            <button
+              type="button"
+              className="lang-switch"
+              onClick={switchLang}
+              aria-label="Switch language"
+            >
+              {lang === "zh" ? "EN" : "中文"}
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => setRefreshKey((k) => k + 1)}
+            >
+              <ArrowClockwise size={14} />
+              {t.refresh}
+            </button>
+          </div>
+        </header>
+
+        <Routes>
+          <Route path="/" element={<ActivityPage t={t} />} />
+          <Route path="/activity" element={<ActivityPage t={t} />} />
+          <Route
+            path="/usage-details"
+            element={<ActivityPage t={t} />}
+          />
+          <Route
+            path="/capacity"
+            element={<PlaceholderPage t={t} title={t.navCapacity} />}
+          />
+          <Route
+            path="/api-spend"
+            element={<PlaceholderPage t={t} title={t.navApiSpend} />}
+          />
+          <Route
+            path="/local-tools"
+            element={<PlaceholderPage t={t} title={t.navLocalTools} />}
+          />
+          <Route
+            path="/providers"
+            element={<PlaceholderPage t={t} title={t.navProviders} />}
+          />
+          <Route
+            path="/data-health"
+            element={<PlaceholderPage t={t} title={t.navDataHealth} />}
+          />
+          <Route
+            path="/automation"
+            element={<PlaceholderPage t={t} title={t.navAutomation} />}
+          />
+        </Routes>
+      </main>
+    </div>
+  );
+}

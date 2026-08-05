@@ -1,0 +1,26 @@
+{
+  "name": "usagehub-web",
+  "version": "0.8.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "node scripts/gen-tokens.mjs && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.7",
+    "gsap": "^3.13.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0"
+  },
+  "license": "Apache-2.0"
+}
