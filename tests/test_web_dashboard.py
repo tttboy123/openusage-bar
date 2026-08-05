@@ -131,3 +131,57 @@ class WebDashboardTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(3)
+
+    def test_loopback_server_exposes_readonly_v1_endpoints(self):
+        server = make_dashboard_server(self.query, port=0, today=date(2026, 7, 29))
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for path in ("/v1/sources/status", "/v1/providers", "/v1/quick-connect"):
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+                connection.request("GET", path)
+                response = connection.getresponse()
+                body = response.read()
+                connection.close()
+                self.assertEqual(response.status, 200, path)
+                self.assertTrue(body.startswith(b"["), path)
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("GET", "/v1/capacity")
+            response = connection.getresponse()
+            body = response.read().decode("utf-8")
+            connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertIn('"providers"', body)
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request(
+                "GET", "/v1/activity/daily?from=2026-07-01&to=2026-07-29"
+            )
+            response = connection.getresponse()
+            body = response.read().decode("utf-8")
+            connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertIn('"rows"', body)
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request(
+                "GET", "/v1/costs/daily?from=2026-07-01&to=2026-07-29"
+            )
+            response = connection.getresponse()
+            body = response.read().decode("utf-8")
+            connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertIn('"rows"', body)
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("GET", "/v1/activity/daily")
+            response = connection.getresponse()
+            response.read()
+            connection.close()
+            self.assertEqual(response.status, 500)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(3)
