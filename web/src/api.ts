@@ -35,6 +35,7 @@ export interface CapacityProvider {
   remainingRatio?: number;
   resetsAt?: string;
   state?: string;
+  appliesTo?: { kind?: string; modelIds?: string[] };
 }
 
 export interface ActivityRow {

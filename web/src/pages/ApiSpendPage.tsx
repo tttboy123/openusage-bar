@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   fetchActivity,
   fetchCosts,
@@ -56,9 +57,20 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
       .finally(() => setLoading(false));
   }, [period]);
 
+  const apiProviders = useMemo(
+    () =>
+      new Set(
+        providers
+          .filter((p) => p.category === "api")
+          .map((p) => p.providerId ?? ""),
+      ),
+    [providers],
+  );
+
   const totals = useMemo(() => {
     const byCurrency: Record<string, number> = {};
     for (const row of costs) {
+      if (!apiProviders.has(row.providerId ?? "")) continue;
       const currency = row.currency ?? "USD";
       byCurrency[currency] =
         (byCurrency[currency] ?? 0) + Number(row.amount ?? 0);
@@ -66,11 +78,12 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
     return Object.entries(byCurrency)
       .map(([currency, amount]) => ({ currency, amount }))
       .filter((entry) => entry.amount > 0);
-  }, [costs]);
+  }, [costs, apiProviders]);
 
   const providerCost = useMemo(() => {
     const map = new Map<string, Map<string, number>>();
     for (const row of costs) {
+      if (!apiProviders.has(row.providerId ?? "")) continue;
       const provider = row.providerId ?? "unknown";
       const currency = row.currency ?? "USD";
       const byCurrency = map.get(provider) ?? new Map<string, number>();
@@ -81,7 +94,7 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
       map.set(provider, byCurrency);
     }
     return map;
-  }, [costs]);
+  }, [costs, apiProviders]);
 
   const categoryByProvider = useMemo(
     () => new Map(providers.map((p) => [p.providerId, p.category ?? ""])),
@@ -91,6 +104,7 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
   const modelRows = useMemo(() => {
     const map = new Map<string, ModelRow>();
     for (const row of activity) {
+      if (!apiProviders.has(row.providerId ?? "")) continue;
       const provider = row.providerId ?? "unknown";
       const model = row.modelId ?? "unknown";
       const key = `${provider}\u0000${model}`;
@@ -113,11 +127,12 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
       map.set(key, entry);
     }
     return [...map.values()].sort((a, b) => b.tokens - a.tokens);
-  }, [activity]);
+  }, [activity, apiProviders]);
 
   const providerRows = useMemo(() => {
     const tokens = new Map<string, number>();
     for (const row of activity) {
+      if (!apiProviders.has(row.providerId ?? "")) continue;
       const provider = row.providerId ?? "unknown";
       tokens.set(provider, (tokens.get(provider) ?? 0) + (row.totalTokens ?? 0));
     }
@@ -135,7 +150,7 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
         };
       })
       .sort((a, b) => b.tokenCount - a.tokenCount);
-  }, [activity, providerCost]);
+  }, [activity, providerCost, apiProviders]);
 
   function modelCostCell(row: ModelRow) {
     const category = categoryByProvider.get(row.provider);
@@ -208,6 +223,14 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
             <div className="panel-head">
               <h3>{t.modelDetail}</h3>
               <span>{t[PERIOD_LABEL[period]]}</span>
+            </div>
+            <div className="panel-body">
+              <p className="dim" style={{ margin: 0, fontSize: "0.74rem" }}>
+                {t.apiOnlyNote}{" "}
+                <Link className="btn-link" to="/capacity">
+                  {t.navCapacity}
+                </Link>
+              </p>
             </div>
             <div className="table-wrap">
               <table>

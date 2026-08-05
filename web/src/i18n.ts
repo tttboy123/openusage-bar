@@ -64,8 +64,11 @@ export const messages = {
     apiPaid: "API paid",
     apiPaidHint:
       "Amounts are reported by the provider account (e.g. DeepSeek 30-day window spend), not token × unit price.",
+    apiOnlyNote:
+      "Only API-billed providers are shown here. Subscription plan quotas live on the Capacity page.",
     subscription: "Subscription",
     subscriptionNoApiCost: "Subscription plan; no per-token API cost",
+    account: "Account",
     localTool: "Local tool",
     categoryCol: "Type",
     sources: "sources",
@@ -170,8 +173,10 @@ export const messages = {
     apiPaid: "API 实付",
     apiPaidHint:
       "金额来自 Provider 账户上报（如 DeepSeek 近 30 天窗口额度），非 Token × 单价。",
+    apiOnlyNote: "此处仅显示 API 计费 Provider；订阅计划额度见「额度」页。",
     subscription: "订阅",
     subscriptionNoApiCost: "订阅计划，无按量 API 费用",
+    account: "账户",
     localTool: "本地工具",
     categoryCol: "类型",
     sources: "数据源",

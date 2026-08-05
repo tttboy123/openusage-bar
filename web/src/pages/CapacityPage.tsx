@@ -9,6 +9,13 @@ function ratioWidth(ratio: number | undefined): string {
   return `${clamped}%`;
 }
 
+function kindLabel(kind: string | undefined, t: Messages): string {
+  if (kind === "subscription") return t.subscription;
+  if (kind === "account") return t.account;
+  if (kind === "api") return t.apiPaid;
+  return kind ?? "—";
+}
+
 export default function CapacityPage({ t }: { t: Messages }) {
   const [items, setItems] = useState<CapacityProvider[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +41,7 @@ export default function CapacityPage({ t }: { t: Messages }) {
           <thead>
             <tr>
               <th scope="col">{t.providerCol}</th>
+              <th scope="col">{t.categoryCol}</th>
               <th scope="col">{t.quotaCol}</th>
               <th scope="col">{t.usedCol}</th>
               <th scope="col">{t.remainingCol}</th>
@@ -44,6 +52,7 @@ export default function CapacityPage({ t }: { t: Messages }) {
             {items.map((item, index) => (
               <tr key={`${item.providerId}-${index}`}>
                 <th scope="row">{item.providerId ?? "n/a"}</th>
+                <td>{kindLabel(item.appliesTo?.kind, t)}</td>
                 <td>{item.quotaName ?? "n/a"}</td>
                 <td className="mono">
                   {item.used ?? "n/a"}
@@ -84,7 +93,7 @@ export default function CapacityPage({ t }: { t: Messages }) {
             ))}
             {items.length === 0 && !error ? (
               <tr>
-                <td colSpan={5} className="empty">
+                <td colSpan={6} className="empty">
                   {t.comingSoon}
                 </td>
               </tr>
