@@ -26,7 +26,7 @@ jobs:
             artifact: UsageHub-*.dmg
           - os: windows-latest
             args: --win
-            artifact: UsageHub-*.exe
+            artifact: UsageHub*.exe
           - os: ubuntu-latest
             args: --linux
             artifact: UsageHub-*.AppImage
