@@ -20,3 +20,7 @@ deployed-backups/
 installed-python.pre-*/
 swift_app/.build/
 *.xcresult
+
+# Internal working documents kept locally, not published
+docs/CONTEXT-HANDOFF-*.md
+docs/superpowers/
