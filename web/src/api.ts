@@ -39,6 +39,7 @@ export interface CapacityProvider {
 export interface ActivityRow {
   day?: string;
   providerId?: string;
+  sourceId?: string | null;
   modelId?: string;
   totalTokens?: number;
   inputTokens?: number;
