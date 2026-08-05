@@ -27,6 +27,7 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
   const [testing, setTesting] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -41,11 +42,39 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
 
   useEffect(() => {
     if (!open) return;
+    const trigger = document.activeElement as HTMLElement | null;
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusables = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first || !dialog.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialog.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
     }
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      trigger?.focus?.();
+    };
   }, [open, onClose]);
 
   const filtered = useMemo(() => {
@@ -85,6 +114,7 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
     <div className="dialog-overlay" role="presentation" onClick={onClose}>
       <div
         className="dialog"
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={t.addProvider}

@@ -71,7 +71,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
-            <ChartBar size={18} />
+            <ChartBar size={20} />
           </span>
           <div>
             <h1>UsageHub</h1>
@@ -135,7 +135,7 @@ export default function App() {
               className="icon-btn"
               onClick={() => window.location.reload()}
             >
-              <ArrowClockwise size={14} />
+              <ArrowClockwise size={16} />
               {t.refresh}
             </button>
           </div>

@@ -115,24 +115,24 @@ export default function ActivityPage({ t }: { t: Messages }) {
         <>
           <div className="metrics">
             <Kpi
-              icon={<ChartLineUp />}
+              icon={<ChartLineUp size={16} />}
               label={t.todayTokens}
               value={tokenValue}
               meta={tokenMeta}
             />
             <Kpi
-              icon={<HardDrives />}
+              icon={<HardDrives size={16} />}
               label={t.providers}
               value={String(providers.length)}
             />
             <Kpi
-              icon={<CurrencyCircleDollar />}
+              icon={<CurrencyCircleDollar size={16} />}
               label={t.balance}
               value={String(quotas.length)}
               meta={quotas.map((q) => q.currency).filter(Boolean).join(", ")}
             />
             <Kpi
-              icon={<CalendarBlank />}
+              icon={<CalendarBlank size={16} />}
               label={t.ledgerDate}
               value={new Date().toISOString().slice(0, 10)}
             />

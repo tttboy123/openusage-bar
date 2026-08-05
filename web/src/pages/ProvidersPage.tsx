@@ -29,7 +29,7 @@ export default function ProvidersPage({ t }: { t: Messages }) {
           className="primary-btn"
           onClick={() => setDialogOpen(true)}
         >
-          <Plus size={14} />
+          <Plus size={16} />
           {t.addConnection}
         </button>
         <span className="dim">{providers.length} {t.instances}</span>

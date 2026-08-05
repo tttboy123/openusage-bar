@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { CheckCircle, WarningCircle, X } from "@phosphor-icons/react";
+import { messages, type Lang } from "../i18n";
 
 type ToastKind = "success" | "error" | "warning";
 interface ToastItem {
@@ -28,6 +29,10 @@ export function useToast() {
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const nextId = useRef(1);
+  const dismissLabel =
+    messages[
+      (document.documentElement.lang === "zh-CN" ? "zh" : "en") as Lang
+    ].dismiss;
 
   const dismiss = useCallback((id: number) => {
     setItems((current) => current.filter((item) => item.id !== id));
@@ -58,9 +63,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               type="button"
               className="toast-close"
               onClick={() => dismiss(item.id)}
-              aria-label="Dismiss"
+              aria-label={dismissLabel}
             >
-              <X size={14} />
+              <X size={16} />
             </button>
           </div>
         ))}
