@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MagnifyingGlass, Eye, EyeSlash, X } from "@phosphor-icons/react";
 import type { QuickConnectItem } from "../api";
 import { useToast } from "./Toast";
@@ -26,12 +26,15 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
+  const [closing, setClosing] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<number | null>(null);
   const toast = useToast();
 
   useEffect(() => {
     if (open) {
+      setClosing(false);
       setQuery("");
       setSelected(null);
       setApiKey("");
@@ -40,12 +43,22 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
     }
   }, [open]);
 
+  const requestClose = useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setClosing(false);
+      onClose();
+    }, 150);
+  }, [closing, onClose]);
+
   useEffect(() => {
     if (!open) return;
     const trigger = document.activeElement as HTMLElement | null;
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        onClose();
+        requestClose();
         return;
       }
       if (event.key !== "Tab") return;
@@ -75,7 +88,15 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
       window.removeEventListener("keydown", onKeyDown);
       trigger?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open, requestClose]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimer.current !== null) {
+        window.clearTimeout(closeTimer.current);
+      }
+    };
+  }, []);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -107,13 +128,17 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
       return;
     }
     toast.show("success", `${selected.familyId} ${t.savedTo}`);
-    onClose();
+    requestClose();
   }
 
   return (
-    <div className="dialog-overlay" role="presentation" onClick={onClose}>
+    <div
+      className={`dialog-overlay${closing ? " closing" : ""}`}
+      role="presentation"
+      onClick={requestClose}
+    >
       <div
-        className="dialog"
+        className={`dialog${closing ? " closing" : ""}`}
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
@@ -128,7 +153,7 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
           <button
             type="button"
             className="icon-btn"
-            onClick={onClose}
+            onClick={requestClose}
             aria-label={t.close}
           >
             <X size={16} />

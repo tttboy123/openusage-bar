@@ -42,12 +42,18 @@ export default function PeriodSelector({
     year: t.periodYear,
   };
   return (
-    <div className="toolbar" style={{ marginBottom: 16 }}>
+    <div
+      className="toolbar"
+      role="group"
+      aria-label={t.periodLabel}
+      style={{ marginBottom: 16 }}
+    >
       {PERIODS.map((period) => (
         <button
           type="button"
           key={period}
           className="icon-btn"
+          aria-pressed={value === period}
           style={{
             background: value === period ? "var(--accent-soft)" : undefined,
             color: value === period ? "var(--accent)" : undefined,
