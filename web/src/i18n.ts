@@ -66,6 +66,8 @@ export const messages = {
       "Amounts are reported by the provider account (e.g. DeepSeek 30-day window spend), not token × unit price.",
     apiOnlyNote:
       "Only API-billed providers are shown here. Subscription plan quotas live on the Capacity page.",
+    apiSpendNoModelDetail:
+      "API-paid amount is recorded, but this ledger has no model-level usage for it yet.",
     subscription: "Subscription",
     subscriptionNoApiCost: "Subscription plan; no per-token API cost",
     account: "Account",
@@ -174,6 +176,8 @@ export const messages = {
     apiPaidHint:
       "金额来自 Provider 账户上报（如 DeepSeek 近 30 天窗口额度），非 Token × 单价。",
     apiOnlyNote: "此处仅显示 API 计费 Provider；订阅计划额度见「额度」页。",
+    apiSpendNoModelDetail:
+      "已有 API 实付金额，但账本暂无对应的模型级用量。",
     subscription: "订阅",
     subscriptionNoApiCost: "订阅计划，无按量 API 费用",
     account: "账户",

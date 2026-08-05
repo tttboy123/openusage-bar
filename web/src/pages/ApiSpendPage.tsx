@@ -136,6 +136,11 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
       const provider = row.providerId ?? "unknown";
       tokens.set(provider, (tokens.get(provider) ?? 0) + (row.totalTokens ?? 0));
     }
+    // API providers that reported cost still belong in the summary,
+    // even when no model-level token rows were captured yet.
+    for (const provider of providerCost.keys()) {
+      if (!tokens.has(provider)) tokens.set(provider, 0);
+    }
     return [...tokens.entries()]
       .map(([provider, tokenCount]) => {
         const amounts = [...(providerCost.get(provider)?.entries() ?? [])].filter(
@@ -256,7 +261,9 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
                   {modelRows.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="empty">
-                        {t.noSpend}
+                        {totals.length > 0
+                          ? t.apiSpendNoModelDetail
+                          : t.noSpend}
                       </td>
                     </tr>
                   ) : null}
@@ -300,7 +307,9 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
                   {providerRows.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="empty">
-                        {t.noSpend}
+                        {totals.length > 0
+                          ? t.apiSpendNoModelDetail
+                          : t.noSpend}
                       </td>
                     </tr>
                   ) : null}
