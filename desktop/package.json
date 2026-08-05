@@ -4,10 +4,39 @@
   "description": "UsageHub cross-platform desktop client (Electron) wrapping the local web dashboard",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "build:web": "cd ../web && npm run build",
+    "dist": "npm run build:web && electron-builder",
+    "dist:mac": "npm run build:web && electron-builder --mac",
+    "dist:win": "npm run build:web && electron-builder --win",
+    "dist:linux": "npm run build:web && electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.lune.openusagebar",
+    "productName": "UsageHub",
+    "files": [
+      "main.js",
+      "package.json",
+      "../web/dist/**"
+    ],
+    "directories": {
+      "output": "../dist-desktop"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.utilities"
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Utility"
+    }
   },
   "license": "Apache-2.0",
   "devDependencies": {
-    "electron": "^43.2.0"
+    "electron": "^43.2.0",
+    "electron-builder": "^26.0.12"
   }
 }

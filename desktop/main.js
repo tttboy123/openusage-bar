@@ -1,16 +1,75 @@
 const { app, BrowserWindow, Tray, Menu, dialog, nativeImage } = require("electron");
 const { spawn } = require("child_process");
 const http = require("http");
+const { createReadStream, existsSync, statSync } = require("fs");
 const path = require("path");
 
 const DASHBOARD_URL =
   process.env.USAGEHUB_DASHBOARD_URL || "http://127.0.0.1:17822";
 const DASHBOARD_PORT = 17822;
+const WEB_ROOT = path.join(__dirname, "..", "web", "dist");
 
 let mainWindow = null;
 let tray = null;
 let serverProcess = null;
+let staticServer = null;
 let isQuitting = false;
+
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".json": "application/json",
+  ".woff2": "font/woff2",
+};
+
+function serveStatic(req, res) {
+  let urlPath = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
+  if (urlPath === "/") urlPath = "/index.html";
+  let file = path.join(WEB_ROOT, urlPath);
+  if (!existsSync(file) || statSync(file).isDirectory()) {
+    file = path.join(WEB_ROOT, "index.html");
+  }
+  createReadStream(file)
+    .on("error", () => {
+      res.statusCode = 404;
+      res.end("not found");
+    })
+    .pipe(res);
+  res.setHeader("Content-Type", MIME[path.extname(file)] ?? "application/octet-stream");
+}
+
+function proxyToDashboard(req, res) {
+  const target = new URL(req.url, DASHBOARD_URL);
+  const proxy = http.request(
+    target,
+    { method: req.method },
+    (upstream) => {
+      res.writeHead(upstream.statusCode ?? 500, upstream.headers);
+      upstream.pipe(res);
+    },
+  );
+  proxy.on("error", () => {
+    res.statusCode = 502;
+    res.end("dashboard unavailable");
+  });
+  req.pipe(proxy);
+}
+
+function startStaticServer() {
+  return new Promise((resolve) => {
+    staticServer = http.createServer((req, res) => {
+      if (req.url.startsWith("/v1/")) {
+        proxyToDashboard(req, res);
+      } else {
+        serveStatic(req, res);
+      }
+    });
+    staticServer.listen(0, "127.0.0.1", () => resolve(staticServer));
+  });
+}
 
 function dashboardUp() {
   return new Promise((resolve) => {
@@ -64,6 +123,7 @@ async function ensureDashboard() {
 }
 
 function createWindow() {
+  const address = staticServer.address();
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -73,7 +133,7 @@ function createWindow() {
       contextIsolation: true,
     },
   });
-  mainWindow.loadURL(DASHBOARD_URL);
+  mainWindow.loadURL(`http://127.0.0.1:${address.port}/`);
   mainWindow.on("close", (event) => {
     if (!isQuitting) {
       event.preventDefault();
@@ -135,6 +195,7 @@ function createTray() {
 
 app.whenReady().then(async () => {
   await ensureDashboard();
+  await startStaticServer();
   createWindow();
   createTray();
   app.on("activate", () => {
@@ -157,5 +218,8 @@ app.on("before-quit", () => {
 app.on("quit", () => {
   if (serverProcess) {
     serverProcess.kill();
+  }
+  if (staticServer) {
+    staticServer.close();
   }
 });
