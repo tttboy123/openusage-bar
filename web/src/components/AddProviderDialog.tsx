@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MagnifyingGlass, Eye, EyeSlash, X } from "@phosphor-icons/react";
 import type { QuickConnectItem } from "../api";
 import { useToast } from "./Toast";
+import { type Messages } from "../i18n";
 
 interface Props {
   open: boolean;
   presets: QuickConnectItem[];
   onClose: () => void;
+  t: Messages;
 }
 
 const BRAND_COLORS: Record<string, string> = {
@@ -17,7 +19,7 @@ const BRAND_COLORS: Record<string, string> = {
   codex: "#10A37F",
 };
 
-export default function AddProviderDialog({ open, presets, onClose }: Props) {
+export default function AddProviderDialog({ open, presets, onClose, t }: Props) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<QuickConnectItem | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -63,10 +65,10 @@ export default function AddProviderDialog({ open, presets, onClose }: Props) {
   function save() {
     if (!selected) return;
     if (!apiKey.trim()) {
-      toast.show("error", "API key is required");
+      toast.show("error", t.apiKeyRequired);
       return;
     }
-    toast.show("success", `${selected.familyId} saved.`);
+    toast.show("success", `${selected.familyId} ${t.savedTo}`);
     onClose();
   }
 
@@ -76,13 +78,13 @@ export default function AddProviderDialog({ open, presets, onClose }: Props) {
         className="dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Add Provider"
+        aria-label={t.addProvider}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="dialog-head">
           <div>
-            <h3>Add Provider</h3>
-            <p>Choose a preset, then enter your API key.</p>
+            <h3>{t.addProvider}</h3>
+            <p>{t.choosePreset}</p>
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
             <X size={16} />
@@ -97,8 +99,8 @@ export default function AddProviderDialog({ open, presets, onClose }: Props) {
                 ref={searchRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search presets..."
-                aria-label="Search provider presets"
+                placeholder={t.searchPresets}
+                aria-label={t.searchPresets}
               />
             </div>
             <div className="preset-grid">
@@ -122,7 +124,7 @@ export default function AddProviderDialog({ open, presets, onClose }: Props) {
               ))}
               {filtered.length === 0 ? (
                 <p className="empty" style={{ gridColumn: "1 / -1" }}>
-                  No matching presets.
+                  {t.noMatchingPresets}
                 </p>
               ) : null}
             </div>
@@ -138,7 +140,7 @@ export default function AddProviderDialog({ open, presets, onClose }: Props) {
                   target="_blank"
                   rel="noopener"
                 >
-                  Get API Key
+                  {t.getApiKey}
                 </a>
               ) : null}
               {selected.consoleUrl ? (
@@ -148,12 +150,12 @@ export default function AddProviderDialog({ open, presets, onClose }: Props) {
                   target="_blank"
                   rel="noopener"
                 >
-                  Open Console
+                  {t.openConsole}
                 </a>
               ) : null}
             </p>
             <label className="field-label" htmlFor="api-key">
-              API Key
+              {t.apiKey}
             </label>
             <div className="key-input">
               <input
@@ -168,7 +170,7 @@ export default function AddProviderDialog({ open, presets, onClose }: Props) {
                 type="button"
                 className="icon-btn"
                 onClick={() => setShowKey((v) => !v)}
-                aria-label={showKey ? "Hide API key" : "Show API key"}
+                aria-label={showKey ? t.hideApiKey : t.showApiKey}
               >
                 {showKey ? <EyeSlash size={16} /> : <Eye size={16} />}
               </button>
@@ -180,7 +182,7 @@ export default function AddProviderDialog({ open, presets, onClose }: Props) {
                 onClick={testEndpoint}
                 disabled={testing}
               >
-                {testing ? "Testing..." : "Test Endpoint"}
+                {testing ? t.testing : t.testEndpoint}
               </button>
               {latency !== null ? (
                 <span className="mono dim">
@@ -193,10 +195,10 @@ export default function AddProviderDialog({ open, presets, onClose }: Props) {
                 className="icon-btn"
                 onClick={() => setSelected(null)}
               >
-                Back
+                {t.back}
               </button>
               <button type="button" className="primary-btn" onClick={save}>
-                Save
+                {t.save}
               </button>
             </div>
           </div>

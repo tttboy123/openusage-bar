@@ -32,27 +32,28 @@ export default function ProvidersPage({ t }: { t: Messages }) {
           <Plus size={14} />
           {t.addConnection}
         </button>
-        <span className="dim">{providers.length} instances</span>
+        <span className="dim">{providers.length} {t.instances}</span>
       </div>
       <AddProviderDialog
         open={dialogOpen}
         presets={quick}
         onClose={() => setDialogOpen(false)}
+        t={t}
       />
       <section className="panel">
         <div className="panel-head">
           <h3>{t.navProviders}</h3>
-          <span>{providers.length} instances</span>
+          <span>{providers.length} {t.instances}</span>
         </div>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th scope="col">Provider</th>
-              <th scope="col">Name</th>
-              <th scope="col">Source Kind</th>
-              <th scope="col">Console</th>
-              <th scope="col">API Key</th>
+              <th scope="col">{t.providerCol}</th>
+              <th scope="col">{t.nameCol}</th>
+              <th scope="col">{t.sourceKind}</th>
+              <th scope="col">{t.consoleCol}</th>
+              <th scope="col">{t.apiKey}</th>
             </tr>
           </thead>
           <tbody>

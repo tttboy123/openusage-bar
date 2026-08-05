@@ -53,7 +53,7 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
       <section className="panel">
         <div className="panel-head">
           <h3>{t.navApiSpend}</h3>
-          <span>last 7 days</span>
+          <span>{t.last7Days}</span>
         </div>
         <div className="panel-body">
           {totals.map((total) => (
@@ -67,15 +67,15 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
 
       <section className="panel">
         <div className="panel-head">
-          <h3>Token Usage</h3>
-          <span>last 7 days</span>
+          <h3>{t.tokenUsage}</h3>
+          <span>{t.last7Days}</span>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th scope="col">Provider</th>
-                <th scope="col">Tokens</th>
+                <th scope="col">{t.providerCol}</th>
+                <th scope="col">{t.tokensCol}</th>
               </tr>
             </thead>
             <tbody>

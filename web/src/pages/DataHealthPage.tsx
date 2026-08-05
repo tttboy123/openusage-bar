@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchSources, type SourceItem } from "../api";
 import { type Messages } from "../i18n";
+import { tpl } from "../i18n";
 
 export default function DataHealthPage({ t }: { t: Messages }) {
   const [sources, setSources] = useState<SourceItem[]>([]);
@@ -21,22 +22,25 @@ export default function DataHealthPage({ t }: { t: Messages }) {
     <section className="panel">
       <div className="panel-head">
         <h3>{t.navDataHealth}</h3>
-        <span>{sources.length} sources</span>
+        <span>{sources.length} {t.sources}</span>
       </div>
       <div className="panel-body">
         <p className="empty">
           {issueCount === 0
-            ? `All ${sources.length} sources are collecting normally.`
-            : `${issueCount} of ${sources.length} sources need attention. Items below show the fix.`}
+            ? tpl(t.allCollecting, { count: sources.length })
+            : tpl(t.needAttention, {
+                issue: issueCount,
+                total: sources.length,
+              })}
         </p>
       </div>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th scope="col">Provider</th>
-              <th scope="col">Source</th>
-              <th scope="col">State</th>
+              <th scope="col">{t.providerCol}</th>
+              <th scope="col">{t.sourceKind}</th>
+              <th scope="col">{t.stateCol}</th>
             </tr>
           </thead>
           <tbody>

@@ -56,11 +56,11 @@ export default function UsageDetailsPage({ t }: { t: Messages }) {
           <p className="metric-value">{totals.tokens.toLocaleString()}</p>
         </div>
         <div className="metric">
-          <p className="metric-label">Input</p>
+          <p className="metric-label">{t.inputTokens}</p>
           <p className="metric-value">{totals.input.toLocaleString()}</p>
         </div>
         <div className="metric">
-          <p className="metric-label">Output</p>
+          <p className="metric-label">{t.outputTokens}</p>
           <p className="metric-value">{totals.output.toLocaleString()}</p>
         </div>
       </div>

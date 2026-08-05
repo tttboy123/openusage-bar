@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ChartLineUp,
   CurrencyCircleDollar,
   HardDrives,
   CalendarBlank,
 } from "@phosphor-icons/react";
-import { fetchSnapshot, type Snapshot } from "../api";
+import { fetchActivity, fetchSnapshot, type Snapshot } from "../api";
 import { useAnimatedNumber } from "../hooks/useAnimatedNumber";
 import { type Messages } from "../i18n";
 
@@ -22,10 +22,14 @@ function Kpi({
 }) {
   return (
     <div className="metric">
-      <p className="metric-label">{label}</p>
+      <p className="metric-label">
+        <span className="metric-icon" aria-hidden="true">
+          {icon}
+        </span>
+        {label}
+      </p>
       <p className="metric-value">{value}</p>
       {meta ? <p className="metric-meta">{meta}</p> : null}
-      <span style={{ display: "none" }}>{icon}</span>
     </div>
   );
 }
@@ -33,6 +37,7 @@ function Kpi({
 export default function ActivityPage({ t }: { t: Messages }) {
   const [snapshot, setSnapshot] = useState<Snapshot>({});
   const [error, setError] = useState<string | null>(null);
+  const [trend, setTrend] = useState<{ day: string; tokens: number }[]>([]);
 
   async function load() {
     try {
@@ -45,6 +50,28 @@ export default function ActivityPage({ t }: { t: Messages }) {
 
   useEffect(() => {
     void load();
+  }, []);
+
+  useEffect(() => {
+    const from = new Date();
+    from.setDate(from.getDate() - 29);
+    void fetchActivity(
+      from.toISOString().slice(0, 10),
+      new Date().toISOString().slice(0, 10),
+    )
+      .then((rows) => {
+        const map: Record<string, number> = {};
+        for (const row of rows) {
+          const day = row.day ?? "unknown";
+          map[day] = (map[day] ?? 0) + (row.totalTokens ?? 0);
+        }
+        setTrend(
+          Object.entries(map)
+            .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+            .map(([day, tokens]) => ({ day, tokens })),
+        );
+      })
+      .catch(() => {});
   }, []);
 
   const summary = snapshot.summary ?? {};
@@ -61,10 +88,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
       ? `${summary.modelCount} ${t.providers} · ${summary.coveredDayCount ?? 0} days`
       : undefined;
 
-  const trendBars = useMemo(
-    () => [38, 52, 44, 61, 48, 70, 82, 64, 76, 90, 58, 85],
-    [],
-  );
+  const trendMax = Math.max(1, ...trend.map((entry) => entry.tokens));
 
   return (
     <>
@@ -96,7 +120,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
       {error ? <p className="empty">{error}</p> : null}
 
       <h2 className="section-title">
-        {t.quotaHub} <span className="dim">· free quota aggregation</span>
+        {t.quotaHub} <span className="dim">· {t.freeQuotaAggregation}</span>
       </h2>
       <div className="quota-grid">
         {quotas.map((item, index) => (
@@ -122,38 +146,41 @@ export default function ActivityPage({ t }: { t: Messages }) {
       <section className="panel" aria-label={t.modelTrend}>
         <div className="panel-head">
           <h3>{t.modelTrend}</h3>
-          <span>30 days</span>
+          <span>{t.last30Days}</span>
         </div>
         <div className="panel-body">
           <div className="trend-bars" role="img" aria-label={t.modelTrend}>
-            {trendBars.map((height, index) => (
+            {trend.map((entry) => (
               <div
                 className="trend-bar"
-                key={index}
-                style={{ height: `${height}%` }}
+                key={entry.day}
+                title={`${entry.day}: ${entry.tokens.toLocaleString()}`}
+                style={{ height: `${(entry.tokens / trendMax) * 100}%` }}
               />
             ))}
           </div>
-          <p className="empty">
-            <ChartLineUp size={16} />
-            {t.noModelTrend}
-          </p>
+          {trend.length === 0 ? (
+            <p className="empty">
+              <ChartLineUp size={16} />
+              {t.noModelTrend}
+            </p>
+          ) : null}
         </div>
       </section>
 
       <section className="panel" aria-label={t.modelSpend}>
         <div className="panel-head">
           <h3>{t.modelSpend}</h3>
-          <span>last 7 days</span>
+          <span>{t.last7Days}</span>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th scope="col">Provider</th>
-                <th scope="col">Name</th>
-                <th scope="col">Source Kind</th>
-                <th scope="col">Console</th>
+                <th scope="col">{t.providerCol}</th>
+                <th scope="col">{t.nameCol}</th>
+                <th scope="col">{t.sourceKind}</th>
+                <th scope="col">{t.consoleCol}</th>
               </tr>
             </thead>
             <tbody>

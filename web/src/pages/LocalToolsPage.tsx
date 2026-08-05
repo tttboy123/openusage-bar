@@ -34,21 +34,18 @@ export default function LocalToolsPage({ t }: { t: Messages }) {
     <section className="panel">
       <div className="panel-head">
         <h3>{t.navLocalTools}</h3>
-        <span>last 30 days</span>
+        <span>{t.last30Days}</span>
       </div>
       <div className="panel-body">
         {totals.length === 0 ? (
-          <p className="empty">
-            No local tool activity yet. Hermes and OpenClaw appear here after they produce
-            Token usage on this device.
-          </p>
+          <p className="empty">{t.noLocalToolActivity}</p>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th scope="col">Tool</th>
-                  <th scope="col">Tokens</th>
+                  <th scope="col">{t.providerCol}</th>
+                  <th scope="col">{t.tokensCol}</th>
                 </tr>
               </thead>
               <tbody>

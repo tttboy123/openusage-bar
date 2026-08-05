@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import {
   ChartLineUp,
   Gauge,
@@ -21,6 +21,7 @@ import DataHealthPage from "./pages/DataHealthPage";
 import AutomationPage from "./pages/AutomationPage";
 import UsageDetailsPage from "./pages/UsageDetailsPage";
 import { fetchQuickConnect, type QuickConnectItem } from "./api";
+import Reveal from "./components/Reveal";
 import { detectLang, setLang, messages, type Lang, type Messages } from "./i18n";
 
 const NAV = [
@@ -46,6 +47,7 @@ const TITLES: Record<string, keyof Messages> = {
 };
 
 export default function App() {
+  const location = useLocation();
   const [lang, setLangState] = useState<Lang>(() => detectLang());
   const [quick, setQuick] = useState<QuickConnectItem[]>([]);
   const t: Messages = messages[lang];
@@ -114,7 +116,7 @@ export default function App() {
               }}
             >
               <option value="" disabled>
-                Quick Connect
+                {t.quickConnect}
               </option>
               {quick.map((item) => (
                 <option key={item.familyId} value={item.consoleUrl}>
@@ -141,38 +143,19 @@ export default function App() {
           </div>
         </header>
 
-        <Routes>
-          <Route path="/" element={<ActivityPage t={t} />} />
-          <Route path="/activity" element={<ActivityPage t={t} />} />
-          <Route
-            path="/usage-details"
-            element={<UsageDetailsPage t={t} />}
-          />
-          <Route
-            path="/capacity"
-            element={<CapacityPage t={t} />}
-          />
-          <Route
-            path="/api-spend"
-            element={<ApiSpendPage t={t} />}
-          />
-          <Route
-            path="/local-tools"
-            element={<LocalToolsPage t={t} />}
-          />
-          <Route
-            path="/providers"
-            element={<ProvidersPage t={t} />}
-          />
-          <Route
-            path="/data-health"
-            element={<DataHealthPage t={t} />}
-          />
-          <Route
-            path="/automation"
-            element={<AutomationPage t={t} />}
-          />
-        </Routes>
+        <Reveal key={location.pathname}>
+          <Routes>
+            <Route path="/" element={<ActivityPage t={t} />} />
+            <Route path="/activity" element={<ActivityPage t={t} />} />
+            <Route path="/usage-details" element={<UsageDetailsPage t={t} />} />
+            <Route path="/capacity" element={<CapacityPage t={t} />} />
+            <Route path="/api-spend" element={<ApiSpendPage t={t} />} />
+            <Route path="/local-tools" element={<LocalToolsPage t={t} />} />
+            <Route path="/providers" element={<ProvidersPage t={t} />} />
+            <Route path="/data-health" element={<DataHealthPage t={t} />} />
+            <Route path="/automation" element={<AutomationPage t={t} />} />
+          </Routes>
+        </Reveal>
       </main>
     </div>
   );

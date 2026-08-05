@@ -22,17 +22,17 @@ export default function CapacityPage({ t }: { t: Messages }) {
     <section className="panel">
       <div className="panel-head">
         <h3>{t.navCapacity}</h3>
-        <span>{items.length} scopes</span>
+        <span>{items.length} {t.scopes}</span>
       </div>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th scope="col">Provider</th>
-              <th scope="col">Quota</th>
-              <th scope="col">Used</th>
-              <th scope="col">Remaining</th>
-              <th scope="col">State</th>
+              <th scope="col">{t.providerCol}</th>
+              <th scope="col">{t.quotaCol}</th>
+              <th scope="col">{t.usedCol}</th>
+              <th scope="col">{t.remainingCol}</th>
+              <th scope="col">{t.stateCol}</th>
             </tr>
           </thead>
           <tbody>

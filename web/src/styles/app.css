@@ -50,6 +50,7 @@ body {
 .metric { padding: 16px 18px; border-left: 1px solid var(--hairline); }
 .metric:first-child { border-left: 0; }
 .metric-label { margin: 0; font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }
+.metric-icon { display: inline-flex; margin-right: 5px; vertical-align: -2px; color: var(--text-dim); }
 .metric-value { margin: 5px 0 0; font-size: 1.5rem; font-weight: 650; font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .metric-meta { margin: 4px 0 0; font-size: 0.74rem; color: var(--text-dim); }
 
