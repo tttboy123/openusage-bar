@@ -132,7 +132,9 @@ struct DataHealthPage: View {
                     ? "checkmark.circle.fill"
                     : "exclamationmark.triangle.fill"
             )
-            .foregroundStyle(issueCount == 0 ? Color.green : Color.orange)
+            .foregroundStyle(
+                issueCount == 0 ? DesignTokens.accent : DesignTokens.warn
+            )
             Text(
                 issueCount == 0
                     ? AppLocalization.format(
@@ -446,7 +448,14 @@ private enum SourceText {
     static func symbol(_ value: String) -> String {
         switch value { case "ok": "checkmark.circle"; case "stale": "clock.badge.exclamationmark"; default: "exclamationmark.triangle" }
     }
-    static func color(_ value: String) -> Color { value == "ok" ? .secondary : .orange }
+    static func color(_ value: String) -> Color {
+        switch value {
+        case "ok": DesignTokens.accent
+        case "stale": DesignTokens.warn
+        case "error": DesignTokens.bad
+        default: DesignTokens.textFaint
+        }
+    }
 }
 
 extension UsageDetailsRoute {

@@ -31,6 +31,7 @@ extension Color {
 }
 
 public enum DesignTokens {
+    public static let bg = Color(light: 0xF7F7F5, dark: 0x0B0C0E)
     public static let accent = Color(light: 0x087F52, dark: 0x34D399)
     public static let text = Color(light: 0x1A1B1E, dark: 0xE8EAED)
     public static let textDim = Color(light: 0x5B5F66, dark: 0xA7ADB8)

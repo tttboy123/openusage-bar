@@ -34,6 +34,7 @@ struct ActivityRootView: View {
             List(UsageDetailsRoute.allCases, selection: routeBinding) { route in
                 Label(route.title, systemImage: route.symbol).tag(route)
             }
+            .scrollContentBackground(.hidden)
             .navigationTitle(AppLocalization.text("UsageHub"))
             .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 250)
         } detail: {
@@ -46,9 +47,11 @@ struct ActivityRootView: View {
                                 .disabled(store.isLoading)
                         }
                     }
-            }
+                }
         }
         .tint(DesignTokens.accent)
+        .background(DesignTokens.bg)
+        .animation(.easeOut(duration: DesignTokens.motionBase), value: coordinator.route)
         .overlay {
             if coordinator.route != .automation, onboardingPhase != .hidden {
                 OnboardingView(

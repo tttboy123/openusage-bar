@@ -70,6 +70,7 @@ def generate(payload: dict, name: str) -> str:
         f"public enum {name} {{",
     ]
     semantic = [
+        "bg",
         "accent",
         "text",
         "textDim",
