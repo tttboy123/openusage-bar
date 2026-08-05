@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
+import { Plus } from "@phosphor-icons/react";
 import { fetchProviders, fetchQuickConnect, type ProviderItem, type QuickConnectItem } from "../api";
+import AddProviderDialog from "../components/AddProviderDialog";
 import { type Messages } from "../i18n";
 
 export default function ProvidersPage({ t }: { t: Messages }) {
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [quick, setQuick] = useState<QuickConnectItem[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -19,11 +22,28 @@ export default function ProvidersPage({ t }: { t: Messages }) {
   const quickByFamily = new Map(quick.map((q) => [q.familyId, q]));
 
   return (
-    <section className="panel">
-      <div className="panel-head">
-        <h3>{t.navProviders}</h3>
-        <span>{providers.length} instances</span>
+    <>
+      <div className="toolbar" style={{ marginBottom: 14 }}>
+        <button
+          type="button"
+          className="primary-btn"
+          onClick={() => setDialogOpen(true)}
+        >
+          <Plus size={14} />
+          {t.addConnection}
+        </button>
+        <span className="dim">{providers.length} instances</span>
       </div>
+      <AddProviderDialog
+        open={dialogOpen}
+        presets={quick}
+        onClose={() => setDialogOpen(false)}
+      />
+      <section className="panel">
+        <div className="panel-head">
+          <h3>{t.navProviders}</h3>
+          <span>{providers.length} instances</span>
+        </div>
       <div className="table-wrap">
         <table>
           <thead>
@@ -85,6 +105,7 @@ export default function ProvidersPage({ t }: { t: Messages }) {
         </table>
       </div>
       {error ? <p className="empty">{error}</p> : null}
-    </section>
+      </section>
+    </>
   );
 }
