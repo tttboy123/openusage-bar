@@ -153,6 +153,14 @@
 "All model series hidden" = "已隐藏所有模型序列";
 "Diagnostic only; readable provider data remains available." = "仅为诊断信息；仍可读取 Provider 数据。";
 "Error code" = "错误代码";
+"Source is collecting normally." = "数据源采集正常。";
+"The source returned an empty result." = "数据源返回了空结果。";
+"The last attempt timed out." = "上次采集请求超时。";
+"Credentials are invalid or expired." = "凭证无效或已过期。";
+"Last collection is stale. Refresh to attempt new data." = "最近一次采集已过期，刷新以尝试获取新数据。";
+"The last collection attempt returned no usable data." = "最近一次采集未返回可用数据。";
+"Collection failed on the last attempt." = "最近一次采集失败。";
+"Unknown error code: %@" = "未知错误码：%@";
 "Last attempt" = "上次尝试";
 "Last success" = "上次成功";
 "No matching usage data" = "暂无符合条件的用量数据";

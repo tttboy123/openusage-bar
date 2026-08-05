@@ -81,35 +81,51 @@ struct DataHealthPage: View {
                     let runtimeSource = ProviderRuntimeSourcePresentation.resolve(
                         runtimeSourceID: source.sourceID, descriptor: descriptor
                     )
-                    VStack(alignment: .leading, spacing: 5) {
+                    DisclosureGroup {
+                        VStack(alignment: .leading, spacing: 7) {
+                            if runtimeSource.strategies.isEmpty {
+                                LabeledContent(
+                                    "Strategy", value: AppLocalization.text("Uncatalogued source")
+                                )
+                            } else {
+                                LabeledContent("Strategy") {
+                                    Text(runtimeSource.strategies.map {
+                                        AppLocalization.text($0.summary)
+                                    }.joined(separator: "; "))
+                                        .multilineTextAlignment(.trailing)
+                                }
+                                LabeledContent(
+                                    "Platforms", value: AppLocalization.text(runtimeSource.platforms)
+                                )
+                            }
+                            LabeledContent("Last attempt", value: DateText.display(source.lastAttemptAt))
+                            LabeledContent(
+                                "Last success", value: source.lastSuccessAt.map(DateText.display)
+                                    ?? AppLocalization.text("Unavailable")
+                            )
+                            if let stale = source.staleAt { LabeledContent("Stale after", value: DateText.display(stale)) }
+                            if let code = source.errorCode {
+                                LabeledContent("Error code") {
+                                    Text(SourceText.cause(state: source.effectiveState, code: code))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Button {
+                                SettingsHelper.open()
+                            } label: {
+                                Label("Repair in Provider Settings", systemImage: "wrench.and.screwdriver")
+                            }
+                            .padding(.top, 2)
+                        }
+                        .padding(.leading, 10)
+                        .padding(.bottom, 4)
+                    } label: {
                         HStack {
                             Text(descriptor.displayName).font(.headline)
                             Text(AppLocalization.text(runtimeSource.roleTitle)).foregroundStyle(.secondary)
                             Spacer()
                             StateLabel(state: source.effectiveState)
                         }
-                        if runtimeSource.strategies.isEmpty {
-                            LabeledContent(
-                                "Strategy", value: AppLocalization.text("Uncatalogued source")
-                            )
-                        } else {
-                            LabeledContent("Strategy") {
-                                Text(runtimeSource.strategies.map {
-                                    AppLocalization.text($0.summary)
-                                }.joined(separator: "; "))
-                                    .multilineTextAlignment(.trailing)
-                            }
-                            LabeledContent(
-                                "Platforms", value: AppLocalization.text(runtimeSource.platforms)
-                            )
-                        }
-                        LabeledContent("Last attempt", value: DateText.display(source.lastAttemptAt))
-                        LabeledContent(
-                            "Last success", value: source.lastSuccessAt.map(DateText.display)
-                                ?? AppLocalization.text("Unavailable")
-                        )
-                        if let stale = source.staleAt { LabeledContent("Stale after", value: DateText.display(stale)) }
-                        if let code = source.errorCode { LabeledContent("Error code", value: SourceText.errorCode(code)) }
                     }
                     Divider()
                 }
@@ -444,6 +460,31 @@ private enum SourceText {
     static func errorCode(_ value: String) -> String {
         value.range(of: #"^[A-Za-z0-9._-]{1,80}$"#, options: .regularExpression) == nil
             ? "unknown_error" : value
+    }
+    static func cause(state: String, code: String) -> String {
+        if state.lowercased() == "ok" {
+            return AppLocalization.text("Source is collecting normally.")
+        }
+        switch code.lowercased() {
+        case "empty_result":
+            return AppLocalization.text("The source returned an empty result.")
+        case "timeout":
+            return AppLocalization.text("The last attempt timed out.")
+        case "unauthorized", "invalid_credentials", "auth_expired", "401":
+            return AppLocalization.text("Credentials are invalid or expired.")
+        default:
+            break
+        }
+        switch state.lowercased() {
+        case "stale":
+            return AppLocalization.text("Last collection is stale. Refresh to attempt new data.")
+        case "temporarily_unavailable":
+            return AppLocalization.text("The last collection attempt returned no usable data.")
+        case "error":
+            return AppLocalization.text("Collection failed on the last attempt.")
+        default:
+            return AppLocalization.format("Unknown error code: %@", code)
+        }
     }
     static func symbol(_ value: String) -> String {
         switch value { case "ok": "checkmark.circle"; case "stale": "clock.badge.exclamationmark"; default: "exclamationmark.triangle" }

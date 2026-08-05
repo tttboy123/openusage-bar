@@ -153,6 +153,14 @@
 "All model series hidden" = "All model series hidden";
 "Diagnostic only; readable provider data remains available." = "Diagnostic only; readable provider data remains available.";
 "Error code" = "Error code";
+"Source is collecting normally." = "Source is collecting normally.";
+"The source returned an empty result." = "The source returned an empty result.";
+"The last attempt timed out." = "The last attempt timed out.";
+"Credentials are invalid or expired." = "Credentials are invalid or expired.";
+"Last collection is stale. Refresh to attempt new data." = "Last collection is stale. Refresh to attempt new data.";
+"The last collection attempt returned no usable data." = "The last collection attempt returned no usable data.";
+"Collection failed on the last attempt." = "Collection failed on the last attempt.";
+"Unknown error code: %@" = "Unknown error code: %@";
 "Last attempt" = "Last attempt";
 "Last success" = "Last success";
 "No matching usage data" = "No matching usage data";

@@ -136,6 +136,53 @@ td { color: var(--text-dim); white-space: nowrap; }
 .trend-bar:hover { opacity: 1; }
 .empty { color: var(--text-dim); font-size: 0.85rem; display: flex; align-items: center; gap: 8px; padding: 10px 0; }
 
+.health-summary { margin: 0; font-size: 0.85rem; color: var(--text-dim); }
+.health-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  margin: 12px 0 2px; flex-wrap: wrap;
+}
+.health-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hairline); }
+.health-item { border-bottom: 1px solid var(--hairline); }
+.health-head {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: none; border: 0; cursor: pointer;
+  padding: 11px 16px; color: var(--text); font-size: 0.84rem; text-align: left;
+  transition:
+    background var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
+}
+.health-head:hover { background: var(--surface-alt); }
+.health-head:active { transform: scale(0.99); }
+.health-title { font-weight: 600; display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; }
+.health-title .mono { color: var(--text-faint); font-size: 0.74rem; }
+.health-chevron {
+  flex: none; color: var(--text-faint);
+  transition: transform var(--motion-base) var(--ease);
+}
+.health-item.open .health-chevron { transform: rotate(180deg); }
+.health-detail {
+  padding: 2px 16px 14px;
+  animation: health-in var(--motion-base) var(--ease) both;
+}
+@keyframes health-in {
+  from { opacity: 0; transform: translateY(-4px); }
+}
+.health-cause { margin: 0 0 10px; font-size: 0.84rem; color: var(--text); }
+.health-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px 18px; margin: 0 0 12px;
+}
+.health-facts div {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  font-size: 0.76rem;
+}
+.health-facts dt { color: var(--text-faint); }
+.health-facts dd {
+  margin: 0; color: var(--text-dim);
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+.health-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
 .lang-switch {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 40px; min-width: 40px; padding: 6px 8px;

@@ -58,7 +58,10 @@ export interface SourceItem {
   providerId?: string;
   sourceId?: string;
   state?: string;
-  errorCode?: string;
+  errorCode?: string | null;
+  lastAttemptAt?: string | null;
+  lastSuccessAt?: string | null;
+  staleAt?: string | null;
 }
 
 export interface QuickConnectItem {
