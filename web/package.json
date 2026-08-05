@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/gen-tokens.mjs && vite build",
+    "build": "node scripts/gen-tokens.mjs && tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

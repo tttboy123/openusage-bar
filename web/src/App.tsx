@@ -13,7 +13,13 @@ import {
   ChartLineUp as UsageIcon,
 } from "@phosphor-icons/react";
 import ActivityPage from "./pages/ActivityPage";
-import PlaceholderPage from "./pages/PlaceholderPage";
+import CapacityPage from "./pages/CapacityPage";
+import ApiSpendPage from "./pages/ApiSpendPage";
+import LocalToolsPage from "./pages/LocalToolsPage";
+import ProvidersPage from "./pages/ProvidersPage";
+import DataHealthPage from "./pages/DataHealthPage";
+import AutomationPage from "./pages/AutomationPage";
+import UsageDetailsPage from "./pages/UsageDetailsPage";
 import { detectLang, setLang, messages, type Lang, type Messages } from "./i18n";
 
 const NAV = [
@@ -40,7 +46,6 @@ const TITLES: Record<string, keyof Messages> = {
 
 export default function App() {
   const [lang, setLangState] = useState<Lang>(() => detectLang());
-  const [refreshKey, setRefreshKey] = useState(0);
   const t: Messages = messages[lang];
 
   useEffect(() => {
@@ -102,7 +107,7 @@ export default function App() {
             <button
               type="button"
               className="icon-btn"
-              onClick={() => setRefreshKey((k) => k + 1)}
+              onClick={() => window.location.reload()}
             >
               <ArrowClockwise size={14} />
               {t.refresh}
@@ -115,31 +120,31 @@ export default function App() {
           <Route path="/activity" element={<ActivityPage t={t} />} />
           <Route
             path="/usage-details"
-            element={<ActivityPage t={t} />}
+            element={<UsageDetailsPage t={t} />}
           />
           <Route
             path="/capacity"
-            element={<PlaceholderPage t={t} title={t.navCapacity} />}
+            element={<CapacityPage t={t} />}
           />
           <Route
             path="/api-spend"
-            element={<PlaceholderPage t={t} title={t.navApiSpend} />}
+            element={<ApiSpendPage t={t} />}
           />
           <Route
             path="/local-tools"
-            element={<PlaceholderPage t={t} title={t.navLocalTools} />}
+            element={<LocalToolsPage t={t} />}
           />
           <Route
             path="/providers"
-            element={<PlaceholderPage t={t} title={t.navProviders} />}
+            element={<ProvidersPage t={t} />}
           />
           <Route
             path="/data-health"
-            element={<PlaceholderPage t={t} title={t.navDataHealth} />}
+            element={<DataHealthPage t={t} />}
           />
           <Route
             path="/automation"
-            element={<PlaceholderPage t={t} title={t.navAutomation} />}
+            element={<AutomationPage t={t} />}
           />
         </Routes>
       </main>

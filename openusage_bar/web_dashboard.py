@@ -15,9 +15,11 @@ import re
 from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
-from typing import Any
+from urllib.parse import parse_qs, urlparse
+from typing import Any, Callable
 
 from .query import QueryService, to_wire
+from .quick_connect import QUICK_CONNECT
 
 
 DEFAULT_DASHBOARD_PORT = 17822
@@ -394,12 +396,16 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        try:
-            snapshot = to_wire(self._query.resource_snapshot(self._today))
-        except Exception:
-            self.send_error(500, "snapshot unavailable")
-            return
-        if self.path in {"/", "/index.html"}:
+        parsed = urlparse(self.path)
+        path = parsed.path
+        params = parse_qs(parsed.query)
+
+        if path in {"/", "/index.html"}:
+            try:
+                snapshot = to_wire(self._query.resource_snapshot(self._today))
+            except Exception:
+                self.send_error(500, "snapshot unavailable")
+                return
             self._write(
                 render_dashboard(
                     snapshot,
@@ -409,15 +415,71 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "text/html; charset=utf-8",
             )
             return
-        if self.path == "/v1/snapshot":
-            import json
-
-            body = json.dumps(snapshot, ensure_ascii=True, separators=(",", ":")).encode(
-                "utf-8"
+        if path == "/v1/snapshot":
+            self._handle_json(lambda: to_wire(self._query.resource_snapshot(self._today)))
+            return
+        if path == "/v1/capacity":
+            self._handle_json(lambda: to_wire(self._query.capacity()))
+            return
+        if path == "/v1/activity/daily":
+            self._handle_json(
+                lambda: to_wire(self._query.activity(*self._day_range(params)))
             )
-            self._write(body, "application/json")
+            return
+        if path == "/v1/costs/daily":
+            self._handle_json(
+                lambda: to_wire(self._query.costs(*self._day_range(params)))
+            )
+            return
+        if path == "/v1/sources/status":
+            self._handle_json(lambda: self._snapshot_part("sources"))
+            return
+        if path == "/v1/providers":
+            self._handle_json(lambda: self._snapshot_part("providers"))
+            return
+        if path == "/v1/quick-connect":
+            self._handle_json(
+                lambda: [
+                    {
+                        "familyId": family_id,
+                        "consoleUrl": item.console_url,
+                        "authModes": list(item.auth_modes),
+                        "apiKeyUrl": item.api_key_url,
+                    }
+                    for family_id, item in sorted(QUICK_CONNECT.items())
+                ]
+            )
             return
         self.send_error(404)
+
+    def _json(self, payload: Any) -> None:
+        import json
+
+        body = json.dumps(
+            payload, ensure_ascii=True, separators=(",", ":")
+        ).encode("utf-8")
+        self._write(body, "application/json")
+
+    def _handle_json(self, resolver: Callable[[], Any]) -> None:
+        try:
+            payload = resolver()
+        except Exception:
+            self.send_error(500, "unavailable")
+            return
+        self._json(payload)
+
+    def _day_range(self, params: dict[str, list[str]]) -> tuple[date, date]:
+        try:
+            from_day = date.fromisoformat(params["from"][0])
+            to_day = date.fromisoformat(params["to"][0])
+        except (KeyError, IndexError, ValueError) as error:
+            raise ValueError("invalid day range") from error
+        return from_day, to_day
+
+    def _snapshot_part(self, key: str) -> list[Any]:
+        wire = to_wire(self._query.resource_snapshot(self._today))
+        value = wire.get(key)
+        return value if isinstance(value, list) else []
 
     def _model_summary(self) -> tuple[dict[str, Any], ...]:
         """Aggregate last-7-day token and cost facts by (model, source)."""

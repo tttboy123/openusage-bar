@@ -69,4 +69,4 @@ export function setLang(lang: Lang) {
   localStorage.setItem("usagehub.lang", lang);
 }
 
-export type Messages = (typeof messages)["en"];
+export type Messages = Record<keyof typeof messages.en, string>;
