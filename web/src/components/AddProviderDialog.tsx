@@ -95,7 +95,12 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
             <h3>{t.addProvider}</h3>
             <p>{t.choosePreset}</p>
           </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onClose}
+            aria-label={t.close}
+          >
             <X size={16} />
           </button>
         </div>

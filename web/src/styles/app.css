@@ -180,6 +180,25 @@ td { color: var(--text-dim); white-space: nowrap; }
 .toast-close { margin-left: auto; background: none; border: 0; color: var(--text-faint); cursor: pointer; display: grid; place-items: center; padding: 2px; }
 .toast-close:hover { color: var(--text); }
 
+.skeleton-stack { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
+.skeleton {
+  height: 14px; border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--surface-alt) 25%,
+    var(--hairline) 37%,
+    var(--surface-alt) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+.skeleton:nth-child(2) { width: 92%; }
+.skeleton:nth-child(3) { width: 80%; }
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
 @media (max-width: 640px) {

@@ -5,20 +5,24 @@ import PeriodSelector, {
   rangeFor,
   type Period,
 } from "../components/PeriodSelector";
+import Skeleton from "../components/Skeleton";
 import { type Messages } from "../i18n";
 
 export default function UsageDetailsPage({ t }: { t: Messages }) {
   const [period, setPeriod] = useState<Period>("week");
   const [rows, setRows] = useState<ActivityRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const days = periodDays(period);
 
   useEffect(() => {
     const { from, to } = rangeFor(days);
+    setLoading(true);
     void fetchActivity(from, to)
       .then(setRows)
-      .catch((e) => setError(e instanceof Error ? e.message : "failed"));
+      .catch((e) => setError(e instanceof Error ? e.message : "failed"))
+      .finally(() => setLoading(false));
   }, [days]);
 
   const totals = useMemo(() => {
@@ -50,52 +54,60 @@ export default function UsageDetailsPage({ t }: { t: Messages }) {
     <>
       <PeriodSelector value={period} onChange={setPeriod} t={t} />
 
-      <div className="metrics">
-        <div className="metric">
-          <p className="metric-label">{t.todayTokens}</p>
-          <p className="metric-value">{totals.tokens.toLocaleString()}</p>
-        </div>
-        <div className="metric">
-          <p className="metric-label">{t.inputTokens}</p>
-          <p className="metric-value">{totals.input.toLocaleString()}</p>
-        </div>
-        <div className="metric">
-          <p className="metric-label">{t.outputTokens}</p>
-          <p className="metric-value">{totals.output.toLocaleString()}</p>
-        </div>
-      </div>
+      {loading ? (
+        <Skeleton lines={4} />
+      ) : (
+        <>
+          <div className="metrics">
+            <div className="metric">
+              <p className="metric-label">{t.todayTokens}</p>
+              <p className="metric-value">{totals.tokens.toLocaleString()}</p>
+            </div>
+            <div className="metric">
+              <p className="metric-label">{t.inputTokens}</p>
+              <p className="metric-value">{totals.input.toLocaleString()}</p>
+            </div>
+            <div className="metric">
+              <p className="metric-label">{t.outputTokens}</p>
+              <p className="metric-value">{totals.output.toLocaleString()}</p>
+            </div>
+          </div>
 
-      <section className="panel">
-        <div className="panel-head">
-          <h3>{t.modelTrend}</h3>
-          <span>{period}</span>
-        </div>
-        <div className="panel-body">
-          <div className="trend-bars" role="img" aria-label={t.modelTrend}>
-            {byDay.map((d) => (
-              <div
-                className="trend-bar"
-                key={d.day}
-                title={`${d.day}: ${d.tokens.toLocaleString()}`}
-                style={{ height: `${(d.tokens / max) * 100}%` }}
-              />
-            ))}
-          </div>
-          {byDay.length === 0 ? <p className="empty">{t.noModelTrend}</p> : null}
-        </div>
-        {byDay.length > 0 ? (
-          <div className="panel-body" style={{ paddingTop: 0 }}>
-            <p className="dim" style={{ margin: 0, fontSize: "0.78rem" }}>
-              {byDay[0].day} - {byDay[byDay.length - 1].day} ·{" "}
-              {t.tokensCol}: {totals.tokens.toLocaleString()} · peak{" "}
-              {byDay.reduce((best, day) =>
-                day.tokens > best.tokens ? day : best,
-              ).day}
-            </p>
-          </div>
-        ) : null}
-      </section>
-      {error ? <p className="empty">{error}</p> : null}
+          <section className="panel">
+            <div className="panel-head">
+              <h3>{t.modelTrend}</h3>
+              <span>{period}</span>
+            </div>
+            <div className="panel-body">
+              <div className="trend-bars" role="img" aria-label={t.modelTrend}>
+                {byDay.map((d) => (
+                  <div
+                    className="trend-bar"
+                    key={d.day}
+                    title={`${d.day}: ${d.tokens.toLocaleString()}`}
+                    style={{ height: `${(d.tokens / max) * 100}%` }}
+                  />
+                ))}
+              </div>
+              {byDay.length === 0 ? (
+                <p className="empty">{t.noModelTrend}</p>
+              ) : null}
+            </div>
+            {byDay.length > 0 ? (
+              <div className="panel-body" style={{ paddingTop: 0 }}>
+                <p className="dim" style={{ margin: 0, fontSize: "0.78rem" }}>
+                  {byDay[0].day} - {byDay[byDay.length - 1].day} ·{" "}
+                  {t.tokensCol}: {totals.tokens.toLocaleString()} · peak{" "}
+                  {byDay.reduce((best, day) =>
+                    day.tokens > best.tokens ? day : best,
+                  ).day}
+                </p>
+              </div>
+            ) : null}
+          </section>
+          {error ? <p className="empty">{error}</p> : null}
+        </>
+      )}
     </>
   );
 }

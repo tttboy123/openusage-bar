@@ -5,7 +5,7 @@ const prefersReducedMotion =
   typeof window !== "undefined" &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-export function useAnimatedNumber(value: number | undefined, duration = 0.5) {
+export function useAnimatedNumber(value: number | undefined, duration = 0.3) {
   const [display, setDisplay] = useState(value ?? 0);
   const previous = useRef(value ?? 0);
 

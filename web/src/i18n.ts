@@ -70,6 +70,8 @@ export const messages = {
     periodWeek: "Week",
     periodMonth: "Month",
     periodYear: "Year",
+    switchLanguage: "Switch language",
+    close: "Close",
   },
   zh: {
     navActivity: "活动",
@@ -139,6 +141,8 @@ export const messages = {
     periodWeek: "周",
     periodMonth: "月",
     periodYear: "年",
+    switchLanguage: "切换语言",
+    close: "关闭",
   },
 } as const;
 

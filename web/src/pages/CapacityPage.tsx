@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchCapacity, type CapacityProvider } from "../api";
+import Skeleton from "../components/Skeleton";
 import { type Messages } from "../i18n";
 
 function ratioWidth(ratio: number | undefined): string {
@@ -11,12 +12,16 @@ function ratioWidth(ratio: number | undefined): string {
 export default function CapacityPage({ t }: { t: Messages }) {
   const [items, setItems] = useState<CapacityProvider[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     void fetchCapacity()
       .then(setItems)
-      .catch((e) => setError(e instanceof Error ? e.message : "failed"));
+      .catch((e) => setError(e instanceof Error ? e.message : "failed"))
+      .finally(() => setLoading(false));
   }, []);
+
+  if (loading) return <Skeleton lines={5} />;
 
   return (
     <section className="panel">

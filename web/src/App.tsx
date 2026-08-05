@@ -104,7 +104,7 @@ export default function App() {
           <div className="toolbar">
             <select
               className="icon-btn quick-connect"
-              aria-label="Quick connect"
+              aria-label={t.quickConnect}
               defaultValue=""
               onChange={(event) => {
                 if (event.target.value) {
@@ -126,7 +126,7 @@ export default function App() {
               type="button"
               className="lang-switch"
               onClick={switchLang}
-              aria-label="Switch language"
+              aria-label={t.switchLanguage}
             >
               {lang === "zh" ? "EN" : "中文"}
             </button>

@@ -13,6 +13,7 @@ import {
   type Snapshot,
 } from "../api";
 import { useAnimatedNumber } from "../hooks/useAnimatedNumber";
+import Skeleton from "../components/Skeleton";
 import { type Messages } from "../i18n";
 
 function Kpi({
@@ -43,15 +44,19 @@ function Kpi({
 export default function ActivityPage({ t }: { t: Messages }) {
   const [snapshot, setSnapshot] = useState<Snapshot>({});
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [trend, setTrend] = useState<{ day: string; tokens: number }[]>([]);
   const [quick, setQuick] = useState<QuickConnectItem[]>([]);
 
   async function load() {
+    setLoading(true);
     try {
       setSnapshot(await fetchSnapshot());
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -104,32 +109,36 @@ export default function ActivityPage({ t }: { t: Messages }) {
 
   return (
     <>
-      <div className="metrics">
-        <Kpi
-          icon={<ChartLineUp />}
-          label={t.todayTokens}
-          value={tokenValue}
-          meta={tokenMeta}
-        />
-        <Kpi
-          icon={<HardDrives />}
-          label={t.providers}
-          value={String(providers.length)}
-        />
-        <Kpi
-          icon={<CurrencyCircleDollar />}
-          label={t.balance}
-          value={String(quotas.length)}
-          meta={quotas.map((q) => q.currency).filter(Boolean).join(", ")}
-        />
-        <Kpi
-          icon={<CalendarBlank />}
-          label={t.ledgerDate}
-          value={new Date().toISOString().slice(0, 10)}
-        />
-      </div>
+      {loading ? (
+        <Skeleton lines={5} />
+      ) : (
+        <>
+          <div className="metrics">
+            <Kpi
+              icon={<ChartLineUp />}
+              label={t.todayTokens}
+              value={tokenValue}
+              meta={tokenMeta}
+            />
+            <Kpi
+              icon={<HardDrives />}
+              label={t.providers}
+              value={String(providers.length)}
+            />
+            <Kpi
+              icon={<CurrencyCircleDollar />}
+              label={t.balance}
+              value={String(quotas.length)}
+              meta={quotas.map((q) => q.currency).filter(Boolean).join(", ")}
+            />
+            <Kpi
+              icon={<CalendarBlank />}
+              label={t.ledgerDate}
+              value={new Date().toISOString().slice(0, 10)}
+            />
+          </div>
 
-      {error ? <p className="empty">{error}</p> : null}
+          {error ? <p className="empty">{error}</p> : null}
 
       <h2 className="section-title">
         {t.quotaHub} <span className="dim">· {t.freeQuotaAggregation}</span>
@@ -233,6 +242,8 @@ export default function ActivityPage({ t }: { t: Messages }) {
           </table>
         </div>
       </section>
+        </>
+      )}
     </>
   );
 }
