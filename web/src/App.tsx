@@ -98,9 +98,7 @@ export default function App() {
       <main className="content">
         <header>
           <div>
-            <h2>
-              {t[TITLES[window.location.pathname] ?? "navActivity"]}
-            </h2>
+            <h2>{t[TITLES[location.pathname] ?? "navActivity"]}</h2>
             <p className="sub">{t.localFirst}</p>
           </div>
           <div className="toolbar">

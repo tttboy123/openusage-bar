@@ -49,7 +49,7 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
 
   return (
     <>
-      <PeriodSelector value={period} onChange={setPeriod} />
+      <PeriodSelector value={period} onChange={setPeriod} t={t} />
       <section className="panel">
         <div className="panel-head">
           <h3>{t.navApiSpend}</h3>

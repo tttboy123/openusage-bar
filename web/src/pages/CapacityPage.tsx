@@ -44,7 +44,32 @@ export default function CapacityPage({ t }: { t: Messages }) {
                   {item.used ?? "n/a"}
                   {item.unit === "percent" ? "%" : ""}
                 </td>
-                <td className="mono">{item.remaining ?? "n/a"}</td>
+                <td className="mono">
+                  {item.remaining ?? "n/a"}
+                  {item.remainingRatio !== undefined ? (
+                    <span
+                      style={{
+                        display: "block",
+                        height: 4,
+                        width: 80,
+                        borderRadius: 2,
+                        background: "var(--surface-alt)",
+                        overflow: "hidden",
+                        marginTop: 4,
+                      }}
+                      aria-hidden="true"
+                    >
+                      <span
+                        style={{
+                          display: "block",
+                          height: "100%",
+                          width: ratioWidth(item.remainingRatio),
+                          background: "var(--accent)",
+                        }}
+                      />
+                    </span>
+                  ) : null}
+                </td>
                 <td>
                   <span className={`pill pill-${item.state === "ok" ? "ok" : "warn"}`}>
                     {item.state ?? "unknown"}
@@ -61,29 +86,6 @@ export default function CapacityPage({ t }: { t: Messages }) {
             ) : null}
           </tbody>
         </table>
-      </div>
-      <div className="panel-body" style={{ paddingTop: 0 }}>
-        {items.map((item, index) => (
-          <div key={`${item.providerId}-${index}`} style={{ marginBottom: 8 }}>
-            <div
-              style={{
-                height: 5,
-                borderRadius: 3,
-                background: "var(--surface-alt)",
-                overflow: "hidden",
-              }}
-              aria-hidden="true"
-            >
-              <div
-                style={{
-                  width: ratioWidth(item.remainingRatio),
-                  height: "100%",
-                  background: "var(--accent)",
-                }}
-              />
-            </div>
-          </div>
-        ))}
       </div>
       {error ? <p className="empty">{error}</p> : null}
     </section>

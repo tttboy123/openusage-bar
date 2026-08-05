@@ -66,6 +66,10 @@ export const messages = {
     needAttention:
       "{issue} of {total} sources need attention. Items below show the fix.",
     dismiss: "Dismiss",
+    periodDay: "Day",
+    periodWeek: "Week",
+    periodMonth: "Month",
+    periodYear: "Year",
   },
   zh: {
     navActivity: "活动",
@@ -131,6 +135,10 @@ export const messages = {
     allCollecting: "全部 {count} 个数据源采集正常。",
     needAttention: "{issue}/{total} 个数据源需要处理，下方列出修复方式。",
     dismiss: "关闭",
+    periodDay: "日",
+    periodWeek: "周",
+    periodMonth: "月",
+    periodYear: "年",
   },
 } as const;
 

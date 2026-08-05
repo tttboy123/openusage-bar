@@ -5,7 +5,13 @@ import {
   HardDrives,
   CalendarBlank,
 } from "@phosphor-icons/react";
-import { fetchActivity, fetchSnapshot, type Snapshot } from "../api";
+import {
+  fetchActivity,
+  fetchQuickConnect,
+  fetchSnapshot,
+  type QuickConnectItem,
+  type Snapshot,
+} from "../api";
 import { useAnimatedNumber } from "../hooks/useAnimatedNumber";
 import { type Messages } from "../i18n";
 
@@ -38,6 +44,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
   const [snapshot, setSnapshot] = useState<Snapshot>({});
   const [error, setError] = useState<string | null>(null);
   const [trend, setTrend] = useState<{ day: string; tokens: number }[]>([]);
+  const [quick, setQuick] = useState<QuickConnectItem[]>([]);
 
   async function load() {
     try {
@@ -50,6 +57,10 @@ export default function ActivityPage({ t }: { t: Messages }) {
 
   useEffect(() => {
     void load();
+  }, []);
+
+  useEffect(() => {
+    void fetchQuickConnect().then(setQuick).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -78,6 +89,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
   const tokens = useAnimatedNumber(summary.todayTokens);
   const quotas = snapshot.quotaHub ?? [];
   const providers = snapshot.providers ?? [];
+  const quickByFamily = new Map(quick.map((q) => [q.familyId, q]));
 
   const tokenValue =
     summary.todayTokens === undefined
@@ -184,22 +196,32 @@ export default function ActivityPage({ t }: { t: Messages }) {
               </tr>
             </thead>
             <tbody>
-              {providers.map((item) => (
-                <tr key={item.providerId}>
-                  <th scope="row">{item.providerId ?? "n/a"}</th>
-                  <td>{item.displayName ?? "n/a"}</td>
-                  <td className="mono">{item.sourceKind ?? "n/a"}</td>
-                  <td>
-                    <a
-                      className="btn-link"
-                      href={`#`}
-                      onClick={(e) => e.preventDefault()}
-                    >
-                      {t.openConsole}
-                    </a>
-                  </td>
-                </tr>
-              ))}
+            {providers.map((item) => (
+              <tr key={item.providerId}>
+                <th scope="row">{item.providerId ?? "n/a"}</th>
+                <td>{item.displayName ?? "n/a"}</td>
+                <td className="mono">{item.sourceKind ?? "n/a"}</td>
+                <td>
+                  {(() => {
+                    const quick = quickByFamily.get(
+                      item.familyId ?? item.providerId ?? "",
+                    );
+                    return quick?.consoleUrl ? (
+                      <a
+                        className="btn-link"
+                        href={quick.consoleUrl}
+                        target="_blank"
+                        rel="noopener"
+                      >
+                        {t.openConsole}
+                      </a>
+                    ) : (
+                      "n/a"
+                    );
+                  })()}
+                </td>
+              </tr>
+            ))}
               {providers.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="empty">

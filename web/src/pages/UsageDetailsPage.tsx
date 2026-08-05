@@ -48,7 +48,7 @@ export default function UsageDetailsPage({ t }: { t: Messages }) {
 
   return (
     <>
-      <PeriodSelector value={period} onChange={setPeriod} />
+      <PeriodSelector value={period} onChange={setPeriod} t={t} />
 
       <div className="metrics">
         <div className="metric">
@@ -83,6 +83,17 @@ export default function UsageDetailsPage({ t }: { t: Messages }) {
           </div>
           {byDay.length === 0 ? <p className="empty">{t.noModelTrend}</p> : null}
         </div>
+        {byDay.length > 0 ? (
+          <div className="panel-body" style={{ paddingTop: 0 }}>
+            <p className="dim" style={{ margin: 0, fontSize: "0.78rem" }}>
+              {byDay[0].day} - {byDay[byDay.length - 1].day} ·{" "}
+              {t.tokensCol}: {totals.tokens.toLocaleString()} · peak{" "}
+              {byDay.reduce((best, day) =>
+                day.tokens > best.tokens ? day : best,
+              ).day}
+            </p>
+          </div>
+        ) : null}
       </section>
       {error ? <p className="empty">{error}</p> : null}
     </>
