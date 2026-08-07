@@ -8,6 +8,7 @@ from typing import Any, Callable, Iterable
 
 from .activity_store import ActivityStore
 from .config import ID_PATTERN
+from .family_mapping import resolve_family
 from .provider_catalog import catalog
 
 
@@ -159,6 +160,7 @@ class ActivityRow:
     revision: int
     record_id: str
     source_id: str
+    model_family: str
 
 
 @dataclass(frozen=True)
@@ -585,7 +587,8 @@ class QueryService:
         models = frozenset(_valid_ids(model_ids, "model_ids"))
         snapshot = self.store.snapshot_daily_usage(start.isoformat(), end.isoformat())
         rows = tuple(ActivityRow(
-            day=row.day, provider_id=row.provider_id, account_ref=row.account_ref or None,
+            day=row.day, provider_id=resolve_family(row.provider_id, row.model_id),
+            account_ref=row.account_ref or None,
             model_id=row.model_id, input_tokens=row.input_tokens, output_tokens=row.output_tokens,
             cache_read_tokens=row.cache_read_tokens, cache_creation_tokens=row.cache_creation_tokens,
             reasoning_tokens=row.reasoning_tokens, total_tokens=row.total_tokens,
@@ -593,6 +596,7 @@ class QueryService:
             cost_amount=row.cost_amount, cost_currency=row.cost_currency, cost_basis=row.cost_basis,
             quality=row.quality, imported_at=row.imported_at or "", revision=row.revision,
             record_id=row.record_id, source_id=row.source_id,
+            model_family=resolve_family(row.provider_id, row.model_id),
         ) for row in snapshot.rows if (not providers or row.provider_id in providers) and (not models or row.model_id in models))
         scopes = {
             (row.provider_id, row.account_ref) for row in snapshot.rows
