@@ -134,6 +134,7 @@ def _assemble_fixture(
 
 
 class ReleaseHandoffTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "Windows locks the open manifest")
     def test_verify_rejects_lstat_to_open_manifest_inode_replacement(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -530,16 +531,17 @@ class ReleaseHandoffTests(unittest.TestCase):
             payload["buildIdentity"]["artifact"]["sizeBytes"] = len(
                 encoded_identity
             )
-            manifest.write_text(
-                json.dumps(
-                    payload,
-                    allow_nan=False,
-                    ensure_ascii=True,
-                    indent=2,
-                    sort_keys=True,
-                )
-                + "\n",
-                encoding="ascii",
+            manifest.write_bytes(
+                (
+                    json.dumps(
+                        payload,
+                        allow_nan=False,
+                        ensure_ascii=True,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    + "\n"
+                ).encode("ascii")
             )
 
             verified = subprocess.run(
@@ -682,7 +684,7 @@ class ReleaseHandoffTests(unittest.TestCase):
                         )
                     else:
                         raw = json.dumps(payload, sort_keys=True) + "\n"
-                    manifest.write_text(raw, encoding="utf-8")
+                    manifest.write_bytes(raw.encode("ascii"))
                     result = subprocess.run(
                         _verify_command(bundle),
                         capture_output=True,

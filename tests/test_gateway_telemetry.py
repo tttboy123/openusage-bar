@@ -10,7 +10,9 @@ from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
+import openusage_bar.gateway.telemetry as telemetry_module
 from openusage_bar.gateway.pii import Redactor
 from openusage_bar.gateway.telemetry import GatewayTelemetryStore
 
@@ -73,6 +75,33 @@ def _record_request(
 
 
 class GatewayTelemetryStoreTests(unittest.TestCase):
+    def test_windows_security_seam_hardens_parent_then_telemetry_handle(self):
+        calls = []
+
+        class Security:
+            def harden_directory(self, path):
+                calls.append(("directory", path))
+
+            def harden_file(self, descriptor):
+                if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                    raise AssertionError("expected regular telemetry database")
+                calls.append(("file", descriptor))
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            telemetry_module,
+            "_WINDOWS_FILE_SECURITY",
+            Security(),
+        ):
+            store = GatewayTelemetryStore(
+                Path(directory) / "gateway-telemetry.sqlite3"
+            )
+            store.close()
+
+        self.assertEqual(
+            [kind for kind, _value in calls[:2]],
+            ["directory", "file"],
+        )
+
     def test_schema_is_an_exact_aggregate_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = GatewayTelemetryStore(Path(directory) / "gateway-telemetry.sqlite3")
@@ -247,6 +276,7 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
             )
             self.assertNotIn(b"request-private-id", path.read_bytes())
 
+    @unittest.skipIf(os.name == "nt", "Windows privacy is enforced by native ACL")
     def test_file_is_private_wal_database_separate_from_activity_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -25,6 +25,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Callable, Iterator, Mapping
 
+from ..windows_file_security import native_windows_file_security
+
 
 DEFAULT_CACHE_SIZE_CAP_BYTES = 100 * 1024 * 1024
 DEFAULT_CACHE_TTL_SECONDS = 60 * 60
@@ -120,6 +122,7 @@ _EXPECTED_OBJECTS = {
 # prevent a caller from fabricating a cache candidate by copying public fields
 # or toggling booleans.
 _ADMISSION_KEY = os.urandom(32)
+_WINDOWS_FILE_SECURITY = native_windows_file_security()
 
 
 @dataclass(frozen=True)
@@ -980,6 +983,8 @@ class SQLiteGatewayCache:
 
     def _tighten_database_files(self) -> None:
         identity = self._require_identity()
+        if _WINDOWS_FILE_SECURITY is not None:
+            _WINDOWS_FILE_SECURITY.harden_directory(self.path.parent)
         _tighten_private_file(
             self.path,
             expected=(identity.database_device, identity.database_inode),
@@ -1536,6 +1541,8 @@ def _coerce_database_path(value: str | Path) -> Path:
 
 def _prepare_private_database(path: Path) -> _DatabaseIdentity:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if _WINDOWS_FILE_SECURITY is not None:
+        _WINDOWS_FILE_SECURITY.harden_directory(path.parent)
     parent = _private_parent_identity(path.parent)
     _verify_sidecars(path)
     try:
@@ -1552,7 +1559,10 @@ def _prepare_private_database(path: Path) -> _DatabaseIdentity:
         metadata = os.fstat(descriptor)
         if not _private_regular(metadata):
             raise ValueError(_PATH_ERROR)
-        _fchmod_private(descriptor, path, metadata)
+        if _WINDOWS_FILE_SECURITY is not None:
+            _WINDOWS_FILE_SECURITY.harden_file(descriptor)
+        else:
+            _fchmod_private(descriptor, path, metadata)
         after = path.lstat()
         if not _same_inode(metadata, after) or not _private_regular(after):
             raise ValueError(_PATH_ERROR)
@@ -1665,6 +1675,8 @@ def _tighten_private_file(
         int(before.st_dev), int(before.st_ino)
     ) != expected:
         raise ValueError(_PATH_ERROR)
+    if _WINDOWS_FILE_SECURITY is not None:
+        return
 
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     binary = getattr(os, "O_BINARY", 0)

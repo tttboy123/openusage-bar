@@ -666,6 +666,7 @@ class GatewayTokenPublicationTests(unittest.TestCase):
                     self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o600)
             self.assertEqual(str(caught.exception), failure)
 
+    @unittest.skipIf(os.name == "nt", "Windows locks the open publication node")
     def test_initial_metadata_failure_preserves_replacement_node(self) -> None:
         failure = "synthetic Gateway token metadata failure"
         replacement = b"replacement-node"

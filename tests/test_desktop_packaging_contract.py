@@ -1,7 +1,6 @@
 import json
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -238,7 +237,7 @@ def _write_identity_gate_fixture(root):
     ):
         destination = root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / relative, destination)
+        destination.write_bytes((ROOT / relative).read_bytes())
 
 
 def _run_identity_gate(root):

@@ -461,12 +461,11 @@ class ObserverSourceNativeEvidenceTests(unittest.TestCase):
             self.assertEqual(stderr.getvalue(), "")
 
             duplicate = root / "duplicate-private-name.json"
-            duplicate.write_text(
-                evidence_path.read_text(encoding="ascii").replace(
-                    '"platform":"linux"',
-                    '"platform":"linux","platform":"windows"',
-                ),
-                encoding="ascii",
+            duplicate.write_bytes(
+                evidence_path.read_bytes().replace(
+                    b'"platform":"linux"',
+                    b'"platform":"linux","platform":"windows"',
+                )
             )
             stdout = io.StringIO()
             stderr = io.StringIO()

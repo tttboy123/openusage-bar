@@ -15,8 +15,11 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Callable, Iterator
 
+from ..windows_file_security import native_windows_file_security
+
 
 DEFAULT_RETENTION_DAYS = 7
+_WINDOWS_FILE_SECURITY = native_windows_file_security()
 
 SANITIZED_ERROR_CODES = frozenset(
     {
@@ -806,6 +809,8 @@ def _coerce_database_path(value: str | Path) -> Path:
 
 def _prepare_private_database(path: Path) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if _WINDOWS_FILE_SECURITY is not None:
+        _WINDOWS_FILE_SECURITY.harden_directory(path.parent)
     try:
         existing = path.lstat()
     except FileNotFoundError:
@@ -822,16 +827,22 @@ def _prepare_private_database(path: Path) -> None:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             raise ValueError(_PATH_ERROR)
-        fchmod = getattr(os, "fchmod", None)
-        if fchmod is None:
-            os.chmod(path, 0o600)
+        if _WINDOWS_FILE_SECURITY is not None:
+            _WINDOWS_FILE_SECURITY.harden_file(descriptor)
         else:
-            fchmod(descriptor, 0o600)
+            fchmod = getattr(os, "fchmod", None)
+            if fchmod is None:
+                os.chmod(path, 0o600)
+            else:
+                fchmod(descriptor, 0o600)
     finally:
         os.close(descriptor)
 
 
 def _tighten_database_files(path: Path) -> None:
+    if _WINDOWS_FILE_SECURITY is not None:
+        _WINDOWS_FILE_SECURITY.harden_directory(path.parent)
+        return
     for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
         try:
             metadata = candidate.lstat()

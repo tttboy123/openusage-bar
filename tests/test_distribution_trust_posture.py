@@ -686,10 +686,16 @@ class DistributionTrustPostureTests(unittest.TestCase):
 
             payload = json.loads(report.read_text(encoding="utf-8"))
             payload["releaseEligible"] = True
-            report.write_text(
-                json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
-                + "\n",
-                encoding="utf-8",
+            report.write_bytes(
+                (
+                    json.dumps(
+                        payload,
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                    + "\n"
+                ).encode("ascii")
             )
             forged = subprocess.run(
                 verify_command,
@@ -705,10 +711,7 @@ class DistributionTrustPostureTests(unittest.TestCase):
             )
             self.assertNotIn(str(root), forged.stderr)
 
-            report.write_text(
-                '{"artifact":{},"artifact":{}}\n',
-                encoding="utf-8",
-            )
+            report.write_bytes(b'{"artifact":{},"artifact":{}}\n')
             duplicate = subprocess.run(
                 verify_command,
                 stdout=subprocess.PIPE,
@@ -813,15 +816,16 @@ class DistributionTrustPostureTests(unittest.TestCase):
                 with self.subTest(field=field):
                     forged = dict(payload)
                     forged[field] = f"PRIVATE_CANARY_{root}"
-                    report.write_text(
-                        json.dumps(
-                            forged,
-                            ensure_ascii=True,
-                            separators=(",", ":"),
-                            sort_keys=True,
-                        )
-                        + "\n",
-                        encoding="utf-8",
+                    report.write_bytes(
+                        (
+                            json.dumps(
+                                forged,
+                                ensure_ascii=True,
+                                separators=(",", ":"),
+                                sort_keys=True,
+                            )
+                            + "\n"
+                        ).encode("ascii")
                     )
                     completed = subprocess.run(
                         verify_command,

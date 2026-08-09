@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,17 +14,19 @@ UPSTREAM_ELECTRON_URL_CONTEXT = (
 )
 
 
-def write_native_macos_package(root: Path, payload: bytes) -> None:
-    write_desktop_package(root, "darwin", asar_extra=payload)
+def write_native_package(root: Path, payload: bytes) -> str:
+    platform = "win32" if os.name == "nt" else "darwin"
+    write_desktop_package(root, platform, asar_extra=payload)
+    return platform
 
 
 class DesktopArtifactAuditURLPathTests(unittest.TestCase):
     def test_upstream_electron_url_route_is_not_a_local_home_path(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            write_native_macos_package(root, UPSTREAM_ELECTRON_URL_CONTEXT)
+            platform = write_native_package(root, UPSTREAM_ELECTRON_URL_CONTEXT)
 
-            inspect_desktop_package(root, "darwin")
+            inspect_desktop_package(root, platform)
 
     def test_actual_home_paths_are_rejected_even_across_scan_chunks(self):
         home_paths = (
@@ -43,10 +46,10 @@ class DesktopArtifactAuditURLPathTests(unittest.TestCase):
                     else:
                         payload = b"built at " + home_path
                     root = Path(directory)
-                    write_native_macos_package(root, payload)
+                    platform = write_native_package(root, payload)
 
                     with self.assertRaises(ArtifactError) as raised:
-                        inspect_desktop_package(root, "darwin")
+                        inspect_desktop_package(root, platform)
 
                     self.assertEqual(raised.exception.reason, "home_path")
 

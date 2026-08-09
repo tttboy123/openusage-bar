@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,7 +12,8 @@ class DesktopArtifactAuditHardeningTests(unittest.TestCase):
         for extra_kind in ("regular", "symlink"):
             with self.subTest(extra_kind=extra_kind), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                collector = write_desktop_package(root, "linux")
+                platform = "win32" if os.name == "nt" else "linux"
+                collector = write_desktop_package(root, platform)
                 extra = collector.with_name("unexpected-collector-member")
                 if extra_kind == "regular":
                     extra.write_bytes(b"unexpected")
@@ -19,7 +21,7 @@ class DesktopArtifactAuditHardeningTests(unittest.TestCase):
                     extra.symlink_to(collector.name)
 
                 with self.assertRaises(ArtifactError) as raised:
-                    inspect_desktop_package(root, "linux")
+                    inspect_desktop_package(root, platform)
 
                 self.assertEqual(raised.exception.reason, "collector")
 

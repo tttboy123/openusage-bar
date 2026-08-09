@@ -121,9 +121,11 @@ def _read_regular(path: Path, *, maximum: int) -> bytes:
                 _fail()
         after = os.fstat(descriptor)
         final_link = path.lstat()
+        # Compare descriptor snapshots with each other. Windows can expose
+        # different timestamp semantics for a path stat and an open handle.
         if (
             size != linked.st_size
-            or not _same_file(linked, after)
+            or not _same_file(opened, after)
             or stat.S_ISLNK(final_link.st_mode)
             or not stat.S_ISREG(final_link.st_mode)
             or (linked.st_dev, linked.st_ino)

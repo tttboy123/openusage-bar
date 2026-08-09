@@ -181,6 +181,9 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
             )
             try:
                 opened = os.fstat(descriptor)
+                payload = os.read(descriptor, linked.st_size)
+                after = os.fstat(descriptor)
+                final_link = path.lstat()
             finally:
                 os.close(descriptor)
 
@@ -194,6 +197,15 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
         self.assertEqual(
             tuple(getattr(linked, field) for field in fields),
             tuple(getattr(opened, field) for field in fields),
+        )
+        self.assertEqual(len(payload), linked.st_size)
+        self.assertEqual(
+            tuple(getattr(opened, field) for field in fields),
+            tuple(getattr(after, field) for field in fields),
+        )
+        self.assertEqual(
+            (linked.st_dev, linked.st_ino),
+            (final_link.st_dev, final_link.st_ino),
         )
 
     def test_cli_reports_only_a_safe_rule_identifier(self):
@@ -343,6 +355,8 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
             ("win32", "resources", "openusage-collector.exe"),
             ("linux", "resources", "openusage-collector"),
         )
+        if os.name == "nt":
+            cases = (cases[1],)
         for platform, resources, executable_name in cases:
             with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -388,6 +402,8 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
             ("win32", "resources", "openusage-collector.exe"),
             ("linux", "resources", "openusage-collector"),
         )
+        if os.name == "nt":
+            cases = (cases[1],)
         for platform, resources, executable_name in cases:
             with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
                 base = Path(directory)
@@ -441,14 +457,20 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             root = base / "package"
+            platform = "win32" if os.name == "nt" else "linux"
+            collector_name = (
+                "openusage-collector.exe"
+                if platform == "win32"
+                else "openusage-collector"
+            )
             collector = write_desktop_package(
                 root,
-                "linux",
+                platform,
                 marker=b"same-build",
             )
-            built = base / "dist-collector/openusage-collector"
+            built = base / "dist-collector" / collector_name
             built.parent.mkdir(parents=True)
-            native = native_collector_bytes("linux", b"same-build")
+            native = native_collector_bytes(platform, b"same-build")
             built.write_bytes(native)
             built.chmod(0o755)
 
@@ -458,7 +480,7 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
                 result = main([
                     "--desktop-package",
                     str(root),
-                    "openusage-collector",
+                    collector_name,
                 ])
             self.assertEqual(
                 result,
@@ -474,7 +496,7 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
                 result = main([
                     "--desktop-package",
                     str(root),
-                    "openusage-collector",
+                    collector_name,
                     "--built-collector",
                     str(built),
                 ])
@@ -483,6 +505,7 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
             self.assertEqual(error.getvalue(), "")
 
     def test_desktop_package_rejects_runtime_secret_and_database_members(self):
+        platform = "win32" if os.name == "nt" else "linux"
         private_names = (
             ".env",
             "api.token",
@@ -495,14 +518,15 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
         for private_name in private_names:
             with self.subTest(private_name=private_name), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                write_desktop_package(root, "linux", marker=b"privacy")
+                write_desktop_package(root, platform, marker=b"privacy")
                 (root / private_name).write_text("private", encoding="utf-8")
 
                 with self.assertRaises(ArtifactError) as raised:
-                    audit_module.inspect_desktop_package(root, "linux")
+                    audit_module.inspect_desktop_package(root, platform)
                 self.assertEqual(raised.exception.reason, "private_material")
 
     def test_desktop_package_rejects_home_paths_and_raw_content_canaries(self):
+        platform = "win32" if os.name == "nt" else "linux"
         private_payloads = (
             (b"built at /Users/release/private", "home_path"),
             (b"built at C:\\Users\\release\\private", "home_path"),
@@ -514,24 +538,25 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
                 root = Path(directory)
                 write_desktop_package(
                     root,
-                    "linux",
+                    platform,
                     marker=b"privacy",
                     asar_extra=payload,
                 )
 
                 with self.assertRaises(ArtifactError) as raised:
-                    audit_module.inspect_desktop_package(root, "linux")
+                    audit_module.inspect_desktop_package(root, platform)
                 self.assertEqual(raised.exception.reason, reason)
 
     def test_desktop_package_binds_canonical_identity_digest_and_size(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            write_desktop_package(root, "linux")
+            platform = "win32" if os.name == "nt" else "linux"
+            write_desktop_package(root, platform)
 
             observed = audit_module.inspect_desktop_package(
                 root,
-                "linux",
-                require_final_native_metadata=True,
+                platform,
+                require_final_native_metadata=platform == "linux",
             )
 
             canonical = CANONICAL_IDENTITY.read_bytes()
@@ -554,11 +579,13 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
 
     def test_desktop_package_rejects_identity_and_native_metadata_tamper(self):
         cases = ("identity", "mac", "windows", "linux")
+        if os.name == "nt":
+            cases = ("identity", "windows")
         for case in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 platform = {
-                    "identity": "linux",
+                    "identity": "win32" if os.name == "nt" else "linux",
                     "mac": "darwin",
                     "windows": "win32",
                     "linux": "linux",

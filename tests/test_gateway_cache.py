@@ -126,6 +126,25 @@ def _candidate(
 
 
 class SQLiteGatewayCacheSecurityTests(unittest.TestCase):
+    def test_windows_parent_acl_failure_prevents_sqlite_open(self):
+        class RejectingSecurity:
+            def harden_directory(self, _path):
+                raise OSError("synthetic ACL failure")
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            gateway_cache,
+            "_WINDOWS_FILE_SECURITY",
+            RejectingSecurity(),
+        ), patch.object(gateway_cache.sqlite3, "connect") as connect:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "^cache database initialization failed$",
+            ):
+                SQLiteGatewayCache(
+                    Path(directory) / "gateway-cache.sqlite3"
+                )
+        connect.assert_not_called()
+
     def test_constructor_requires_exact_cache_filename(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -292,6 +311,33 @@ class SQLiteGatewayCacheSecurityTests(unittest.TestCase):
 
 
 class SQLiteGatewayCacheBehaviorTests(unittest.TestCase):
+    def test_windows_security_seam_hardens_parent_then_database_handle(self):
+        calls = []
+
+        class Security:
+            def harden_directory(self, path):
+                calls.append(("directory", path))
+
+            def harden_file(self, descriptor):
+                if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                    raise AssertionError("expected regular cache database")
+                calls.append(("file", descriptor))
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            gateway_cache,
+            "_WINDOWS_FILE_SECURITY",
+            Security(),
+        ):
+            cache = SQLiteGatewayCache(
+                Path(directory) / "gateway-cache.sqlite3"
+            )
+            cache.close()
+
+        self.assertEqual(
+            [kind for kind, _value in calls[:2]],
+            ["directory", "file"],
+        )
+
     @unittest.skipUnless(os.name == "nt", "Windows-native diagnostic contract")
     def test_windows_private_wal_cache_initializes_without_hidden_platform_error(self):
         failures: list[tuple[str, BaseException]] = []

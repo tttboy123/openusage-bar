@@ -96,6 +96,10 @@ TARGET_FILES = {
 }
 
 
+def _write_ascii(path: Path, content: str) -> None:
+    path.write_bytes(content.encode("ascii"))
+
+
 def _distribution_trust(platform: str) -> dict[str, object]:
     return {
         "platformCodeSigning": "not_verified",
@@ -848,7 +852,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
                     platform="win",
                     arch="x64",
                 )
-                source_evidence.write_text(source_raw, encoding="ascii")
+                _write_ascii(source_evidence, source_raw)
 
                 generated = subprocess.run(
                     _generate_command(
@@ -908,9 +912,9 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 self.assertEqual(generated.returncode, 0, generated.stderr)
                 legacy = json.loads(evidence.read_text(encoding="utf-8"))
                 del legacy["observerSourceEvidence"]
-                evidence.write_text(
+                _write_ascii(
+                    evidence,
                     json.dumps(legacy, indent=2, sort_keys=True) + "\n",
-                    encoding="ascii",
                 )
 
                 verified = subprocess.run(
@@ -997,9 +1001,9 @@ class NativeCiEvidenceTests(unittest.TestCase):
 
             for name, payload, reason in hostile:
                 with self.subTest(case=name):
-                    evidence.write_text(
+                    _write_ascii(
+                        evidence,
                         json.dumps(payload, indent=2, sort_keys=True) + "\n",
-                        encoding="ascii",
                     )
                     verified = subprocess.run(
                         _verify_command(
@@ -1021,10 +1025,10 @@ class NativeCiEvidenceTests(unittest.TestCase):
                     self.assertNotIn(private_marker, verified.stderr)
                     self.assertNotIn(str(root), verified.stderr)
 
-            evidence.write_text(
+            _write_ascii(
+                evidence,
                 json.dumps(original, separators=(",", ":"), sort_keys=True)
                 + "\n",
-                encoding="ascii",
             )
             noncanonical = subprocess.run(
                 _verify_command(
@@ -1185,9 +1189,9 @@ class NativeCiEvidenceTests(unittest.TestCase):
                     payload["buildIdentity"]["artifact"]["sizeBytes"] += 1
                 else:
                     payload["buildIdentity"]["identity"]["displayName"] = "OtherHub"
-                evidence.write_text(
+                _write_ascii(
+                    evidence,
                     json.dumps(payload, indent=2, sort_keys=True) + "\n",
-                    encoding="utf-8",
                 )
 
                 verified = subprocess.run(
@@ -1232,9 +1236,9 @@ class NativeCiEvidenceTests(unittest.TestCase):
             self.assertEqual(generated.returncode, 0, generated.stderr)
             payload = json.loads(evidence.read_text(encoding="utf-8"))
             payload["target"]["platform"] = ["mac"]
-            evidence.write_text(
+            _write_ascii(
+                evidence,
                 json.dumps(payload, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
             )
 
             verified = subprocess.run(
@@ -1279,9 +1283,9 @@ class NativeCiEvidenceTests(unittest.TestCase):
             self.assertEqual(generated.returncode, 0, generated.stderr)
             payload = json.loads(evidence.read_text(encoding="utf-8"))
             payload["distributionTrust"]["releaseEligible"] = True
-            evidence.write_text(
+            _write_ascii(
+                evidence,
                 json.dumps(payload, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
             )
 
             verified = subprocess.run(
@@ -1326,9 +1330,9 @@ class NativeCiEvidenceTests(unittest.TestCase):
             self.assertEqual(generated.returncode, 0, generated.stderr)
             payload = json.loads(evidence.read_text(encoding="utf-8"))
             payload["schemaVersion"] = 1.0
-            evidence.write_text(
+            _write_ascii(
+                evidence,
                 json.dumps(payload, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
             )
 
             verified = subprocess.run(
@@ -1548,7 +1552,8 @@ class NativeCiEvidenceTests(unittest.TestCase):
             posture = _posture_report_path(evidence, "mac", "x64")
             payload = json.loads(posture.read_text(encoding="utf-8"))
             payload["platformCodeSigning"] = "ad_hoc_strict_invalid"
-            posture.write_text(
+            _write_ascii(
+                posture,
                 json.dumps(
                     payload,
                     ensure_ascii=True,
@@ -1556,7 +1561,6 @@ class NativeCiEvidenceTests(unittest.TestCase):
                     sort_keys=True,
                 )
                 + "\n",
-                encoding="utf-8",
             )
 
             verified = subprocess.run(
@@ -1585,10 +1589,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
             evidence = root / "evidence.json"
             _write_macho(collector, arch="x64")
             _write_dmg(artifact)
-            evidence.write_text(
-                '{"schemaVersion":1,"schemaVersion":1}\n',
-                encoding="utf-8",
-            )
+            _write_ascii(evidence, '{"schemaVersion":1,"schemaVersion":1}\n')
 
             verified = subprocess.run(
                 _verify_command(
@@ -1616,7 +1617,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
             evidence = root / "evidence.json"
             _write_macho(collector, arch="x64")
             _write_dmg(artifact)
-            evidence.write_text("[" * 2000 + "0" + "]" * 2000, encoding="utf-8")
+            _write_ascii(evidence, "[" * 2000 + "0" + "]" * 2000)
 
             verified = subprocess.run(
                 _verify_command(
