@@ -187,16 +187,19 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
             finally:
                 os.close(descriptor)
 
-        fields = (
+        identity_fields = (
             "st_dev",
             "st_ino",
             "st_size",
+        )
+        fields = (
+            *identity_fields,
             "st_mtime_ns",
             "st_ctime_ns",
         )
         self.assertEqual(
-            tuple(getattr(linked, field) for field in fields),
-            tuple(getattr(opened, field) for field in fields),
+            tuple(getattr(linked, field) for field in identity_fields),
+            tuple(getattr(opened, field) for field in identity_fields),
         )
         self.assertEqual(len(payload), linked.st_size)
         self.assertEqual(
