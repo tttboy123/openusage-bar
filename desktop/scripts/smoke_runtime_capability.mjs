@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -301,8 +302,64 @@ function waitForChildExit(child, timeoutMs) {
   });
 }
 
+function resolveTrustedWindowsTaskkill() {
+  try {
+    const rawRoot = process.env.SystemRoot;
+    if (typeof rawRoot !== "string" || !path.win32.isAbsolute(rawRoot)) {
+      return null;
+    }
+    const root = fs.realpathSync.native(rawRoot);
+    const driveRoot = path.win32.parse(root).root;
+    if (
+      root.toLowerCase() !==
+      path.win32.join(driveRoot, "Windows").toLowerCase()
+    ) {
+      return null;
+    }
+    const system32 = fs.realpathSync.native(
+      path.win32.join(root, "System32"),
+    );
+    const executable = fs.realpathSync.native(
+      path.win32.join(system32, "taskkill.exe"),
+    );
+    const metadata = fs.lstatSync(executable);
+    if (
+      metadata.isSymbolicLink() ||
+      !metadata.isFile() ||
+      path.win32.dirname(executable).toLowerCase() !== system32.toLowerCase()
+    ) {
+      return null;
+    }
+    return executable;
+  } catch {
+    return null;
+  }
+}
+
 async function terminateChild(child) {
   if (childHasExited(child)) return;
+  if (
+    process.platform === "win32" &&
+    Number.isInteger(child?.pid) &&
+    child.pid > 0
+  ) {
+    const taskkill = resolveTrustedWindowsTaskkill();
+    if (taskkill !== null) {
+      try {
+        spawnSync(taskkill, ["/PID", String(child.pid), "/T", "/F"], {
+          encoding: "utf8",
+          maxBuffer: 8 * 1024,
+          shell: false,
+          stdio: "ignore",
+          timeout: 5_000,
+          windowsHide: true,
+        });
+      } catch {
+        // Continue to the bounded direct-process fallback.
+      }
+      if (await waitForChildExit(child, 1_000)) return;
+    }
+  }
   try {
     child.kill("SIGTERM");
   } catch {
@@ -328,7 +385,12 @@ function removeCreatedRoot(createdRoot) {
   ) {
     throw smokeFailure();
   }
-  fs.rmSync(createdRoot.path, { recursive: true, force: false, maxRetries: 2 });
+  fs.rmSync(createdRoot.path, {
+    recursive: true,
+    force: false,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
 }
 
 async function runCli(argv) {
