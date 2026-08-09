@@ -324,6 +324,9 @@ def _mac_observation(
 
 def _windows_observation(artifact: Path, runner: Runner) -> tuple[str, str]:
     environment = dict(os.environ)
+    for key in tuple(environment):
+        if key.casefold() == "psmodulepath":
+            del environment[key]
     environment["OPENUSAGE_TRUST_ARTIFACT"] = str(artifact)
     environment["OPENUSAGE_TRUST_SENTINEL"] = POLICY
     command = (

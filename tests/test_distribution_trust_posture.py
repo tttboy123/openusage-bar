@@ -518,7 +518,11 @@ class DistributionTrustPostureTests(unittest.TestCase):
             windows_fixture.mkdir()
             win_root, win_artifact = _fixture(windows_fixture, "win")
             win_runner = ToolRunner(authenticode=(0, "Valid\n", ""))
-            self.inspect("win", win_root, win_artifact, win_runner)
+            with mock.patch.dict(
+                os.environ,
+                {"PSModulePath": "PRIVATE_INCOMPATIBLE_MODULE_PATH"},
+            ):
+                self.inspect("win", win_root, win_artifact, win_runner)
             self.assertEqual(len(win_runner.calls), 1)
             win_command = win_runner.calls[0]
             self.assertEqual(
@@ -538,6 +542,13 @@ class DistributionTrustPostureTests(unittest.TestCase):
             self.assertEqual(
                 win_options["env"]["OPENUSAGE_TRUST_SENTINEL"],
                 "distribution-trust-posture/v1",
+            )
+            self.assertFalse(
+                any(key.casefold() == "psmodulepath" for key in win_options["env"])
+            )
+            self.assertNotIn(
+                "PRIVATE_INCOMPATIBLE_MODULE_PATH",
+                json.dumps(win_options["env"], sort_keys=True),
             )
             self.assertNotIn("Invoke-Expression", " ".join(win_command))
             self.assertEqual(
