@@ -478,9 +478,21 @@ class DistributionTrustPostureTests(unittest.TestCase):
                 "Microsoft.PowerShell.Security\\Get-AuthenticodeSignature",
                 " ".join(win_command),
             )
-            self.assertEqual(win_command[-1], str(win_artifact))
+            self.assertNotIn(str(win_artifact), " ".join(win_command))
+            win_options = win_runner.options[0]
+            self.assertEqual(
+                win_options["env"]["OPENUSAGE_TRUST_ARTIFACT"],
+                str(win_artifact),
+            )
+            self.assertEqual(
+                win_options["env"]["OPENUSAGE_TRUST_SENTINEL"],
+                "distribution-trust-posture/v1",
+            )
             self.assertNotIn("Invoke-Expression", " ".join(win_command))
-            self.assertEqual(win_runner.options, [expected_options])
+            self.assertEqual(
+                {key: value for key, value in win_options.items() if key != "env"},
+                expected_options,
+            )
 
     def test_persisted_macos_report_requires_the_same_read_only_mounted_dmg(self):
         with tempfile.TemporaryDirectory() as directory:

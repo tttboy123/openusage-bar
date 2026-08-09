@@ -196,18 +196,22 @@ def _bounded_text(value: object) -> str | None:
 def _run_tool(
     runner: Runner,
     command: Sequence[str],
+    *,
+    env: dict[str, str] | None = None,
 ) -> tuple[int, str, str] | None:
     try:
-        completed = runner(
-            list(command),
-            timeout=TOOL_TIMEOUT_SECONDS,
-            stdout_limit=MAX_TOOL_OUTPUT_BYTES,
-            stderr_limit=MAX_TOOL_OUTPUT_BYTES,
-            shell=False,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        options: dict[str, object] = {
+            "timeout": TOOL_TIMEOUT_SECONDS,
+            "stdout_limit": MAX_TOOL_OUTPUT_BYTES,
+            "stderr_limit": MAX_TOOL_OUTPUT_BYTES,
+            "shell": False,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+        }
+        if env is not None:
+            options["env"] = env
+        completed = runner(list(command), **options)
         stdout = _bounded_text(completed.stdout)
         stderr = _bounded_text(completed.stderr)
         if (
@@ -299,6 +303,9 @@ def _mac_observation(
 
 
 def _windows_observation(artifact: Path, runner: Runner) -> tuple[str, str]:
+    environment = dict(os.environ)
+    environment["OPENUSAGE_TRUST_ARTIFACT"] = str(artifact)
+    environment["OPENUSAGE_TRUST_SENTINEL"] = POLICY
     command = (
         r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
         "-NoLogo",
@@ -307,13 +314,19 @@ def _windows_observation(artifact: Path, runner: Runner) -> tuple[str, str]:
         "-Command",
         (
             "$ErrorActionPreference='Stop';"
+            "$sentinel=[Environment]::GetEnvironmentVariable("
+            "'OPENUSAGE_TRUST_SENTINEL','Process');"
+            f"if ($sentinel -cne '{POLICY}') {{ throw 'invalid sentinel' }};"
+            "$artifact=[Environment]::GetEnvironmentVariable("
+            "'OPENUSAGE_TRUST_ARTIFACT','Process');"
+            "if ([string]::IsNullOrWhiteSpace($artifact)) "
+            "{ throw 'invalid artifact' };"
             "$signature=Microsoft.PowerShell.Security\\Get-AuthenticodeSignature "
-            "-LiteralPath $args[0];"
+            "-LiteralPath $artifact;"
             "[Console]::Out.Write($signature.Status.ToString())"
         ),
-        str(artifact),
     )
-    outcome = _run_tool(runner, command)
+    outcome = _run_tool(runner, command, env=environment)
     if outcome is None or outcome[0] != 0:
         signing = "unknown"
     else:
