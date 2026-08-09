@@ -443,7 +443,9 @@
           "freshness_seconds": 300,
           "credential_type": "local",
           "operating_systems": [
-            "macos"
+            "linux",
+            "macos",
+            "windows"
           ],
           "stability": "stable",
           "provenance": "provider_local",
@@ -1365,6 +1367,7 @@
           "credential_type": "api_key",
           "credential_scope": "moonshot_api_key",
           "operating_systems": [
+            "linux",
             "macos"
           ],
           "stability": "stable",

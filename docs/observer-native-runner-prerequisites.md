@@ -97,5 +97,23 @@ containers, and N-1 native evidence never produce `supportedSourceCount` or
 `observerSourceEvidence`; macOS forbids that field, and the release handoff
 remains exactly five files. Catalog support may change only after the matching
 real hosted row is retained and the embedded per-source state passes the
-combined native-evidence verifier. Until then the public platform truth remains
-macOS `49/49`, Windows/Linux `0/49`, and unknown runtime `null/49`.
+combined native-evidence verifier.
+
+## Retained hosted promotion evidence
+
+GitHub Actions run
+[`31335567420`](https://github.com/tttboy123/openusage-bar/actions/runs/31335567420)
+at source commit `0a0d9547595ec7a7d466119137f5e3e419cf33f7` retained the
+exact five-file handoff for Windows x64, Windows ARM64, Linux x64, and Linux
+ARM64. Each downloaded handoff passed `release_handoff.py verify`, and each
+embedded source object passed the combined `native_ci_evidence.py verify`
+binding against its collector, final container, and distribution-trust report.
+
+Both Linux architectures verified `moonshot/moonshot_official_api` and
+`codex/codex_local_log`. Both Windows architectures verified only
+`codex/codex_local_log`; Moonshot remained independently unverified. The
+source-atomic catalog promotion is therefore macOS `49/49`, Windows `1/49`,
+Linux `2/49`, and unknown runtime `null/49`. These counts describe Observer
+source support only. All four new handoffs remain `releaseEligible=false`, and
+the promotion does not claim artifact signing, notarization, or provenance
+attestation.

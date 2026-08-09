@@ -321,21 +321,21 @@
           "evidence": {
             "credential_backend": "not_applicable",
             "executable": "not_applicable",
-            "fact_parser": "unverified",
-            "local_discovery": "unverified"
+            "fact_parser": "verified",
+            "local_discovery": "verified"
           },
-          "reason_code": "source_level_evidence_unverified",
-          "supported": false
+          "reason_code": "hosted_native_evidence",
+          "supported": true
         },
         "windows": {
           "evidence": {
             "credential_backend": "not_applicable",
             "executable": "not_applicable",
-            "fact_parser": "unverified",
-            "local_discovery": "unverified"
+            "fact_parser": "verified",
+            "local_discovery": "verified"
           },
-          "reason_code": "source_level_evidence_unverified",
-          "supported": false
+          "reason_code": "hosted_native_evidence",
+          "supported": true
         }
       }
     },
@@ -1111,13 +1111,13 @@
         },
         "linux": {
           "evidence": {
-            "credential_backend": "unverified",
+            "credential_backend": "verified",
             "executable": "not_applicable",
-            "fact_parser": "unverified",
+            "fact_parser": "verified",
             "local_discovery": "not_applicable"
           },
-          "reason_code": "source_level_evidence_unverified",
-          "supported": false
+          "reason_code": "hosted_native_evidence",
+          "supported": true
         },
         "windows": {
           "evidence": {

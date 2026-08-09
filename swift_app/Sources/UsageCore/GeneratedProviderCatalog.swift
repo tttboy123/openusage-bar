@@ -257,7 +257,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "codex_local_log", sourceKind: "local_log", operatingSystems: [.macOS], stability: .stable, provenance: .providerLocal, factFamilies: [.detection, .subscriptionCapacity, .tokenActivity], authority: .providerLocal, accountScope: .localProfile, modelScope: .mixed, verification: .liveAccount),
+                ProviderSourceCapability(sourceID: "codex_local_log", sourceKind: "local_log", operatingSystems: [.linux, .macOS, .windows], stability: .stable, provenance: .providerLocal, factFamilies: [.detection, .subscriptionCapacity, .tokenActivity], authority: .providerLocal, accountScope: .localProfile, modelScope: .mixed, verification: .liveAccount),
                 ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
@@ -695,7 +695,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "moonshot_official_api", sourceKind: "official_api", operatingSystems: [.macOS], stability: .stable, provenance: .providerOfficial, factFamilies: [.apiBalance, .detection], authority: .providerOfficial, accountScope: .configuredAccount, modelScope: .aggregate, verification: .fixture),
+                ProviderSourceCapability(sourceID: "moonshot_official_api", sourceKind: "official_api", operatingSystems: [.linux, .macOS], stability: .stable, provenance: .providerOfficial, factFamilies: [.apiBalance, .detection], authority: .providerOfficial, accountScope: .configuredAccount, modelScope: .aggregate, verification: .fixture),
                 ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
             ]
         ),

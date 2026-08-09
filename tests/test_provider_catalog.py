@@ -424,10 +424,20 @@ class ProviderCatalogTests(unittest.TestCase):
             "step_plan_browser_session": ("experimental", "user_session"),
             "step_plan_official_api": ("stable", "provider_official"),
         }
+        expected_operating_systems = {
+            "codex_local_log": frozenset({"linux", "macos", "windows"}),
+            "moonshot_official_api": frozenset({"linux", "macos"}),
+        }
         for family in self.catalog.families:
             for source in family.sources:
                 with self.subTest(family=family.family_id, source=source.source_id):
-                    self.assertEqual(source.operating_systems, frozenset({"macos"}))
+                    self.assertEqual(
+                        source.operating_systems,
+                        expected_operating_systems.get(
+                            source.source_id,
+                            frozenset({"macos"}),
+                        ),
+                    )
                     self.assertEqual(
                         (source.stability, source.provenance), expected[source.source_id]
                     )

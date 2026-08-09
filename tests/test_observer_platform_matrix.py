@@ -41,6 +41,7 @@ EVIDENCE_FIELDS = {
 EVIDENCE_STATUSES = {"not_applicable", "unverified", "verified"}
 REASON_CODES = {
     "existing_macos_contract",
+    "hosted_native_evidence",
     "source_level_evidence_unverified",
 }
 
@@ -107,11 +108,13 @@ class ObserverPlatformMatrixTests(unittest.TestCase):
                             for status in support["evidence"].values()
                         )
                         self.assertEqual(support["supported"], fully_evidenced)
-                        expected_reason = (
-                            "existing_macos_contract"
-                            if support["supported"]
-                            else "source_level_evidence_unverified"
-                        )
+                        expected_reason = "source_level_evidence_unverified"
+                        if support["supported"]:
+                            expected_reason = (
+                                "existing_macos_contract"
+                                if platform == "darwin"
+                                else "hosted_native_evidence"
+                            )
                         self.assertEqual(
                             support["reason_code"], expected_reason
                         )
@@ -171,16 +174,31 @@ class ObserverPlatformMatrixTests(unittest.TestCase):
                             "unverified", support["evidence"].values()
                         )
 
-    def test_current_matrix_preserves_macos_without_claiming_windows_or_linux(
+    def test_current_matrix_promotes_only_retained_hosted_source_evidence(
         self,
     ) -> None:
+        promoted = {
+            "windows": {("codex", "codex_local_log")},
+            "linux": {
+                ("codex", "codex_local_log"),
+                ("moonshot", "moonshot_official_api"),
+            },
+        }
         for entry in self.fixture["sources"]:
+            pair = (entry["family_id"], entry["source_id"])
             with self.subTest(
                 family=entry["family_id"], source=entry["source_id"]
             ):
                 self.assertTrue(entry["platforms"]["darwin"]["supported"])
-                self.assertFalse(entry["platforms"]["windows"]["supported"])
-                self.assertFalse(entry["platforms"]["linux"]["supported"])
+                for platform, promoted_pairs in promoted.items():
+                    support = entry["platforms"][platform]
+                    self.assertEqual(support["supported"], pair in promoted_pairs)
+                    self.assertEqual(
+                        support["reason_code"],
+                        "hosted_native_evidence"
+                        if pair in promoted_pairs
+                        else "source_level_evidence_unverified",
+                    )
 
     def test_fixture_contains_capability_evidence_not_private_runtime_data(
         self,

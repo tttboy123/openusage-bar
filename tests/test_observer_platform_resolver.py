@@ -47,9 +47,10 @@ class ObserverPlatformResolverTests(unittest.TestCase):
                 )
                 self.assertIsNone(resolver.operating_system)
 
-    def test_summary_distinguishes_verified_zero_from_unknown(self) -> None:
+    def test_summary_distinguishes_partial_support_from_unknown(self) -> None:
         macos = ObserverPlatformResolver(catalog, runtime_platform="darwin")
         windows = ObserverPlatformResolver(catalog, runtime_platform="win32")
+        linux = ObserverPlatformResolver(catalog, runtime_platform="linux")
         unknown = ObserverPlatformResolver(catalog, runtime_platform="freebsd")
 
         self.assertEqual(
@@ -68,7 +69,16 @@ class ObserverPlatformResolverTests(unittest.TestCase):
                 windows.summary.total_source_count,
                 windows.summary.reason_code,
             ),
-            ("unsupported", 0, 49, "source_level_evidence_unverified"),
+            ("supported", 1, 49, "supported_sources_available"),
+        )
+        self.assertEqual(
+            (
+                linux.summary.support,
+                linux.summary.supported_source_count,
+                linux.summary.total_source_count,
+                linux.summary.reason_code,
+            ),
+            ("supported", 2, 49, "supported_sources_available"),
         )
         self.assertEqual(
             (
@@ -85,12 +95,15 @@ class ObserverPlatformResolverTests(unittest.TestCase):
         records = windows.source_capabilities
 
         self.assertEqual(len(records), 49)
-        self.assertTrue(all(not record.supported for record in records))
+        self.assertEqual(sum(record.supported for record in records), 1)
         self.assertEqual(
             {record.reason_code for record in records},
-            {"source_level_evidence_unverified"},
+            {
+                "source_level_evidence_unverified",
+                "supported_sources_available",
+            },
         )
-        self.assertFalse(windows.supports_source("codex", "codex_local_log"))
+        self.assertTrue(windows.supports_source("codex", "codex_local_log"))
         self.assertFalse(windows.supports_any_source_id("openusage"))
 
     def test_shared_source_adapter_requires_every_catalog_use_to_be_supported(
@@ -175,7 +188,7 @@ class ObserverPlatformResolverTests(unittest.TestCase):
         ).build([config])
         self.assertEqual(
             [binding.provider_id for binding in bindings],
-            ["openusage"],
+            ["codex", "openusage"],
         )
 
     def test_resolver_is_pure_and_never_probes_the_host(self) -> None:
@@ -189,7 +202,7 @@ class ObserverPlatformResolverTests(unittest.TestCase):
             resolver = ObserverPlatformResolver(
                 catalog, runtime_platform="linux"
             )
-            self.assertEqual(resolver.summary.supported_source_count, 0)
+            self.assertEqual(resolver.summary.supported_source_count, 2)
             self.assertEqual(len(resolver.source_capabilities), 49)
 
 
@@ -207,10 +220,10 @@ class ObserverPlatformIntegrationContractTests(unittest.TestCase):
             payload["observerPlatform"],
             {
                 "operatingSystem": "windows",
-                "support": "unsupported",
-                "supportedSourceCount": 0,
+                "support": "supported",
+                "supportedSourceCount": 1,
                 "totalSourceCount": 49,
-                "reasonCode": "source_level_evidence_unverified",
+                "reasonCode": "supported_sources_available",
             },
         )
         projected = [
@@ -220,14 +233,12 @@ class ObserverPlatformIntegrationContractTests(unittest.TestCase):
         ]
         self.assertEqual(len(projected), 49)
         self.assertEqual(
-            projected,
-            [
-                {
-                    "state": "unsupported",
-                    "reasonCode": "source_level_evidence_unverified",
-                }
-            ]
-            * 49,
+            sum(item["state"] == "supported" for item in projected),
+            1,
+        )
+        self.assertEqual(
+            sum(item["state"] == "unsupported" for item in projected),
+            48,
         )
 
     def test_unknown_runtime_never_serializes_supported_count_as_zero(self) -> None:
@@ -254,7 +265,7 @@ class ObserverPlatformIntegrationContractTests(unittest.TestCase):
             {"unknown"},
         )
 
-    def test_adapter_factories_are_not_constructed_without_source_evidence(
+    def test_only_promoted_adapter_factories_are_constructed_on_linux(
         self,
     ) -> None:
         resolver = ObserverPlatformResolver(catalog, runtime_platform="linux")
@@ -267,7 +278,10 @@ class ObserverPlatformIntegrationContractTests(unittest.TestCase):
                 keychain=object(),
                 observer_platform=resolver,
             ).build([])
-        self.assertEqual(bindings, ())
+        self.assertEqual(
+            [binding.provider_id for binding in bindings],
+            ["codex"],
+        )
 
     def test_configured_adapter_factory_is_gated_before_construction(self) -> None:
         resolver = ObserverPlatformResolver(catalog, runtime_platform="win32")
@@ -294,7 +308,10 @@ class ObserverPlatformIntegrationContractTests(unittest.TestCase):
                 keychain=object(),
                 observer_platform=resolver,
             ).build([config])
-        self.assertEqual(bindings, ())
+        self.assertEqual(
+            [binding.provider_id for binding in bindings],
+            ["codex"],
+        )
 
     def test_macos_adapter_registry_preserves_existing_global_bindings(
         self,
@@ -328,7 +345,7 @@ class ObserverPlatformIntegrationContractTests(unittest.TestCase):
         with self.assertRaises(UnknownProviderConfig):
             registry.build([object()])
 
-    def test_headless_observer_starts_with_an_empty_verified_source_set(
+    def test_headless_observer_starts_with_only_promoted_linux_sources(
         self,
     ) -> None:
         resolver = ObserverPlatformResolver(catalog, runtime_platform="linux")
@@ -351,9 +368,15 @@ class ObserverPlatformIntegrationContractTests(unittest.TestCase):
                 observer_platform=resolver,
             )
 
-        self.assertEqual(refresher.quota_sources, ())
+        self.assertEqual(
+            [
+                (provider_id, source_id)
+                for provider_id, source_id, _adapter in refresher.quota_sources
+            ],
+            [("codex", "codex.local_rate_limits")],
+        )
         self.assertEqual(refresher.balance_sources, ())
-        self.assertEqual(refresher.eager_usage_provider_ids, ())
+        self.assertEqual(refresher.eager_usage_provider_ids, ("codex",))
         self.assertIsNone(refresher.collector.importer)
 
 
