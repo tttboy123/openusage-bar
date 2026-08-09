@@ -420,25 +420,49 @@ class DistributionTrustPostureTests(unittest.TestCase):
     def test_windows_tool_diagnostic_is_opt_in_closed_and_path_free(self):
         with tempfile.TemporaryDirectory() as directory:
             package_root, artifact = _fixture(Path(directory), "win")
-            diagnostic = io.StringIO()
-            with mock.patch.dict(
-                os.environ,
-                {"OPENUSAGE_TRUST_STAGE_DIAGNOSTIC": "1"},
-            ), contextlib.redirect_stderr(diagnostic):
-                report = self.inspect(
-                    "win",
-                    package_root,
-                    artifact,
+            cases = (
+                (
                     ToolRunner(error=OSError("PRIVATE_CANARY")),
-                )
-
-            self.assertEqual(report["platformCodeSigning"], "unknown")
-            self.assertEqual(
-                diagnostic.getvalue(),
-                "distribution_trust_stage=windows_tool_unavailable\n",
+                    "windows_tool_unavailable",
+                ),
+                (
+                    ToolRunner(authenticode=(0, "EnvironmentInvalid\n", "")),
+                    "windows_environment_invalid",
+                ),
+                (
+                    ToolRunner(authenticode=(0, "ArtifactUnavailable\n", "")),
+                    "windows_artifact_unavailable",
+                ),
+                (
+                    ToolRunner(authenticode=(0, "CmdletUnavailable\n", "")),
+                    "windows_cmdlet_unavailable",
+                ),
+                (
+                    ToolRunner(authenticode=(0, "ProbeFailed\n", "")),
+                    "windows_probe_failed",
+                ),
             )
-            self.assertNotIn(str(artifact), diagnostic.getvalue())
-            self.assertNotIn("PRIVATE_CANARY", diagnostic.getvalue())
+            for runner, expected_stage in cases:
+                with self.subTest(stage=expected_stage):
+                    diagnostic = io.StringIO()
+                    with mock.patch.dict(
+                        os.environ,
+                        {"OPENUSAGE_TRUST_STAGE_DIAGNOSTIC": "1"},
+                    ), contextlib.redirect_stderr(diagnostic):
+                        report = self.inspect(
+                            "win",
+                            package_root,
+                            artifact,
+                            runner,
+                        )
+
+                    self.assertEqual(report["platformCodeSigning"], "unknown")
+                    self.assertEqual(
+                        diagnostic.getvalue(),
+                        f"distribution_trust_stage={expected_stage}\n",
+                    )
+                    self.assertNotIn(str(artifact), diagnostic.getvalue())
+                    self.assertNotIn("PRIVATE_CANARY", diagnostic.getvalue())
 
     def test_platform_tool_argv_and_process_bounds_are_fixed(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -81,6 +81,10 @@ _TRUST_DIAGNOSTIC_STAGES = frozenset(
         "windows_tool_failed",
         "windows_status_shape",
         "windows_status_unknown",
+        "windows_environment_invalid",
+        "windows_artifact_unavailable",
+        "windows_cmdlet_unavailable",
+        "windows_probe_failed",
     }
 )
 
@@ -332,13 +336,21 @@ def _windows_observation(artifact: Path, runner: Runner) -> tuple[str, str]:
             "$ErrorActionPreference='Stop';"
             "$sentinel=[Environment]::GetEnvironmentVariable("
             "'OPENUSAGE_TRUST_SENTINEL','Process');"
-            f"if ($sentinel -cne '{POLICY}') {{ throw 'invalid sentinel' }};"
+            f"if ($sentinel -cne '{POLICY}') "
+            "{ [Console]::Out.Write('EnvironmentInvalid'); exit 0 };"
             "$artifact=[Environment]::GetEnvironmentVariable("
             "'OPENUSAGE_TRUST_ARTIFACT','Process');"
             "if ([string]::IsNullOrWhiteSpace($artifact)) "
-            "{ throw 'invalid artifact' };"
-            "$signature=Microsoft.PowerShell.Security\\Get-AuthenticodeSignature "
-            "-LiteralPath $artifact;"
+            "{ [Console]::Out.Write('EnvironmentInvalid'); exit 0 };"
+            "if (-not [System.IO.File]::Exists($artifact)) "
+            "{ [Console]::Out.Write('ArtifactUnavailable'); exit 0 };"
+            "$command=Get-Command "
+            "'Microsoft.PowerShell.Security\\Get-AuthenticodeSignature' "
+            "-ErrorAction SilentlyContinue;"
+            "if ($null -eq $command) "
+            "{ [Console]::Out.Write('CmdletUnavailable'); exit 0 };"
+            "try { $signature=& $command -LiteralPath $artifact } "
+            "catch { [Console]::Out.Write('ProbeFailed'); exit 0 };"
             "[Console]::Out.Write($signature.Status.ToString())"
         ),
     )
@@ -355,6 +367,14 @@ def _windows_observation(artifact: Path, runner: Runner) -> tuple[str, str]:
             _emit_trust_diagnostic("windows_status_shape")
             signing = "unknown"
         else:
+            diagnostic_stage = {
+                "EnvironmentInvalid": "windows_environment_invalid",
+                "ArtifactUnavailable": "windows_artifact_unavailable",
+                "CmdletUnavailable": "windows_cmdlet_unavailable",
+                "ProbeFailed": "windows_probe_failed",
+            }.get(values[0].strip())
+            if diagnostic_stage is not None:
+                _emit_trust_diagnostic(diagnostic_stage)
             signing = {
                 "Valid": "valid",
                 "NotSigned": "unsigned",
@@ -362,7 +382,7 @@ def _windows_observation(artifact: Path, runner: Runner) -> tuple[str, str]:
                 "NotTrusted": "invalid",
                 "UnknownError": "invalid",
             }.get(values[0].strip(), "unknown")
-            if signing == "unknown":
+            if signing == "unknown" and diagnostic_stage is None:
                 _emit_trust_diagnostic("windows_status_unknown")
     return signing, "not_applicable"
 
