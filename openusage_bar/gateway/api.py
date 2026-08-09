@@ -19,6 +19,7 @@ from ..runtime_capabilities import (
 )
 from .contracts import Decision, GatewayMode, ShouldSendDecision, ShouldSendRequest
 from .ingress import parse_gateway_request
+from .pools import validate_account_pools_public_payload
 from .response import (
     encode_sse_event,
     gateway_events,
@@ -50,6 +51,7 @@ _REASONS = frozenset(
 _ROUTES = frozenset(
     {
         ("GET", "/gateway/v1/health"),
+        ("GET", "/gateway/v1/account-pools"),
         ("GET", "/gateway/v1/schema"),
         ("POST", "/gateway/v1/should-send"),
         ("POST", "/gateway/v1/responses"),
@@ -73,6 +75,7 @@ Policy = Callable[[ShouldSendRequest], ShouldSendDecision]
 Proxy = Callable[[dict[str, object]], dict[str, object]]
 GatewayEvent = dict[str, object]
 GatewayDelivery = Iterable[GatewayEvent] | dict[str, object]
+AccountPools = Callable[[], dict[str, object]]
 
 
 def _problem(code: str, message: str, retryable: bool) -> dict[str, object]:
@@ -293,13 +296,14 @@ def _decision_payload(value: object) -> dict[str, object] | None:
 
 
 class GatewayRouter:
-    """Dispatch the four frozen Gateway v1 routes without doing I/O."""
+    """Dispatch the additive Gateway v1 routes without doing external I/O."""
 
     def __init__(
         self,
         mode: GatewayMode,
         policy: Policy | None,
         proxy: Proxy | None,
+        account_pools: AccountPools | None = None,
     ) -> None:
         if not isinstance(mode, GatewayMode):
             raise ValueError("Gateway mode is invalid.")
@@ -307,9 +311,12 @@ class GatewayRouter:
             raise ValueError("Gateway policy is invalid.")
         if proxy is not None and not callable(proxy):
             raise ValueError("Gateway proxy is invalid.")
+        if account_pools is not None and not callable(account_pools):
+            raise ValueError("Gateway account pools are invalid.")
         self._mode = mode
         self._policy = policy
         self._proxy = proxy
+        self._account_pools = account_pools
 
     def close(self) -> None:
         """Release proxy-owned resources once the listener is no longer active."""
@@ -343,6 +350,15 @@ class GatewayRouter:
                 )
             if path == "/gateway/v1/schema":
                 return 200, copy.deepcopy(_SCHEMA)
+            if path == "/gateway/v1/account-pools":
+                if self._mode is GatewayMode.OBSERVE or self._account_pools is None:
+                    return 200, {"accounts": []}
+                try:
+                    candidate = self._account_pools()
+                    payload = validate_account_pools_public_payload(candidate)
+                except Exception:
+                    return _internal_error()
+                return (200, payload) if payload is not None else _internal_error()
             return 200, {
                 "apiVersion": "gateway.openusage/v1",
                 "status": "disabled" if self._mode is GatewayMode.OBSERVE else "ok",

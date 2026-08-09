@@ -834,6 +834,7 @@ def _build_default_gateway_server(
     from .gateway.api import GatewayRouter
     from .gateway.cache import SQLiteGatewayCache
     from .gateway.policy import SnapshottingShouldSendEvaluator
+    from .gateway.pools import account_pools_public_payload
     from .gateway.runtime import GatewayRuntime
     from .gateway.server import create_gateway_server
     from .gateway.telemetry import GatewayTelemetryStore
@@ -878,6 +879,10 @@ def _build_default_gateway_server(
         mode=config.mode,
         policy=should_send,
         proxy=proxy,
+        account_pools=lambda: account_pools_public_payload(
+            accounts=config.accounts,
+            pools=config.account_pools,
+        ),
     )
     return create_gateway_server(
         router,

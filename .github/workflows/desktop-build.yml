@@ -272,6 +272,7 @@ jobs:
             tests.test_desktop_packaging_contract \
             tests.test_distribution_trust_posture \
             tests.test_extract_nsis_payload \
+            tests.test_gateway_account_pool \
             tests.test_gateway_api \
             tests.test_gateway_api_schema \
             tests.test_gateway_cache \

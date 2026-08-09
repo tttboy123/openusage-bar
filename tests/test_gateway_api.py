@@ -40,6 +40,27 @@ DECISION = ShouldSendDecision(
     burn_rate_per_minute=10.0,
     predicted_exhaustion_minutes=120.0,
 )
+ACCOUNT_POOLS = {
+    "accounts": [
+        {
+            "alias": "Work",
+            "displayId": "acct_0123456789ab",
+            "status": "unknown",
+            "quota": {
+                "state": "unknown",
+                "remaining": None,
+                "limit": None,
+                "resetAt": None,
+            },
+            "cooldown": {"state": "unknown", "until": None},
+            "pools": [
+                {"poolId": "daily-coding", "priority": 10, "weight": 1}
+            ],
+            "priority": 10,
+            "weight": 1,
+        }
+    ]
+}
 
 
 def body(payload: object = VALID_REQUEST) -> bytes:
@@ -209,13 +230,15 @@ class GatewayRouterTests(unittest.TestCase):
             all(route.split(" ", 1)[1].startswith("/gateway/v1/") for route in payload["routes"])
         )
 
-    def test_only_the_four_frozen_method_and_path_pairs_dispatch(self) -> None:
+    def test_only_the_five_additive_method_and_path_pairs_dispatch(self) -> None:
         router = GatewayRouter(
             mode=GatewayMode.GATEWAY,
             policy=policy,
             proxy=proxy,
+            account_pools=lambda: ACCOUNT_POOLS,
         )
         accepted = (
+            ("GET", "/gateway/v1/account-pools", b""),
             ("GET", "/gateway/v1/health", b""),
             ("GET", "/gateway/v1/schema", b""),
             ("POST", "/gateway/v1/should-send", body()),
@@ -247,6 +270,49 @@ class GatewayRouterTests(unittest.TestCase):
                 status, payload = router.dispatch("GET", path, b"")
                 self.assertEqual(status, 404)
                 assert_problem(self, payload, "not_found", False)
+
+    def test_account_pool_projection_is_optional_closed_and_renderer_safe(self) -> None:
+        router = GatewayRouter(
+            mode=GatewayMode.ADVISE,
+            policy=policy,
+            proxy=None,
+            account_pools=lambda: ACCOUNT_POOLS,
+        )
+
+        status, payload = router.dispatch(
+            "GET", "/gateway/v1/account-pools", b""
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, ACCOUNT_POOLS)
+        serialized = json.dumps(payload, sort_keys=True).casefold()
+        for forbidden in ("credential", "account_id", "token", "path", "header"):
+            self.assertNotIn(forbidden, serialized)
+
+        unavailable = GatewayRouter(
+            mode=GatewayMode.ADVISE,
+            policy=policy,
+            proxy=None,
+        )
+        self.assertEqual(
+            unavailable.dispatch("GET", "/gateway/v1/account-pools", b""),
+            (200, {"accounts": []}),
+        )
+
+        hostile = GatewayRouter(
+            mode=GatewayMode.ADVISE,
+            policy=policy,
+            proxy=None,
+            account_pools=lambda: {
+                "accounts": [],
+                "credential": "CANARY",
+            },
+        )
+        status, payload = hostile.dispatch(
+            "GET", "/gateway/v1/account-pools", b""
+        )
+        self.assertEqual(status, 500)
+        assert_problem(self, payload, "internal_error", True)
 
     def test_post_requires_strict_utf8_json_object(self) -> None:
         router = GatewayRouter(mode=GatewayMode.ADVISE, policy=policy, proxy=None)

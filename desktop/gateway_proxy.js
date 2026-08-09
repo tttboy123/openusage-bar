@@ -18,6 +18,7 @@ const MAX_RESPONSE_HEADER_BYTES = 16 * 1024;
 const MAX_RESPONSE_HEADER_COUNT = 64;
 const MAX_LOCAL_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_CAPABILITY_RESPONSE_BYTES = 64 * 1024;
+const MAX_ACCOUNT_POOLS_RESPONSE_BYTES = 64 * 1024;
 const MAX_SHOULD_SEND_REQUEST_BYTES = 8 * 1024;
 const MAX_SHOULD_SEND_RESPONSE_BYTES = 8 * 1024;
 const DEFAULT_DEADLINE_MS = 5_000;
@@ -42,6 +43,16 @@ const SHOULD_SEND_REASONS = new Set([
   "quota_low",
   "quota_unknown",
 ]);
+const ACCOUNT_POOL_STATUSES = new Set([
+  "ready",
+  "cooldown",
+  "quota_exhausted",
+  "disabled",
+  "backend_unavailable",
+  "unknown",
+]);
+const ACCOUNT_QUOTA_STATES = new Set(["available", "exhausted", "unknown"]);
+const ACCOUNT_COOLDOWN_STATES = new Set(["active", "inactive", "unknown"]);
 
 const WINDOWS_ACL_SCRIPT = String.raw`
 & {
@@ -227,6 +238,15 @@ function classifyRendererRequest({ method, target, headers = {} }) {
       method,
       target,
       headers: { Accept: RUNTIME_CAPABILITY_MEDIA_TYPE },
+    };
+  }
+  if (target === "/gateway/v1/account-pools") {
+    if (method !== "GET") return null;
+    return {
+      service: "gateway",
+      method,
+      target,
+      headers: { Accept: "application/json" },
     };
   }
   if (method !== "GET" && method !== "HEAD") return null;
@@ -913,6 +933,34 @@ async function fetchRendererResponse(
       body,
     };
   }
+  if (
+    classified.service === "gateway" &&
+    classified.method === "GET" &&
+    classified.target === "/gateway/v1/account-pools"
+  ) {
+    const gatewayResult = await privateRequest(
+      runtime.gateway,
+      classified,
+      MAX_ACCOUNT_POOLS_RESPONSE_BYTES,
+      requestOptions,
+    );
+    if (gatewayResult.statusCode !== 200) {
+      throw requestFailure("unavailable");
+    }
+    const accountPools = sanitizeAccountPoolsPayload(gatewayResult.body);
+    if (accountPools === null) throw requestFailure("invalid");
+    const body = Buffer.from(JSON.stringify(accountPools), "utf8");
+    return {
+      statusCode: 200,
+      headers: {
+        "Cache-Control": "no-store",
+        "Content-Length": String(body.length),
+        "Content-Type": "application/json; charset=utf-8",
+        "X-Content-Type-Options": "nosniff",
+      },
+      body,
+    };
+  }
   if (classified.service === "localApi") {
     return privateRequest(
       runtime.localApi,
@@ -1306,6 +1354,138 @@ function sanitizeShouldSendDecision(body) {
     defer_until: deferUntil,
     details,
   };
+}
+
+function sanitizeAccountPoolsPayload(body) {
+  const value = parseStrictJsonObject(body, MAX_ACCOUNT_POOLS_RESPONSE_BYTES);
+  if (
+    value === null ||
+    !hasExactOwnKeys(value, ["accounts"]) ||
+    !Array.isArray(value.accounts) ||
+    value.accounts.length > 256
+  ) {
+    return null;
+  }
+  const accounts = [];
+  const displayIds = new Set();
+  for (const item of value.accounts) {
+    const account = sanitizeAccountPoolAccount(item);
+    if (account === null || displayIds.has(account.displayId)) return null;
+    displayIds.add(account.displayId);
+    accounts.push(account);
+  }
+  return { accounts };
+}
+
+function sanitizeAccountPoolAccount(value) {
+  if (
+    !isJsonRecord(value) ||
+    !hasExactOwnKeys(value, [
+      "alias",
+      "displayId",
+      "status",
+      "quota",
+      "cooldown",
+      "pools",
+      "priority",
+      "weight",
+    ])
+  ) {
+    return null;
+  }
+  const alias = value.alias === null
+    ? null
+    : boundedShouldSendText(value.alias, 128);
+  const displayId = boundedShouldSendText(value.displayId, 128);
+  const quota = sanitizeAccountQuota(value.quota);
+  const cooldown = sanitizeAccountCooldown(value.cooldown);
+  const pools = sanitizeAccountPoolMemberships(value.pools);
+  if (
+    (value.alias !== null && alias === null) ||
+    displayId === null ||
+    !/^acct_[0-9a-f]{12}$/u.test(displayId) ||
+    !ACCOUNT_POOL_STATUSES.has(value.status) ||
+    quota === null ||
+    cooldown === null ||
+    pools === null ||
+    !isBoundedPublicInteger(value.priority) ||
+    !isBoundedPublicInteger(value.weight)
+  ) {
+    return null;
+  }
+  return {
+    alias,
+    displayId,
+    status: value.status,
+    quota,
+    cooldown,
+    pools,
+    priority: value.priority,
+    weight: value.weight,
+  };
+}
+
+function sanitizeAccountQuota(value) {
+  if (
+    !isJsonRecord(value) ||
+    !hasExactOwnKeys(value, ["state", "remaining", "limit", "resetAt"]) ||
+    !ACCOUNT_QUOTA_STATES.has(value.state)
+  ) {
+    return null;
+  }
+  const remaining = nullableNonNegativeNumber(value.remaining);
+  const limit = nullableNonNegativeNumber(value.limit);
+  if (
+    remaining === undefined ||
+    limit === undefined ||
+    !isValidShouldSendTimestamp(value.resetAt)
+  ) {
+    return null;
+  }
+  return { state: value.state, remaining, limit, resetAt: value.resetAt };
+}
+
+function sanitizeAccountCooldown(value) {
+  if (
+    !isJsonRecord(value) ||
+    !hasExactOwnKeys(value, ["state", "until"]) ||
+    !ACCOUNT_COOLDOWN_STATES.has(value.state) ||
+    !isValidShouldSendTimestamp(value.until)
+  ) {
+    return null;
+  }
+  return { state: value.state, until: value.until };
+}
+
+function sanitizeAccountPoolMemberships(value) {
+  if (!Array.isArray(value) || value.length > 64) return null;
+  const result = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (
+      !isJsonRecord(item) ||
+      !hasExactOwnKeys(item, ["poolId", "priority", "weight"])
+    ) {
+      return null;
+    }
+    const poolId = boundedShouldSendText(item.poolId, 128);
+    if (
+      poolId === null ||
+      !/^[A-Za-z0-9._-]+$/u.test(poolId) ||
+      seen.has(poolId) ||
+      !isBoundedPublicInteger(item.priority) ||
+      !isBoundedPublicInteger(item.weight)
+    ) {
+      return null;
+    }
+    seen.add(poolId);
+    result.push({ poolId, priority: item.priority, weight: item.weight });
+  }
+  return result;
+}
+
+function isBoundedPublicInteger(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 1_000_000;
 }
 
 function parseStrictJsonObject(
@@ -2087,6 +2267,7 @@ module.exports = {
   observerDaemonArguments,
   probePrivateObserver,
   readPrivateToken,
+  sanitizeAccountPoolsPayload,
   startOrProbeLegacyDashboard,
   startOrProbePrivateObserver,
   validatePrivateUnixSocket,

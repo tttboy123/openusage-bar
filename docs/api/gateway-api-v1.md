@@ -23,12 +23,15 @@ that choice on the user's behalf.
 | `advise` | Enables the Gateway listener and `POST /gateway/v1/should-send`. It never forwards a Provider request, and `POST /gateway/v1/responses` remains disabled. |
 | `gateway` | Enables explicitly configured forwarding through `POST /gateway/v1/responses`; advice, cache, and fallback behavior remain subject to explicit configuration. |
 
-## Frozen route surface
+## Compatible additive route surface
 
-Gateway API v1 has exactly these method and path pairs:
+Gateway API v1 preserves the original four route semantics and adds the
+renderer-safe Account Pool projection as an optional GET. Existing request and
+response shapes remain unchanged:
 
 | Method and path | Contract |
 |---|---|
+| `GET /gateway/v1/account-pools` | Returns configured local account aliases, derived display IDs, closed status/quota/cooldown facts, and Pool membership. It never returns account refs, credential lookup names, tokens, paths, headers, or raw Provider errors. |
 | `GET /gateway/v1/health` | Returns sanitized Gateway capability and health state. Gateway health is not added to Local API health. |
 | `GET /gateway/v1/schema` | Returns the committed v1 Gateway route manifest. It never advertises Local API routes. |
 | `POST /gateway/v1/should-send` | Evaluates admission advice from recorded capacity facts and bounded aggregate telemetry. The request path does not invoke a live quota adapter or read a Provider credential. |
@@ -36,7 +39,23 @@ Gateway API v1 has exactly these method and path pairs:
 
 No other method or path is a Gateway API v1 route. In particular, Gateway API
 v1 is not mounted below `/v1/*`, and the Local API listener never dispatches a
-`/gateway/*` target.
+`/gateway/*` target. Adding the Account Pool GET does not alter Local API v1,
+Should-Send, Responses, health, or schema request semantics.
+
+### Account Pool projection
+
+`GET /gateway/v1/account-pools` is available only through the authenticated
+private Gateway boundary. With no configured accounts it returns
+`{"accounts":[]}`. A configured account is initially `unknown`; creating an
+account or Pool never proves credential availability, account health, or quota.
+The renderer receives only a user alias, a one-way derived display ID, closed
+status/quota/cooldown facts, and bounded membership priority/weight.
+
+The configuration keeps the existing provider default credential mapping when
+no account is selected. An explicit selected account is resolved inside the
+Python/OS credential boundary. Cross-provider, cross-model, and cross-region
+fallback remain disabled unless each scope is explicitly confirmed by the
+local Pool configuration.
 
 ### Representation negotiation
 

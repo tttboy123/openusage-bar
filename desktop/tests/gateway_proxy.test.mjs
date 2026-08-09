@@ -121,6 +121,19 @@ test("allows only credential-free renderer reads and builds closed upstream head
   assert.deepEqual(
     classifyRendererRequest({
       method: "GET",
+      target: "/gateway/v1/account-pools",
+      headers: { accept: "text/html" },
+    }),
+    {
+      service: "gateway",
+      method: "GET",
+      target: "/gateway/v1/account-pools",
+      headers: { Accept: "application/json" },
+    },
+  );
+  assert.deepEqual(
+    classifyRendererRequest({
+      method: "GET",
       target: "/gateway/v1/health",
       headers: { accept: "text/html" },
     }),
@@ -157,6 +170,50 @@ test("allows only credential-free renderer reads and builds closed upstream head
       `${request.method} ${request.target}`,
     );
   }
+});
+
+test("sanitizes the exact Account Pool renderer projection", () => {
+  const { sanitizeAccountPoolsPayload } = require("../gateway_proxy.js");
+  const safe = {
+    accounts: [
+      {
+        alias: "Work",
+        displayId: "acct_0123456789ab",
+        status: "unknown",
+        quota: { state: "unknown", remaining: null, limit: null, resetAt: null },
+        cooldown: { state: "unknown", until: null },
+        pools: [{ poolId: "daily-coding", priority: 10, weight: 1 }],
+        priority: 10,
+        weight: 1,
+      },
+    ],
+  };
+  assert.deepEqual(
+    sanitizeAccountPoolsPayload(Buffer.from(JSON.stringify(safe), "utf8")),
+    safe,
+  );
+  for (const field of [
+    "credentialStoreAccount",
+    "externalOpaqueRef",
+    "token",
+    "path",
+    "header",
+  ]) {
+    const hostile = structuredClone(safe);
+    hostile.accounts[0][field] = "CANARY";
+    assert.equal(
+      sanitizeAccountPoolsPayload(Buffer.from(JSON.stringify(hostile), "utf8")),
+      null,
+    );
+  }
+  const disguisedCredentialKey = structuredClone(safe);
+  disguisedCredentialKey.accounts[0].displayId = "openai.work.gateway-api-key";
+  assert.equal(
+    sanitizeAccountPoolsPayload(
+      Buffer.from(JSON.stringify(disguisedCredentialKey), "utf8"),
+    ),
+    null,
+  );
 });
 
 test(

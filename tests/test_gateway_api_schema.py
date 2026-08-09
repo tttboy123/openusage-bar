@@ -17,6 +17,7 @@ class GatewayAPISchemaTests(unittest.TestCase):
         self.assertEqual(
             sorted(payload["routes"]),
             [
+                "GET /gateway/v1/account-pools",
                 "GET /gateway/v1/health",
                 "GET /gateway/v1/schema",
                 "POST /gateway/v1/responses",

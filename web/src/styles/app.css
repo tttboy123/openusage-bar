@@ -293,6 +293,30 @@ td { color: var(--text-dim); white-space: nowrap; }
 }
 .primary-btn:hover { opacity: 0.9; }
 .primary-btn:disabled { opacity: 0.5; cursor: default; }
+.secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease),
+    background var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
+}
+.secondary-btn:hover { border-color: var(--accent); background: var(--surface-hover); }
+.secondary-btn[aria-disabled="true"] {
+  color: var(--text-faint);
+  cursor: default;
+}
 
 .dialog-overlay {
   position: fixed; inset: 0; z-index: 100;
@@ -636,6 +660,122 @@ select option { background: var(--surface); color: var(--text); }
 @media (hover: none) {
   .provider-actions { opacity: 1; }
 }
+
+.account-pools-panel {
+  margin: 0 0 16px;
+  padding: 16px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.account-pools-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.account-pools-head h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 650;
+}
+.account-pools-note,
+.account-pools-create-note,
+.account-pools-summary,
+.account-pool-memberships {
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.account-pools-create { flex: none; }
+.account-pools-summary {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.account-pools-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.account-pool-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--bg);
+  outline: none;
+}
+.account-pool-card:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.account-pool-card-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.account-pool-identity {
+  min-width: 0;
+}
+.account-pool-identity h4 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.account-pool-display-id {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+.account-pool-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+}
+.account-pool-facts div {
+  min-width: 0;
+}
+.account-pool-facts dt {
+  color: var(--text-faint);
+  font-size: 0.68rem;
+}
+.account-pool-facts dd {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.account-pool-memberships {
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+.account-pool-status-unknown {
+  border: 1px solid var(--hairline);
+}
+.account-pools-empty {
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--surface-alt);
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
  .provider-grid {
    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
  }
@@ -738,6 +878,12 @@ select option { background: var(--surface); color: var(--text); }
   .metric-value { white-space: normal; overflow: visible; }
   .provider-grid { grid-template-columns: 1fr; }
   .provider-actions { opacity: 1; }
+  .account-pools-panel { padding: 14px; }
+  .account-pools-head { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .account-pools-create { justify-self: start; }
+  .account-pools-list { grid-template-columns: minmax(0, 1fr); }
+  .account-pool-card-main { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .account-pool-facts { grid-template-columns: minmax(0, 1fr); }
   .trend-bars { overflow-x: auto; }
   .heatmap-scroll { max-width: 100%; }
 }

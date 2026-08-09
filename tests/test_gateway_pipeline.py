@@ -9,6 +9,7 @@ import urllib.error
 
 from openusage_bar.gateway import providers as provider_module
 from openusage_bar.gateway.egress import execute_provider_call
+from openusage_bar.gateway.accounts import ProviderAccountRef
 from openusage_bar.gateway.ingress import GatewayRequest, parse_gateway_request
 from openusage_bar.gateway.providers import (
     GatewayProviderError,
@@ -846,6 +847,67 @@ class GatewayEgressTests(unittest.TestCase):
                 )
                 self.assertEqual(result.status_code, 200)
                 self.assertNotIn(SECRET, repr(result))
+
+    def test_selected_account_uses_its_private_credential_lookup(self) -> None:
+        encoded = json.dumps(
+            fixture("openai")["response"],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        transport = FakeTransport(
+            ProviderResult(
+                200,
+                (("Content-Type", "application/json"),),
+                (encoded,),
+            )
+        )
+        selected = ProviderAccountRef(
+            provider_id="openai",
+            account_id="work",
+            alias="Work",
+            credential_account="openai.work.gateway-api-key",
+        )
+        keychain = FakeKeychain(
+            {
+                "openai.gateway-api-key": "wrong-default",
+                "openai.work.gateway-api-key": SECRET,
+            }
+        )
+
+        result = execute_provider_call(
+            "openai",
+            request_bytes("openai"),
+            providers=self.providers(transport),
+            keychain=keychain,
+            account=selected,
+        )
+
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(keychain.accounts, ["openai.work.gateway-api-key"])
+        self.assertNotIn("openai.work.gateway-api-key", repr(result))
+
+    def test_selected_account_cannot_cross_the_requested_provider(self) -> None:
+        selected = ProviderAccountRef(
+            provider_id="anthropic",
+            account_id="work",
+            alias="Work",
+            credential_account="anthropic.work.gateway-api-key",
+        )
+        keychain = FakeKeychain(
+            {"anthropic.work.gateway-api-key": SECRET}
+        )
+
+        with self.assertRaises(GatewayProviderError) as caught:
+            execute_provider_call(
+                "openai",
+                request_bytes("openai"),
+                providers=self.providers(FakeTransport()),
+                keychain=keychain,
+                account=selected,
+            )
+
+        self.assertEqual(caught.exception.code, "unsupported_provider")
+        self.assertEqual(keychain.accounts, [])
 
     def test_ollama_never_reads_keychain(self) -> None:
         transport = FakeTransport(

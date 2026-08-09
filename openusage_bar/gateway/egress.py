@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from ..keychain import default_keychain
+from .accounts import ProviderAccountRef
 from .providers import (
     GatewayProvider,
     GatewayProviderError,
@@ -45,6 +46,7 @@ def execute_provider_call(
     *,
     providers: Iterable[GatewayProvider] | None = None,
     keychain: Any | None = None,
+    account: ProviderAccountRef | None = None,
 ) -> ProviderResult | ProviderEventStream:
     """Read one credential inside Python, then execute one bounded adapter call."""
 
@@ -52,6 +54,12 @@ def execute_provider_call(
         raise _provider_error("unsupported_provider")
     if type(request_body) is not bytes:
         raise _provider_error("invalid_request")
+    if account is not None and (
+        type(account) is not ProviderAccountRef
+        or account.provider_id != provider_id
+        or _PROVIDER_CREDENTIAL_ACCOUNTS[provider_id] is None
+    ):
+        raise _provider_error("unsupported_provider")
     try:
         available = tuple(
             providers if providers is not None else default_gateway_providers()
@@ -84,13 +92,17 @@ def execute_provider_call(
         raise _provider_error("unsupported_provider")
 
     credential = ""
-    account = _PROVIDER_CREDENTIAL_ACCOUNTS[provider_id]
-    if account is not None:
-        if type(account) is not str or not account:
+    credential_account = (
+        account.credential_account
+        if account is not None
+        else _PROVIDER_CREDENTIAL_ACCOUNTS[provider_id]
+    )
+    if credential_account is not None:
+        if type(credential_account) is not str or not credential_account:
             raise _provider_error("credential_unavailable")
         try:
             boundary = keychain if keychain is not None else default_keychain()
-            value = boundary.get(account)
+            value = boundary.get(credential_account)
         except Exception:
             raise _provider_error("credential_unavailable") from None
         if not _valid_stored_credential(value):
