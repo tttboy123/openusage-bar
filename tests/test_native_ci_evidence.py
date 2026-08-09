@@ -1632,6 +1632,23 @@ class NativeCiEvidenceTests(unittest.TestCase):
             )
             self.assertNotIn("Traceback", verified.stderr)
 
+    def test_workflow_fetches_release_tags_before_product_truth_verification(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        checkout_start = source.index("- name: Check out source")
+        setup_python_start = source.index(
+            "- name: Set up pinned Python",
+            checkout_start,
+        )
+        checkout = source[checkout_start:setup_python_start]
+        product_truth_start = source.index(
+            "- name: Verify product and version truth",
+            setup_python_start,
+        )
+
+        self.assertIn("with:", checkout)
+        self.assertIn("fetch-depth: 0", checkout)
+        self.assertLess(checkout_start, product_truth_start)
+
     def test_workflow_bootstraps_pinned_linux_secret_service_without_weakening_source_evidence(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         bootstrap_marker = "- name: Prepare pinned Linux Observer secret service"
