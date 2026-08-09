@@ -314,7 +314,8 @@ function readPrivateToken(
     platform = process.platform,
     verifyWindowsAcl,
     realpath = fs.realpathSync.native,
-    resolvePath = path.resolve,
+    resolvePath =
+      platform === "win32" ? fs.realpathSync.native : path.resolve,
   } = {},
 ) {
   const unavailable = () => new Error("private token unavailable");
