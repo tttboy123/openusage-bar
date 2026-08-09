@@ -30,9 +30,29 @@ const OPERATIONAL_VALUES = new Set([
   "unavailable",
   "unknown",
 ]);
+const SAFE_FAILURE_STAGES = new Set([
+  "resolve_collector",
+  "create_runtime_root",
+  "isolate_environment",
+  "discover_runtime",
+  "observer_exited",
+  "observer_token_missing",
+  "observer_token_acl",
+  "observer_health_unavailable",
+  "fetch_capability",
+  "validate_capability",
+  "terminate_observer",
+  "restore_environment",
+  "remove_runtime_root",
+  "unknown",
+]);
 
-function smokeFailure() {
-  return new Error(GENERIC_ERROR);
+function smokeFailure(stage = null) {
+  const error = new Error(GENERIC_ERROR);
+  if (SAFE_FAILURE_STAGES.has(stage)) {
+    Object.defineProperty(error, "stage", { value: stage });
+  }
+  return error;
 }
 
 function ownDataValue(value, key) {
@@ -317,10 +337,15 @@ async function runCli(argv) {
   let environment = null;
   let aggregate = null;
   let cleanupFailed = false;
+  let stage = "resolve_collector";
+  let failureStage = null;
   try {
     const collector = resolveCollectorExecutable(parseCollectorArgument(argv));
+    stage = "create_runtime_root";
     createdRoot = createPrivateRuntimeRoot();
+    stage = "isolate_environment";
     environment = isolateEnvironment(createdRoot.path);
+    stage = "discover_runtime";
     const runtime = discoverPrivateRuntime({
       platform: process.platform,
       homeDir: environment.isolated.HOME,
@@ -337,8 +362,23 @@ async function runCli(argv) {
       offline: true,
     });
     child = started?.child ?? null;
-    if (started?.ready !== true) throw smokeFailure();
+    if (started?.ready !== true) {
+      const tokenPath = runtime?.localApi?.tokenPath;
+      if (childHasExited(child)) stage = "observer_exited";
+      else if (typeof tokenPath !== "string" || !fs.existsSync(tokenPath)) {
+        stage = "observer_token_missing";
+      } else if (
+        typeof verifyWindowsAcl === "function" &&
+        verifyWindowsAcl(tokenPath) !== true
+      ) {
+        stage = "observer_token_acl";
+      } else {
+        stage = "observer_health_unavailable";
+      }
+      throw smokeFailure(stage);
+    }
 
+    stage = "fetch_capability";
     const classified = classifyRendererRequest({
       method: "GET",
       target: "/gateway/v1/health",
@@ -354,6 +394,7 @@ async function runCli(argv) {
     if (response?.statusCode !== 200 || !Buffer.isBuffer(response.body)) {
       throw smokeFailure();
     }
+    stage = "validate_capability";
     const payload = JSON.parse(response.body.toString("utf8"));
     const forbidden = [
       createdRoot.path,
@@ -364,36 +405,47 @@ async function runCli(argv) {
     ].filter((value) => typeof value === "string" && value.length > 0);
     aggregate = validateRuntimeCapabilitySmoke(payload, forbidden);
   } catch {
+    failureStage = stage;
     aggregate = null;
   } finally {
     try {
       await terminateChild(child);
     } catch {
+      failureStage ??= "terminate_observer";
       cleanupFailed = true;
     }
     try {
       environment?.restore();
     } catch {
+      failureStage ??= "restore_environment";
       cleanupFailed = true;
     }
     if (childHasExited(child)) {
       try {
         removeCreatedRoot(createdRoot);
       } catch {
+        failureStage ??= "remove_runtime_root";
         cleanupFailed = true;
       }
     } else {
       cleanupFailed = true;
     }
   }
-  if (aggregate === null || cleanupFailed) throw smokeFailure();
+  if (aggregate === null || cleanupFailed) {
+    throw smokeFailure(failureStage ?? "unknown");
+  }
   process.stdout.write(`${JSON.stringify(aggregate)}\n`);
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
 if (invokedPath !== null && invokedPath === fileURLToPath(import.meta.url)) {
-  runCli(process.argv.slice(2)).catch(() => {
-    process.stderr.write(`${GENERIC_ERROR}\n`);
+  runCli(process.argv.slice(2)).catch((error) => {
+    const diagnosticStage =
+      process.env.OPENUSAGE_SMOKE_STAGE_DIAGNOSTIC === "1" &&
+      SAFE_FAILURE_STAGES.has(error?.stage)
+        ? ` stage=${error.stage}`
+        : "";
+    process.stderr.write(`${GENERIC_ERROR}${diagnosticStage}\n`);
     process.exitCode = 1;
   });
 }

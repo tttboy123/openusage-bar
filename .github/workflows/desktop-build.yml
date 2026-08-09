@@ -397,6 +397,8 @@ jobs:
       - name: Smoke desktop runtime capability
         id: desktop_runtime_capability_smoke
         shell: bash
+        env:
+          OPENUSAGE_SMOKE_STAGE_DIAGNOSTIC: "1"
         run: node desktop/scripts/smoke_runtime_capability.mjs --collector "./dist-collector/${{ matrix.collector }}"
       - name: Package desktop app
         id: desktop_package
