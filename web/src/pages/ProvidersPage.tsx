@@ -1,24 +1,58 @@
 import { useEffect, useState } from "react";
-import { Plus } from "@phosphor-icons/react";
-import { fetchProviders, fetchQuickConnect, type ProviderItem, type QuickConnectItem } from "../api";
+import { Plus, HardDrives, ArrowClockwise } from "@phosphor-icons/react";
+import {
+  fetchProviders,
+  fetchSources,
+  fetchQuickConnect,
+  type ProviderItem,
+  type SourceItem,
+  type QuickConnectItem,
+} from "../api";
 import AddProviderDialog from "../components/AddProviderDialog";
-import { type Messages } from "../i18n";
+import ProviderCard from "../components/ProviderCard";
+import { type Messages, tpl } from "../i18n";
 
 export default function ProvidersPage({ t }: { t: Messages }) {
   const [providers, setProviders] = useState<ProviderItem[]>([]);
+  const [sources, setSources] = useState<SourceItem[]>([]);
   const [quick, setQuick] = useState<QuickConnectItem[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+
+  const load = async (quiet = false) => {
+    if (!quiet) setIsRefreshing(true);
+    try {
+      const [p, s, q] = await Promise.all([
+        fetchProviders(),
+        fetchSources(),
+        fetchQuickConnect(),
+      ]);
+      setProviders(p);
+      setSources(s);
+      setQuick(q);
+      setError(null);
+      setLastRefreshed(new Date());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed");
+    } finally {
+      if (!quiet) setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
-    Promise.all([fetchProviders(), fetchQuickConnect()])
-      .then(([p, q]) => {
-        setProviders(p);
-        setQuick(q);
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : "failed"));
+    load();
   }, []);
 
+  useEffect(() => {
+    const id = setInterval(() => load(true), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const sourcesByProvider = new Map(
+    sources.map((s) => [s.providerId, s] as const),
+  );
   const quickByFamily = new Map(quick.map((q) => [q.familyId, q]));
 
   return (
@@ -32,7 +66,23 @@ export default function ProvidersPage({ t }: { t: Messages }) {
           <Plus size={16} />
           {t.addConnection}
         </button>
-        <span className="dim">{providers.length} {t.instances}</span>
+        <div className="toolbar-right">
+          <span className="dim">
+            {lastRefreshed
+              ? tpl(t.lastUpdated, { time: relativeTime(lastRefreshed.toISOString(), t) })
+              : t.refreshStatus}
+          </span>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => load()}
+            disabled={isRefreshing}
+            aria-label={t.refresh}
+            title={t.refresh}
+          >
+            <ArrowClockwise size={16} className={isRefreshing ? "spinning" : ""} />
+          </button>
+        </div>
       </div>
       <AddProviderDialog
         open={dialogOpen}
@@ -40,73 +90,41 @@ export default function ProvidersPage({ t }: { t: Messages }) {
         onClose={() => setDialogOpen(false)}
         t={t}
       />
-      <section className="panel">
-        <div className="panel-head">
-          <h3>{t.navProviders}</h3>
-          <span>{providers.length} {t.instances}</span>
-        </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">{t.providerCol}</th>
-              <th scope="col">{t.nameCol}</th>
-              <th scope="col">{t.sourceKind}</th>
-              <th scope="col">{t.consoleCol}</th>
-              <th scope="col">{t.apiKey}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {providers.map((item) => {
-              const quick = quickByFamily.get(item.familyId ?? item.providerId ?? "");
-              return (
-                <tr key={item.providerId}>
-                  <th scope="row">{item.providerId ?? "n/a"}</th>
-                  <td>{item.displayName ?? "n/a"}</td>
-                  <td className="mono">{item.sourceKind ?? "n/a"}</td>
-                  <td>
-                    {quick?.consoleUrl ? (
-                      <a
-                        className="btn-link"
-                        href={quick.consoleUrl}
-                        target="_blank"
-                        rel="noopener"
-                      >
-                        {t.openConsole}
-                      </a>
-                    ) : (
-                      "n/a"
-                    )}
-                  </td>
-                  <td>
-                    {quick?.apiKeyUrl ? (
-                      <a
-                        className="btn-link"
-                        href={quick.apiKeyUrl}
-                        target="_blank"
-                        rel="noopener"
-                      >
-                        {t.getApiKey}
-                      </a>
-                    ) : (
-                      "n/a"
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-            {providers.length === 0 && !error ? (
-              <tr>
-                <td colSpan={5} className="empty">
-                  {t.comingSoon}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-      {error ? <p className="empty">{error}</p> : null}
+      <section className="provider-grid" aria-label={t.navProviders}>
+        {providers.map((item) => (
+         <ProviderCard
+           key={item.providerId}
+           providerId={item.providerId ?? ""}
+           displayName={item.displayName ?? item.providerId ?? "n/a"}
+           familyId={item.familyId ?? item.providerId ?? ""}
+           sourceKind={item.sourceKind}
+           source={sourcesByProvider.get(item.providerId ?? "")}
+           quick={quickByFamily.get(item.familyId ?? "")}
+           t={t}
+            isSyncing={isRefreshing}
+         />
+        ))}
+        {providers.length === 0 && !error ? (
+          <div className="empty-block" style={{ gridColumn: "1 / -1" }}>
+            <HardDrives size={32} />
+            <p>{t.comingSoon}</p>
+          </div>
+        ) : null}
       </section>
+      {error ? <p className="empty">{error}</p> : null}
     </>
   );
+}
+
+function relativeTime(date: string | null | undefined, t: Messages): string {
+  if (!date) return t.never;
+  const then = new Date(date).getTime();
+  if (Number.isNaN(then)) return t.never;
+  const minutes = Math.floor((Date.now() - then) / 60000);
+  if (minutes < 1) return t.justNow ?? "just now";
+  if (minutes < 60) return tpl(t.minutesAgo, { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return tpl(t.hoursAgo, { count: hours });
+  const days = Math.floor(hours / 24);
+  return tpl(t.daysAgo, { count: days });
 }

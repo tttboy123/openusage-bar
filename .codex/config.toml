@@ -1,0 +1,28 @@
+# Project-local Codex team for cross-platform OpenUsage Bar development.
+#
+# The primary agent coordinates up to three child agents concurrently. Four
+# roles are defined and rotate through the available slots with one writer per
+# file at any time.
+
+[features]
+multi_agent = true
+
+[agents]
+max_threads = 3
+max_depth = 1
+
+[agents.server]
+description = "Owns Python collector, Local/Gateway APIs, storage, credentials, and platform services."
+config_file = "agents/server.toml"
+
+[agents.client]
+description = "Owns Swift, Electron main-process, and Web data-client integration."
+config_file = "agents/client.toml"
+
+[agents.ui]
+description = "Owns cross-platform interaction, accessibility, localization, and visual consistency."
+config_file = "agents/ui.toml"
+
+[agents.test]
+description = "Owns independent contract, privacy, UI, packaging, and release verification."
+config_file = "agents/test.toml"

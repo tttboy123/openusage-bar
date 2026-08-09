@@ -31,14 +31,14 @@ extension Color {
 }
 
 public enum DesignTokens {
-    public static let bg = Color(light: 0xF7F7F5, dark: 0x0B0C0E)
+    public static let bg = Color(light: 0xF4F5F7, dark: 0x0C0E12)
     public static let accent = Color(light: 0x087F52, dark: 0x34D399)
-    public static let text = Color(light: 0x1A1B1E, dark: 0xE8EAED)
-    public static let textDim = Color(light: 0x5B5F66, dark: 0xA7ADB8)
-    public static let textFaint = Color(light: 0x6A707A, dark: 0x7B818C)
-    public static let hairline = Color(light: 0xE3E4E1, dark: 0x23262C)
-    public static let surface = Color(light: 0xFFFFFF, dark: 0x121316)
-    public static let surfaceAlt = Color(light: 0xF0F0EE, dark: 0x181A1E)
+    public static let text = Color(light: 0x111114, dark: 0xEAECEF)
+    public static let textDim = Color(light: 0x454A55, dark: 0xA7ADB8)
+    public static let textFaint = Color(light: 0x5F6570, dark: 0x8A909B)
+    public static let hairline = Color(light: 0xD9DDE2, dark: 0x252A31)
+    public static let surface = Color(light: 0xFFFFFF, dark: 0x13161B)
+    public static let surfaceAlt = Color(light: 0xECEEF1, dark: 0x1A1D23)
     public static let warn = Color(light: 0xB45309, dark: 0xFBBF24)
     public static let bad = Color(light: 0xC0392B, dark: 0xF87171)
 

@@ -6,6 +6,7 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -67,6 +68,21 @@ _CHILD_ENVIRONMENT_KEYS = frozenset(
         "XDG_STATE_HOME",
     }
 )
+_WINDOWS_CHILD_ENVIRONMENT_KEYS = frozenset(
+    {
+        "SYSTEMROOT",
+        "WINDIR",
+        "SYSTEMDRIVE",
+        "COMSPEC",
+        "PATHEXT",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "USERNAME",
+        "LOCALAPPDATA",
+        "APPDATA",
+    }
+)
 
 
 class ProviderRetryBackoff:
@@ -109,22 +125,47 @@ class ProviderRetryBackoff:
 def child_subprocess_environment(
     environment: dict[str, str] | None = None,
     path_exists: Callable[[str], bool] | None = None,
+    *,
+    platform: str | None = None,
+    path_separator: str | None = None,
 ) -> dict[str, str]:
-    """Return a credential-free child environment with Cursor's CLI available."""
+    """Return a minimal, credential-free environment for child CLIs."""
     parent = environment if environment is not None else os.environ
-    child = {
-        key: value
-        for key, value in parent.items()
-        if key in _CHILD_ENVIRONMENT_KEYS
-    }
+    active_platform = sys.platform if platform is None else platform
+    separator = (
+        (";" if active_platform == "win32" else os.pathsep)
+        if path_separator is None
+        else path_separator
+    )
+    if not isinstance(separator, str) or not separator:
+        raise ValueError("invalid child PATH separator")
+
+    if active_platform == "win32":
+        allowed_keys = _CHILD_ENVIRONMENT_KEYS | _WINDOWS_CHILD_ENVIRONMENT_KEYS
+        child: dict[str, str] = {}
+        for key, value in parent.items():
+            canonical_key = key.upper()
+            if canonical_key not in allowed_keys:
+                continue
+            previous = child.get(canonical_key)
+            if previous is not None and previous != value:
+                raise ValueError("conflicting child environment")
+            child[canonical_key] = value
+    else:
+        child = {
+            key: value
+            for key, value in parent.items()
+            if key in _CHILD_ENVIRONMENT_KEYS
+        }
+
     exists = path_exists or os.path.isdir
-    parts = [part for part in child.get("PATH", "").split(os.pathsep) if part]
+    parts = [part for part in child.get("PATH", "").split(separator) if part]
     discovered = [
         directory
         for directory in CHILD_CLI_DIRECTORIES
         if exists(directory) and directory not in parts
     ]
-    child["PATH"] = os.pathsep.join(discovered + parts)
+    child["PATH"] = separator.join(discovered + parts)
     return child
 
 
@@ -380,7 +421,12 @@ class OpenUsageAdapter:
                 **options,
             )
         except BoundedProcessError as error:
-            reason = "timed out" if error.code == "timeout" else "output exceeded limit"
+            if error.code == "timeout":
+                reason = "timed out"
+            elif error.code == "output_overflow":
+                reason = "output exceeded limit"
+            else:
+                reason = "export runner failed"
             raise OpenUsageExportError(reason) from None
         except subprocess.TimeoutExpired:
             raise OpenUsageExportError(f"timed out after {timeout}s") from None

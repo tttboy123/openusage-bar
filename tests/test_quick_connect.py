@@ -45,3 +45,6 @@ class QuickConnectTests(unittest.TestCase):
         )
         self.assertEqual(deepseek["consoleUrl"], "https://platform.deepseek.com")
         self.assertIn("api_key", deepseek["authModes"])
+        self.assertEqual(
+            deepseek["apiKeyUrl"], "https://platform.deepseek.com/api_keys"
+        )

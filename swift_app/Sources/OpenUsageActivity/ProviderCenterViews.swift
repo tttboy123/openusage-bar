@@ -63,11 +63,19 @@ struct ProvidersPage: View {
         }.map { descriptor in
             let connectionIDs = Set(instances[descriptor.familyID, default: []].map(\.providerID))
                 .union(configured[descriptor.familyID, default: []].map(\.providerID))
+            let familySources = data.health.sources.filter {
+                sourceFamilyID(for: $0.providerID) == descriptor.familyID
+            }
+            let latestSuccess = familySources
+                .compactMap(\.lastSuccessAt)
+                .compactMap { value -> (String, Date) in (value, ActivityTimestamp.date(from: value) ?? .distantPast) }
+                .max { $0.1 < $1.1 }?.0
             return ProviderCenterItem(
                 descriptor: descriptor,
                 instanceCount: connectionIDs.count,
                 observed: observedFamilies.contains(descriptor.familyID),
-                issues: issues[descriptor.familyID, default: []]
+                issues: issues[descriptor.familyID, default: []],
+                lastSuccessAt: latestSuccess
             )
         }.sorted { left, right in
             let leftRank = left.status.sortRank
@@ -254,12 +262,11 @@ private struct ProviderCenterRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: item.category.symbol)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(item.category.color)
-                .frame(width: 30, height: 30)
-                .background(item.category.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                .accessibilityHidden(true)
+            UnifiedProviderAvatar(
+                familyID: item.descriptor.familyID,
+                displayName: item.descriptor.displayName,
+                size: 34
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.descriptor.displayName)
                     .font(.body.weight(.medium)).lineLimit(1)
@@ -268,13 +275,19 @@ private struct ProviderCenterRow: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
-            Image(systemName: item.status.symbol)
-                .foregroundStyle(item.status.color)
-                .accessibilityLabel(item.status.title)
+            UnifiedStatusBadge(status: badgeStatus, title: item.status.title, isLive: item.isLive)
         }
         .padding(.vertical, 4)
         .help(item.helpText)
         .accessibilityElement(children: .combine)
+    }
+
+    private var badgeStatus: UnifiedStatusBadge.Status {
+        switch item.status {
+        case .available: .neutral
+        case .connected: .ok
+        case .attention: .warning
+        }
     }
 }
 
@@ -359,20 +372,27 @@ private struct ProviderConnectionDetail: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 14) {
-            Image(systemName: item.category.symbol)
-                .font(.system(size: 23, weight: .semibold))
-                .foregroundStyle(item.category.color)
-                .frame(width: 50, height: 50)
-                .background(item.category.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
-                .accessibilityHidden(true)
+            UnifiedProviderAvatar(
+                familyID: descriptor.familyID,
+                displayName: descriptor.displayName,
+                size: 50,
+                cornerRadius: 13
+            )
             VStack(alignment: .leading, spacing: 4) {
                 Text(descriptor.displayName).font(.title2.weight(.semibold))
                 Text(ProviderCenterText.scope(descriptor) ?? item.category.title)
                     .foregroundStyle(.secondary)
-                Label(item.status.title, systemImage: item.status.symbol)
-                    .font(.caption).foregroundStyle(item.status.color)
+                UnifiedStatusBadge(status: badgeStatus, title: item.status.title, isLive: item.isLive)
             }
             Spacer()
+        }
+    }
+
+    private var badgeStatus: UnifiedStatusBadge.Status {
+        switch item.status {
+        case .available: .neutral
+        case .connected: .ok
+        case .attention: .warning
         }
     }
 

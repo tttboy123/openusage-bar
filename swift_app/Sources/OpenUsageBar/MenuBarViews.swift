@@ -68,13 +68,8 @@ struct MenuBarPopover: View {
                 Text(model.updatedAge).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Button { model.refresh() } label: {
-                Label(
-                    AppLocalization.text(model.isRefreshing ? "Refreshing" : "Refresh"),
-                    systemImage: "arrow.clockwise"
-                )
-            }
-                .buttonStyle(.borderless).disabled(model.isRefreshing).keyboardShortcut("r", modifiers: .command)
+            UnifiedRefreshButton(isRefreshing: model.isRefreshing, action: model.refresh)
+                .keyboardShortcut("r", modifiers: .command)
         }
         .padding(.horizontal, 16).padding(.vertical, 13)
     }
@@ -111,30 +106,29 @@ struct MenuBarPopover: View {
 
     private func provider(_ group: ProviderCapacityGroup) -> some View {
         let item = ProviderRowPresentation(group.primary)
+        let descriptor = item.providerDescriptor
+        let urls = providerURLs(for: descriptor.familyID)
         return VStack(spacing: 0) {
             Button { model.selectedProviderID = group.id; model.toggle(group.id) } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
+                    UnifiedProviderAvatar(familyID: descriptor.familyID, displayName: item.provider, size: 36)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.provider).fontWeight(.medium)
+                        Text(item.provider).font(.body.weight(.medium)).lineLimit(1)
                         Text(item.window).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    Spacer(minLength: 8)
-                    VStack(alignment: .trailing, spacing: 2) {
-                        HStack(spacing: 4) {
-                            if let symbol = item.stateSymbol { Image(systemName: symbol).imageScale(.small) }
-                            Text(item.capacity).fontWeight(.semibold).monospacedDigit()
-                        }
-                        .foregroundStyle(item.isCritical ? Color.red : item.isWarning ? Color.orange : Color.primary)
-                        ForEach(item.visibleMetadata, id: \.self) {
-                            Text($0).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    UnifiedStatusBadge(status: badgeStatus(for: item), title: badgeTitle(for: item))
+                    if !group.secondary.isEmpty {
+                        Image(systemName: model.expandedProviderID == group.id ? "chevron.up" : "chevron.down")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    if !group.secondary.isEmpty { Image(systemName: model.expandedProviderID == group.id ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(.secondary) }
+                    ProviderHoverActions(consoleURL: urls.console, credentialURL: urls.credential)
                 }
-                .contentShape(Rectangle()).padding(.horizontal, 16).padding(.vertical, 9)
+                .contentShape(Rectangle())
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
             }
-            .buttonStyle(.plain)
-            .background(model.selectedProviderID == group.id ? Color.accentColor.opacity(0.10) : Color.clear)
+            .buttonStyle(MenuProviderRowStyle(isSelected: model.selectedProviderID == group.id))
             .accessibilityLabel(item.accessibilityLabel).accessibilityValue(item.accessibilityValue)
             if model.expandedProviderID == group.id { ForEach(Array(group.secondary), id: \.recordID) { secondary($0) } }
         }
@@ -145,44 +139,39 @@ struct MenuBarPopover: View {
         return HStack {
             Text(item.window).foregroundStyle(.secondary)
             Spacer()
-            HStack(spacing: 4) {
-                if let symbol = item.stateSymbol { Image(systemName: symbol).imageScale(.small) }
-                Text(item.capacity).monospacedDigit()
-            }
-            .foregroundStyle(riskColor(item.riskLevel))
-            VStack(alignment: .trailing, spacing: 1) {
-                ForEach(item.visibleMetadata, id: \.self) { Text($0) }
-            }
-            .foregroundStyle(.secondary)
+            UnifiedStatusBadge(status: badgeStatus(for: item), title: badgeTitle(for: item))
         }
-        .font(.caption).padding(.leading, 34).padding(.trailing, 16).padding(.vertical, 6)
+        .font(.caption).padding(.leading, 62).padding(.trailing, 16).padding(.vertical, 5)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.accessibilityLabel)
         .accessibilityValue(item.accessibilityValue)
     }
 
-    private func riskColor(_ level: ProviderRiskLevel) -> Color {
-        switch level {
-        case .critical: .red
-        case .warning: .orange
-        case .normal: .primary
-        }
+    private func badgeStatus(for item: ProviderRowPresentation) -> UnifiedStatusBadge.Status {
+        if item.isCritical { return .critical }
+        if item.isWarning { return .warning }
+        return item.capacity == AppLocalization.text("Unavailable") ? .neutral : .ok
+    }
+
+    private func badgeTitle(for item: ProviderRowPresentation) -> String {
+        item.capacity
+    }
+
+    private func providerURLs(for familyID: String) -> (console: URL?, credential: URL?) {
+        let console = GeneratedProviderCatalog.quickConnectURLs[familyID].flatMap(URL.init(string:))
+        let credential = GeneratedProviderCatalog.apiKeyURLs[familyID].flatMap(URL.init(string:))
+        return (console, credential)
     }
 
     private var emptyState: some View {
         let presentation = model.emptyStatePresentation
-        return VStack(spacing: 6) {
-            Image(systemName: "tray").foregroundStyle(.secondary)
-            Text(AppLocalization.text(presentation.titleKey)).fontWeight(.medium)
-            Text(model.displayError ?? AppLocalization.text(presentation.detailKey))
-                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Button(AppLocalization.text(presentation.actionKey)) {
-                HelperLauncher.openActivity(route: presentation.primaryRoute.transportValue)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-        }
-        .padding(24).frame(maxWidth: .infinity)
+        return UnifiedEmptyState(
+            symbol: "tray",
+            title: AppLocalization.text(presentation.titleKey),
+            body: model.displayError ?? AppLocalization.text(presentation.detailKey),
+            actionTitle: AppLocalization.text(presentation.actionKey),
+            action: { HelperLauncher.openActivity(route: presentation.primaryRoute.transportValue) }
+        )
     }
 
     private var footer: some View {
@@ -193,5 +182,47 @@ struct MenuBarPopover: View {
             Button("Settings") { HelperLauncher.openSettings() }.keyboardShortcut(",", modifiers: .command)
         }
         .buttonStyle(.plain).font(.caption).padding(.horizontal, 16).padding(.vertical, 11)
+    }
+}
+
+private struct MenuProviderRowStyle: ButtonStyle {
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(isSelected ? DesignTokens.accent.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                if isSelected || configuration.isPressed {
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(DesignTokens.accent.opacity(configuration.isPressed ? 0.5 : 0.3), lineWidth: 1)
+                }
+            }
+            .scaleEffect(configuration.isPressed ? 0.995 : 1)
+    }
+}
+
+private struct ProviderHoverActions: View {
+    let consoleURL: URL?
+    let credentialURL: URL?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let consoleURL {
+                Link(destination: consoleURL) {
+                    Image(systemName: "arrow.up.forward.square")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                }
+                .help(AppLocalization.text("Open Console"))
+            }
+            if let credentialURL {
+                Link(destination: credentialURL) {
+                    Image(systemName: "key")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                }
+                .help(AppLocalization.text("Get API Key"))
+            }
+        }
     }
 }

@@ -50,7 +50,7 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
     Promise.all([fetchCosts(from, to), fetchActivity(from, to), fetchProviders()])
       .then(([c, a, p]) => {
         setCosts(c);
-        setActivity(a);
+        setActivity(a.rows);
         setProviders(p);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "failed"))
@@ -195,6 +195,8 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
     return t.apiPaid;
   }
 
+  const totalTokens = modelRows.reduce((sum, row) => sum + row.tokens, 0);
+
   return (
     <>
       <PeriodSelector value={period} onChange={setPeriod} t={t} />
@@ -202,20 +204,42 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
         <Skeleton lines={5} />
       ) : (
         <>
+          <div className="metrics">
+            <div className="metric">
+              <p className="metric-value">
+                {totals.length > 0
+                  ? totals.map((total) => formatAmount(total.amount, total.currency)).join(" · ")
+                  : "—"}
+              </p>
+              <p className="metric-label">{t.spend}</p>
+            </div>
+            <div className="metric">
+              <p className="metric-value">{apiProviders.size}</p>
+              <p className="metric-label">{t.apiProviders}</p>
+            </div>
+            <div className="metric">
+              <p className="metric-value">{modelRows.length}</p>
+              <p className="metric-label">{t.models}</p>
+            </div>
+            <div className="metric">
+              <p className="metric-value">{totalTokens.toLocaleString()}</p>
+              <p className="metric-label">{t.tokensCol}</p>
+            </div>
+          </div>
+
           <section className="panel">
             <div className="panel-head">
               <h3>{t.apiPaid}</h3>
               <span>{t[PERIOD_LABEL[period]]}</span>
             </div>
             <div className="panel-body">
-              <p className="dim" style={{ margin: "0 0 10px", fontSize: "0.74rem" }}>
+              <p className="dim panel-hint">
                 {t.apiPaidHint}
               </p>
               {totals.map((total) => (
                 <p
                   key={total.currency}
-                  className="mono"
-                  style={{ fontSize: "1.2rem", margin: 0 }}
+                  className="mono amount-value"
                 >
                   {formatAmount(total.amount, total.currency)}
                 </p>
@@ -230,7 +254,7 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
               <span>{t[PERIOD_LABEL[period]]}</span>
             </div>
             <div className="panel-body">
-              <p className="dim" style={{ margin: 0, fontSize: "0.74rem" }}>
+              <p className="dim panel-hint">
                 {t.apiOnlyNote}{" "}
                 <Link className="btn-link" to="/capacity">
                   {t.navCapacity}

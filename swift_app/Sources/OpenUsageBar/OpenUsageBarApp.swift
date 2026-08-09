@@ -14,6 +14,14 @@ final class AppLaunchDelegate: NSObject, NSApplicationDelegate {
         statusController = controller
         controller.install()
         model.startMonitoring()
+
+        // Debug/screenshot helper: if launched with --show-popover, present the
+        // menu bar popover after a short delay so the status item is installed.
+        if ProcessInfo.processInfo.arguments.contains("--show-popover") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak controller] in
+                controller?.showPopover(nil)
+            }
+        }
         recover(reopened: false)
     }
 
@@ -108,7 +116,7 @@ final class StatusItemController: NSObject {
         }
     }
 
-    private func showPopover(_ sender: Any?) {
+    func showPopover(_ sender: Any?) {
         guard let button = statusItem?.button else { return }
         model.loadLastGoodOnce()
         model.checkFreshness()

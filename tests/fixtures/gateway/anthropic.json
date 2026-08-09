@@ -1,0 +1,27 @@
+{
+  "provider": "anthropic",
+  "endpoint": "https://api.anthropic.com/v1/messages",
+  "request": {
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 64,
+    "messages": [
+      {
+        "role": "user",
+        "content": "hello"
+      }
+    ]
+  },
+  "response": {
+    "id": "message-1",
+    "type": "message",
+    "content": []
+  },
+  "stream": {
+    "wire": "sse",
+    "content_type": "text/event-stream",
+    "chunks": [
+      "event: message_start\ndata: {\"type\":\"message_start\"}\n\n",
+      "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+    ]
+  }
+}

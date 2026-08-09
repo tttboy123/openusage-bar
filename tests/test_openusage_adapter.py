@@ -1,12 +1,14 @@
 import json
+import inspect
 import os
 import subprocess
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
+from openusage_bar.bounded_process import BoundedProcessError
 from openusage_bar.models import Category, Overview, ProviderCard, ProviderStatus
-from openusage_bar.openusage_adapter import OpenUsageAdapter
+from openusage_bar.openusage_adapter import OpenUsageAdapter, child_subprocess_environment
 from openusage_bar.provider_catalog import catalog
 
 
@@ -184,6 +186,70 @@ class OpenUsageAdapterTests(unittest.TestCase):
             },
         )
         self.assertEqual(parent["OPENAI_API_KEY"], "openai-secret")
+
+    def test_windows_child_environment_is_case_insensitive_and_fail_closed(self):
+        parameters = inspect.signature(child_subprocess_environment).parameters
+        self.assertIn("platform", parameters)
+        self.assertIn("path_separator", parameters)
+
+        windows_path = r"C:\Windows\System32;C:\Tools"
+        parent = {
+            "Path": windows_path,
+            "PATH": windows_path,
+            "systemroot": r"C:\Windows",
+            "WiNdIr": r"C:\Windows",
+            "SystemDrive": "C:",
+            "ComSpec": r"C:\Windows\System32\cmd.exe",
+            "PathExt": ".COM;.EXE;.BAT;.CMD",
+            "UserProfile": r"C:\Users\tester",
+            "HomeDrive": "C:",
+            "HomePath": r"\Users\tester",
+            "UserName": "tester",
+            "LocalAppData": r"C:\Users\tester\AppData\Local",
+            "AppData": r"C:\Users\tester\AppData\Roaming",
+            "OpenAI_Api_Key": "secret",
+            "SESSION_TOKEN": "secret",
+            "Cookie": "session=secret",
+        }
+        original = dict(parent)
+
+        child = child_subprocess_environment(
+            parent,
+            path_exists=lambda _path: False,
+            platform="win32",
+            path_separator=";",
+        )
+
+        self.assertEqual(
+            child,
+            {
+                "PATH": windows_path,
+                "SYSTEMROOT": r"C:\Windows",
+                "WINDIR": r"C:\Windows",
+                "SYSTEMDRIVE": "C:",
+                "COMSPEC": r"C:\Windows\System32\cmd.exe",
+                "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+                "USERPROFILE": r"C:\Users\tester",
+                "HOMEDRIVE": "C:",
+                "HOMEPATH": r"\Users\tester",
+                "USERNAME": "tester",
+                "LOCALAPPDATA": r"C:\Users\tester\AppData\Local",
+                "APPDATA": r"C:\Users\tester\AppData\Roaming",
+            },
+        )
+        self.assertEqual(parent, original)
+        self.assertEqual(child["PATH"].split(";"), [r"C:\Windows\System32", r"C:\Tools"])
+
+        conflicting = {"Path": r"C:\one", "PATH": r"C:\two"}
+        conflicting_original = dict(conflicting)
+        with self.assertRaises(ValueError):
+            child_subprocess_environment(
+                conflicting,
+                path_exists=lambda _path: False,
+                platform="win32",
+                path_separator=";",
+            )
+        self.assertEqual(conflicting, conflicting_original)
 
     def test_cursor_maps_plan_quota_to_remaining_subscription(self):
         card = OpenUsageAdapter.parse(
@@ -617,6 +683,27 @@ class OpenUsageAdapterTests(unittest.TestCase):
             [call.args[0][-1] for call in run.call_args_list],
             ["auto", "direct"],
         )
+
+    def test_bounded_process_errors_map_to_stable_export_failures(self):
+        for code, expected in (
+            ("timeout", "timed out"),
+            ("output_overflow", "output exceeded limit"),
+            ("reader_failed", "export runner failed"),
+            ("runner_failed", "export runner failed"),
+        ):
+            with self.subTest(code=code):
+                run = Mock(side_effect=BoundedProcessError(code))
+                with self.assertLogs(
+                    "openusage_bar.openusage_adapter",
+                    level="WARNING",
+                ):
+                    result = OpenUsageAdapter(clock=lambda: NOW, runner=run).fetch()
+
+                self.assertEqual(
+                    result.cards[0].last_error,
+                    f"auto: {expected}; direct: {expected}",
+                )
+                self.assertEqual(run.call_count, 2)
 
 
 if __name__ == "__main__":

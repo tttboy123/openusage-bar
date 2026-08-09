@@ -1,0 +1,15 @@
+{
+  "canaryClock": "not_started",
+  "canaryQualifiedMachines": 0,
+  "canaryTargetMachines": 5,
+  "candidateBuild": "28",
+  "candidateVersion": "0.8.6",
+  "channel": "rc",
+  "displayName": "UsageHub",
+  "publicationStatus": "not_published",
+  "publishedBaselineTag": "v0.7.1",
+  "publishedBaselineVersion": "0.7.1",
+  "releaseEligible": false,
+  "releaseStage": "candidate",
+  "schemaVersion": "artifact-build-identity/v1"
+}

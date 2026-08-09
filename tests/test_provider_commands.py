@@ -1,7 +1,7 @@
 import io
 import json
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from openusage_bar.config import (
     DailyUsageFeedConfig,
@@ -307,6 +307,37 @@ class ProviderMutationCommandTests(unittest.TestCase):
         self.assertEqual(saved[0].name, "Main")
         self.assertEqual(saved[1].name, "Work Updated")
         self.assertEqual(saved[1].site, "international")
+
+    def test_uses_platform_default_keychain_when_not_injected(self):
+        store = Mock()
+        store.load.return_value = []
+        platform_keychain = Mock()
+        output = io.StringIO()
+
+        with patch(
+            "openusage_bar.provider_commands.default_keychain",
+            create=True,
+            return_value=platform_keychain,
+        ) as default_keychain_factory:
+            status = run_provider_mutation(
+                io.StringIO(json.dumps({
+                    "version": 1,
+                    "action": "update_connection",
+                    "providerId": "minimax-missing",
+                    "name": "MiniMax",
+                    "apiKey": "",
+                    "sessionCookie": "",
+                })),
+                output,
+                store=store,
+            )
+
+        default_keychain_factory.assert_called_once_with()
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            json.loads(output.getvalue())["message"],
+            "Provider connection was not found",
+        )
 
     def test_updates_non_step_plan_connection_without_accepting_a_client_type(self):
         store = Mock()

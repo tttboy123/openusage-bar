@@ -2,16 +2,31 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import mmap
 import os
 import posixpath
 import plistlib
 import re
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
+
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.verify_artifact_build_identity import (
+    ArtifactBuildIdentityError,
+    CANONICAL_IDENTITY,
+    PACKAGED_IDENTITY_NAME,
+    PRODUCT_TRUTH,
+    verify_packaged_build_identity,
+)
 
 
 ARCHIVE_PATTERN = re.compile(r"^OpenUsage-Bar-v(\d+\.\d+\.\d+)-macos-arm64\.zip$")
@@ -25,17 +40,49 @@ ALLOWED_SCRIPTS = frozenset({
     "verify_local_api.py",
 })
 SENSITIVE_NAMES = frozenset({
-    ".env", "providers.json", "activity.sqlite3", "activity.sqlite3-wal",
-    "activity.sqlite3-shm", "keychain", "cookies", "credentials",
+    ".env", "providers.json", "gateway.json", "api.token", "gateway.token",
+    "openusage.token", "activity.sqlite3", "activity.sqlite3-wal",
+    "activity.sqlite3-shm", "gateway-cache.sqlite3",
+    "gateway-cache.sqlite3-wal", "gateway-cache.sqlite3-shm",
+    "gateway-telemetry.sqlite3", "gateway-telemetry.sqlite3-wal",
+    "gateway-telemetry.sqlite3-shm", "keychain", "cookies", "credentials",
 })
 MAX_MEMBER_BYTES = 256 * 1024 * 1024
 MAX_TOTAL_BYTES = 1024 * 1024 * 1024
+MAX_SYMLINK_TARGET_BYTES = 4096
+MAX_DESKTOP_MEMBERS = 200_000
+MAX_DESKTOP_DEPTH = 64
+MAX_DESKTOP_MEMBER_BYTES = 512 * 1024 * 1024
+MAX_DESKTOP_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
+DESKTOP_SCAN_CHUNK_BYTES = 1024 * 1024
+DESKTOP_SCAN_OVERLAP_BYTES = 512
 MACHO_MAGICS = {
     b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf",
     b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
     b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
 }
 HOME_PATH_PATTERN = re.compile(rb"/(?:Users|home)/[A-Za-z0-9._-]+(?:/|\b)")
+DESKTOP_POSIX_HOME_PATH_PATTERN = re.compile(
+    rb"/(?:Users|home)/[A-Za-z0-9._-]{1,255}/[^/\x00]"
+)
+WINDOWS_HOME_PATH_PATTERN = re.compile(
+    rb"[A-Za-z]:[\\/]+Users[\\/]+[A-Za-z0-9._ -]{1,128}"
+    rb"[\\/]+[^\\/\x00]",
+    re.IGNORECASE,
+)
+DESKTOP_DATABASE_PATTERN = re.compile(
+    r"(?:activity|gateway-cache|gateway-telemetry)\.sqlite3"
+    r"(?:-(?:wal|shm)|-journal)?\Z",
+    re.IGNORECASE,
+)
+RAW_CONTENT_CANARIES = (
+    b"OPENUSAGE_RAW_PROMPT_CANARY_",
+    b"OPENUSAGE_RAW_RESPONSE_CANARY_",
+)
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+MAX_ASAR_HEADER_BYTES = 16 * 1024 * 1024
+MAX_PACKAGE_METADATA_BYTES = 64 * 1024
+MAX_DESKTOP_ENTRY_BYTES = 64 * 1024
 
 
 class ArtifactError(ValueError):
@@ -46,9 +93,10 @@ class ArtifactError(ValueError):
 
 
 SAFE_REASONS = frozenset({
-    "archive", "architecture", "binary", "checksum", "home_path",
-    "oversized", "plist", "private_material", "signature", "symlink",
-    "unexpected_member", "unsafe_path", "version_mismatch",
+    "archive", "architecture", "binary", "build_identity", "checksum",
+    "collector", "home_path", "native_metadata", "oversized", "plist",
+    "private_material", "signature", "symlink", "unexpected_member",
+    "unsafe_path", "version_mismatch",
 })
 
 
@@ -68,8 +116,17 @@ def inspect_members(archive: zipfile.ZipFile, expected_root: str) -> None:
         ):
             raise ArtifactError("unsafe_path")
         seen.add(name)
+        total += info.file_size
+        if (
+            info.file_size < 0
+            or info.file_size > MAX_MEMBER_BYTES
+            or total > MAX_TOTAL_BYTES
+        ):
+            raise ArtifactError("oversized")
         mode = _member_mode(info)
         if stat.S_ISLNK(mode):
+            if info.file_size > MAX_SYMLINK_TARGET_BYTES:
+                raise ArtifactError("oversized")
             try:
                 target = archive.read(info).decode("utf-8")
             except (UnicodeError, KeyError) as error:
@@ -79,9 +136,6 @@ def inspect_members(archive: zipfile.ZipFile, expected_root: str) -> None:
             if target.startswith("/") or not name.startswith(app_prefix) or not resolved.startswith(app_prefix):
                 raise ArtifactError("symlink")
             continue
-        total += info.file_size
-        if info.file_size > MAX_MEMBER_BYTES or total > MAX_TOTAL_BYTES:
-            raise ArtifactError("oversized")
         relative = path.parts[1:]
         if not relative:
             continue
@@ -122,28 +176,71 @@ def _verify_checksum(archive_path: Path) -> None:
         raise ArtifactError("checksum")
 
 
-def _metadata(path: Path) -> tuple[str, str]:
+def _packaged_build_identity(
+    resource_root: Path,
+    *,
+    canonical_identity: Path | None = None,
+    product_truth: Path | None = None,
+) -> dict[str, object]:
+    try:
+        identity, artifact = verify_packaged_build_identity(
+            resource_root / PACKAGED_IDENTITY_NAME,
+            canonical_identity or REPOSITORY_ROOT / CANONICAL_IDENTITY,
+            product_truth or REPOSITORY_ROOT / PRODUCT_TRUTH,
+        )
+    except (ArtifactBuildIdentityError, OSError, UnicodeError) as error:
+        raise ArtifactError("build_identity") from error
+    return {"artifact": artifact, "identity": identity}
+
+
+def _plist(path: Path) -> dict[str, object]:
     try:
         value = plistlib.loads(path.read_bytes())
-        version = value["CFBundleShortVersionString"]
-        build = value["CFBundleVersion"]
-    except (OSError, plistlib.InvalidFileException, KeyError, TypeError) as error:
+    except (OSError, plistlib.InvalidFileException, TypeError) as error:
         raise ArtifactError("plist") from error
-    if not isinstance(version, str) or not isinstance(build, str):
+    if type(value) is not dict:
+        raise ArtifactError("plist")
+    return value
+
+
+def _metadata(path: Path) -> tuple[str, str]:
+    value = _plist(path)
+    version = value.get("CFBundleShortVersionString")
+    build = value.get("CFBundleVersion")
+    if type(version) is not str or type(build) is not str:
         raise ArtifactError("plist")
     return version, build
 
 
-def verify_versions(root: Path, expected_version: str) -> None:
+def verify_versions(
+    root: Path,
+    expected_version: str,
+    *,
+    canonical_identity: Path | None = None,
+    product_truth: Path | None = None,
+) -> dict[str, object]:
     app = root / "dist/OpenUsage Bar.app"
+    build_identity = _packaged_build_identity(
+        app / "Contents/Resources",
+        canonical_identity=canonical_identity,
+        product_truth=product_truth,
+    )
+    identity = build_identity["identity"]
     plists = (
         app / "Contents/Info.plist",
         app / "Contents/Helpers/OpenUsage Activity.app/Contents/Info.plist",
         app / "Contents/Helpers/OpenUsage Provider Settings.app/Contents/Info.plist",
     )
     values = {_metadata(path) for path in plists}
-    if len(values) != 1 or next(iter(values))[0] != expected_version:
+    main = _plist(plists[0])
+    if (
+        expected_version != identity["candidateVersion"]
+        or values
+        != {(identity["candidateVersion"], identity["candidateBuild"])}
+        or main.get("CFBundleDisplayName") != identity["displayName"]
+    ):
         raise ArtifactError("version_mismatch")
+    return build_identity
 
 
 def verify_executable_names(root: Path) -> None:
@@ -200,6 +297,623 @@ def verify_binaries(root: Path) -> None:
         raise ArtifactError("signature")
 
 
+def _native_collector(path: Path, platform: str) -> bool:
+    """Recognize the target operating system's executable container format."""
+
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(64)
+            if platform == "darwin":
+                return header[:4] in MACHO_MAGICS
+            if platform == "linux":
+                return (
+                    len(header) >= 8
+                    and header[:4] == b"\x7fELF"
+                    and header[4] in {1, 2}
+                    and header[5] in {1, 2}
+                    and header[6] == 1
+                )
+            if platform != "win32" or len(header) < 64 or header[:2] != b"MZ":
+                return False
+            pe_offset = int.from_bytes(header[0x3C:0x40], "little")
+            size = path.stat().st_size
+            if pe_offset < 64 or pe_offset > size - 4:
+                return False
+            handle.seek(pe_offset)
+            return handle.read(4) == b"PE\x00\x00"
+    except OSError as error:
+        raise ArtifactError("binary") from error
+
+
+def _file_digest(path: Path) -> bytes:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            while chunk := handle.read(DESKTOP_SCAN_CHUNK_BYTES):
+                digest.update(chunk)
+    except OSError as error:
+        raise ArtifactError("collector") from error
+    return digest.digest()
+
+
+def _verify_built_collector(
+    packaged_collector: Path,
+    built_collector: Path,
+    platform: str,
+) -> None:
+    try:
+        built_stat = built_collector.lstat()
+    except OSError as error:
+        raise ArtifactError("collector") from error
+    if (
+        stat.S_ISLNK(built_stat.st_mode)
+        or not stat.S_ISREG(built_stat.st_mode)
+        or built_stat.st_size > MAX_DESKTOP_MEMBER_BYTES
+        or (
+            platform != "win32"
+            and built_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            == 0
+        )
+    ):
+        raise ArtifactError("collector")
+    if not _native_collector(built_collector, platform):
+        raise ArtifactError("binary")
+    if _file_digest(packaged_collector) != _file_digest(built_collector):
+        raise ArtifactError("collector")
+
+
+def _same_open_file(before: os.stat_result, after: os.stat_result) -> bool:
+    return (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    ) == (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+
+
+def _read_exact(descriptor: int, size: int) -> bytes:
+    chunks: list[bytes] = []
+    remaining = size
+    while remaining:
+        chunk = os.read(descriptor, remaining)
+        if not chunk:
+            raise ArtifactError("native_metadata")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _json_without_duplicate_keys(encoded: bytes) -> object:
+    def reject(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ArtifactError("native_metadata")
+            value[key] = item
+        return value
+
+    try:
+        return json.loads(
+            encoded.decode("utf-8"),
+            object_pairs_hook=reject,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                ArtifactError("native_metadata")
+            ),
+        )
+    except ArtifactError:
+        raise
+    except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
+        raise ArtifactError("native_metadata") from error
+
+
+def _asar_package_metadata(path: Path) -> dict[str, object]:
+    descriptor: int | None = None
+    try:
+        linked = path.lstat()
+        if (
+            stat.S_ISLNK(linked.st_mode)
+            or not stat.S_ISREG(linked.st_mode)
+            or linked.st_size < 16
+            or linked.st_size > MAX_DESKTOP_MEMBER_BYTES
+        ):
+            raise ArtifactError("native_metadata")
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (linked.st_dev, linked.st_ino) != (opened.st_dev, opened.st_ino)
+        ):
+            raise ArtifactError("native_metadata")
+        prefix = _read_exact(descriptor, 16)
+        pickle_payload, header_size, header_payload, string_size = struct.unpack(
+            "<IIII", prefix
+        )
+        if (
+            pickle_payload != 4
+            or header_size < 8
+            or header_size > MAX_ASAR_HEADER_BYTES
+            or header_payload != header_size - 4
+            or string_size <= 0
+            or string_size > header_payload - 4
+            or 8 + header_size > opened.st_size
+        ):
+            raise ArtifactError("native_metadata")
+        header = _json_without_duplicate_keys(_read_exact(descriptor, string_size))
+        if type(header) is not dict or type(header.get("files")) is not dict:
+            raise ArtifactError("native_metadata")
+        record = header["files"].get("package.json")
+        if type(record) is not dict or record.get("unpacked") is True:
+            raise ArtifactError("native_metadata")
+        member_size = record.get("size")
+        offset = record.get("offset")
+        if (
+            type(member_size) is not int
+            or isinstance(member_size, bool)
+            or member_size <= 0
+            or member_size > MAX_PACKAGE_METADATA_BYTES
+            or type(offset) is not str
+            or re.fullmatch(r"(?:0|[1-9][0-9]*)", offset) is None
+        ):
+            raise ArtifactError("native_metadata")
+        member_start = 8 + header_size + int(offset)
+        if member_start < 8 + header_size or member_start + member_size > opened.st_size:
+            raise ArtifactError("native_metadata")
+        os.lseek(descriptor, member_start, os.SEEK_SET)
+        encoded = _read_exact(descriptor, member_size)
+        integrity = record.get("integrity")
+        if integrity is not None and (
+            type(integrity) is not dict
+            or integrity.get("algorithm") != "SHA256"
+            or integrity.get("hash") != hashlib.sha256(encoded).hexdigest()
+        ):
+            raise ArtifactError("native_metadata")
+        after = os.fstat(descriptor)
+        final_link = path.lstat()
+        if (
+            not _same_open_file(linked, after)
+            or stat.S_ISLNK(final_link.st_mode)
+            or not stat.S_ISREG(final_link.st_mode)
+            or (linked.st_dev, linked.st_ino)
+            != (final_link.st_dev, final_link.st_ino)
+        ):
+            raise ArtifactError("native_metadata")
+    except ArtifactError:
+        raise
+    except (OSError, KeyError, TypeError, ValueError, struct.error) as error:
+        raise ArtifactError("native_metadata") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    metadata = _json_without_duplicate_keys(encoded)
+    if type(metadata) is not dict:
+        raise ArtifactError("native_metadata")
+    return metadata
+
+
+def _verify_asar_package_metadata(
+    resource_root: Path,
+    identity: dict[str, object],
+) -> None:
+    metadata = _asar_package_metadata(resource_root / "app.asar")
+    if (
+        metadata.get("name") != "usagehub-desktop"
+        or metadata.get("version") != identity["candidateVersion"]
+        or metadata.get("buildVersion") != identity["candidateBuild"]
+        or metadata.get("buildNumber") != identity["candidateBuild"]
+    ):
+        raise ArtifactError("version_mismatch")
+
+
+def _pe_version_strings(path: Path) -> dict[str, set[str]]:
+    keys = ("FileVersion", "ProductName", "ProductVersion")
+    descriptor: int | None = None
+    mapped: mmap.mmap | None = None
+    try:
+        linked = path.lstat()
+        if (
+            stat.S_ISLNK(linked.st_mode)
+            or not stat.S_ISREG(linked.st_mode)
+            or linked.st_size <= 0
+            or linked.st_size > MAX_DESKTOP_MEMBER_BYTES
+        ):
+            raise ArtifactError("native_metadata")
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (linked.st_dev, linked.st_ino) != (opened.st_dev, opened.st_ino)
+        ):
+            raise ArtifactError("native_metadata")
+        mapped = mmap.mmap(descriptor, 0, access=mmap.ACCESS_READ)
+        values = {key: set() for key in keys}
+        for key in keys:
+            marker = (key + "\0").encode("utf-16le")
+            position = 0
+            while True:
+                position = mapped.find(marker, position)
+                if position < 0:
+                    break
+                start = position - 6
+                if start >= 0:
+                    length, value_length, value_type = struct.unpack_from(
+                        "<HHH", mapped, start
+                    )
+                    value_start = (position + len(marker) + 3) & ~3
+                    value_end = value_start + value_length * 2
+                    if (
+                        value_type == 1
+                        and length >= value_end - start
+                        and start + length <= len(mapped)
+                    ):
+                        try:
+                            value = mapped[value_start:value_end].decode("utf-16le")
+                        except UnicodeError:
+                            value = ""
+                        value = value.rstrip("\0")
+                        if value:
+                            values[key].add(value)
+                position += len(marker)
+        after = os.fstat(descriptor)
+        final_link = path.lstat()
+        if (
+            not _same_open_file(linked, after)
+            or stat.S_ISLNK(final_link.st_mode)
+            or not stat.S_ISREG(final_link.st_mode)
+            or (linked.st_dev, linked.st_ino)
+            != (final_link.st_dev, final_link.st_ino)
+        ):
+            raise ArtifactError("native_metadata")
+        return values
+    except ArtifactError:
+        raise
+    except (OSError, ValueError, struct.error) as error:
+        raise ArtifactError("native_metadata") from error
+    finally:
+        if mapped is not None:
+            mapped.close()
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _windows_build_matches(value: str, build: object) -> bool:
+    if type(build) is not str or re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,3}", value) is None:
+        return False
+    parts = [int(part) for part in value.split(".")]
+    return parts[0] == int(build) and all(part == 0 for part in parts[1:])
+
+
+def _verify_windows_native_metadata(
+    package_root: Path,
+    identity: dict[str, object],
+) -> None:
+    executable = package_root / "UsageHub.exe"
+    if not _native_collector(executable, "win32"):
+        raise ArtifactError("native_metadata")
+    values = _pe_version_strings(executable)
+    expected_product_version = (
+        f"{identity['candidateVersion']}.{identity['candidateBuild']}"
+    )
+    if (
+        values["ProductName"] != {identity["displayName"]}
+        or values["ProductVersion"] != {expected_product_version}
+        or not values["FileVersion"]
+        or any(
+            not _windows_build_matches(value, identity["candidateBuild"])
+            for value in values["FileVersion"]
+        )
+    ):
+        raise ArtifactError("version_mismatch")
+
+
+def _electron_resource_root(package_root: Path, platform: str) -> Path:
+    if platform == "darwin":
+        candidate = package_root / "Contents/Resources"
+    else:
+        candidate = package_root / "resources"
+    try:
+        metadata = candidate.lstat()
+    except OSError:
+        metadata = None
+    if metadata is not None:
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise ArtifactError("native_metadata")
+        return candidate
+    if platform != "linux":
+        raise ArtifactError("native_metadata")
+
+    library_root = package_root / "usr/lib"
+    candidates: list[Path] = []
+    try:
+        library_metadata = library_root.lstat()
+        if stat.S_ISLNK(library_metadata.st_mode) or not stat.S_ISDIR(
+            library_metadata.st_mode
+        ):
+            raise ArtifactError("native_metadata")
+        with os.scandir(library_root) as applications:
+            for application in applications:
+                app_metadata = application.stat(follow_symlinks=False)
+                if application.is_symlink() or not stat.S_ISDIR(app_metadata.st_mode):
+                    continue
+                resources = Path(application.path) / "resources"
+                try:
+                    resources_metadata = resources.lstat()
+                except OSError:
+                    continue
+                if (
+                    not stat.S_ISLNK(resources_metadata.st_mode)
+                    and stat.S_ISDIR(resources_metadata.st_mode)
+                    and (resources / "app.asar").is_file()
+                ):
+                    candidates.append(resources)
+    except ArtifactError:
+        raise
+    except OSError as error:
+        raise ArtifactError("native_metadata") from error
+    if len(candidates) != 1:
+        raise ArtifactError("native_metadata")
+    return candidates[0]
+
+
+def _verify_mac_native_metadata(
+    package_root: Path,
+    identity: dict[str, object],
+) -> None:
+    metadata = _plist(package_root / "Contents/Info.plist")
+    if (
+        metadata.get("CFBundleDisplayName") != identity["displayName"]
+        or metadata.get("CFBundleName") != identity["displayName"]
+        or metadata.get("CFBundleShortVersionString")
+        != identity["candidateVersion"]
+        or metadata.get("CFBundleVersion") != identity["candidateBuild"]
+    ):
+        raise ArtifactError("version_mismatch")
+
+
+def _desktop_entry(path: Path) -> dict[str, str]:
+    try:
+        metadata = path.lstat()
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size <= 0
+            or metadata.st_size > MAX_DESKTOP_ENTRY_BYTES
+        ):
+            raise ArtifactError("native_metadata")
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except ArtifactError:
+        raise
+    except (OSError, UnicodeError) as error:
+        raise ArtifactError("native_metadata") from error
+    section: str | None = None
+    values: dict[str, str] = {}
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+            continue
+        if section != "Desktop Entry" or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key in values:
+            raise ArtifactError("native_metadata")
+        values[key] = value
+    return values
+
+
+def _verify_linux_final_metadata(
+    desktop_entries: list[Path],
+    identity: dict[str, object],
+) -> None:
+    if len(desktop_entries) != 1:
+        raise ArtifactError("native_metadata")
+    values = _desktop_entry(desktop_entries[0])
+    if (
+        values.get("Name") != identity["displayName"]
+        or values.get("X-AppImage-Version") != identity["candidateBuild"]
+    ):
+        raise ArtifactError("version_mismatch")
+
+
+def inspect_desktop_package(
+    root: Path,
+    platform: str,
+    *,
+    built_collector: Path | None = None,
+    canonical_identity: Path | None = None,
+    product_truth: Path | None = None,
+    require_final_native_metadata: bool = False,
+) -> dict[str, object]:
+    """Audit one unpacked Electron package without following external links."""
+
+    if platform not in {"darwin", "win32", "linux"}:
+        raise ArtifactError("collector")
+    try:
+        if root.is_symlink() or not root.is_dir():
+            raise ArtifactError("collector")
+        package_root = root.resolve(strict=True)
+    except OSError as error:
+        raise ArtifactError("collector") from error
+
+    resource_root = _electron_resource_root(package_root, platform)
+    build_identity = _packaged_build_identity(
+        resource_root,
+        canonical_identity=canonical_identity,
+        product_truth=product_truth,
+    )
+    identity = build_identity["identity"]
+    if platform == "darwin":
+        _verify_mac_native_metadata(package_root, identity)
+    elif platform == "win32":
+        _verify_windows_native_metadata(package_root, identity)
+    else:
+        _verify_asar_package_metadata(resource_root, identity)
+    collector_name = (
+        "openusage-collector.exe" if platform == "win32"
+        else "openusage-collector"
+    )
+    collector_directory = resource_root / "collector"
+    try:
+        directory_stat = collector_directory.lstat()
+        if not stat.S_ISDIR(directory_stat.st_mode):
+            raise ArtifactError("collector")
+        with os.scandir(collector_directory) as entries:
+            first = next(entries, None)
+            second = next(entries, None)
+        if first is None or second is not None or first.name != collector_name:
+            raise ArtifactError("collector")
+        collector_stat = first.stat(follow_symlinks=False)
+    except OSError as error:
+        raise ArtifactError("collector") from error
+    if (
+        not stat.S_ISREG(collector_stat.st_mode)
+        or collector_stat.st_size > MAX_DESKTOP_MEMBER_BYTES
+        or (
+            platform != "win32"
+            and collector_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            == 0
+        )
+    ):
+        raise ArtifactError("collector")
+
+    packaged_collector = Path(first.path)
+    if not _native_collector(packaged_collector, platform):
+        raise ArtifactError("binary")
+    if built_collector is not None:
+        _verify_built_collector(
+            packaged_collector,
+            built_collector,
+            platform,
+        )
+
+    desktop_entries: list[Path] = []
+    for member, _size in _desktop_files(package_root):
+        if platform == "linux" and member.suffix == ".desktop":
+            desktop_entries.append(member)
+        if _private_desktop_name(member.name):
+            raise ArtifactError("private_material")
+        reason = _scan_desktop_content(member)
+        if reason is not None:
+            raise ArtifactError(reason)
+    if platform == "linux" and require_final_native_metadata:
+        _verify_linux_final_metadata(desktop_entries, identity)
+    return build_identity
+
+
+def _desktop_files(root: Path):
+    pending: list[tuple[Path, int]] = [(root, 0)]
+    member_count = 0
+    total_bytes = 0
+    while pending:
+        directory, depth = pending.pop()
+        if depth > MAX_DESKTOP_DEPTH:
+            raise ArtifactError("unsafe_path")
+        try:
+            entries = os.scandir(directory)
+            with entries:
+                for entry in entries:
+                    member_count += 1
+                    if member_count > MAX_DESKTOP_MEMBERS:
+                        raise ArtifactError("oversized")
+                    member = Path(entry.path)
+                    if _private_desktop_name(entry.name):
+                        raise ArtifactError("private_material")
+                    try:
+                        member_stat = entry.stat(follow_symlinks=False)
+                    except OSError as error:
+                        raise ArtifactError("binary") from error
+                    if stat.S_ISLNK(member_stat.st_mode):
+                        try:
+                            target = member.resolve(strict=True)
+                        except OSError as error:
+                            raise ArtifactError("symlink") from error
+                        if not _contained_path(root, target):
+                            raise ArtifactError("symlink")
+                        continue
+                    if stat.S_ISDIR(member_stat.st_mode):
+                        pending.append((member, depth + 1))
+                        continue
+                    if not stat.S_ISREG(member_stat.st_mode):
+                        raise ArtifactError("unexpected_member")
+                    size = member_stat.st_size
+                    total_bytes += size
+                    if (
+                        size > MAX_DESKTOP_MEMBER_BYTES
+                        or total_bytes > MAX_DESKTOP_TOTAL_BYTES
+                    ):
+                        raise ArtifactError("oversized")
+                    yield member, size
+        except ArtifactError:
+            raise
+        except OSError as error:
+            raise ArtifactError("binary") from error
+
+
+def _contained_path(root: Path, candidate: Path) -> bool:
+    try:
+        return os.path.commonpath((str(root), str(candidate))) == str(root)
+    except (OSError, ValueError):
+        return False
+
+
+def _private_desktop_name(name: str) -> bool:
+    lowered = name.casefold()
+    return (
+        lowered in SENSITIVE_NAMES
+        or lowered.startswith(".env.")
+        or lowered.endswith(".token")
+        or lowered.endswith(".log")
+        or DESKTOP_DATABASE_PATTERN.fullmatch(lowered) is not None
+    )
+
+
+def _scan_desktop_content(path: Path) -> str | None:
+    overlap = b""
+    try:
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(DESKTOP_SCAN_CHUNK_BYTES)
+                if not chunk:
+                    return None
+                window = overlap + chunk
+                if (
+                    DESKTOP_POSIX_HOME_PATH_PATTERN.search(window)
+                    or WINDOWS_HOME_PATH_PATTERN.search(window)
+                ):
+                    return "home_path"
+                if any(canary in window for canary in RAW_CONTENT_CANARIES):
+                    return "private_material"
+                overlap = window[-DESKTOP_SCAN_OVERLAP_BYTES:]
+    except OSError as error:
+        raise ArtifactError("binary") from error
+
+
+def _desktop_platform(root: Path, collector_name: str) -> str:
+    if collector_name == "openusage-collector.exe":
+        return "win32"
+    if collector_name != "openusage-collector":
+        raise ArtifactError("collector")
+    return "darwin" if (root / "Contents/Resources").is_dir() else "linux"
+
+
 def audit(path: Path) -> None:
     path = path.resolve()
     match = ARCHIVE_PATTERN.fullmatch(path.name)
@@ -223,11 +937,29 @@ def audit(path: Path) -> None:
 
 
 def main(arguments: list[str]) -> int:
-    if len(arguments) != 1:
+    desktop_arguments = (
+        len(arguments) in {5, 6}
+        and arguments[0] == "--desktop-package"
+        and arguments[3] == "--built-collector"
+        and (
+            len(arguments) == 5
+            or arguments[5] == "--require-final-native-metadata"
+        )
+    )
+    if len(arguments) != 1 and not desktop_arguments:
         print("release_artifact_invalid", file=sys.stderr)
         return 2
     try:
-        audit(Path(arguments[0]))
+        if desktop_arguments:
+            root = Path(arguments[1])
+            inspect_desktop_package(
+                root,
+                _desktop_platform(root, arguments[2]),
+                built_collector=Path(arguments[4]),
+                require_final_native_metadata=len(arguments) == 6,
+            )
+        else:
+            audit(Path(arguments[0]))
     except ArtifactError as error:
         reason = error.reason
         if reason not in SAFE_REASONS:

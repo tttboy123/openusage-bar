@@ -18,7 +18,7 @@ from importlib import resources
 from urllib.parse import parse_qs, urlparse
 from typing import Any, Callable
 
-from .query import QueryService, to_wire
+from .query import QueryService, to_wire, SCHEMA_VERSION
 from .quick_connect import QUICK_CONNECT
 
 
@@ -387,8 +387,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self._today = today or date.today()
         super().__init__(*args, **kwargs)
 
-    def _write(self, body: bytes, content_type: str) -> None:
-        self.send_response(200)
+    def _write(self, body: bytes, content_type: str, *, status: int = 200) -> None:
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -418,8 +418,28 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if path == "/v1/snapshot":
             self._handle_json(lambda: to_wire(self._query.resource_snapshot(self._today)))
             return
+        if path == "/v1/summary":
+            self._handle_json(
+                lambda: to_wire(
+                    self._query.summary(
+                        self._day(params, "today", default=self._today)
+                    )
+                )
+            )
+            return
         if path == "/v1/capacity":
             self._handle_json(lambda: to_wire(self._query.capacity()))
+            return
+        if path == "/v1/balances":
+            self._handle_json(
+                lambda: to_wire(
+                    self._query.balances(
+                        self._integer(params, "limit", default=1000)
+                        if "limit" in params
+                        else None
+                    )
+                )
+            )
             return
         if path == "/v1/activity/daily":
             self._handle_json(
@@ -432,41 +452,138 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             )
             return
         if path == "/v1/sources/status":
-            self._handle_json(lambda: self._snapshot_part("sources"))
+            self._handle_json(lambda: to_wire(self._query.source_status()))
             return
         if path == "/v1/providers":
-            self._handle_json(lambda: self._snapshot_part("providers"))
+            self._handle_json(lambda: to_wire(self._query.provider_instances()))
             return
+        if path == "/v1/capabilities":
+            from .local_api import LocalAPIRouter
+
+            self._handle_json(lambda: LocalAPIRouter(self._query)._payload(path, {}))
+            return
+        if path == "/v1/quotas/history":
+            provider_id = params.get("providerId", [None])[0]
+            account_ref = params.get("accountRef", [None])[0]
+            from_time = params.get("from", [None])[0]
+            to_time = params.get("to", [None])[0]
+            self._handle_json(
+                lambda: to_wire(
+                    self._query.quota_history(
+                        provider_id=provider_id or None,
+                        account_ref=account_ref or None,
+                        from_time=from_time,
+                        to_time=to_time,
+                        limit=self._integer(params, "limit", default=1000),
+                    )
+                )
+            )
+            return
+        if path == "/v1/changes":
+            self._handle_json(lambda: to_wire(self._query.changes(
+                self._integer(params, "after", default=0),
+                self._integer(params, "limit", default=100),
+            )))
+            return
+        if path in {"/v1/health", "/v1/schema", "/v1/schema.json"}:
+            status = to_wire(self._query.source_status())
+            if path == "/v1/health":
+                status.update({"health": {"ok": True, "status": "ok"}})
+                self._json(status)
+                return
+            if path == "/v1/schema":
+                from .local_api import LocalAPIRouter
+
+                self._json({
+                    "schemaVersion": status["schemaVersion"],
+                    "dataRevision": status["dataRevision"],
+                    "generatedAt": status["generatedAt"],
+                    "routes": list(LocalAPIRouter.ROUTES),
+                    "errorShape": {"error": {"code": "string", "message": "string"}},
+                })
+                return
+            if path == "/v1/schema.json":
+                from .local_api import LOCAL_API_SCHEMA
+                self._json({
+                    "schemaVersion": status["schemaVersion"],
+                    "dataRevision": status["dataRevision"],
+                    "generatedAt": status["generatedAt"],
+                    "schema": LOCAL_API_SCHEMA,
+                })
+                return
         if path == "/v1/quick-connect":
             self._handle_json(
-                lambda: [
-                    {
-                        "familyId": family_id,
-                        "consoleUrl": item.console_url,
-                        "authModes": list(item.auth_modes),
-                        "apiKeyUrl": item.api_key_url,
-                    }
-                    for family_id, item in sorted(QUICK_CONNECT.items())
-                ]
+                lambda: {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "providers": [
+                        {
+                            "familyId": family_id,
+                            "consoleUrl": item.console_url,
+                            "authModes": list(item.auth_modes),
+                            "apiKeyUrl": item.api_key_url,
+                        }
+                        for family_id, item in sorted(QUICK_CONNECT.items())
+                    ],
+                }
             )
             return
         self.send_error(404)
 
-    def _json(self, payload: Any) -> None:
+    def _json(self, payload: Any, *, status: int = 200) -> None:
         import json
 
         body = json.dumps(
             payload, ensure_ascii=True, separators=(",", ":")
         ).encode("utf-8")
-        self._write(body, "application/json")
+        self._write(body, "application/json", status=status)
 
     def _handle_json(self, resolver: Callable[[], Any]) -> None:
         try:
             payload = resolver()
+        except ValueError:
+            self._json(
+                {
+                    "error": {
+                        "code": "invalid_parameter",
+                        "message": "Invalid request parameter.",
+                    }
+                },
+                status=400,
+            )
+            return
         except Exception:
             self.send_error(500, "unavailable")
             return
         self._json(payload)
+
+    @staticmethod
+    def _integer(
+        params: dict[str, list[str]],
+        name: str,
+        *,
+        default: int,
+    ) -> int:
+        values = params.get(name)
+        if not values:
+            return default
+        value = values[0]
+        if not value.isascii() or not value.isdecimal():
+            raise ValueError("invalid integer parameter")
+        return int(value)
+
+    @staticmethod
+    def _day(
+        params: dict[str, list[str]],
+        name: str,
+        *,
+        default: date,
+    ) -> date:
+        values = params.get(name)
+        if not values:
+            return default
+        if len(values) != 1:
+            raise ValueError("invalid day parameter")
+        return date.fromisoformat(values[0])
 
     def _day_range(self, params: dict[str, list[str]]) -> tuple[date, date]:
         try:

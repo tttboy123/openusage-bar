@@ -1,11 +1,13 @@
 {
   "name": "usagehub-desktop",
-  "version": "0.1.0",
+  "version": "0.8.6",
   "description": "UsageHub cross-platform desktop client (Electron) wrapping the local web dashboard",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test tests/*.test.mjs",
     "build:web": "cd ../web && npm run build",
+    "build": "npm run build:web && electron-builder --dir",
     "dist": "npm run build:web && electron-builder",
     "dist:mac": "npm run build:web && electron-builder --mac",
     "dist:win": "npm run build:web && electron-builder --win",
@@ -14,29 +16,84 @@
   "build": {
     "appId": "com.lune.openusagebar",
     "productName": "UsageHub",
+    "buildVersion": "28",
+    "buildNumber": "28",
+    "extraMetadata": {
+      "buildVersion": "28",
+      "buildNumber": "28"
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "files": [
+      "build_identity_copy.js",
+      "collector_runtime.js",
+      "gateway_proxy.js",
       "main.js",
       "package.json",
-      "../web/dist/**"
+      "product_version_truth.js",
+      "runtime_capability.js",
+      "tray_state.js"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/dist",
+        "to": "web/dist",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../openusage_bar/resources/artifact-build-identity.v1.json",
+        "to": "product-build-identity.v1.json"
+      }
     ],
     "directories": {
       "output": "../dist-desktop"
     },
     "mac": {
-      "target": ["dmg"],
-      "category": "public.app-category.utilities"
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.utilities",
+      "extraResources": [
+        {
+          "from": "../dist-collector/openusage-collector",
+          "to": "collector/openusage-collector"
+        }
+      ]
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ],
+      "extraResources": [
+        {
+          "from": "../dist-collector/openusage-collector.exe",
+          "to": "collector/openusage-collector.exe"
+        }
+      ]
     },
     "linux": {
-      "target": ["AppImage"],
-      "category": "Utility"
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility",
+      "desktop": {
+        "entry": {
+          "X-AppImage-Version": "28"
+        }
+      },
+      "extraResources": [
+        {
+          "from": "../dist-collector/openusage-collector",
+          "to": "collector/openusage-collector"
+        }
+      ]
     }
   },
   "license": "Apache-2.0",
   "devDependencies": {
     "electron": "^43.2.0",
     "electron-builder": "^26.0.12"
-  }
+  },
+  "author": "Lune"
 }

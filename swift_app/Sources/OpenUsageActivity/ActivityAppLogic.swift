@@ -203,6 +203,21 @@ struct ProviderCenterItem: Identifiable, Sendable, Hashable {
     let instanceCount: Int
     let observed: Bool
     let issues: [ProviderSourceIssuePresentation]
+    let lastSuccessAt: String?
+
+    init(
+        descriptor: ProviderDisplayDescriptor,
+        instanceCount: Int,
+        observed: Bool,
+        issues: [ProviderSourceIssuePresentation],
+        lastSuccessAt: String? = nil
+    ) {
+        self.descriptor = descriptor
+        self.instanceCount = instanceCount
+        self.observed = observed
+        self.issues = issues
+        self.lastSuccessAt = lastSuccessAt
+    }
 
     var id: String { descriptor.familyID }
     var category: ProviderBrowseCategory { .classify(descriptor) }
@@ -215,6 +230,11 @@ struct ProviderCenterItem: Identifiable, Sendable, Hashable {
     var status: ProviderConnectionStatus {
         if !connectionIssues.isEmpty { return .attention }
         return observed || instanceCount > 0 ? .connected : .available
+    }
+    var isLive: Bool {
+        guard status == .connected, let last = lastSuccessAt,
+              let date = ActivityTimestamp.date(from: last) else { return false }
+        return Date().timeIntervalSince(date) < 5 * 60
     }
     var helpText: String {
         if let issue = connectionIssues.first ?? secondaryIssues.first { return issue.message }

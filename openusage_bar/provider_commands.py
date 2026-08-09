@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Callable, TextIO
+from typing import Callable, Protocol, TextIO
 
 from .config import (
     ID_PATTERN,
@@ -13,7 +13,7 @@ from .config import (
     ProviderConfigStore,
     StepPlanConfig,
 )
-from .keychain import MacOSKeychain
+from .keychain import default_keychain
 from .network import resolve_public_addresses
 
 
@@ -32,6 +32,12 @@ MUTATION_V2_KINDS = frozenset({
     "minimax", "moonshot", "step_plan", "openai_organization", "generic",
     "daily_usage_feed",
 })
+
+
+class ProviderCredentialStore(Protocol):
+    def get(self, account: str) -> str | None: ...
+    def set(self, account: str, secret: str) -> None: ...
+    def delete(self, account: str) -> None: ...
 
 
 def _write_response(output: TextIO, ok: bool, message: str) -> int:
@@ -174,7 +180,7 @@ def run_provider_mutation(
     output_stream: TextIO,
     *,
     store: ProviderConfigStore | None = None,
-    keychain: MacOSKeychain | None = None,
+    keychain: ProviderCredentialStore | None = None,
     resolver: Callable[[str], list[str]] = resolve_public_addresses,
 ) -> int:
     """Apply one allowlisted provider mutation from a private stdin pipe.
@@ -191,7 +197,7 @@ def run_provider_mutation(
             raise ValueError("Provider edit request is invalid")
 
         resolved_store = store or ProviderConfigStore()
-        resolved_keychain = keychain or MacOSKeychain()
+        resolved_keychain = keychain if keychain is not None else default_keychain()
         if payload.get("version") == 2:
             _exact_object(payload, MUTATION_V2_FIELDS, "Provider mutation request")
             if payload.get("action") not in MUTATION_V2_ACTIONS:

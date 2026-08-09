@@ -32,6 +32,8 @@ jobs:
       - name: Install Windows timezone data
         if: runner.os == 'Windows'
         run: pip install tzdata
+      - name: Verify product and version truth
+        run: python scripts/verify_product_version_truth.py
       - name: Run the core Python test suite
         run: python -m unittest discover -s tests -p "test_*.py"
 
@@ -55,6 +57,8 @@ jobs:
         run: scripts/bootstrap.sh
       - name: Verify release metadata consistency
         run: .build-venv/bin/python scripts/verify_release_metadata.py
+      - name: Verify product and version truth
+        run: .build-venv/bin/python scripts/verify_product_version_truth.py
       - name: Audit locked Python dependencies
         run: scripts/audit_dependencies.sh
       - name: Scan the complete Git history for credentials

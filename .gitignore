@@ -11,12 +11,15 @@ __pycache__/
 *.egg-info/
 *.py[cod]
 build/
+build-collector/
 build.failed-*/
 build.pre-*/
 dist/
+dist-collector/
 dist.failed-*/
 dist.pre-*/
 deployed-backups/
+dist-desktop/
 installed-python.pre-*/
 swift_app/.build/
 *.xcresult
@@ -24,3 +27,9 @@ swift_app/.build/
 # Internal working documents kept locally, not published
 docs/CONTEXT-HANDOFF-*.md
 docs/superpowers/
+
+outputs/
+output/
+.playwright-cli/
+
+web/.test-dist/

@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "name": "http_429",
+      "signal": "rate_limit",
+      "sanitized_error_code": "upstream_rate_limited"
+    },
+    {
+      "name": "http_5xx",
+      "signal": "server_error",
+      "sanitized_error_code": "upstream_server_error"
+    },
+    {
+      "name": "provider_timeout",
+      "signal": "timeout",
+      "sanitized_error_code": "upstream_timeout"
+    },
+    {
+      "name": "quota_exhausted",
+      "signal": "quota_exhausted",
+      "sanitized_error_code": "policy_rejected"
+    }
+  ],
+  "terminal_cases": [
+    {
+      "name": "client_abort",
+      "signal": "client_abort",
+      "sanitized_error_code": "stream_interrupted"
+    },
+    {
+      "name": "stream_interrupted",
+      "signal": "stream_interrupted",
+      "sanitized_error_code": "stream_interrupted"
+    }
+  ]
+}

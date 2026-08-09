@@ -1,0 +1,29 @@
+{
+  "provider": "ollama",
+  "endpoint": "http://127.0.0.1:11434/api/chat",
+  "request": {
+    "model": "llama3.2",
+    "messages": [
+      {
+        "role": "user",
+        "content": "hello"
+      }
+    ]
+  },
+  "response": {
+    "model": "llama3.2",
+    "message": {
+      "role": "assistant",
+      "content": "ok"
+    },
+    "done": true
+  },
+  "stream": {
+    "wire": "ndjson",
+    "content_type": "application/x-ndjson",
+    "chunks": [
+      "{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"done\":false}\n",
+      "{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true}\n"
+    ]
+  }
+}

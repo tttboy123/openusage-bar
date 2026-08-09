@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MagnifyingGlass, Eye, EyeSlash, X } from "@phosphor-icons/react";
+import { MagnifyingGlass, X } from "@phosphor-icons/react";
 import type { QuickConnectItem } from "../api";
-import { useToast } from "./Toast";
 import { type Messages } from "../i18n";
 
 interface Props {
@@ -19,29 +18,56 @@ const BRAND_COLORS: Record<string, string> = {
   codex: "#10A37F",
 };
 
+const PRESET_META: Record<string, { name: string; models: string }> = {
+  anthropic: { name: "Claude", models: "Claude Sonnet · Opus" },
+  codex: { name: "Codex", models: "GPT-5 · Codex" },
+  deepseek: { name: "DeepSeek", models: "DeepSeek V3 · R1" },
+  gemini_api: { name: "Gemini API", models: "Gemini 2.5 Pro" },
+  google: { name: "Gemini (Google)", models: "Gemini 2.5 Pro" },
+  minimax: { name: "MiniMax", models: "MiniMax M2 · Text-01" },
+  moonshot: { name: "Kimi", models: "Kimi k2" },
+  openai: { name: "OpenAI", models: "GPT-5 · o-series" },
+  step_plan: { name: "StepFun", models: "Step 2 · Mini" },
+  cc_switch: { name: "CC Switch", models: "Auto-detect" },
+  omniroute: { name: "OmniRoute", models: "Auto-detect" },
+};
+
+function presetName(preset: QuickConnectItem): string {
+  return PRESET_META[preset.familyId]?.name ?? preset.familyId;
+}
+
 export default function AddProviderDialog({ open, presets, onClose, t }: Props) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<QuickConnectItem | null>(null);
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
   const [closing, setClosing] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const selectedRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<number | null>(null);
-  const toast = useToast();
 
   useEffect(() => {
     if (open) {
       setClosing(false);
       setQuery("");
       setSelected(null);
-      setApiKey("");
+      setTesting(false);
       setLatency(null);
-      window.setTimeout(() => searchRef.current?.focus(), 50);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => {
+      if (selected) {
+        selectedRef.current?.focus();
+      } else {
+        searchRef.current?.focus();
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open, selected]);
 
   const requestClose = useCallback(() => {
     if (closing) return;
@@ -101,9 +127,15 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return presets;
-    return presets.filter((preset) =>
-      preset.familyId.toLowerCase().includes(normalized),
-    );
+    return presets.filter((preset) => {
+      const name = presetName(preset).toLowerCase();
+      const models = PRESET_META[preset.familyId]?.models.toLowerCase() ?? "";
+      return (
+        preset.familyId.toLowerCase().includes(normalized) ||
+        name.includes(normalized) ||
+        models.includes(normalized)
+      );
+    });
   }, [query, presets]);
 
   if (!open) return null;
@@ -111,24 +143,25 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
   async function testEndpoint() {
     if (!selected) return;
     setTesting(true);
+    setLatency(null);
     const started = performance.now();
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
     try {
-      await fetch(selected.consoleUrl, { method: "HEAD", mode: "no-cors" });
+      await fetch(selected.consoleUrl, {
+        method: "HEAD",
+        mode: "no-cors",
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+        signal: controller.signal,
+      });
+      setLatency(Math.round(performance.now() - started));
     } catch {
-      // no-cors HEAD can reject on opaque responses; treat as reachable
+      setLatency(-1);
+    } finally {
+      window.clearTimeout(timeout);
+      setTesting(false);
     }
-    setLatency(Math.round(performance.now() - started));
-    setTesting(false);
-  }
-
-  function save() {
-    if (!selected) return;
-    if (!apiKey.trim()) {
-      toast.show("error", t.apiKeyRequired);
-      return;
-    }
-    toast.show("success", `${selected.familyId} ${t.savedTo}`);
-    requestClose();
   }
 
   return (
@@ -149,6 +182,7 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
           <div>
             <h3>{t.addProvider}</h3>
             <p>{t.choosePreset}</p>
+            <p className="preset-hint web-preview-note">{t.webPreviewNote}</p>
           </div>
           <button
             type="button"
@@ -173,24 +207,34 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
               />
             </div>
             <div className="preset-grid">
-              {filtered.map((preset) => (
-                <button
-                  type="button"
-                  key={preset.familyId}
-                  className="preset-card"
-                  onClick={() => setSelected(preset)}
-                >
-                  <span
-                    className="preset-icon"
-                    style={{
-                      background: BRAND_COLORS[preset.familyId] ?? "var(--surface-alt)",
+              {filtered.map((preset) => {
+                const meta = PRESET_META[preset.familyId];
+                return (
+                  <button
+                    type="button"
+                    key={preset.familyId}
+                    className="preset-card"
+                    onClick={() => {
+                      setLatency(null);
+                      setSelected(preset);
                     }}
                   >
-                    {preset.familyId.slice(0, 2).toUpperCase()}
-                  </span>
-                  <span>{preset.familyId}</span>
-                </button>
-              ))}
+                    <span
+                      className="preset-icon"
+                      style={{
+                        background:
+                          BRAND_COLORS[preset.familyId] ?? "var(--surface-alt)",
+                      }}
+                    >
+                      {presetName(preset).slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="preset-card-name">{presetName(preset)}</span>
+                    {meta?.models ? (
+                      <span className="preset-card-meta">{meta.models}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
               {filtered.length === 0 ? (
                 <p className="empty" style={{ gridColumn: "1 / -1" }}>
                   {t.noMatchingPresets}
@@ -200,49 +244,39 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
           </>
         ) : (
           <div className="dialog-form">
-            <p className="selected-preset">
-              {selected.familyId}
-              {selected.apiKeyUrl ? (
-                <a
-                  className="btn-link"
-                  href={selected.apiKeyUrl}
-                  target="_blank"
-                  rel="noopener"
-                >
-                  {t.getApiKey}
-                </a>
-              ) : null}
-              {selected.consoleUrl ? (
-                <a
-                  className="btn-link"
-                  href={selected.consoleUrl}
-                  target="_blank"
-                  rel="noopener"
-                >
-                  {t.openConsole}
-                </a>
-              ) : null}
-            </p>
-            <label className="field-label" htmlFor="api-key">
-              {t.apiKey}
-            </label>
-            <div className="key-input">
-              <input
-                id="api-key"
-                type={showKey ? "text" : "password"}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setShowKey((v) => !v)}
-                aria-label={showKey ? t.hideApiKey : t.showApiKey}
-              >
-                {showKey ? <EyeSlash size={16} /> : <Eye size={16} />}
-              </button>
+            <div
+              ref={selectedRef}
+              className="selected-preset"
+              tabIndex={-1}
+            >
+              <div className="selected-preset-title">
+                <span>{presetName(selected)}</span>
+                <span className="preset-card-meta">
+                  {PRESET_META[selected.familyId]?.models ?? ""}
+                </span>
+              </div>
+              <div className="selected-preset-links">
+                {selected.apiKeyUrl ? (
+                  <a
+                    className="btn-link"
+                    href={selected.apiKeyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t.getApiKey}
+                  </a>
+                ) : null}
+                {selected.consoleUrl ? (
+                  <a
+                    className="btn-link"
+                    href={selected.consoleUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t.openConsole}
+                  </a>
+                ) : null}
+              </div>
             </div>
             <div className="dialog-actions">
               <button
@@ -251,11 +285,18 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
                 onClick={testEndpoint}
                 disabled={testing}
               >
-                {testing ? t.testing : t.testEndpoint}
+                {testing ? (
+                  <>
+                    <span className="spinner" aria-hidden="true" />
+                    {t.testing}
+                  </>
+                ) : (
+                  t.testEndpoint
+                )}
               </button>
               {latency !== null ? (
-                <span className="mono dim">
-                  {latency >= 0 ? `${latency}ms` : "unreachable"}
+                <span className="mono dim" role="status" aria-live="polite">
+                  {latency >= 0 ? `${latency}ms` : t.unavailable}
                 </span>
               ) : null}
               <span style={{ flex: 1 }} />
@@ -266,8 +307,8 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
               >
                 {t.back}
               </button>
-              <button type="button" className="primary-btn" onClick={save}>
-                {t.save}
+              <button type="button" className="primary-btn" onClick={requestClose}>
+                {t.close}
               </button>
             </div>
           </div>

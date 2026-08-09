@@ -13,9 +13,10 @@ import time
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import patch
 
+import openusage_bar.local_api as local_api_module
 from openusage_bar.activity_store import (
     ActivityStore,
     DailyCostRow,
@@ -40,7 +41,7 @@ from openusage_bar.capabilities import (
 )
 from openusage_bar.local_api import create_tcp_server, create_unix_server
 from openusage_bar.collector_cli import main as collector_main
-from openusage_bar.provider_catalog import catalog
+from openusage_bar.provider_catalog import ObserverPlatformResolver, catalog
 from openusage_bar.query import QueryService
 
 
@@ -167,7 +168,14 @@ class UnixLocalAPITests(unittest.TestCase):
         self.root = Path(self.temp.name) / "private"
         self.socket_path = self.root / "api.sock"
         self.store, self.query = seeded_query()
-        self.server = create_unix_server(self.socket_path, self.query, clock=lambda: NOW)
+        self.server = create_unix_server(
+            self.socket_path,
+            self.query,
+            clock=lambda: NOW,
+            observer_platform=ObserverPlatformResolver(
+                catalog, runtime_platform="darwin"
+            ),
+        )
         self.thread = start(self.server)
 
     def tearDown(self):
@@ -306,6 +314,13 @@ class UnixLocalAPITests(unittest.TestCase):
             "name": "openusage", "version": "0.23.0", "revision": "3059f1b",
             "familyCount": 35,
         })
+        self.assertEqual(payload["observerPlatform"], {
+            "operatingSystem": "macos",
+            "support": "supported",
+            "supportedSourceCount": 49,
+            "totalSourceCount": 49,
+            "reasonCode": "supported_sources_available",
+        })
         for family in payload["providers"]:
             self.assertEqual(set(family), {
                 "providerId", "familyId", "displayName", "category",
@@ -329,6 +344,11 @@ class UnixLocalAPITests(unittest.TestCase):
                     "credentialType", "requiresCredential", "operatingSystems",
                     "stability", "provenance", "factFamilies", "authority",
                     "accountScope", "modelScope", "verification",
+                    "platformSupport",
+                })
+                self.assertEqual(source["platformSupport"], {
+                    "state": "supported",
+                    "reasonCode": "supported_sources_available",
                 })
         lowered = json.dumps(payload, ensure_ascii=False).lower()
         for localized in ("正常", "错误", "未配置", "过期"):
@@ -381,6 +401,10 @@ class UnixLocalAPITests(unittest.TestCase):
                 "accountScope": "configured_account",
                 "modelScope": "aggregate",
                 "verification": "live_account",
+                "platformSupport": {
+                    "state": "supported",
+                    "reasonCode": "supported_sources_available",
+                },
             },
         )
         openusage = providers["codex"]["sources"][1]
@@ -1035,6 +1059,538 @@ class DeadlineTests(unittest.TestCase):
             store.close()
 
 
+class LocalAPITokenPublicationTests(unittest.TestCase):
+    def test_token_path_validation_uses_the_target_platform_path_flavor(self):
+        windows_token_path = (
+            r"C:\Users\example\AppData\Local\openusage-bar\api.token"
+        )
+        with (
+            patch.object(local_api_module.os, "name", "nt"),
+            patch.object(local_api_module, "Path", PureWindowsPath),
+        ):
+            self.assertEqual(
+                local_api_module._validated_token_path(windows_token_path),
+                PureWindowsPath(windows_token_path),
+            )
+            invalid_windows_paths = (
+                r"\\server\share\api.token",
+                r"\\?\C:\state\api.token",
+                r"\\.\C:\state\api.token",
+                "C:\\",
+                r"C:\state\..\api.token",
+                r"C:\state\api.token:stream",
+                r"C:\state:cache\api.token",
+                "C:\\state\\api\x00.token",
+                "C:\\state\\api\n.token",
+                r"state\api.token",
+                r"\state\api.token",
+                r"C:state\api.token",
+            )
+            for candidate in invalid_windows_paths:
+                with self.subTest(platform="win32", candidate=repr(candidate)):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "^token path must be absolute$",
+                    ):
+                        local_api_module._validated_token_path(candidate)
+
+        posix_token_path = "/home/example/.local/state/openusage-bar/api.token"
+        with (
+            patch.object(local_api_module.os, "name", "posix"),
+            patch.object(local_api_module, "Path", PurePosixPath),
+        ):
+            self.assertEqual(
+                local_api_module._validated_token_path(posix_token_path),
+                PurePosixPath(posix_token_path),
+            )
+
+    def test_relative_token_path_is_rejected_before_filesystem_mutation(self):
+        store, query = seeded_query()
+        mkdir_calls: list[Path] = []
+        hardening_calls: list[Path] = []
+
+        class GuardWindowsFileSecurity:
+            def harden_directory(self, directory: Path) -> None:
+                hardening_calls.append(directory)
+
+            def harden_file(self, _descriptor: int) -> None:
+                raise AssertionError("a token file must not be opened")
+
+        def forbidden_mkdir(candidate, *args, **kwargs):
+            del args, kwargs
+            mkdir_calls.append(Path(candidate))
+            raise AssertionError("mkdir ran before token path validation")
+
+        try:
+            with (
+                patch.object(
+                    local_api_module,
+                    "_WINDOWS_FILE_SECURITY",
+                    GuardWindowsFileSecurity(),
+                ),
+                patch.object(local_api_module.Path, "mkdir", forbidden_mkdir),
+                self.assertRaises(ValueError) as caught,
+            ):
+                create_tcp_server(
+                    query,
+                    port=0,
+                    bearer_token=TOKEN,
+                    token_path=Path("relative-state") / "api.token",
+                )
+
+            self.assertEqual(str(caught.exception), "token path must be absolute")
+            self.assertEqual(mkdir_calls, [])
+            self.assertEqual(hardening_calls, [])
+        finally:
+            store.close()
+
+    def test_parent_traversal_token_path_is_rejected_before_filesystem_mutation(self):
+        store, query = seeded_query()
+        mkdir_calls: list[Path] = []
+        hardening_calls: list[Path] = []
+
+        class GuardWindowsFileSecurity:
+            def harden_directory(self, directory: Path) -> None:
+                hardening_calls.append(directory)
+
+            def harden_file(self, _descriptor: int) -> None:
+                raise AssertionError("a token file must not be opened")
+
+        def forbidden_mkdir(candidate, *args, **kwargs):
+            del args, kwargs
+            mkdir_calls.append(Path(candidate))
+            raise AssertionError("mkdir ran before token path validation")
+
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                token_path = (
+                    Path(temporary) / "private" / ".." / "api.token"
+                )
+                with (
+                    patch.object(
+                        local_api_module,
+                        "_WINDOWS_FILE_SECURITY",
+                        GuardWindowsFileSecurity(),
+                    ),
+                    patch.object(local_api_module.Path, "mkdir", forbidden_mkdir),
+                    self.assertRaises(ValueError) as caught,
+                ):
+                    create_tcp_server(
+                        query,
+                        port=0,
+                        bearer_token=TOKEN,
+                        token_path=token_path,
+                    )
+
+                self.assertEqual(
+                    str(caught.exception),
+                    "token path must be absolute",
+                )
+                self.assertEqual(mkdir_calls, [])
+                self.assertEqual(hardening_calls, [])
+                self.assertFalse((Path(temporary) / "private").exists())
+        finally:
+            store.close()
+
+    def test_windows_security_seam_hardens_parent_and_open_file_before_write(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            token_path = Path(temporary) / "api.token"
+            calls: list[tuple[str, object]] = []
+            real_write = os.write
+
+            class FakeWindowsFileSecurity:
+                def harden_directory(self, directory: Path) -> None:
+                    calls.append(("directory", directory))
+
+                def harden_file(self, descriptor: int) -> None:
+                    calls.append(("file", descriptor))
+
+                def verify_file(self, _descriptor: int) -> None:
+                    raise AssertionError("a new token must be hardened, not verified")
+
+            def checked_write(descriptor: int, content: object) -> int:
+                self.assertEqual(
+                    calls,
+                    [
+                        ("directory", token_path.parent),
+                        ("file", descriptor),
+                    ],
+                )
+                return real_write(descriptor, content)
+
+            with (
+                patch.object(
+                    local_api_module,
+                    "_WINDOWS_FILE_SECURITY",
+                    FakeWindowsFileSecurity(),
+                ),
+                patch.object(local_api_module.os, "write", checked_write),
+            ):
+                loaded = local_api_module._load_or_create_token(token_path, TOKEN)
+
+            self.assertEqual(loaded, TOKEN)
+            self.assertEqual(calls[0], ("directory", token_path.parent))
+            self.assertEqual(calls[1][0], "file")
+            self.assertEqual(len(calls), 2)
+
+    def test_windows_existing_acl_failure_prevents_read_or_hardening(self):
+        secret_detail = "security-detail-must-not-escape"
+        with tempfile.TemporaryDirectory() as temporary:
+            token_path = Path(temporary) / "api.token"
+            token_path.write_text(TOKEN, encoding="ascii")
+            if os.name != "nt":
+                token_path.chmod(0o600)
+            calls: list[tuple[str, object]] = []
+
+            class FailingWindowsFileSecurity:
+                def harden_directory(self, directory: Path) -> None:
+                    calls.append(("directory", directory))
+
+                def harden_file(self, descriptor: int) -> None:
+                    calls.append(("harden_file", descriptor))
+                    raise OSError("an existing token ACL must never be rewritten")
+
+                def verify_file(self, descriptor: int) -> None:
+                    calls.append(("verify_file", descriptor))
+                    raise OSError(f"{secret_detail}: {token_path}")
+
+            def forbidden_read(_descriptor: int, _count: int) -> bytes:
+                raise AssertionError("token bytes were read before ACL hardening")
+
+            with (
+                patch.object(
+                    local_api_module,
+                    "_WINDOWS_FILE_SECURITY",
+                    FailingWindowsFileSecurity(),
+                ),
+                patch.object(local_api_module.os, "read", forbidden_read),
+                self.assertRaises(OSError) as caught,
+            ):
+                local_api_module._load_or_create_token(token_path, None)
+
+            self.assertEqual(str(caught.exception), "existing token file is unsafe")
+            self.assertNotIn(secret_detail, str(caught.exception))
+            self.assertNotIn(str(token_path), str(caught.exception))
+            self.assertEqual(calls[0], ("directory", token_path.parent))
+            self.assertEqual(calls[1][0], "verify_file")
+            self.assertEqual(len(calls), 2)
+
+    def test_token_path_is_published_only_after_complete_private_write(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            token_path = Path(temporary) / "api.token"
+            write_started = threading.Event()
+            allow_write = threading.Event()
+            created: list[bool] = []
+            errors: list[Exception] = []
+            real_write = os.write
+
+            def blocking_write(descriptor, content):
+                write_started.set()
+                if not allow_write.wait(2):
+                    raise TimeoutError("test write was not released")
+                return real_write(descriptor, content)
+
+            def create() -> None:
+                try:
+                    created.append(local_api_module._create_token(token_path, TOKEN))
+                except Exception as error:
+                    errors.append(error)
+
+            with patch.object(local_api_module.os, "write", blocking_write):
+                worker = threading.Thread(target=create)
+                worker.start()
+                self.assertTrue(write_started.wait(2))
+                try:
+                    self.assertFalse(token_path.exists())
+                finally:
+                    allow_write.set()
+                    worker.join(2)
+
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(created, [True])
+            self.assertEqual(token_path.read_text(encoding="ascii"), TOKEN)
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(token_path.stat().st_mode), 0o600)
+
+    def test_failed_partial_write_leaves_no_final_token_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            token_path = Path(temporary) / "api.token"
+            real_write = os.write
+            calls = 0
+
+            def partial_then_fail(descriptor, content):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    prefix = max(1, len(content) // 2)
+                    return real_write(descriptor, content[:prefix])
+                raise OSError("synthetic token write failure")
+
+            with patch.object(local_api_module.os, "write", partial_then_fail):
+                with self.assertRaisesRegex(OSError, "synthetic token write failure"):
+                    local_api_module._create_token(token_path, TOKEN)
+
+            self.assertFalse(token_path.exists())
+
+    def test_initial_metadata_failure_leaves_only_private_empty_orphan(self):
+        failure = "synthetic token metadata failure"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            token_path = root / "api.token"
+
+            with patch.object(
+                local_api_module.os,
+                "fstat",
+                side_effect=OSError(failure),
+            ):
+                with self.assertRaises(OSError) as caught:
+                    local_api_module._create_token(token_path, TOKEN)
+
+            self.assertFalse(token_path.exists())
+            residuals = list(root.iterdir())
+            self.assertLessEqual(
+                len(residuals),
+                1,
+                "more than one temporary token was left behind",
+            )
+            for residual in residuals:
+                metadata = residual.lstat()
+                self.assertTrue(
+                    stat.S_ISREG(metadata.st_mode),
+                    "residual temporary token is not regular",
+                )
+                self.assertEqual(
+                    metadata.st_size,
+                    0,
+                    "residual temporary token is not empty",
+                )
+                if os.name != "nt":
+                    self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o600)
+            self.assertEqual(str(caught.exception), failure)
+
+    def test_initial_metadata_failure_preserves_replacement_node(self):
+        failure = "synthetic token metadata failure"
+        replacement = b"replacement-node"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            token_path = root / "api.token"
+            candidates: list[Path] = []
+            replacement_identity: tuple[int, int] | None = None
+            fstat_calls = 0
+            real_open = os.open
+            real_fstat = os.fstat
+
+            def capture_candidate(target, flags, *args, **kwargs):
+                descriptor = real_open(target, flags, *args, **kwargs)
+                candidate = Path(target)
+                if (
+                    not candidates
+                    and candidate.parent == root
+                    and ".tmp-" in candidate.name
+                ):
+                    candidates.append(candidate)
+                return descriptor
+
+            def replace_then_fail(descriptor):
+                nonlocal fstat_calls, replacement_identity
+                fstat_calls += 1
+                if fstat_calls == 1:
+                    if len(candidates) != 1:
+                        raise AssertionError("temporary candidate was not captured")
+                    candidate = candidates[0]
+                    candidate.unlink()
+                    candidate.write_bytes(replacement)
+                    if os.name != "nt":
+                        candidate.chmod(0o600)
+                    metadata = candidate.stat()
+                    replacement_identity = (metadata.st_dev, metadata.st_ino)
+                    raise OSError(failure)
+                return real_fstat(descriptor)
+
+            with (
+                patch.object(local_api_module.os, "open", capture_candidate),
+                patch.object(local_api_module.os, "fstat", replace_then_fail),
+            ):
+                with self.assertRaises(OSError) as caught:
+                    local_api_module._create_token(token_path, TOKEN)
+
+            self.assertEqual(str(caught.exception), failure)
+            self.assertFalse(token_path.exists())
+            self.assertEqual(
+                len(candidates),
+                1,
+                "temporary candidate was not captured exactly once",
+            )
+            candidate = candidates[0]
+            self.assertTrue(candidate.exists(), "replacement node was deleted")
+            self.assertEqual(candidate.read_bytes(), replacement)
+            metadata = candidate.stat()
+            self.assertEqual(
+                (metadata.st_dev, metadata.st_ino),
+                replacement_identity,
+            )
+
+    def test_primary_write_failure_wins_over_secondary_close_failure(self):
+        primary = "primary write failure"
+        secondary = "secondary close failure"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            token_path = root / "api.token"
+            real_close = os.close
+            close_calls = 0
+
+            def fail_write(_descriptor, _content):
+                raise OSError(primary)
+
+            def close_then_fail(descriptor):
+                nonlocal close_calls
+                close_calls += 1
+                real_close(descriptor)
+                if close_calls == 1:
+                    raise OSError(secondary)
+
+            with (
+                patch.object(local_api_module.os, "write", fail_write),
+                patch.object(local_api_module.os, "close", close_then_fail),
+            ):
+                with self.assertRaises(OSError) as caught:
+                    local_api_module._create_token(token_path, TOKEN)
+
+            self.assertFalse(token_path.exists())
+            self.assertFalse(any(root.iterdir()), "owned token node was not cleaned")
+            self.assertEqual(str(caught.exception), primary)
+
+    @unittest.skipIf(os.name == "nt", "directory fsync is unavailable on Windows")
+    def test_parent_fsync_failure_wins_over_parent_close_failure(self):
+        primary = "primary parent fsync failure"
+        secondary = "secondary parent close failure"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            token_path = root / "api.token"
+            parent_descriptor: int | None = None
+            real_fstat = os.fstat
+            real_fsync = os.fsync
+            real_close = os.close
+
+            def fail_parent_fsync(descriptor):
+                nonlocal parent_descriptor
+                if stat.S_ISDIR(real_fstat(descriptor).st_mode):
+                    parent_descriptor = descriptor
+                    raise OSError(primary)
+                return real_fsync(descriptor)
+
+            def close_parent_then_fail(descriptor):
+                real_close(descriptor)
+                if descriptor == parent_descriptor:
+                    raise OSError(secondary)
+
+            with (
+                patch.object(local_api_module.os, "fsync", fail_parent_fsync),
+                patch.object(local_api_module.os, "close", close_parent_then_fail),
+            ):
+                with self.assertRaises(OSError) as caught:
+                    local_api_module._create_token(token_path, TOKEN)
+
+            self.assertIsNotNone(parent_descriptor, "parent fsync probe did not run")
+            self.assertFalse(token_path.exists())
+            self.assertFalse(any(root.iterdir()), "owned token nodes were not cleaned")
+            self.assertEqual(str(caught.exception), primary)
+
+    def test_close_failure_after_complete_write_cleans_every_token_path(self):
+        failure = "synthetic token close failure"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            token_path = root / "api.token"
+            real_close = os.close
+            calls = 0
+
+            def close_then_fail(descriptor):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    real_close(descriptor)
+                    raise OSError(failure)
+                return real_close(descriptor)
+
+            with patch.object(local_api_module.os, "close", close_then_fail):
+                with self.assertRaises(OSError) as caught:
+                    local_api_module._create_token(token_path, TOKEN)
+
+            self.assertFalse(
+                any(root.iterdir()),
+                "temporary token was not cleaned",
+            )
+            self.assertEqual(str(caught.exception), failure)
+
+    def test_existing_token_is_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            token_path = Path(temporary) / "api.token"
+            existing = "e" * 48
+            token_path.write_text(existing, encoding="ascii")
+            if os.name != "nt":
+                token_path.chmod(0o600)
+
+            self.assertFalse(local_api_module._create_token(token_path, TOKEN))
+            self.assertEqual(token_path.read_text(encoding="ascii"), existing)
+
+    @unittest.skipUnless(hasattr(os, "link"), "hard links are unavailable")
+    def test_read_token_rejects_hardlink_without_modifying_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.token"
+            alias = root / "api.token"
+            source.write_text(TOKEN, encoding="ascii")
+            if os.name != "nt":
+                source.chmod(0o600)
+            original = source.stat()
+            os.link(source, alias)
+
+            with self.assertRaisesRegex(
+                OSError,
+                "^existing token file is unsafe$",
+            ):
+                local_api_module._read_token(alias)
+
+            current = source.stat()
+            self.assertEqual(source.read_text(encoding="ascii"), TOKEN)
+            self.assertEqual((current.st_dev, current.st_ino), (original.st_dev, original.st_ino))
+            self.assertEqual(current.st_nlink, 2)
+
+    @unittest.skipUnless(hasattr(os, "link"), "hard links are unavailable")
+    def test_tcp_server_rejects_hardlink_token_without_modifying_source(self):
+        store, query = seeded_query()
+        server = None
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = root / "source.token"
+                alias = root / "api.token"
+                source.write_text(TOKEN, encoding="ascii")
+                if os.name != "nt":
+                    source.chmod(0o600)
+                original = source.stat()
+                os.link(source, alias)
+
+                with self.assertRaisesRegex(
+                    OSError,
+                    "^existing token file is unsafe$",
+                ):
+                    server = create_tcp_server(query, port=0, token_path=alias)
+
+                current = source.stat()
+                self.assertEqual(source.read_text(encoding="ascii"), TOKEN)
+                self.assertEqual(
+                    (current.st_dev, current.st_ino),
+                    (original.st_dev, original.st_ino),
+                )
+                self.assertEqual(current.st_nlink, 2)
+        finally:
+            if server is not None:
+                server.server_close()
+            store.close()
+
+
 class TCPLocalAPITests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -1079,6 +1635,22 @@ class TCPLocalAPITests(unittest.TestCase):
             "providerId", "familyId", "displayName", "category",
             "credentialSource", "sourceKind", "observedAt", "revision",
         })
+
+    def test_quick_connect_route_matches_advertised_schema_route(self):
+        status, _, body = self.request("/v1/schema")
+        self.assertEqual(status, 200)
+        schema_payload = json.loads(body)
+        self.assertIn("/v1/quick-connect", schema_payload["routes"])
+
+        status, _, body = self.request("/v1/quick-connect")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["schemaVersion"], schema_payload["schemaVersion"])
+        self.assertTrue(payload["providers"])
+        self.assertEqual(payload["providers"], sorted(
+            payload["providers"], key=lambda item: item["familyId"]
+        ))
+        self.assertIn("apiKeyUrl", payload["providers"][0])
 
     def test_tcp_provider_id_set_semantics_have_one_etag_and_body(self):
         targets = (

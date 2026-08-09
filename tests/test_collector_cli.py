@@ -93,6 +93,35 @@ class FrozenRefreshCommandTests(unittest.TestCase):
             executable, "__refresh-once", "--ledger", "/safe/ledger.sqlite3",
         ])
 
+    def test_pyinstaller_runtime_reexecutes_the_bundled_collector_itself(self):
+        executable = "/opt/UsageHub/resources/collector/openusage-collector"
+        with (
+            patch.object(sys, "frozen", True, create=True),
+            patch.object(sys, "_MEIPASS", "/tmp/openusage-pyinstaller", create=True),
+            patch.object(sys, "executable", executable),
+            patch.dict(
+                "os.environ",
+                {
+                    "EXECUTABLEPATH": "/tmp/untrusted-py2app-helper",
+                    "RESOURCEPATH": "/tmp/untrusted-py2app-resources",
+                },
+            ),
+        ):
+            command = _default_refresh_command("/safe/ledger.sqlite3", None)
+
+        self.assertEqual(command, [
+            executable, "__refresh-once", "--ledger", "/safe/ledger.sqlite3",
+        ])
+
+    def test_pyinstaller_runtime_rejects_a_relative_self_executable(self):
+        with (
+            patch.object(sys, "frozen", True, create=True),
+            patch.object(sys, "_MEIPASS", "/tmp/openusage-pyinstaller", create=True),
+            patch.object(sys, "executable", "relative-openusage-collector"),
+            self.assertRaises(CLIError),
+        ):
+            _default_refresh_command("/safe/ledger.sqlite3", None)
+
     def test_internal_refresh_writes_privacy_safe_source_class_timing(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger = Path(directory) / "ledger.sqlite3"
@@ -255,6 +284,25 @@ class MutatingRefresher:
         self.finished.set()
 
 
+class BlockingGatewayServer:
+    def __init__(self):
+        self.started = threading.Event()
+        self.shutdown_requested = threading.Event()
+        self.shutdown_calls = 0
+        self.close_calls = 0
+
+    def serve_forever(self):
+        self.started.set()
+        self.shutdown_requested.wait(3)
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+        self.shutdown_requested.set()
+
+    def server_close(self):
+        self.close_calls += 1
+
+
 class CollectorCLITests(unittest.TestCase):
     def setUp(self):
         self.store = seeded_store()
@@ -268,6 +316,571 @@ class CollectorCLITests(unittest.TestCase):
         dependencies.setdefault("clock", lambda: NOW)
         code = main(argv, stdout=stdout, stderr=stderr, store=self.store, query=self.query, **dependencies)
         return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_manual_windows_tcp_daemon_uses_shared_default_token_path_and_preserves_override(self):
+        local_app_data = r"C:\Users\example\AppData\Local"
+        cases = (
+            (
+                "explicit",
+                ["--api-token-path", r"D:\private\manual-api.token"],
+                r"D:\private\manual-api.token",
+            ),
+            (
+                "default",
+                [],
+                r"C:\Users\example\AppData\Local\openusage-bar\api.token",
+            ),
+        )
+
+        for name, token_arguments, expected in cases:
+            with self.subTest(name=name):
+                received = {}
+                server = BlockingGatewayServer()
+
+                def create_server(query, **kwargs):
+                    received["query"] = query
+                    received.update(kwargs)
+                    return server
+
+                with (
+                    patch.object(sys, "platform", "win32"),
+                    patch.dict(
+                        "os.environ",
+                        {"LOCALAPPDATA": local_app_data},
+                    ),
+                    patch(
+                        "openusage_bar.local_api.create_tcp_server",
+                        side_effect=create_server,
+                    ),
+                ):
+                    code, out, err = self.run_cli(
+                        [
+                            "daemon",
+                            "--interval",
+                            "60",
+                            "--api-transport",
+                            "tcp",
+                            *token_arguments,
+                        ],
+                        refresher=FakeRefresher(),
+                        stop_event=threading.Event(),
+                        waiter=lambda _seconds: True,
+                    )
+
+                self.assertEqual((code, out, err), (0, "", ""))
+                self.assertIs(received["query"], self.query)
+                self.assertEqual(received["token_path"], expected)
+
+    def test_windows_gateway_start_uses_local_app_data_token_and_preserves_override(self):
+        local_app_data = r"C:\Users\example\AppData\Local"
+        cases = (
+            (
+                "default",
+                {"LOCALAPPDATA": local_app_data},
+                [],
+                rf"{local_app_data}\openusage-bar\gateway.token",
+            ),
+            (
+                "explicit",
+                {},
+                ["--token-path", r"D:\private\manual-gateway.token"],
+                r"D:\private\manual-gateway.token",
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "gateway.json"
+            config_path.write_text(
+                json.dumps({"enabled": True, "mode": "advise"}),
+                encoding="utf-8",
+            )
+            for name, environment, token_arguments, expected in cases:
+                with self.subTest(name=name):
+                    received = {}
+                    server = BlockingGatewayServer()
+
+                    def gateway_server_factory(*_args, **kwargs):
+                        received.update(kwargs)
+                        return server
+
+                    stop = threading.Event()
+                    stop.set()
+                    with (
+                        patch.object(sys, "platform", "win32"),
+                        patch.dict("os.environ", environment, clear=True),
+                    ):
+                        code, out, err = self.run_cli(
+                            [
+                                "gateway",
+                                "start",
+                                "--config",
+                                str(config_path),
+                                *token_arguments,
+                            ],
+                            stop_event=stop,
+                            gateway_server_factory=gateway_server_factory,
+                        )
+
+                    self.assertEqual((code, out, err), (0, "", ""))
+                    self.assertEqual(str(received["token_path"]), expected)
+
+    def test_windows_gateway_start_without_local_app_data_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_path = root / "gateway.json"
+            config_path.write_text(
+                json.dumps({"enabled": True, "mode": "advise"}),
+                encoding="utf-8",
+            )
+            posix_token = root / "home/.local/state/openusage-bar/gateway.token"
+            factory_calls = []
+            store_calls = []
+
+            def gateway_server_factory(*_args, **kwargs):
+                factory_calls.append(kwargs)
+                return BlockingGatewayServer()
+
+            def store_factory():
+                store_calls.append(True)
+                return self.store
+
+            stop = threading.Event()
+            stop.set()
+            with (
+                patch.object(sys, "platform", "win32"),
+                patch.dict("os.environ", {}, clear=True),
+                patch(
+                    "openusage_bar.collector_cli.DEFAULT_GATEWAY_TOKEN_PATH",
+                    posix_token,
+                ),
+            ):
+                stdout, stderr = io.StringIO(), io.StringIO()
+                code = main(
+                    [
+                        "gateway",
+                        "start",
+                        "--config",
+                        str(config_path),
+                    ],
+                    stdout=stdout,
+                    stderr=stderr,
+                    store_factory=store_factory,
+                    stop_event=stop,
+                    gateway_server_factory=gateway_server_factory,
+                )
+
+            self.assertEqual(
+                (code, stdout.getvalue(), stderr.getvalue()),
+                (2, "", "invalid command input\n"),
+            )
+            self.assertEqual(store_calls, [])
+            self.assertEqual(factory_calls, [])
+            self.assertFalse(posix_token.exists())
+
+    def test_gateway_print_config_emits_stable_secret_free_default_json(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+
+        def forbidden_dependency(*_args, **_kwargs):
+            raise AssertionError("print-config must not construct runtime dependencies")
+
+        with patch(
+            "openusage_bar.keychain.default_keychain",
+            side_effect=AssertionError("print-config must not access credentials"),
+        ):
+            code = main(
+                ["gateway", "print-config"],
+                stdout=stdout,
+                stderr=stderr,
+                store_factory=forbidden_dependency,
+                gateway_server_factory=forbidden_dependency,
+            )
+
+        expected = {
+            "cache_enabled": False,
+            "enabled": False,
+            "host": "127.0.0.1",
+            "mode": "observe",
+            "port": 17823,
+            "proxy_enabled": False,
+        }
+        self.assertEqual((code, stderr.getvalue()), (0, ""))
+        self.assertEqual(
+            stdout.getvalue(),
+            json.dumps(expected, sort_keys=True, separators=(",", ":")) + "\n",
+        )
+        normalized = stdout.getvalue().casefold()
+        for forbidden in ("api_key", "apikey", "credential", "password", "secret", "token"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, normalized)
+
+    def test_gateway_print_config_ignores_an_invalid_or_secret_bearing_default_file(self):
+        expected = {
+            "cache_enabled": False,
+            "enabled": False,
+            "host": "127.0.0.1",
+            "mode": "observe",
+            "port": 17823,
+            "proxy_enabled": False,
+        }
+
+        def forbidden_dependency(*_args, **_kwargs):
+            raise AssertionError("print-config must not construct runtime dependencies")
+
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "gateway.json"
+            cases = {
+                "invalid": b'{"enabled":',
+                "secret": b'{"enabled":true,"mode":"advise","token":"sk-private"}',
+            }
+            for name, raw in cases.items():
+                with self.subTest(name=name):
+                    config_path.write_bytes(raw)
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    with (
+                        patch(
+                            "openusage_bar.collector_cli.DEFAULT_GATEWAY_CONFIG_PATH",
+                            config_path,
+                        ),
+                        patch(
+                            "openusage_bar.keychain.default_keychain",
+                            side_effect=AssertionError(
+                                "print-config must not access credentials"
+                            ),
+                        ),
+                    ):
+                        code = main(
+                            ["gateway", "print-config"],
+                            stdout=stdout,
+                            stderr=stderr,
+                            store_factory=forbidden_dependency,
+                            gateway_server_factory=forbidden_dependency,
+                        )
+
+                    self.assertEqual((code, stderr.getvalue()), (0, ""))
+                    self.assertEqual(json.loads(stdout.getvalue()), expected)
+                    self.assertEqual(config_path.read_bytes(), raw)
+
+    def test_gateway_status_reads_only_config_and_reports_startability(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_path = root / "gateway.json"
+            token_path = root / "gateway.token"
+            config_text = json.dumps({
+                "enabled": True,
+                "mode": "advise",
+                "host": "127.0.0.1",
+                "port": 17823,
+                "proxy_enabled": False,
+                "cache_enabled": False,
+            })
+            config_path.write_text(config_text, encoding="utf-8")
+            stdout, stderr = io.StringIO(), io.StringIO()
+
+            def forbidden_dependency(*_args, **_kwargs):
+                raise AssertionError("status must not construct runtime dependencies")
+
+            with patch(
+                "openusage_bar.keychain.default_keychain",
+                side_effect=AssertionError("status must not access credentials"),
+            ):
+                code = main(
+                    ["gateway", "status", "--config", str(config_path)],
+                    stdout=stdout,
+                    stderr=stderr,
+                    store_factory=forbidden_dependency,
+                    gateway_server_factory=forbidden_dependency,
+                )
+
+            expected = {
+                "cache_enabled": False,
+                "can_start": True,
+                "enabled": True,
+                "host": "127.0.0.1",
+                "mode": "advise",
+                "port": 17823,
+                "proxy_enabled": False,
+            }
+            self.assertEqual((code, stderr.getvalue()), (0, ""))
+            self.assertEqual(json.loads(stdout.getvalue()), expected)
+            self.assertEqual(config_path.read_text(encoding="utf-8"), config_text)
+            self.assertFalse(token_path.exists())
+
+    def test_gateway_start_fails_closed_for_missing_observe_or_disabled_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = {
+                "missing": None,
+                "observe": {"enabled": True, "mode": "observe"},
+                "disabled": {"enabled": False, "mode": "advise"},
+            }
+            for name, payload in cases.items():
+                with self.subTest(name=name):
+                    config_path = root / f"{name}.json"
+                    token_path = root / f"{name}.token"
+                    if payload is not None:
+                        config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+                    def forbidden_dependency(*_args, **_kwargs):
+                        raise AssertionError("disabled Gateway must not start dependencies")
+
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    code = main(
+                        [
+                            "gateway", "start",
+                            "--config", str(config_path),
+                            "--token-path", str(token_path),
+                        ],
+                        stdout=stdout,
+                        stderr=stderr,
+                        store_factory=forbidden_dependency,
+                        gateway_server_factory=forbidden_dependency,
+                    )
+
+                    self.assertNotEqual(code, 0)
+                    self.assertEqual(stdout.getvalue(), "")
+                    self.assertEqual(stderr.getvalue(), "gateway_disabled\n")
+                    self.assertFalse(token_path.exists())
+
+    def test_gateway_start_runs_enabled_modes_with_an_independent_token_and_graceful_stop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for mode in ("advise", "gateway"):
+                with self.subTest(mode=mode):
+                    mode_root = root / mode
+                    mode_root.mkdir()
+                    config_path = mode_root / "gateway.json"
+                    config_path.write_text(
+                        json.dumps({"enabled": True, "mode": mode}),
+                        encoding="utf-8",
+                    )
+                    gateway_token_path = mode_root / "gateway.token"
+                    local_api_token_path = mode_root / "api.token"
+                    local_api_token = "local-api-sentinel-must-remain-private\n"
+                    local_api_token_path.write_text(local_api_token, encoding="utf-8")
+                    server = BlockingGatewayServer()
+                    received = {}
+
+                    def gateway_server_factory(*_args, **kwargs):
+                        received.update(kwargs)
+                        Path(kwargs["token_path"]).write_text(
+                            "gateway-only-auth-material\n",
+                            encoding="utf-8",
+                        )
+                        return server
+
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    stop = threading.Event()
+                    result = []
+                    errors = []
+
+                    def run_gateway():
+                        try:
+                            result.append(main(
+                                [
+                                    "gateway", "start",
+                                    "--config", str(config_path),
+                                    "--token-path", str(gateway_token_path),
+                                ],
+                                stdout=stdout,
+                                stderr=stderr,
+                                store=self.store,
+                                query=self.query,
+                                stop_event=stop,
+                                gateway_server_factory=gateway_server_factory,
+                            ))
+                        except BaseException as error:
+                            errors.append(error)
+
+                    with patch(
+                        "openusage_bar.collector_cli.DEFAULT_API_TOKEN_PATH",
+                        local_api_token_path,
+                    ):
+                        thread = threading.Thread(target=run_gateway)
+                        thread.start()
+                        deadline = time.monotonic() + 3
+                        while (
+                            not server.started.is_set()
+                            and thread.is_alive()
+                            and time.monotonic() < deadline
+                        ):
+                            server.started.wait(0.01)
+                        if server.started.is_set():
+                            stop.set()
+                        thread.join(3)
+
+                    self.assertEqual(errors, [])
+                    self.assertTrue(server.started.is_set())
+                    self.assertFalse(thread.is_alive())
+                    self.assertEqual(result, [0])
+                    self.assertEqual((stdout.getvalue(), stderr.getvalue()), ("", ""))
+                    self.assertEqual(received["config"].mode.value, mode)
+                    self.assertTrue(received["config"].enabled)
+                    self.assertEqual(Path(received["token_path"]), gateway_token_path)
+                    self.assertTrue(gateway_token_path.exists())
+                    self.assertEqual(
+                        local_api_token_path.read_text(encoding="utf-8"),
+                        local_api_token,
+                    )
+                    self.assertNotIn(local_api_token.strip(), repr(received))
+                    self.assertNotIn(local_api_token.strip(), stdout.getvalue())
+                    self.assertNotIn(local_api_token.strip(), stderr.getvalue())
+                    self.assertEqual(server.shutdown_calls, 1)
+                    self.assertEqual(server.close_calls, 1)
+
+    def test_gateway_start_default_factory_serves_advise_and_isolates_local_api_token(self):
+        import http.client
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+
+            config_path = root / "gateway.json"
+            config_path.write_text(
+                json.dumps({
+                    "enabled": True,
+                    "mode": "advise",
+                    "host": "127.0.0.1",
+                    "port": port,
+                    "proxy_enabled": False,
+                    "cache_enabled": False,
+                }),
+                encoding="utf-8",
+            )
+            gateway_token_path = root / "gateway.token"
+            local_api_token_path = root / "api.token"
+            local_api_sentinel = b"local-api-sentinel-must-remain-private\n"
+            local_api_token_path.write_bytes(local_api_sentinel)
+
+            stdout, stderr = io.StringIO(), io.StringIO()
+            stop = threading.Event()
+            result = []
+            errors = []
+
+            def run_gateway():
+                try:
+                    result.append(main(
+                        [
+                            "gateway", "start",
+                            "--config", str(config_path),
+                            "--token-path", str(gateway_token_path),
+                        ],
+                        stdout=stdout,
+                        stderr=stderr,
+                        store=self.store,
+                        query=self.query,
+                        stop_event=stop,
+                    ))
+                except BaseException as error:
+                    errors.append(error)
+
+            thread = threading.Thread(target=run_gateway)
+            status = 0
+            response_body = b""
+            try:
+                with patch(
+                    "openusage_bar.collector_cli.DEFAULT_API_TOKEN_PATH",
+                    local_api_token_path,
+                ):
+                    thread.start()
+                    deadline = time.monotonic() + 3
+                    while (
+                        not gateway_token_path.exists()
+                        and thread.is_alive()
+                        and time.monotonic() < deadline
+                    ):
+                        time.sleep(0.01)
+                    token = gateway_token_path.read_text(encoding="ascii")
+
+                    request_body = json.dumps({
+                        "provider": "minimax",
+                        "model": "MiniMax-M2.1",
+                        "estimated_tokens": 8_000,
+                        "window": "5m",
+                    }).encode("utf-8")
+                    while thread.is_alive() and time.monotonic() < deadline:
+                        connection = http.client.HTTPConnection(
+                            "127.0.0.1", port, timeout=1
+                        )
+                        try:
+                            connection.request(
+                                "POST",
+                                "/gateway/v1/should-send",
+                                body=request_body,
+                                headers={
+                                    "Authorization": f"Bearer {token}",
+                                    "Content-Type": "application/json",
+                                },
+                            )
+                            response = connection.getresponse()
+                            status = response.status
+                            response_body = response.read()
+                            break
+                        except OSError:
+                            time.sleep(0.02)
+                        finally:
+                            connection.close()
+            finally:
+                stop.set()
+                thread.join(3)
+
+            self.assertEqual(errors, [])
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result, [0])
+            self.assertEqual(status, 200)
+            payload = json.loads(response_body)
+            self.assertEqual(
+                set(payload),
+                {"decision", "confidence", "reason", "defer_until", "details"},
+            )
+            self.assertEqual(
+                set(payload["details"]),
+                {
+                    "quota_remaining",
+                    "burn_rate_per_min",
+                    "predicted_exhaustion_minutes",
+                },
+            )
+            self.assertEqual(local_api_token_path.read_bytes(), local_api_sentinel)
+            observed = stdout.getvalue().encode() + stderr.getvalue().encode() + response_body
+            self.assertNotIn(local_api_sentinel.strip(), observed)
+            self.assertEqual((stdout.getvalue(), stderr.getvalue()), ("", ""))
+
+    def test_gateway_config_errors_are_stable_and_never_echo_secret_material(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = {
+                "invalid": {"enabled": True, "mode": "unsupported"},
+                "secret": {
+                    "enabled": True,
+                    "mode": "advise",
+                    "token": "sk-sensitive-material-must-not-echo",
+                },
+            }
+            for name, payload in cases.items():
+                with self.subTest(name=name):
+                    config_path = root / f"{name}.json"
+                    config_path.write_text(json.dumps(payload), encoding="utf-8")
+                    stdout, stderr = io.StringIO(), io.StringIO()
+
+                    def forbidden_factory(*_args, **_kwargs):
+                        raise AssertionError("invalid Gateway config must not start")
+
+                    code = main(
+                        ["gateway", "status", "--config", str(config_path)],
+                        stdout=stdout,
+                        stderr=stderr,
+                        store_factory=forbidden_factory,
+                        gateway_server_factory=forbidden_factory,
+                    )
+
+                    self.assertEqual(code, 2)
+                    self.assertEqual(stdout.getvalue(), "")
+                    self.assertEqual(stderr.getvalue(), "invalid gateway configuration\n")
+                    combined = stdout.getvalue() + stderr.getvalue()
+                    self.assertNotIn("sk-sensitive-material-must-not-echo", combined)
+
 
     def test_json_commands_write_only_canonical_payload(self):
         for command in (
@@ -448,6 +1061,80 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual((code, err, refresher.calls), (0, "", 0))
         self.assertTrue(out)
 
+    def test_offline_daemon_serves_only_last_good_ledger_data(self):
+        injected_refresher = FakeRefresher(
+            error=AssertionError("offline daemon must not refresh")
+        )
+        factory_calls = []
+        runner_calls = []
+
+        def refresher_factory(_store):
+            factory_calls.append(True)
+            return FakeRefresher(
+                error=AssertionError("offline daemon factory result must not refresh")
+            )
+
+        class CatalogMonitor:
+            def maybe_run(self):
+                raise AssertionError("offline daemon must not monitor the catalog")
+
+        def run_daemon_with_api(
+            interval, daemon_refresher, active_query, api_socket, **options
+        ):
+            runner_calls.append(
+                (interval, daemon_refresher, active_query, api_socket, options)
+            )
+            return 0
+
+        command = [
+            "--offline",
+            "daemon",
+            "--interval",
+            "60",
+            "--api-transport",
+            "tcp",
+            "--api-port",
+            "17821",
+            "--api-token-path",
+            "unused.token",
+        ]
+        cases = (
+            {
+                "refresher": injected_refresher,
+                "refresher_factory": refresher_factory,
+                "catalog_monitor": CatalogMonitor(),
+            },
+            {"refresher_factory": refresher_factory},
+        )
+        with (
+            patch(
+                "openusage_bar.collector_cli._run_daemon_with_api",
+                side_effect=run_daemon_with_api,
+            ),
+            patch(
+                "openusage_bar.daily_history.OpenUsageCatalogMonitor",
+                return_value=CatalogMonitor(),
+            ) as monitor_type,
+        ):
+            for dependencies in cases:
+                with self.subTest(dependencies=tuple(dependencies)):
+                    code, out, err = self.run_cli(command, **dependencies)
+                    self.assertEqual((code, out, err), (0, "", ""))
+
+        self.assertEqual(len(runner_calls), len(cases))
+        for index, (_, daemon_refresher, _, _, options) in enumerate(runner_calls):
+            with self.subTest(case=index, boundary="catalog monitor"):
+                self.assertIsNone(options["catalog_monitor"])
+            with self.subTest(case=index, boundary="refresher"):
+                try:
+                    result = daemon_refresher.refresh()
+                except Exception as error:
+                    self.fail(f"offline daemon refresher was not a no-op: {error}")
+                self.assertIsNone(result)
+        self.assertEqual(injected_refresher.calls, 0)
+        self.assertEqual(factory_calls, [])
+        self.assertEqual(monitor_type.call_count, 0)
+
     @unittest.skipIf(sys.platform == "win32", "Windows uses loopback TCP transport")
     def test_daemon_serves_private_unix_api_and_cleans_socket_on_stop(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -542,6 +1229,7 @@ class CollectorCLITests(unittest.TestCase):
     def test_daemon_serves_loopback_tcp_api_with_bearer_token(self):
         import http.client
 
+        daemon_cleanup_timeout_seconds = 7
         with tempfile.TemporaryDirectory() as directory:
             probe = socket.socket()
             probe.bind(("127.0.0.1", 0))
@@ -591,7 +1279,7 @@ class CollectorCLITests(unittest.TestCase):
             self.assertIn(b'"schemaVersion":"1.0"', body)
 
             stop.set()
-            thread.join(3)
+            thread.join(daemon_cleanup_timeout_seconds)
             self.assertFalse(thread.is_alive())
             self.assertEqual(result, [0])
 

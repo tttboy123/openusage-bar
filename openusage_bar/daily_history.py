@@ -455,7 +455,7 @@ class ActivityCollector:
     def __init__(
         self,
         store: ActivityStore,
-        importer: OpenUsageDailyImporter,
+        importer: OpenUsageDailyImporter | None,
         *,
         official_importers: Mapping[str, Any] | None = None,
         clock: Callable[[], datetime] | None = None,
@@ -1014,6 +1014,11 @@ class ActivityCollector:
                         use_openusage_fallback = True
 
             if not use_openusage_fallback:
+                continue
+            if self.importer is None:
+                # A verified empty platform source set is a valid Observer
+                # state.  Do not synthesize an importer failure or probe a
+                # provider when the shared fallback was never constructed.
                 continue
             openusage_provider_id = fallback_families.get(provider_id, provider_id)
             if (

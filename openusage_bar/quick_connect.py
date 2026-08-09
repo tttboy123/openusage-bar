@@ -41,8 +41,24 @@ QUICK_CONNECT: dict[str, QuickConnect] = {
     "omniroute": QuickConnect(
         "omniroute", "http://localhost:20128", ("auto_detect",)
     ),
-    "cc_switch": QuickConnect(
-        "cc_switch", "https://ccswitch.io", ("auto_detect",)
+   "cc_switch": QuickConnect(
+       "cc_switch", "https://ccswitch.io", ("auto_detect",)
+   ),
+    "openai": QuickConnect(
+        "openai", "https://platform.openai.com", ("api_key", "auto_detect"),
+        api_key_url="https://platform.openai.com/api-keys",
+    ),
+    "anthropic": QuickConnect(
+        "anthropic", "https://console.anthropic.com", ("api_key", "auto_detect"),
+        api_key_url="https://console.anthropic.com/settings/keys",
+    ),
+    "gemini_api": QuickConnect(
+        "gemini_api", "https://aistudio.google.com", ("api_key", "auto_detect"),
+        api_key_url="https://aistudio.google.com/app/apikey",
+    ),
+    "google": QuickConnect(
+        "google", "https://aistudio.google.com", ("api_key", "auto_detect"),
+        api_key_url="https://aistudio.google.com/app/apikey",
     ),
 }
 

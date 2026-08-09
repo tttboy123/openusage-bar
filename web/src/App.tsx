@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import {
   ChartLineUp,
@@ -10,7 +10,9 @@ import {
   Lightning,
   ChartBar,
   ArrowClockwise,
-  ChartLineUp as UsageIcon,
+  ChartBar as UsageIcon,
+  CaretDown,
+  Globe,
 } from "@phosphor-icons/react";
 import ActivityPage from "./pages/ActivityPage";
 import CapacityPage from "./pages/CapacityPage";
@@ -23,6 +25,8 @@ import UsageDetailsPage from "./pages/UsageDetailsPage";
 import { fetchQuickConnect, type QuickConnectItem } from "./api";
 import Reveal from "./components/Reveal";
 import { detectLang, setLang, messages, type Lang, type Messages } from "./i18n";
+import { buildProductIdentityPresentation } from "./productBuildIdentity";
+import { productVersionTruth } from "./productVersionTruth";
 
 const NAV = [
   { to: "/activity", key: "navActivity", icon: ChartLineUp },
@@ -50,7 +54,12 @@ export default function App() {
   const location = useLocation();
   const [lang, setLangState] = useState<Lang>(() => detectLang());
   const [quick, setQuick] = useState<QuickConnectItem[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const activeNavRef = useRef<HTMLAnchorElement>(null);
   const t: Messages = messages[lang];
+  const buildIdentity = buildProductIdentityPresentation(productVersionTruth, t);
 
   useEffect(() => {
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
@@ -60,6 +69,33 @@ export default function App() {
     void fetchQuickConnect().then(setQuick).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    activeNavRef.current?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const first = document.querySelector('[role="menuitem"]:not(:disabled)') as HTMLElement | null;
+    first?.focus();
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onClickOutside(event: MouseEvent) {
+      if (!menuRef.current || menuRef.current.contains(event.target as Node)) return;
+      setMenuOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+    window.addEventListener("mousedown", onClickOutside);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onClickOutside);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
+
   function switchLang() {
     const next: Lang = lang === "zh" ? "en" : "zh";
     setLang(next);
@@ -68,7 +104,7 @@ export default function App() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      <nav className="sidebar" aria-label={t.primaryNavigation}>
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
             <ChartBar size={20} />
@@ -84,6 +120,7 @@ export default function App() {
             <NavLink
               key={item.to}
               to={item.to}
+              ref={item.to === location.pathname ? activeNavRef : undefined}
               className={({ isActive }) =>
                 `nav-link${isActive ? " active" : ""}`
               }
@@ -93,7 +130,13 @@ export default function App() {
             </NavLink>
           );
         })}
-      </aside>
+        <section className="build-identity" aria-label={t.buildIdentityLabel}>
+          <strong>{buildIdentity.versionAndBuild}</strong>
+          <span>{buildIdentity.lifecycle}</span>
+          <span>{buildIdentity.published}</span>
+          <span>{buildIdentity.canary}</span>
+        </section>
+      </nav>
 
       <main className="content">
         <header>
@@ -102,26 +145,70 @@ export default function App() {
             <p className="sub">{t.localFirst}</p>
           </div>
           <div className="toolbar">
-            <select
-              className="icon-btn quick-connect"
-              aria-label={t.quickConnect}
-              defaultValue=""
-              onChange={(event) => {
-                if (event.target.value) {
-                  window.open(event.target.value, "_blank", "noopener");
-                  event.target.value = "";
-                }
-              }}
-            >
-              <option value="" disabled>
-                {t.quickConnect}
-              </option>
-              {quick.map((item) => (
-                <option key={item.familyId} value={item.consoleUrl}>
-                  {item.familyId}
-                </option>
-              ))}
-            </select>
+            <div className="dropdown" ref={menuRef}>
+              <button
+                type="button"
+                className="icon-btn quick-connect"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                <Globe size={16} />
+                <span>{t.quickConnect}</span>
+                <CaretDown size={14} />
+              </button>
+              {menuOpen ? (
+                <div
+                  className="dropdown-menu"
+                  role="menu"
+                  aria-label={t.quickConnect}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setMenuOpen(false);
+                      return;
+                    }
+                    const items = Array.from(
+                      event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'),
+                    );
+                    if (items.length === 0) return;
+                    const index = items.indexOf(document.activeElement as HTMLElement);
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      items[Math.min(items.length - 1, index + 1)]?.focus();
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      items[Math.max(0, index - 1)]?.focus();
+                    } else if (event.key === "Home") {
+                      event.preventDefault();
+                      items[0]?.focus();
+                    } else if (event.key === "End") {
+                      event.preventDefault();
+                      items[items.length - 1]?.focus();
+                    }
+                  }}>
+                  {quick.length === 0 ? (
+                    <button type="button" disabled>
+                      {t.noMatchingPresets}
+                    </button>
+                  ) : (
+                    quick.map((item) => (
+                      <button
+                        key={item.familyId}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          window.open(item.consoleUrl, "_blank", "noopener,noreferrer");
+                          setMenuOpen(false);
+                        }}
+                      >
+                        {item.familyId}
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               className="lang-switch"
@@ -133,7 +220,7 @@ export default function App() {
             <button
               type="button"
               className="icon-btn"
-              onClick={() => window.location.reload()}
+              onClick={() => setRefreshNonce((n) => n + 1)}
             >
               <ArrowClockwise size={16} />
               {t.refresh}
@@ -141,7 +228,7 @@ export default function App() {
           </div>
         </header>
 
-        <Reveal key={location.pathname}>
+        <Reveal key={`${location.pathname}-${refreshNonce}`}>
           <Routes>
             <Route path="/" element={<ActivityPage t={t} />} />
             <Route path="/activity" element={<ActivityPage t={t} />} />

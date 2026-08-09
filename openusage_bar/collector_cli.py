@@ -10,7 +10,7 @@ import sys
 import threading
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, TextIO
 
 from .activity_store import ActivityStore, SCHEMA_VERSION as LEDGER_SCHEMA_VERSION
@@ -23,7 +23,17 @@ from .query import QueryService, SCHEMA_VERSION, to_wire
 
 DEFAULT_LEDGER_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "activity.sqlite3"
 DEFAULT_API_SOCKET_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "openusage.sock"
-DEFAULT_API_TOKEN_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "openusage.token"
+DEFAULT_API_TOKEN_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "api.token"
+DEFAULT_GATEWAY_CONFIG_PATH = Path.home() / ".config" / "openusage-bar" / "gateway.json"
+DEFAULT_GATEWAY_TOKEN_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "gateway.token"
+DEFAULT_GATEWAY_CACHE_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "gateway-cache.sqlite3"
+DEFAULT_GATEWAY_TELEMETRY_PATH = (
+    Path.home()
+    / ".local"
+    / "state"
+    / "openusage-bar"
+    / "gateway-telemetry.sqlite3"
+)
 DEFAULT_API_TCP_PORT = 17821
 # An interactive attempt may legitimately use OpenUsage's bounded auto -> direct
 # fallback (12s + 75s) followed by a bounded daily-history import (60s). One
@@ -32,6 +42,7 @@ DEFAULT_API_TCP_PORT = 17821
 DEFAULT_FRESH_TIMEOUT_SECONDS = 160
 MIN_DAEMON_INTERVAL_SECONDS = 60
 INTERNAL_REFRESH_COMMAND = "__refresh-once"
+INTERNAL_GATEWAY_SELF_TEST_COMMAND = "__gateway-self-test"
 
 
 class CLIError(ValueError):
@@ -46,6 +57,11 @@ class SafeArgumentParser(argparse.ArgumentParser):
 class UnavailableRefresher:
     def refresh(self) -> None:
         raise RuntimeError("refresh unavailable")
+
+
+class OfflineRefresher:
+    def refresh(self) -> None:
+        return None
 
 
 def build_default_refresher(
@@ -119,6 +135,64 @@ def _internal_refresh_once(
             store.close()
 
 
+def _gateway_self_test_unavailable_report() -> dict[str, object]:
+    return {
+        "schemaVersion": "gateway-self-test/v1",
+        "object": "gateway.self_test",
+        "ok": False,
+        "checks": {
+            "observe": {
+                "ok": False,
+                "observer": "unavailable",
+                "gateway": "disabled",
+                "credentialReads": 0,
+                "providerCalls": 0,
+            },
+            "advise": {
+                "ok": False,
+                "decision": "defer",
+                "reason": "self_test_failed",
+                "credentialReads": 0,
+                "providerCalls": 0,
+            },
+            "gateway": {
+                "ok": False,
+                "status": "failed",
+                "credentialReads": 0,
+                "providerCalls": 0,
+            },
+            "credentialFailure": {
+                "ok": False,
+                "errorCode": "self_test_failed",
+                "retryable": False,
+                "providerCalls": 0,
+                "observer": "unavailable",
+            },
+        },
+    }
+
+
+def _internal_gateway_self_test(
+    argv: list[str],
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    if argv != [INTERNAL_GATEWAY_SELF_TEST_COMMAND, "--format", "json"]:
+        stderr.write("invalid command input\n")
+        return 2
+    try:
+        from .gateway import self_test as gateway_self_test
+
+        report = gateway_self_test.run_gateway_self_test()
+        if not gateway_self_test.is_gateway_self_test_report(report):
+            report = _gateway_self_test_unavailable_report()
+    except Exception:
+        report = _gateway_self_test_unavailable_report()
+    _write_json(stdout, report)
+    return 0 if report.get("ok") is True else 1
+
+
 def _parser() -> SafeArgumentParser:
     parser = SafeArgumentParser(prog="openusage-bar")
     parser.add_argument("--offline", action="store_true")
@@ -160,7 +234,7 @@ def _parser() -> SafeArgumentParser:
         default="auto",
     )
     daemon.add_argument("--api-port", type=int, default=0)
-    daemon.add_argument("--api-token-path", default=str(DEFAULT_API_TOKEN_PATH))
+    daemon.add_argument("--api-token-path")
     service = commands.add_parser("service")
     service.add_argument(
         "action",
@@ -185,6 +259,25 @@ def _parser() -> SafeArgumentParser:
     connect = commands.add_parser("connect")
     connect.add_argument("--family", required=True)
     connect.add_argument("--format", choices=("json",), required=True)
+    gateway = commands.add_parser("gateway")
+    gateway_commands = gateway.add_subparsers(
+        dest="gateway_action",
+        required=True,
+    )
+    gateway_commands.add_parser("print-config")
+    gateway_status = gateway_commands.add_parser("status")
+    gateway_status.add_argument(
+        "--config",
+        default=str(DEFAULT_GATEWAY_CONFIG_PATH),
+    )
+    gateway_start = gateway_commands.add_parser("start")
+    gateway_start.add_argument(
+        "--config",
+        default=str(DEFAULT_GATEWAY_CONFIG_PATH),
+    )
+    gateway_start.add_argument(
+        "--token-path",
+    )
     return parser
 
 
@@ -227,6 +320,34 @@ def _resolve_api_transport(
     return resolved, port
 
 
+def _default_api_token_path() -> str:
+    """Resolve the manual TCP token path from the live runtime environment."""
+
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            raise CLIError("missing local application data directory")
+        return str(
+            PureWindowsPath(local_app_data) / "openusage-bar" / "api.token"
+        )
+    return str(
+        Path.home() / ".local" / "state" / "openusage-bar" / "api.token"
+    )
+
+
+def _default_gateway_token_path() -> str:
+    """Resolve the Gateway token path from the live runtime environment."""
+
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            raise CLIError("missing local application data directory")
+        return str(
+            PureWindowsPath(local_app_data) / "openusage-bar" / "gateway.token"
+        )
+    return str(DEFAULT_GATEWAY_TOKEN_PATH)
+
+
 def _fresh_timeout(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 300:
         raise CLIError("invalid refresh timeout")
@@ -260,6 +381,44 @@ def _default_refresh_command(
     entrypoint: Path | None,
 ) -> list[str]:
     if entrypoint is None and getattr(sys, "frozen", False):
+        # PyInstaller resource collectors are already the trusted executable
+        # that must service the bounded internal refresh.  Unlike py2app they
+        # do not have an outer EXECUTABLEPATH launcher; `_MEIPASS` is the
+        # documented runtime marker and `sys.executable` is the bootloader
+        # path on macOS, Windows, and Linux.
+        raw_pyinstaller_root = getattr(sys, "_MEIPASS", None)
+        if raw_pyinstaller_root is not None:
+            raw_self = sys.executable
+            if (
+                not isinstance(raw_self, str)
+                or not isinstance(raw_pyinstaller_root, str)
+                or not raw_self
+                or not raw_pyinstaller_root
+                or "\x00" in raw_self
+                or "\x00" in raw_pyinstaller_root
+                or not os.path.isabs(raw_self)
+                or not os.path.isabs(raw_pyinstaller_root)
+            ):
+                raise CLIError("invalid frozen runtime")
+            executable = Path(os.path.realpath(raw_self))
+            runtime_root = Path(os.path.realpath(raw_pyinstaller_root))
+            if (
+                not executable.is_absolute()
+                or not runtime_root.is_absolute()
+                or not executable.name
+            ):
+                raise CLIError("invalid frozen runtime")
+            return [
+                str(executable),
+                INTERNAL_REFRESH_COMMAND,
+                "--ledger",
+                ledger_path,
+            ]
+
+        # The legacy native macOS helper remains a py2app bundle.  It has a
+        # separate launcher and embedded interpreter, so retain its stricter
+        # bundle relationship checks instead of treating every frozen runtime
+        # as a self-executable.
         raw_executable = os.environ.get("EXECUTABLEPATH", "")
         raw_resources = os.environ.get("RESOURCEPATH", "")
         raw_interpreter = sys.executable
@@ -650,6 +809,161 @@ def _run_daemon_with_api(
         server_thread.join(5)
 
 
+def _gateway_config_payload(config: Any) -> dict[str, Any]:
+    return {
+        "cache_enabled": config.cache_enabled,
+        "enabled": config.enabled,
+        "host": config.host,
+        "mode": config.mode.value,
+        "port": config.port,
+        "proxy_enabled": config.proxy_enabled,
+    }
+
+
+def _gateway_can_start(config: Any) -> bool:
+    return config.enabled and config.mode.value in ("advise", "gateway")
+
+
+def _build_default_gateway_server(
+    *,
+    config: Any,
+    token_path: Path,
+    query: QueryService,
+) -> Any:
+    """Build the optional Gateway without importing it for read-only commands."""
+    from .gateway.api import GatewayRouter
+    from .gateway.cache import SQLiteGatewayCache
+    from .gateway.policy import SnapshottingShouldSendEvaluator
+    from .gateway.runtime import GatewayRuntime
+    from .gateway.server import create_gateway_server
+    from .gateway.telemetry import GatewayTelemetryStore
+
+    telemetry = None
+    if _gateway_can_start(config):
+        try:
+            telemetry = GatewayTelemetryStore(DEFAULT_GATEWAY_TELEMETRY_PATH)
+        except Exception:
+            telemetry = None
+
+    burn_rate = None
+    if telemetry is not None:
+        def burn_rate(provider_id: str, model_id: str) -> float | None:
+            return telemetry.recent_burn_rate(
+                provider_id,
+                model_id,
+                window_minutes=5,
+                max_rows=1_000,
+            )
+
+    should_send = SnapshottingShouldSendEvaluator(
+        capacity=query.capacity,
+        burn_rate=burn_rate,
+        ttl_seconds=10.0,
+    )
+
+    proxy = None
+    if config.mode.value == "gateway" and config.proxy_enabled:
+        cache = None
+        if config.cache_enabled:
+            try:
+                cache = SQLiteGatewayCache(DEFAULT_GATEWAY_CACHE_PATH)
+            except Exception:
+                cache = None
+        proxy = GatewayRuntime(
+            cache=cache,
+            telemetry=telemetry,
+        )
+
+    router = GatewayRouter(
+        mode=config.mode,
+        policy=should_send,
+        proxy=proxy,
+    )
+    return create_gateway_server(
+        router,
+        host=config.host,
+        port=config.port,
+        token_path=token_path,
+    )
+
+
+def _run_gateway_server(
+    config: Any,
+    token_path: Path,
+    query: QueryService,
+    *,
+    stop_event: threading.Event | None,
+    server_factory: Callable[..., Any] | None,
+    stderr: TextIO,
+) -> int:
+    active_stop = stop_event or threading.Event()
+    if stop_event is None and threading.current_thread() is threading.main_thread():
+        def stop(*_: object) -> None:
+            active_stop.set()
+
+        signal.signal(signal.SIGTERM, stop)
+        signal.signal(signal.SIGINT, stop)
+
+    factory = server_factory or _build_default_gateway_server
+    try:
+        server = factory(
+            config=config,
+            token_path=token_path,
+            query=query,
+        )
+    except Exception:
+        stderr.write("gateway unavailable\n")
+        return 1
+
+    server_failed = threading.Event()
+
+    def serve() -> None:
+        try:
+            server.serve_forever()
+        except Exception:
+            server_failed.set()
+        finally:
+            if not active_stop.is_set():
+                server_failed.set()
+                active_stop.set()
+
+    server_thread = threading.Thread(
+        target=serve,
+        name="openusage-gateway",
+        daemon=True,
+    )
+    started = False
+    cleanup_failed = False
+    try:
+        server_thread.start()
+        started = True
+        try:
+            active_stop.wait()
+        except KeyboardInterrupt:
+            active_stop.set()
+    except Exception:
+        server_failed.set()
+    finally:
+        if started:
+            try:
+                server.shutdown()
+            except Exception:
+                cleanup_failed = True
+        try:
+            server.server_close()
+        except Exception:
+            cleanup_failed = True
+        if started:
+            server_thread.join(5)
+            if server_thread.is_alive():
+                cleanup_failed = True
+
+    if server_failed.is_set() or cleanup_failed:
+        stderr.write("gateway unavailable\n")
+        return 1
+    return 0
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -670,10 +984,17 @@ def main(
     refresh_entrypoint: Path | None = None,
     child_environment: dict[str, str] | None = None,
     catalog_monitor: Any | None = None,
+    gateway_server_factory: Callable[..., Any] | None = None,
 ) -> int:
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == INTERNAL_GATEWAY_SELF_TEST_COMMAND:
+        return _internal_gateway_self_test(
+            arguments,
+            stdout=stdout,
+            stderr=stderr,
+        )
     if arguments and arguments[0] == INTERNAL_REFRESH_COMMAND:
         return _internal_refresh_once(
             arguments,
@@ -693,6 +1014,40 @@ def main(
         stderr.write("invalid command input\n")
         return 2
 
+    gateway_config: Any | None = None
+    gateway_token_path: str | None = None
+    if args.command == "gateway":
+        from .gateway.config import GatewayConfig, load_gateway_config
+
+        if args.gateway_action == "print-config":
+            _write_json(stdout, _gateway_config_payload(GatewayConfig()))
+            return 0
+
+        try:
+            gateway_config = load_gateway_config(Path(args.config))
+        except ValueError:
+            stderr.write("invalid gateway configuration\n")
+            return 2
+        payload = _gateway_config_payload(gateway_config)
+        if args.gateway_action == "status":
+            _write_json(
+                stdout,
+                payload | {"can_start": _gateway_can_start(gateway_config)},
+            )
+            return 0
+        if not _gateway_can_start(gateway_config):
+            stderr.write("gateway_disabled\n")
+            return 1
+        try:
+            gateway_token_path = (
+                args.token_path
+                if args.token_path is not None
+                else _default_gateway_token_path()
+            )
+        except CLIError:
+            stderr.write("invalid command input\n")
+            return 2
+
     active_store: ActivityStore | None = store
     refresh_outcome: RefreshOutcome | None = None
     deferred_close = False
@@ -704,6 +1059,18 @@ def main(
                 DEFAULT_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
                 active_store = ActivityStore(DEFAULT_LEDGER_PATH)
         active_query = query or QueryService(active_store, clock=clock)
+
+        if args.command == "gateway":
+            assert gateway_config is not None
+            assert gateway_token_path is not None
+            return _run_gateway_server(
+                gateway_config,
+                Path(gateway_token_path),
+                active_query,
+                stop_event=stop_event,
+                server_factory=gateway_server_factory,
+                stderr=stderr,
+            )
 
         if args.command == "service":
             from . import platform_services
@@ -868,16 +1235,20 @@ def main(
             return 0
 
         if args.command == "daemon":
-            if catalog_monitor is None:
-                from .daily_history import OpenUsageCatalogMonitor
+            if offline or args.offline:
+                refresher = OfflineRefresher()
+                catalog_monitor = None
+            else:
+                if catalog_monitor is None:
+                    from .daily_history import OpenUsageCatalogMonitor
 
-                catalog_monitor = OpenUsageCatalogMonitor(active_store, clock=clock)
-            if refresher is None:
-                factory = refresher_factory or build_default_refresher
-                try:
-                    refresher = factory(active_store)
-                except Exception:
-                    refresher = UnavailableRefresher()
+                    catalog_monitor = OpenUsageCatalogMonitor(active_store, clock=clock)
+                if refresher is None:
+                    factory = refresher_factory or build_default_refresher
+                    try:
+                        refresher = factory(active_store)
+                    except Exception:
+                        refresher = UnavailableRefresher()
             active_stop = stop_event or threading.Event()
             if stop_event is None and threading.current_thread() is threading.main_thread():
                 def stop(*_: object) -> None:
@@ -889,6 +1260,9 @@ def main(
                 args.api_transport,
                 api_port,
             )
+            api_token_path = args.api_token_path
+            if resolved_transport == "tcp" and api_token_path is None:
+                api_token_path = _default_api_token_path()
             return _run_daemon_with_api(
                 interval or MIN_DAEMON_INTERVAL_SECONDS,
                 refresher,
@@ -896,7 +1270,7 @@ def main(
                 args.api_socket,
                 transport=resolved_transport,
                 api_port=resolved_port,
-                api_token_path=args.api_token_path,
+                api_token_path=api_token_path,
                 stop_event=active_stop,
                 waiter=active_waiter,
                 stderr=stderr,

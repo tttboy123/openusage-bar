@@ -1,0 +1,336 @@
+{
+  "$defs": {
+    "artifactBuildIdentity": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "publicationStatus": {
+                  "const": "not_published"
+                },
+                "releaseEligible": {
+                  "const": false
+                },
+                "releaseStage": {
+                  "const": "candidate"
+                }
+              }
+            },
+            {
+              "properties": {
+                "publicationStatus": {
+                  "const": "not_published"
+                },
+                "releaseEligible": {
+                  "const": true
+                },
+                "releaseStage": {
+                  "const": "prerelease_ready"
+                }
+              }
+            },
+            {
+              "properties": {
+                "publicationStatus": {
+                  "const": "published_prerelease"
+                },
+                "releaseEligible": {
+                  "const": false
+                },
+                "releaseStage": {
+                  "const": "prerelease_published"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "properties": {
+        "candidateBuild": {
+          "pattern": "^[1-9][0-9]*$",
+          "type": "string"
+        },
+        "candidateVersion": {
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "canaryClock": {
+          "enum": [
+            "not_started",
+            "running",
+            "passed",
+            "blocked"
+          ],
+          "type": "string"
+        },
+        "canaryQualifiedMachines": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "canaryTargetMachines": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "channel": {
+          "enum": [
+            "alpha",
+            "beta",
+            "rc"
+          ],
+          "type": "string"
+        },
+        "displayName": {
+          "const": "UsageHub",
+          "type": "string"
+        },
+        "publicationStatus": {
+          "enum": [
+            "not_published",
+            "published_prerelease"
+          ],
+          "type": "string"
+        },
+        "publishedBaselineTag": {
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "publishedBaselineVersion": {
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "releaseEligible": {
+          "type": "boolean"
+        },
+        "releaseStage": {
+          "enum": [
+            "candidate",
+            "prerelease_ready",
+            "prerelease_published"
+          ],
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "artifact-build-identity/v1",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidateBuild",
+        "candidateVersion",
+        "canaryClock",
+        "canaryQualifiedMachines",
+        "canaryTargetMachines",
+        "channel",
+        "displayName",
+        "publicationStatus",
+        "publishedBaselineTag",
+        "publishedBaselineVersion",
+        "releaseEligible",
+        "releaseStage",
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "fileRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 255,
+          "minLength": 1,
+          "pattern": "^[^/\\\\\\u0000]+$",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "sha256",
+        "sizeBytes"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://openusage.bar/schemas/release-handoff-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "buildIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "const": "product-build-identity.v1.json",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sizeBytes": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "name",
+            "sha256",
+            "sizeBytes"
+          ],
+          "type": "object"
+        },
+        "identity": {
+          "$ref": "#/$defs/artifactBuildIdentity"
+        }
+      },
+      "required": [
+        "artifact",
+        "identity"
+      ],
+      "type": "object"
+    },
+    "files": {
+      "additionalProperties": false,
+      "properties": {
+        "collector": {
+          "$ref": "#/$defs/fileRecord"
+        },
+        "distributionTrustPosture": {
+          "$ref": "#/$defs/fileRecord"
+        },
+        "finalContainer": {
+          "$ref": "#/$defs/fileRecord"
+        },
+        "nativeCiEvidence": {
+          "$ref": "#/$defs/fileRecord"
+        }
+      },
+      "required": [
+        "collector",
+        "distributionTrustPosture",
+        "finalContainer",
+        "nativeCiEvidence"
+      ],
+      "type": "object"
+    },
+    "object": {
+      "const": "release.handoff_bundle",
+      "type": "string"
+    },
+    "policy": {
+      "const": "release-handoff-local-nonclaim/v1",
+      "type": "string"
+    },
+    "product": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "const": "UsageHub",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "provenanceAttestation": {
+      "const": "not_verified",
+      "type": "string"
+    },
+    "releaseEligible": {
+      "const": false,
+      "type": "boolean"
+    },
+    "schemaVersion": {
+      "const": "release-handoff/v1",
+      "type": "string"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "enum": [
+            "pull_request",
+            "push",
+            "workflow_dispatch"
+          ],
+          "type": "string"
+        },
+        "runAttempt": {
+          "pattern": "^[1-9][0-9]*$",
+          "type": "string"
+        },
+        "runId": {
+          "pattern": "^[1-9][0-9]*$",
+          "type": "string"
+        },
+        "sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event",
+        "runAttempt",
+        "runId",
+        "sha"
+      ],
+      "type": "object"
+    },
+    "target": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {
+          "enum": [
+            "arm64",
+            "x64"
+          ],
+          "type": "string"
+        },
+        "platform": {
+          "enum": [
+            "linux",
+            "mac",
+            "win"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "arch",
+        "platform"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "buildIdentity",
+    "files",
+    "object",
+    "policy",
+    "product",
+    "provenanceAttestation",
+    "releaseEligible",
+    "schemaVersion",
+    "source",
+    "target"
+  ],
+  "title": "UsageHub local release handoff bundle",
+  "type": "object"
+}

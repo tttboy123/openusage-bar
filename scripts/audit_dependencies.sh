@@ -5,10 +5,11 @@ ROOT=${0:A:h:h}
 PYTHON="$ROOT/.build-venv/bin/python"
 AUDIT_LOCK="$ROOT/requirements-audit.txt"
 BUILD_LOCK="$ROOT/requirements-build.txt"
+LINUX_LOCK="$ROOT/requirements-linux.txt"
 AUDIT_HOME=$(mktemp -d "${TMPDIR:-/tmp}/openusage-audit.XXXXXX")
 trap 'rm -rf "$AUDIT_HOME"' EXIT
 
-[[ -x "$PYTHON" && -f "$AUDIT_LOCK" && -f "$BUILD_LOCK" ]] || {
+[[ -x "$PYTHON" && -f "$AUDIT_LOCK" && -f "$BUILD_LOCK" && -f "$LINUX_LOCK" ]] || {
   print -u2 "dependency_audit_unavailable"
   exit 2
 }
@@ -19,4 +20,6 @@ trap 'rm -rf "$AUDIT_HOME"' EXIT
   --requirement "$AUDIT_LOCK"
 "$AUDIT_HOME/venv/bin/python" -m pip_audit \
   --requirement "$BUILD_LOCK" --progress-spinner off --strict
+"$AUDIT_HOME/venv/bin/python" -m pip_audit \
+  --requirement "$LINUX_LOCK" --progress-spinner off --strict
 print "dependency_audit_ok"

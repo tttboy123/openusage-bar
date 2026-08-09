@@ -663,7 +663,8 @@ class _SecretServiceBackend:
         return self._bus
 
     def _collection(self):
-        return self._secretstorage.get_default_collection(self._connect())
+        bus = self._connect()
+        return self._secretstorage.get_default_collection(bus)
 
     @staticmethod
     def _attributes(query: dict[str, str]) -> dict[str, str]:

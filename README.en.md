@@ -1,4 +1,5 @@
-<!-- openusage-release-version: 0.7.1 -->
+<!-- openusage-release-version: 0.8.6 -->
+<!-- openusage-build-identity: product=UsageHub candidate=0.8.6 build=28 channel=rc stage=candidate publication=not_published published=v0.7.1 -->
 <div align="center">
 
 # UsageHub
@@ -25,8 +26,10 @@ UsageHub (formerly OpenUsage Bar) is a local-first native macOS dashboard for AI
 
 <p align="center"><sub>Real SwiftUI interface rendered from an isolated synthetic ledger. No user ledger, Keychain data, or real quota was read.</sub></p>
 
-> Current public pre-release: **0.6.0 RC**, for the opt-in, no-telemetry
-> external Canary. The qualifying external cohort remains **0 / 5** and the
+> Current repository candidate: **0.8.6 RC**. It enters the opt-in,
+> no-telemetry external Canary only after complete verification, native
+> three-platform packaging, and candidate publication; the currently
+> published baseline remains **v0.7.1**. The qualifying external cohort remains **0 / 5** and the
 > 30-day clock is **`not_started`**; follow
 > [Canary tracking issue #33](https://github.com/tttboy123/openusage-bar/issues/33)
 > for current state. Apple Silicon and macOS 15 or later are required.
@@ -64,7 +67,7 @@ flowchart LR
 
 ## Quick install
 
-[Download OpenUsage Bar v0.7.1 DMG for Apple Silicon](https://github.com/tttboy123/openusage-bar/releases/download/v0.7.1/OpenUsage-Bar-v0.7.1-macos-arm64.dmg)
+[Download the OpenUsage Bar v0.8.6 candidate DMG after publication](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg)
 
 1. Open the downloaded DMG.
 2. Drag **OpenUsage Bar** onto **Applications**.

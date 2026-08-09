@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openusage.bar/schemas/runtime-capability-v1.schema.json",
+  "title": "OpenUsage Bar renderer-safe runtime capability v1",
+  "x-openusage-maxUtf8Bytes": 65536,
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "runtime-capability.openusage/v1"
+    },
+    "object": {
+      "const": "runtime.capability"
+    },
+    "observer": {
+      "$ref": "#/$defs/observer"
+    },
+    "gateway": {
+      "$ref": "#/$defs/gateway"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "object",
+    "observer",
+    "gateway"
+  ],
+  "type": "object",
+  "$defs": {
+    "knownBoolean": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "const": "unknown",
+          "type": "string"
+        }
+      ]
+    },
+    "support": {
+      "enum": [
+        "supported",
+        "unsupported",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "operational": {
+      "enum": [
+        "disabled",
+        "starting",
+        "ready",
+        "degraded",
+        "unavailable",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "gatewayMode": {
+      "enum": [
+        "observe",
+        "advise",
+        "gateway",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "timestamp": {
+      "maxLength": 32,
+      "minLength": 20,
+      "pattern": "^(?:(?:(?:000[1-9]|00[1-9][0-9]|0[1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01]))|(?:(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30))|(?:02-(?:0[1-9]|1[0-9]|2[0-8]))))|(?:(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[48]|[2468][048]|[13579][26])00)-02-29))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$",
+      "type": "string"
+    },
+    "nullableTimestamp": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullableNonNegativeInteger": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "nullableSchemaVersion": {
+      "oneOf": [
+        {
+          "maxLength": 64,
+          "minLength": 3,
+          "pattern": "^(?:openusage/v[0-9]+|[0-9]+\\.[0-9]+)$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "observer": {
+      "additionalProperties": false,
+      "properties": {
+        "operational": {
+          "$ref": "#/$defs/operational"
+        },
+        "generatedAt": {
+          "$ref": "#/$defs/nullableTimestamp"
+        },
+        "lastGoodAt": {
+          "$ref": "#/$defs/nullableTimestamp"
+        },
+        "dataRevision": {
+          "$ref": "#/$defs/nullableNonNegativeInteger"
+        },
+        "schemaVersion": {
+          "$ref": "#/$defs/nullableSchemaVersion"
+        }
+      },
+      "required": [
+        "operational",
+        "generatedAt",
+        "lastGoodAt",
+        "dataRevision",
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "feature": {
+      "additionalProperties": false,
+      "properties": {
+        "support": {
+          "$ref": "#/$defs/support"
+        },
+        "enabled": {
+          "$ref": "#/$defs/knownBoolean"
+        },
+        "configured": {
+          "$ref": "#/$defs/knownBoolean"
+        },
+        "operational": {
+          "$ref": "#/$defs/operational"
+        }
+      },
+      "required": [
+        "support",
+        "enabled",
+        "configured",
+        "operational"
+      ],
+      "type": "object"
+    },
+    "features": {
+      "additionalProperties": false,
+      "properties": {
+        "listener": {
+          "$ref": "#/$defs/feature"
+        },
+        "should_send": {
+          "$ref": "#/$defs/feature"
+        },
+        "responses": {
+          "$ref": "#/$defs/feature"
+        },
+        "cache": {
+          "$ref": "#/$defs/feature"
+        },
+        "fallback": {
+          "$ref": "#/$defs/feature"
+        },
+        "pii_redaction": {
+          "$ref": "#/$defs/feature"
+        },
+        "streaming": {
+          "$ref": "#/$defs/feature"
+        }
+      },
+      "required": [
+        "listener",
+        "should_send",
+        "responses",
+        "cache",
+        "fallback",
+        "pii_redaction",
+        "streaming"
+      ],
+      "type": "object"
+    },
+    "actionId": {
+      "enum": [
+        "enable",
+        "disable",
+        "open_settings",
+        "retry",
+        "learn_more",
+        "clear_cache"
+      ],
+      "type": "string"
+    },
+    "actions": {
+      "items": {
+        "$ref": "#/$defs/actionId"
+      },
+      "maxItems": 6,
+      "uniqueItems": true,
+      "type": "array"
+    },
+    "errorCode": {
+      "enum": [
+        "gateway_disabled",
+        "gateway_starting",
+        "gateway_timeout",
+        "gateway_unavailable",
+        "provider_unavailable",
+        "credential_backend_unavailable",
+        "capability_invalid"
+      ],
+      "type": "string"
+    },
+    "lastError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/errorCode"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "observedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "required": [
+        "code",
+        "retryable"
+      ],
+      "type": "object"
+    },
+    "nullableLastError": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/lastError"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "gateway": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/gatewayMode"
+        },
+        "operational": {
+          "$ref": "#/$defs/operational"
+        },
+        "features": {
+          "$ref": "#/$defs/features"
+        },
+        "configuredProviderCount": {
+          "$ref": "#/$defs/nullableNonNegativeInteger"
+        },
+        "healthyProviderCount": {
+          "$ref": "#/$defs/nullableNonNegativeInteger"
+        },
+        "actions": {
+          "$ref": "#/$defs/actions"
+        },
+        "lastError": {
+          "$ref": "#/$defs/nullableLastError"
+        }
+      },
+      "required": [
+        "mode",
+        "operational",
+        "features",
+        "configuredProviderCount",
+        "healthyProviderCount",
+        "actions",
+        "lastError"
+      ],
+      "type": "object"
+    }
+  }
+}

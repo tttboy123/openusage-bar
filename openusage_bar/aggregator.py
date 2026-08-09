@@ -294,20 +294,31 @@ def build_headless_refresher(
     activity_store,
     *,
     timing_recorder: RefreshTimingRecorder | None = None,
+    observer_platform=None,
 ):
     """Build the production collector without importing the AppKit UI module."""
+    import sys
+
     from .config import ProviderConfigStore
     from .daily_history import ActivityCollector
+    from .provider_catalog import ObserverPlatformResolver, catalog
     from .providers.builtins import default_registry
 
     clock = lambda: datetime.now(timezone.utc)
-    keychain = default_keychain()
+    if observer_platform is None:
+        observer_platform = ObserverPlatformResolver(
+            catalog, runtime_platform=sys.platform
+        )
     config_store = ProviderConfigStore()
     try:
         configs = config_store.load()
     except (OSError, ValueError):
         configs = []
-    bindings = default_registry(clock=clock, keychain=keychain).build(configs)
+    bindings = default_registry(
+        clock=clock,
+        keychain_factory=default_keychain,
+        observer_platform=observer_platform,
+    ).build(configs)
     adapters = [item[4] for item in sorted(
         (
             getattr(adapter, "source_priority", 100),
@@ -319,11 +330,11 @@ def build_headless_refresher(
         for binding in bindings
         for adapter in (*binding.quota_sources, *binding.balance_sources)
     )]
-    openusage_importer = next(
+    openusage_importer = next((
         source
         for binding in bindings if binding.provider_id == "openusage"
         for source in binding.usage_sources
-    )
+    ), None)
     official_importers = {}
     for binding in bindings:
         if binding.provider_id == "openusage":
@@ -368,7 +379,7 @@ def build_headless_refresher(
         for binding in bindings for adapter in binding.balance_sources
     )
     eager_usage_provider_ids = tuple(sorted(
-        {"codex"} | {
+        {
             provider_id
             for provider_id, importer in official_importers.items()
             if getattr(importer, "eager_local", False) is True

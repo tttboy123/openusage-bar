@@ -1,0 +1,152 @@
+# Gateway Performance Evidence
+
+This document records the current Gateway performance evidence contract. It is
+about reproducible evidence shape and release gates, not about claiming final
+performance numbers for the current development round.
+
+## Evidence Status
+
+The current evidence fixture is
+`tests/fixtures/gateway/performance-v1.json`. The report schema is
+`docs/schemas/gateway-performance-v1.schema.json`, and the local runner is
+`scripts/measure_gateway_performance.py`.
+
+No final release performance report is committed in this round. Any local
+command output from unit tests or smoke tests is diagnostic only unless it is
+captured by the performance runner on a clean, idle reference machine and
+published as a schema-valid report.
+
+## Release Gates
+
+| Scenario | Release gate | Current result |
+| --- | --- | --- |
+| Should-Send authenticated loopback | p99 < 50 ms | Placeholder: run `scripts/measure_gateway_performance.py run` on a clean idle reference machine. |
+| Responses proxy overhead, paired | signed p99 delta < 200 ms | Placeholder: run the release evidence command. |
+| Exact cache core lookup | p99 < 5 ms | Placeholder: authoritative cache gate; run the release evidence command. |
+| Exact cache authenticated loopback | informational only | Placeholder: diagnostic context only; failure does not decide the cache scenario while core lookup passes. |
+| Responses throughput | every complete one-second bucket >= 100 successes | Placeholder: run the release evidence command. |
+
+The cache scenario status is derived from `responsesExactCacheHit.coreLookup`.
+`responsesExactCacheHit.e2eAuthenticatedLoopback` is nested with
+`informationalOnly: true`; it exists to diagnose end-to-end HTTP/server overhead
+and must not be used as the cache release gate.
+
+## Frozen Workload
+
+The v1 fixture is deliberately exact rather than machine-scaled:
+
+| Surface | Frozen input |
+| --- | --- |
+| Activity facts | 1,000 quota-state rows |
+| Gateway telemetry | 4,000 aggregate rows: 1,000 in-window matches, 1,000 out-of-window matches, 1,000 other-model rows, and 1,000 other-provider rows |
+| Cache | 1,000 entries; entry 500 is the hot exact hit; zero prefix hashes per entry |
+| Should-Send request | 82-byte canonical JSON body |
+| Responses request | 4,096-byte Gateway envelope with a 4,041-byte canonical Provider request |
+| Synthetic response | 4,096-byte output text in fixed 4,307-byte SSE framing |
+
+Every latency scenario uses 100 warmups followed by 2,000 measured attempts in
+each of three rounds. Throughput uses 16 clients, a 32-thread server cap, 30
+one-second buckets, connection-close HTTP, and a five-second client timeout.
+The fixture-only admission limiter is 10,000 capacity with 10,000/second refill;
+it is a benchmark control and does not change the product default limiter.
+
+The cache workload primes the streaming response once and requires `miss`, then
+repeats the identical request and requires `exact_hit`, `attemptCount: 0`, and no
+additional fixture egress call. This proves that the measured core lookup and
+authenticated loopback refer to the same exact-hit contract.
+
+## Measurement Semantics
+
+Latency summaries use nearest-rank p99 with `ceil(percentile * sample_count /
+100)`. Each scenario runs three rounds; the published summary selects the worst
+valid round. A round is invalid if warmups, sample counts, order, or clock
+monotonicity violate the frozen fixture contract.
+
+Proxy overhead is paired and signed: each sample records direct fixture egress
+and Gateway loopback in alternating order, then computes `gateway_ns -
+direct_ns`. Negative deltas are retained and counted; they are not clamped to
+zero.
+
+Throughput uses terminal completion timestamps. Only completions in the
+half-open measurement window `[window_start, window_end)` count toward the
+per-second buckets. Completions at or after `window_end` are late completions
+and are reported separately in `lateCompletionCount`; they are excluded from
+the buckets and are not reclassified as request errors. Real request errors,
+timeouts, or HTTP 429 responses fail the round. Completions before
+`window_start` are clock regressions and invalidate the contract.
+
+## Reference Machine Rules
+
+A report may be treated as release evidence only when all of the following are
+true:
+
+- The source tree state in the report is `clean`.
+- The run happens on the intended reference class of machine, on AC power where
+  applicable, with no intentional competing workload.
+- The report is produced by `scripts/measure_gateway_performance.py run`, then
+  verified by `scripts/measure_gateway_performance.py verify`.
+- The report contains only the allowlisted aggregate fields from the schema.
+- The report is attached to manual CI evidence or release notes as non-secret
+  JSON; local databases, prompts, responses, credentials, process IDs, and local
+  paths are never attached.
+
+The script records bounded machine facts such as OS, architecture, CPU model,
+memory, storage class, filesystem, power state, Python version, source commit,
+and source tree state. Those fields help interpret the run; they do not by
+themselves prove that the machine was idle.
+
+## Manual CI
+
+The desktop build workflow has a dispatch-only `gateway-performance` job. It
+runs the unit contract and smoke checks, invokes the performance runner,
+verifies the report, and uploads `gateway-performance-v1.json`. Absolute budgets
+remain non-blocking because the shared runner job deliberately omits
+`--enforce`; the artifact is diagnostic CI evidence, not a reference-machine
+release claim. A manually generated or CI report must not be described as
+release evidence unless it satisfies the reference-machine rules above.
+
+## Commands
+
+Run the credential/network isolation smoke first:
+
+```sh
+python scripts/measure_gateway_performance.py smoke
+```
+
+Create and verify a report with an explicit 40-character source revision:
+
+```sh
+python scripts/measure_gateway_performance.py run \
+  --source-commit <source-commit> \
+  --source-tree-state auto \
+  --output <gateway-performance-v1.json>
+python scripts/measure_gateway_performance.py verify \
+  --report <gateway-performance-v1.json>
+```
+
+Use `--enforce` only for an intentionally idle, named reference-machine run.
+Do not use it to turn a shared CI runner or a foreground-loaded developer
+machine into a release gate.
+
+## Privacy and Unit Compatibility
+
+The performance fixture uses synthetic Provider inputs, synthetic SSE output,
+synthetic capacity facts, synthetic Gateway telemetry, and a local fixture
+transport. The authenticated loopback smoke is expected to make one fixture
+egress call and zero real credential reads or real Provider network calls.
+
+Should-Send prediction may use burn rate only when the remaining quota and the
+observed burn rate are in compatible units, such as remaining Tokens divided by
+Tokens per minute. A remaining ratio is not a Token balance and must not be
+divided by a Token burn rate to fabricate `predicted_exhaustion_minutes`.
+
+## Current Non-Release Diagnostics
+
+These diagnostics are useful for development confidence but are not final
+performance evidence:
+
+| Diagnostic | Status |
+| --- | --- |
+| `python -m unittest tests.test_gateway_performance_measurement tests.test_gateway_should_send tests.test_gateway_cache` | Local diagnostic PASS observed during documentation update. |
+| `python scripts/measure_gateway_performance.py smoke` | Local diagnostic PASS observed during documentation update: fixture egress only, no real credentials or Provider network. |
+| Dirty local three-round report, 2026-08-09 | Schema-valid diagnostic with overall `fail`: Should-Send worst p99 66.165 ms; paired proxy worst p99 delta 199.710 ms; cache core worst p99 6.250 ms; informational authenticated cache loopback 155.764 ms; throughput worst complete bucket 13 successes/s with real client timeouts. The source tree was dirty and the machine was under severe foreground load, so this is not release evidence. |

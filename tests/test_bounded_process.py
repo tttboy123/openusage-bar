@@ -4,7 +4,6 @@ import sys
 import tempfile
 import time
 import unittest
-import sys
 from pathlib import Path
 
 
@@ -52,13 +51,30 @@ class BoundedProcessTests(unittest.TestCase):
             root = Path(directory); pidfile = root / "child.pid"
             helper = self.helper(
                 root,
-                "import os,sys,time\nchild=os.fork()\n"
-                "if child==0: time.sleep(30); raise SystemExit\n"
-                "open(sys.argv[1],'w').write(str(child))\n",
+                "import os,sys,time\n"
+                "release_read,release_write=os.pipe()\n"
+                "child=os.fork()\n"
+                "if child==0:\n"
+                " os.close(release_write)\n"
+                " os.read(release_read,1)\n"
+                " os.close(release_read)\n"
+                " sys.stdout.buffer.write(b'x'*70000)\n"
+                " sys.stdout.flush()\n"
+                " time.sleep(30)\n"
+                " raise SystemExit\n"
+                "os.close(release_read)\n"
+                "with open(sys.argv[1],'w') as pidfile:\n"
+                " pidfile.write(str(child))\n"
+                "os.write(release_write,b'x')\n"
+                "os.close(release_write)\n",
             )
             with self.assertRaises(BoundedProcessError) as raised:
-                run_bounded([str(helper), str(pidfile)], timeout=1)
-            self.assertEqual(raised.exception.code, "timeout")
+                run_bounded(
+                    [str(helper), str(pidfile)],
+                    timeout=30,
+                    stdout_limit=65536,
+                )
+            self.assertEqual(raised.exception.code, "output_overflow")
             pid = int(pidfile.read_text())
             state = ""
             for _ in range(20):

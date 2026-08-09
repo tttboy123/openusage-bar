@@ -9,9 +9,10 @@ export default function Reveal({ children }: { children: ReactNode }) {
     if (!node) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduce) return;
-    const items = node.querySelectorAll(
-      ".metric, .panel, .quota, .section-title",
+    const items = Array.from(
+      node.querySelectorAll(".metric, .panel, .quota, .section-title"),
     );
+    if (items.length === 0) return;
     const ctx = gsap.context(() => {
       gsap.from(items, {
         autoAlpha: 0,

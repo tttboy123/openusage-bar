@@ -1,0 +1,135 @@
+{
+  "$id": "https://openusage.bar/schemas/artifact-build-identity-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "publicationStatus": {
+              "const": "not_published"
+            },
+            "releaseEligible": {
+              "const": false
+            },
+            "releaseStage": {
+              "const": "candidate"
+            }
+          }
+        },
+        {
+          "properties": {
+            "publicationStatus": {
+              "const": "not_published"
+            },
+            "releaseEligible": {
+              "const": true
+            },
+            "releaseStage": {
+              "const": "prerelease_ready"
+            }
+          }
+        },
+        {
+          "properties": {
+            "publicationStatus": {
+              "const": "published_prerelease"
+            },
+            "releaseEligible": {
+              "const": false
+            },
+            "releaseStage": {
+              "const": "prerelease_published"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "properties": {
+    "candidateBuild": {
+      "pattern": "^[1-9][0-9]*$",
+      "type": "string"
+    },
+    "candidateVersion": {
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "canaryClock": {
+      "enum": [
+        "not_started",
+        "running",
+        "passed",
+        "blocked"
+      ],
+      "type": "string"
+    },
+    "canaryQualifiedMachines": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "canaryTargetMachines": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "channel": {
+      "enum": [
+        "alpha",
+        "beta",
+        "rc"
+      ],
+      "type": "string"
+    },
+    "displayName": {
+      "const": "UsageHub",
+      "type": "string"
+    },
+    "publicationStatus": {
+      "enum": [
+        "not_published",
+        "published_prerelease"
+      ],
+      "type": "string"
+    },
+    "publishedBaselineTag": {
+      "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "publishedBaselineVersion": {
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "releaseEligible": {
+      "type": "boolean"
+    },
+    "releaseStage": {
+      "enum": [
+        "candidate",
+        "prerelease_ready",
+        "prerelease_published"
+      ],
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "artifact-build-identity/v1",
+      "type": "string"
+    }
+  },
+  "required": [
+    "candidateBuild",
+    "candidateVersion",
+    "canaryClock",
+    "canaryQualifiedMachines",
+    "canaryTargetMachines",
+    "channel",
+    "displayName",
+    "publicationStatus",
+    "publishedBaselineTag",
+    "publishedBaselineVersion",
+    "releaseEligible",
+    "releaseStage",
+    "schemaVersion"
+  ],
+  "type": "object"
+}

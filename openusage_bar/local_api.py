@@ -21,6 +21,7 @@ import socket
 import socketserver
 import stat
 import struct
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -33,8 +34,10 @@ from urllib.parse import parse_qsl, urlsplit
 
 from .capabilities import registry as default_registry
 from .config import ID_PATTERN
+from .provider_catalog import ObserverPlatformResolver
 from .provider_catalog import catalog as default_catalog
 from .query import MAX_LIMIT, SCHEMA_VERSION, QueryService, to_wire
+from .windows_file_security import native_windows_file_security
 
 
 LOCAL_API_SCHEMA = json.loads(
@@ -55,8 +58,10 @@ DEFAULT_CLIENT_TIMEOUT = 5.0
 DEFAULT_REQUEST_DEADLINE = 15.0
 DEFAULT_RATE_LIMIT_CAPACITY = 120
 DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 2.0
+_MAX_TOKEN_PATH_LENGTH = 4_096
 _BAD_PERCENT = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_WINDOWS_FILE_SECURITY = native_windows_file_security()
 
 
 @dataclass(frozen=True)
@@ -275,6 +280,7 @@ class LocalAPIRouter:
         *,
         clock: Callable[[], datetime] | None = None,
         provider_registry: Any = default_registry,
+        observer_platform: ObserverPlatformResolver | None = None,
         bearer_verifier: Callable[[str], bool] | None = None,
         rate_limiter: TokenBucket | None = None,
         allowed_origins: Collection[str] = (),
@@ -283,6 +289,13 @@ class LocalAPIRouter:
         self.query = query
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.provider_registry = provider_registry
+        self.observer_platform = (
+            observer_platform
+            if observer_platform is not None
+            else ObserverPlatformResolver(
+                default_catalog, runtime_platform=sys.platform
+            )
+        )
         self.bearer_verifier = bearer_verifier
         self.rate_limiter = rate_limiter
         origins = frozenset(allowed_origins)
@@ -412,6 +425,7 @@ class LocalAPIRouter:
             "/v1/quotas/history": ("providerId", "accountRef", "from", "to", "limit"),
             "/v1/sources/status": (),
             "/v1/changes": ("after", "limit"),
+            "/v1/quick-connect": (),
         }
         if route not in allowed:
             raise _error(HTTPStatus.NOT_FOUND, "not_found", "Route was not found.")
@@ -455,6 +469,7 @@ class LocalAPIRouter:
                             "familyId": item.family_id,
                             "consoleUrl": item.console_url,
                             "authModes": list(item.auth_modes),
+                            "apiKeyUrl": item.api_key_url,
                         }
                         for item in sorted(
                             QUICK_CONNECT.values(),
@@ -535,6 +550,37 @@ class LocalAPIRouter:
                 }
             if route == "/v1/capabilities":
                 descriptors = self.provider_registry.descriptors
+                platform_summary = self.observer_platform.summary
+
+                def platform_support(
+                    family_id: str, source_id: str
+                ) -> dict[str, str]:
+                    record = self.observer_platform.source_capability(
+                        family_id, source_id
+                    )
+                    if record is not None:
+                        return {
+                            "state": (
+                                "unknown"
+                                if platform_summary.support == "unknown"
+                                else (
+                                    "supported"
+                                    if record.supported
+                                    else "unsupported"
+                                )
+                            ),
+                            "reasonCode": record.reason_code,
+                        }
+                    if platform_summary.support == "unknown":
+                        return {
+                            "state": "unknown",
+                            "reasonCode": "runtime_platform_unknown",
+                        }
+                    return {
+                        "state": "unsupported",
+                        "reasonCode": "source_level_evidence_unverified",
+                    }
+
                 providers = [{
                     "providerId": item.provider_id,
                     "familyId": item.provider_id,
@@ -580,6 +626,9 @@ class LocalAPIRouter:
                         "accountScope": source.account_scope.value,
                         "modelScope": source.model_scope.value,
                         "verification": source.verification.value,
+                        "platformSupport": platform_support(
+                            item.provider_id, source.source_id
+                        ),
                     } for source in item.sources],
                 } for item in descriptors]
                 return {
@@ -591,6 +640,17 @@ class LocalAPIRouter:
                         "version": default_catalog.upstream_version,
                         "revision": default_catalog.upstream_revision,
                         "familyCount": len(default_catalog.upstream_family_ids),
+                    },
+                    "observerPlatform": {
+                        "operatingSystem": platform_summary.operating_system,
+                        "support": platform_summary.support,
+                        "supportedSourceCount": (
+                            platform_summary.supported_source_count
+                        ),
+                        "totalSourceCount": (
+                            platform_summary.total_source_count
+                        ),
+                        "reasonCode": platform_summary.reason_code,
                     },
                     "providers": providers,
                 }
@@ -1052,12 +1112,54 @@ def _validate_token(token: str) -> str:
     return token
 
 
+def _validated_token_path(value: object) -> Path:
+    invalid = "token path must be absolute"
+    try:
+        raw = os.fspath(value)
+    except Exception:
+        raise ValueError(invalid) from None
+    if (
+        not isinstance(raw, str)
+        or not raw
+        or len(raw) > _MAX_TOKEN_PATH_LENGTH
+        or any(
+            ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F
+            for character in raw
+        )
+    ):
+        raise ValueError(invalid)
+    try:
+        path = Path(raw)
+    except Exception:
+        raise ValueError(invalid) from None
+    if (
+        not path.is_absolute()
+        or not path.name
+        or ".." in path.parts
+        or (
+            os.name == "nt"
+            and (
+                re.fullmatch(r"[A-Za-z]:", path.drive) is None
+                or ":" in raw[len(path.drive):]
+            )
+        )
+    ):
+        raise ValueError(invalid)
+    return path
+
+
 def _prepare_private_parent(path: Path, purpose: str) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.parent.is_symlink() or not path.parent.is_dir():
         raise OSError(f"{purpose} parent must be a directory")
     if hasattr(os, "getuid") and path.parent.stat().st_uid != os.getuid():
         raise OSError(f"{purpose} parent must be owned by the current user")
+    if _WINDOWS_FILE_SECURITY is not None:
+        try:
+            _WINDOWS_FILE_SECURITY.harden_directory(path.parent)
+        except Exception:
+            raise OSError(f"{purpose} parent is unsafe") from None
+        return
     try:
         os.chmod(path.parent, 0o700, follow_symlinks=False)
     except (NotImplementedError, OSError, TypeError):
@@ -1065,15 +1167,37 @@ def _prepare_private_parent(path: Path, purpose: str) -> None:
 
 
 def _read_token(path: Path) -> str:
+    unsafe = "existing token file is unsafe"
+    try:
+        existing = path.lstat()
+    except FileNotFoundError:
+        raise
+    except OSError:
+        raise OSError(unsafe) from None
+    if (
+        stat.S_ISLNK(existing.st_mode)
+        or not stat.S_ISREG(existing.st_mode)
+        or existing.st_nlink != 1
+    ):
+        raise OSError(unsafe)
     read_flags = os.O_RDONLY
     if hasattr(os, "O_NOFOLLOW"):
         read_flags |= os.O_NOFOLLOW
-    descriptor = os.open(path, read_flags)
+    try:
+        descriptor = os.open(path, read_flags)
+    except FileNotFoundError:
+        raise
+    except OSError:
+        raise OSError(unsafe) from None
+    raw = b""
+    read_error: OSError | None = None
     try:
         current = os.fstat(descriptor)
-        content = os.read(descriptor, 257)
         if (
             not stat.S_ISREG(current.st_mode)
+            or current.st_nlink != 1
+            or (current.st_dev, current.st_ino)
+            != (existing.st_dev, existing.st_ino)
             or (
                 hasattr(os, "getuid")
                 and (
@@ -1082,31 +1206,141 @@ def _read_token(path: Path) -> str:
                 )
             )
         ):
-            raise OSError("existing token file is unsafe")
+            raise OSError(unsafe)
+        if _WINDOWS_FILE_SECURITY is not None:
+            try:
+                _WINDOWS_FILE_SECURITY.verify_file(descriptor)
+            except Exception:
+                raise OSError(unsafe) from None
+        raw = os.read(descriptor, 257)
+    except OSError:
+        read_error = OSError(unsafe)
     finally:
-        os.close(descriptor)
+        try:
+            os.close(descriptor)
+        except OSError:
+            if read_error is None:
+                read_error = OSError(unsafe)
+    if read_error is not None:
+        raise read_error from None
     try:
-        return _validate_token(content.decode("ascii"))
+        return _validate_token(raw.decode("ascii"))
     except (UnicodeError, ValueError) as error:
-        raise OSError("existing token file is unsafe") from error
+        raise OSError(unsafe) from error
+
+
+def _unlink_owned_token_node(
+    path: Path,
+    identity: tuple[int, int] | None,
+) -> None:
+    if identity is None:
+        return
+    try:
+        current = path.lstat()
+    except FileNotFoundError:
+        return
+    if (
+        stat.S_ISREG(current.st_mode)
+        and (current.st_dev, current.st_ino) == identity
+    ):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _link_token_without_replacement(source: Path, destination: Path) -> None:
+    try:
+        os.link(source, destination, follow_symlinks=False)
+    except (NotImplementedError, TypeError):
+        # Windows and older Python/filesystem combinations may not expose the
+        # keyword even though same-directory hard-link publication is present.
+        os.link(source, destination)
+
+
+def _fsync_token_parent(path: Path) -> None:
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path.parent, flags)
+    sync_error: OSError | None = None
+    try:
+        current = os.fstat(descriptor)
+        if not stat.S_ISDIR(current.st_mode):
+            raise OSError("token parent is unsafe")
+        os.fsync(descriptor)
+    except OSError as error:
+        sync_error = error
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError as error:
+            if sync_error is None:
+                sync_error = error
+    if sync_error is not None:
+        raise sync_error
 
 
 def _create_token(path: Path, token: str) -> bool:
+    """Publish a complete private token atomically without replacing a node."""
+
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+
+    descriptor: int | None = None
+    temporary: Path | None = None
+    identity: tuple[int, int] | None = None
+    published = False
+    primary_error_active = False
     try:
-        descriptor = os.open(path, flags, 0o600)
-    except FileExistsError:
-        return False
-    try:
-        if hasattr(os, "fchmod"):
-            os.fchmod(descriptor, 0o600)
-        else:
+        for _ in range(16):
+            candidate = path.parent / (
+                f".{path.name}.tmp-{secrets.token_hex(16)}"
+            )
             try:
-                os.chmod(path, 0o600)
-            except (NotImplementedError, OSError, TypeError):
-                pass
+                descriptor = os.open(candidate, flags, 0o600)
+            except FileExistsError:
+                continue
+            temporary = candidate
+            if hasattr(os, "fchmod"):
+                try:
+                    os.fchmod(descriptor, 0o600)
+                except (NotImplementedError, OSError):
+                    # The O_CREAT mode is already no broader than 0600.  Do
+                    # not fall back to a path chmod before fstat establishes
+                    # which inode we own; fail closed on the check below.
+                    pass
+            opened = os.fstat(descriptor)
+            identity = (opened.st_dev, opened.st_ino)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or (
+                    hasattr(os, "getuid")
+                    and (
+                        opened.st_uid != os.getuid()
+                        or stat.S_IMODE(opened.st_mode) != 0o600
+                    )
+                )
+            ):
+                raise OSError("temporary token file is unsafe")
+            if _WINDOWS_FILE_SECURITY is not None:
+                try:
+                    _WINDOWS_FILE_SECURITY.harden_file(descriptor)
+                except Exception:
+                    raise OSError("temporary token file is unsafe") from None
+            break
+        else:
+            raise OSError("temporary token file could not be created")
+
+        assert descriptor is not None and temporary is not None
         content = memoryview(token.encode("ascii"))
         while content:
             written = os.write(descriptor, content)
@@ -1114,12 +1348,79 @@ def _create_token(path: Path, token: str) -> bool:
                 raise OSError("bearer token could not be persisted")
             content = content[written:]
         os.fsync(descriptor)
+        completed = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(completed.st_mode)
+            or completed.st_nlink != 1
+            or (
+                hasattr(os, "getuid")
+                and (
+                    completed.st_uid != os.getuid()
+                    or stat.S_IMODE(completed.st_mode) != 0o600
+                )
+            )
+        ):
+            raise OSError("temporary token file is unsafe")
+        closing_descriptor = descriptor
+        descriptor = None
+        os.close(closing_descriptor)
+
+        try:
+            _link_token_without_replacement(temporary, path)
+        except FileExistsError:
+            return False
+        published = True
+        temporary.unlink()
+        temporary = None
+
+        final = path.lstat()
+        if (
+            not stat.S_ISREG(final.st_mode)
+            or (final.st_dev, final.st_ino) != identity
+            or final.st_nlink != 1
+            or (
+                hasattr(os, "getuid")
+                and (
+                    final.st_uid != os.getuid()
+                    or stat.S_IMODE(final.st_mode) != 0o600
+                )
+            )
+        ):
+            raise OSError("published token file is unsafe")
+        _fsync_token_parent(path)
+        return True
+    except BaseException:
+        primary_error_active = True
+        if published:
+            try:
+                _unlink_owned_token_node(path, identity)
+            except BaseException:
+                pass
+        raise
     finally:
-        os.close(descriptor)
-    return True
+        close_error: BaseException | None = None
+        if descriptor is not None:
+            closing_descriptor = descriptor
+            descriptor = None
+            try:
+                os.close(closing_descriptor)
+            except BaseException as error:
+                close_error = error
+        cleanup_error: BaseException | None = None
+        if temporary is not None:
+            try:
+                _unlink_owned_token_node(temporary, identity)
+            except BaseException as error:
+                cleanup_error = error
+        if not primary_error_active:
+            if close_error is not None:
+                raise close_error
+            if cleanup_error is not None:
+                raise cleanup_error
 
 
 def _load_or_create_token(path: Path, supplied: str | None) -> str:
+    path = _validated_token_path(path)
     _prepare_private_parent(path, "token")
     if supplied is not None:
         token = _validate_token(supplied)
@@ -1144,6 +1445,7 @@ def create_unix_server(
     allowed_origins: Collection[str] = (),
     clock: Callable[[], datetime] | None = None,
     provider_registry: Any = default_registry,
+    observer_platform: ObserverPlatformResolver | None = None,
     max_threads: int = DEFAULT_MAX_THREADS,
     client_timeout: float = DEFAULT_CLIENT_TIMEOUT,
     request_deadline: float = DEFAULT_REQUEST_DEADLINE,
@@ -1157,6 +1459,7 @@ def create_unix_server(
         raise ValueError("request_deadline must be between 0.05 and 300 seconds")
     router = LocalAPIRouter(
         query, clock=clock, provider_registry=provider_registry,
+        observer_platform=observer_platform,
         allowed_origins=allowed_origins,
     )
     return UnixHTTPServer(
@@ -1175,6 +1478,7 @@ def create_tcp_server(
     allowed_origins: Collection[str] = (),
     clock: Callable[[], datetime] | None = None,
     provider_registry: Any = default_registry,
+    observer_platform: ObserverPlatformResolver | None = None,
     max_threads: int = DEFAULT_MAX_THREADS,
     client_timeout: float = DEFAULT_CLIENT_TIMEOUT,
     request_deadline: float = DEFAULT_REQUEST_DEADLINE,
@@ -1200,7 +1504,8 @@ def create_tcp_server(
     if token_path is None:
         token = _validate_token(bearer_token or "")
     else:
-        token = _load_or_create_token(Path(token_path), bearer_token)
+        validated_token_path = _validated_token_path(token_path)
+        token = _load_or_create_token(validated_token_path, bearer_token)
     verifier = lambda candidate: hmac.compare_digest(token, candidate)
     rate_limiter = TokenBucket(
         rate_limit_capacity,
@@ -1209,6 +1514,7 @@ def create_tcp_server(
     )
     router = LocalAPIRouter(
         query, clock=clock, provider_registry=provider_registry,
+        observer_platform=observer_platform,
         bearer_verifier=verifier, rate_limiter=rate_limiter,
         allowed_origins=allowed_origins,
     )

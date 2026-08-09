@@ -65,7 +65,7 @@ ATTENTION_HEIGHT = 36
 
 _UI_TEXT = {
     "en": {
-        "settings.window_title": "OpenUsage Bar Advanced and Repair",
+        "settings.window_title": "UsageHub Advanced and Repair",
         "settings.providers_title": "Advanced and Repair",
         "settings.credentials_help": (
             "Manage accounts in Usage Details > Providers. Use this fallback only "
@@ -112,7 +112,7 @@ _UI_TEXT = {
         "settings.could_not_save": "Could not save provider",
     },
     "zh-Hans": {
-        "settings.window_title": "OpenUsage Bar 高级与修复",
+        "settings.window_title": "UsageHub 高级与修复",
         "settings.providers_title": "高级与修复",
         "settings.credentials_help": (
             "请在“用量详情 > Provider”管理账号；这里只用于修复 Provider 显示状态。"

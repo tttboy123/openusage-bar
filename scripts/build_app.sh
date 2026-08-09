@@ -12,6 +12,8 @@ SETTINGS_APP="$APP/Contents/Helpers/OpenUsage Provider Settings.app"
 STATUS_RUNTIME="$APP/Contents/MacOS/OpenUsage Bar.runtime"
 COLLECTOR_LAUNCHER="$APP/Contents/MacOS/OpenUsage Collector"
 RESOURCES="$SWIFT_PACKAGE/Resources"
+BUILD_IDENTITY_SOURCE="$ROOT/openusage_bar/resources/artifact-build-identity.v1.json"
+BUILD_IDENTITY_RESOURCE="$RESOURCES/product-build-identity.v1.json"
 ATOMIC_SWAP="$APP/Contents/Resources/atomic-swap"
 SWIFT_MIN_LINE_COVERAGE=80
 PYTHON_MIN_LINE_COVERAGE=80
@@ -26,6 +28,8 @@ CODESIGN_IDENTITY=${OPENUSAGE_CODESIGN_IDENTITY:--}
 cd "$ROOT"
 "$PYTHON" scripts/release_secret_scan.py
 "$PYTHON" scripts/verify_action_pins.py
+"$PYTHON" scripts/verify_product_version_truth.py
+"$PYTHON" scripts/verify_artifact_build_identity.py --root "$ROOT"
 CATALOG_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-provider-catalog.XXXXXX")
 DESIGN_TOKENS_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-design-tokens.XXXXXX")
 LOCAL_API_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-local-api-schema.XXXXXX")
@@ -71,6 +75,9 @@ PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
   --minimum "$PYTHON_MIN_LINE_COVERAGE" \
   --package-root "$ROOT/openusage_bar"
 "$PYTHON" scripts/privacy_scan.py \
+  "$BUILD_IDENTITY_SOURCE" \
+  "$BUILD_IDENTITY_RESOURCE" \
+  "$ROOT/openusage_bar/resources/product-version-truth.v1.json" \
   "$ROOT/openusage_bar/resources/release-state.v1.json" \
   "$ROOT/openusage_bar/resources/provider-catalog.v1.json" \
   "$ROOT/openusage_bar/resources/local-api-v1.schema.json" \
@@ -106,6 +113,10 @@ mkdir -p \
   "$APP/Contents/Helpers" \
   "$APP/Contents/Resources/LaunchAgents" \
   "$APP/Contents/Library/LaunchAgents"
+cp "$BUILD_IDENTITY_SOURCE" \
+  "$APP/Contents/Resources/product-build-identity.v1.json"
+cmp -s "$BUILD_IDENTITY_SOURCE" \
+  "$APP/Contents/Resources/product-build-identity.v1.json"
 /usr/bin/clang -Wall -Wextra -Werror -mmacosx-version-min=15.0 \
   "$ROOT/scripts/atomic_swap.c" -o "$ATOMIC_SWAP"
 chmod 755 "$ATOMIC_SWAP"

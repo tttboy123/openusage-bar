@@ -1,0 +1,185 @@
+{
+  "$id": "https://openusage.bar/schemas/distribution-trust-posture-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "targetPlatform": {
+            "const": "mac"
+          }
+        },
+        "required": [
+          "targetPlatform"
+        ]
+      },
+      "then": {
+        "properties": {
+          "artifact": {
+            "properties": {
+              "name": {
+                "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-mac-(?:arm64|x64)\\.dmg$"
+              }
+            }
+          },
+          "platformCodeSigning": {
+            "enum": [
+              "ad_hoc_strict_invalid",
+              "ad_hoc_strict_valid",
+              "developer_id_style_strict_invalid",
+              "developer_id_style_strict_valid",
+              "other_style_strict_invalid",
+              "other_style_strict_valid",
+              "unknown",
+              "unsigned"
+            ]
+          },
+          "platformNotarization": {
+            "enum": [
+              "not_stapled",
+              "stapled",
+              "unknown"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "targetPlatform": {
+            "const": "win"
+          }
+        },
+        "required": [
+          "targetPlatform"
+        ]
+      },
+      "then": {
+        "properties": {
+          "artifact": {
+            "properties": {
+              "name": {
+                "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-win-(?:arm64|x64)\\.exe$"
+              }
+            }
+          },
+          "platformCodeSigning": {
+            "enum": [
+              "invalid",
+              "unknown",
+              "unsigned",
+              "valid"
+            ]
+          },
+          "platformNotarization": {
+            "const": "not_applicable"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "targetPlatform": {
+            "const": "linux"
+          }
+        },
+        "required": [
+          "targetPlatform"
+        ]
+      },
+      "then": {
+        "properties": {
+          "artifact": {
+            "properties": {
+              "name": {
+                "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-linux-(?:arm64|x64|x86_64)\\.AppImage$"
+              }
+            }
+          },
+          "platformCodeSigning": {
+            "const": "not_applicable"
+          },
+          "platformNotarization": {
+            "const": "not_applicable"
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+ -]{0,159}$",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "sha256",
+        "sizeBytes"
+      ],
+      "type": "object"
+    },
+    "object": {
+      "const": "distribution.trust_posture",
+      "type": "string"
+    },
+    "platformCodeSigning": {
+      "type": "string"
+    },
+    "platformNotarization": {
+      "type": "string"
+    },
+    "policy": {
+      "const": "distribution-trust-posture/v1",
+      "type": "string"
+    },
+    "provenanceAttestation": {
+      "const": "not_verified",
+      "type": "string"
+    },
+    "releaseEligible": {
+      "const": false,
+      "type": "boolean"
+    },
+    "schemaVersion": {
+      "const": "distribution-trust-posture/v1",
+      "type": "string"
+    },
+    "targetPlatform": {
+      "enum": [
+        "linux",
+        "mac",
+        "win"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "artifact",
+    "object",
+    "platformCodeSigning",
+    "platformNotarization",
+    "policy",
+    "provenanceAttestation",
+    "releaseEligible",
+    "schemaVersion",
+    "targetPlatform"
+  ],
+  "type": "object"
+}

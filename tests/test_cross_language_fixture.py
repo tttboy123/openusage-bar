@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -91,7 +92,7 @@ class CrossLanguageFixtureTests(unittest.TestCase):
                 },
             )
 
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.row_factory = sqlite3.Row
                 usage = connection.execute(
                     """

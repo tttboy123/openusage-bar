@@ -66,6 +66,7 @@
 "Add Account" = "添加账号";
 "Refresh Data" = "刷新数据";
 "Open Console" = "打开控制台";
+"Get API Key" = "获取 API Key";
 "Open Main Window" = "打开主界面";
 "Existing app-managed accounts are edited in Connections above." = "已有账号请在上方“连接”区域中修改。";
 "Data Source Issues" = "数据源问题";
@@ -457,9 +458,8 @@
 "Allow UsageHub in System Settings > General > Login Items so capacity and Token data can refresh automatically." = "请在“系统设置 > 通用 > 登录项”中允许 UsageHub，以便自动刷新额度和 Token 数据。";
 "Open Login Items" = "打开登录项";
 "Later" = "稍后";
-"UsageHub could not start its bundled collector. Reinstall the app from the official DMG or use the advanced repair package." = "UsageHub 无法启动内置采集器。请从官方 DMG 重新安装，或使用高级修复包。";
+"UsageHub could not start its bundled collector. Reinstall from a repository download whose checksum you verified, or use the advanced repair package." = "UsageHub 无法启动内置采集器。请从本仓库重新下载并校验校验和后安装，或使用高级修复包。";
 "OK" = "好";
-"Get API Key" = "获取 API Key";
 "Token Usage" = "Token 用量";
 "No token activity matches the current filters." = "当前筛选下没有匹配的 Token 活动。";
 "No model activity matches the current filters. Switch the period or Provider to see a trend." = "当前筛选下没有匹配的模型活动，切换周期或 Provider 后查看趋势。";
@@ -467,3 +467,16 @@
 "Local runtimes such as Hermes and OpenClaw appear here after they produce Token usage on this device." = "Hermes、OpenClaw 等本地运行时在本机产生 Token 用量后会出现在这里。";
 "All %lld sources are collecting normally." = "全部 %lld 个数据源采集正常。";
 "%lld of %lld sources need attention. Items below show the fix." = "%lld/%lld 个数据源需要处理，下方列出修复方式。";
+"%@ (build %@)" = "%@（构建 %@）";
+"Candidate · not published" = "候选版 · 尚未发布";
+"Published stable: %@" = "已发布稳定版：%@";
+"Canary: not started · %lld/%lld" = "Canary：尚未开始 · %lld/%lld";
+"Candidate" = "候选版";
+"Not published" = "尚未发布";
+"Pre-release ready" = "预发布就绪";
+"Published pre-release" = "已发布预览版";
+"Not started" = "尚未开始";
+"Running" = "进行中";
+"Passed" = "已通过";
+"Blocked" = "已阻塞";
+"Canary: %@ · %lld/%lld" = "Canary：%@ · %lld/%lld";

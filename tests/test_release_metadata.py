@@ -1,11 +1,11 @@
 import plistlib
 import json
+import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
-import sys
-import os
 from pathlib import Path
 
 from scripts.verify_action_pins import action_pin_issues, verify_action_pin_repository
@@ -19,6 +19,10 @@ OFFICIAL_ACTION_REFERENCE = re.compile(
     re.MULTILINE,
 )
 FULL_COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+HASH_PINNED_REQUIREMENT = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9][A-Za-z0-9.+!_-]*"
+    r"(?: --hash=sha256:[0-9a-f]{64})+$"
+)
 
 
 def unpinned_official_actions(source):
@@ -27,6 +31,105 @@ def unpinned_official_actions(source):
         for repository, reference in OFFICIAL_ACTION_REFERENCE.findall(source)
         if FULL_COMMIT_SHA.fullmatch(reference) is None
     ]
+
+
+def setup_metadata_for(platform):
+    program = (
+        "import json, runpy, sys, types\n"
+        "captured = {}\n"
+        "setuptools = types.ModuleType('setuptools')\n"
+        "setuptools.setup = lambda **kwargs: captured.update(kwargs)\n"
+        "sys.modules['setuptools'] = setuptools\n"
+        f"sys.platform = {platform!r}\n"
+        f"runpy.run_path({str(ROOT / 'setup.py')!r}, run_name='__main__')\n"
+        "print(json.dumps(captured))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise AssertionError(result.stderr)
+    return json.loads(result.stdout)
+
+
+class LinuxCredentialReleaseMetadataTests(unittest.TestCase):
+    REQUIRED_LINUX_PACKAGES = {
+        "cffi",
+        "cryptography",
+        "jeepney",
+        "pycparser",
+        "secretstorage",
+    }
+
+    def test_linux_credential_lock_is_complete_and_hash_pinned(self):
+        lock = ROOT / "requirements-linux.txt"
+
+        self.assertTrue(lock.is_file(), "requirements-linux.txt must be committed")
+        lines = [
+            line.strip()
+            for line in lock.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertTrue(lines, "requirements-linux.txt must not be empty")
+        for line in lines:
+            with self.subTest(requirement=line):
+                self.assertRegex(line, HASH_PINNED_REQUIREMENT)
+
+        package_names = {
+            line.split("==", 1)[0].lower().replace("_", "-").replace(".", "-")
+            for line in lines
+        }
+        self.assertTrue(
+            self.REQUIRED_LINUX_PACKAGES.issubset(package_names),
+            "Linux credential lock must include secretstorage and its transitive "
+            "dependencies",
+        )
+
+    def test_setup_exposes_linux_scoped_credential_extra(self):
+        metadata = setup_metadata_for("linux")
+        extras = metadata.get("extras_require", {})
+
+        self.assertIn("linux-credentials", extras)
+        requirements = extras["linux-credentials"]
+        self.assertIsInstance(requirements, list)
+        package_names = []
+        for value in requirements:
+            with self.subTest(requirement=value):
+                requirement, separator, marker = value.partition(";")
+                self.assertEqual(separator, ";")
+                self.assertRegex(
+                    marker.strip(),
+                    r"^sys_platform\s*==\s*(['\"])linux\1$",
+                )
+                package_names.append(
+                    re.split(r"[<>=!~\[\s]", requirement.strip(), maxsplit=1)[0]
+                    .lower()
+                    .replace("_", "-")
+                    .replace(".", "-")
+                )
+        self.assertEqual(package_names.count("secretstorage"), 1)
+
+    def test_dependency_audit_requires_and_scans_linux_lock(self):
+        source = (ROOT / "scripts/audit_dependencies.sh").read_text(encoding="utf-8")
+        normalized = source.replace("\\\n", " ")
+        preflight = normalized.partition("|| {")[0]
+        audit_commands = [
+            line for line in normalized.splitlines() if "-m pip_audit" in line
+        ]
+
+        self.assertRegex(
+            source,
+            r'(?m)^LINUX_LOCK="?\$ROOT/requirements-linux\.txt"?$',
+        )
+        self.assertIn('-f "$LINUX_LOCK"', preflight)
+        self.assertTrue(
+            any('--requirement "$LINUX_LOCK"' in line for line in audit_commands),
+            "dependency audit must scan requirements-linux.txt",
+        )
 
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS release metadata test")
@@ -100,6 +203,71 @@ class ReleaseMetadataTests(unittest.TestCase):
             "canary=0/5 clock=not_started -->\n",
             encoding="utf-8",
         )
+        self.write_setup_metadata(version, version)
+        for application in ("web", "desktop"):
+            self.write_package_metadata(application, version)
+        (self.repo / "docs/canary.md").write_text(
+            f"The current candidate version is `{version}`:\n\n"
+            f"OpenUsage-Bar-v{version}-macos-arm64.zip\n"
+            f"--source-ref refs/tags/v{version}\n"
+            f"scripts/verify_canary_candidate.py --version {version}\n",
+            encoding="utf-8",
+        )
+
+    def write_setup_metadata(self, non_darwin_version, darwin_version):
+        (self.repo / "setup.py").write_text(
+            "import sys\n\n"
+            "from setuptools import setup\n\n"
+            f"common = {{'name': 'openusage-bar', 'version': "
+            f"{non_darwin_version!r}}}\n"
+            "if sys.platform == 'darwin':\n"
+            f"    common.update(version={darwin_version!r})\n"
+            "setup(**common)\n",
+            encoding="utf-8",
+        )
+
+    def write_package_metadata(self, application, version):
+        directory = self.repo / application
+        directory.mkdir(exist_ok=True)
+        package_name = f"usagehub-{application}"
+        package = {"name": package_name, "version": version, "private": True}
+        lock = {
+            "name": package_name,
+            "version": version,
+            "lockfileVersion": 3,
+            "requires": True,
+            "packages": {"": {"name": package_name, "version": version}},
+        }
+        (directory / "package.json").write_text(
+            json.dumps(package, indent=2) + "\n", encoding="utf-8"
+        )
+        (directory / "package-lock.json").write_text(
+            json.dumps(lock, indent=2) + "\n", encoding="utf-8"
+        )
+
+    def release_version(self):
+        state = json.loads((self.repo / RELEASE_STATE).read_text("utf-8"))
+        return state["currentVersion"]
+
+    def release_build(self):
+        state = json.loads((self.repo / RELEASE_STATE).read_text("utf-8"))
+        return state["buildVersion"]
+
+    def previous_release_version(self):
+        result = subprocess.run(
+            ["git", "tag", "--list", "v*", "--sort=-version:refname"],
+            cwd=self.repo, capture_output=True, text=True, check=True,
+        )
+        return result.stdout.splitlines()[0].removeprefix("v")
+
+    def write_json_version(self, relative_path, keys, version):
+        path = self.repo / relative_path
+        payload = json.loads(path.read_text("utf-8"))
+        target = payload
+        for key in keys[:-1]:
+            target = target[key]
+        target[keys[-1]] = version
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     def commit(self, message):
         subprocess.run(["git", "add", "."], cwd=self.repo, check=True)
@@ -121,7 +289,76 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_valid_untagged_release_metadata_passes(self):
         result = self.run_verifier()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "release_metadata_ok version=0.4.0 build=4\n")
+        self.assertEqual(
+            result.stdout,
+            f"release_metadata_ok version={self.release_version()} "
+            f"build={self.release_build()}\n",
+        )
+
+    def test_stale_non_darwin_setup_version_fails(self):
+        candidate = self.release_version()
+        stale = self.previous_release_version()
+        self.write_setup_metadata(stale, candidate)
+
+        result = self.run_verifier()
+
+        self.assertNotEqual(
+            result.returncode,
+            0,
+            "setup.py non-Darwin version drift was accepted: "
+            f"expected {candidate}, found {stale}; stdout={result.stdout!r}",
+        )
+
+    def test_stale_web_package_versions_fail(self):
+        self.assert_stale_package_versions_fail("web")
+
+    def test_stale_desktop_package_versions_fail(self):
+        self.assert_stale_package_versions_fail("desktop")
+
+    def assert_stale_package_versions_fail(self, application):
+        candidate = self.release_version()
+        stale = self.previous_release_version()
+        cases = (
+            (Path(application) / "package.json", ("version",)),
+            (Path(application) / "package-lock.json", ("version",)),
+            (
+                Path(application) / "package-lock.json",
+                ("packages", "", "version"),
+            ),
+        )
+        for relative_path, keys in cases:
+            field = ".".join(key or "<root>" for key in keys)
+            with self.subTest(
+                application=application, file=str(relative_path), field=field
+            ):
+                self.write_package_metadata(application, candidate)
+                self.write_json_version(relative_path, keys, stale)
+
+                result = self.run_verifier()
+
+                self.assertNotEqual(
+                    result.returncode,
+                    0,
+                    f"{relative_path}:{field} version drift was accepted: "
+                    f"expected {candidate}, found {stale}; stdout={result.stdout!r}",
+                )
+
+    def test_stale_canary_candidate_version_fails(self):
+        candidate = self.release_version()
+        stale = self.previous_release_version()
+        path = self.repo / "docs/canary.md"
+        source = path.read_text("utf-8")
+        self.assertGreater(source.count(candidate), 1)
+        path.write_text(source.replace(candidate, stale, 1), encoding="utf-8")
+
+        result = self.run_verifier()
+
+        self.assertNotEqual(
+            result.returncode,
+            0,
+            "docs/canary.md candidate version drift was accepted: "
+            f"expected {candidate}, found {stale}; stdout={result.stdout!r}",
+        )
 
     def test_mismatched_helper_version_fails(self):
         self.write_metadata("0.4.0", "4", activity_version="0.4.1")

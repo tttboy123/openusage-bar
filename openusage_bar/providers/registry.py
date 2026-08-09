@@ -13,6 +13,8 @@ class UnknownProviderConfig(ValueError):
 
 GlobalFactory = Callable[[], ProviderBinding]
 ConfigFactory = Callable[[Any], ProviderBinding]
+GlobalAvailability = Callable[[], bool]
+ConfigAvailability = Callable[[Any], bool]
 
 
 def _source_id(source: object, family: str) -> str:
@@ -59,27 +61,45 @@ def _normalized(binding: ProviderBinding) -> ProviderBinding:
 
 class AdapterRegistry:
     def __init__(self) -> None:
-        self._global_factories: list[GlobalFactory] = []
-        self._config_factories: dict[type[object], ConfigFactory] = {}
+        self._global_factories: list[
+            tuple[GlobalFactory, GlobalAvailability | None]
+        ] = []
+        self._config_factories: dict[
+            type[object], tuple[ConfigFactory, ConfigAvailability | None]
+        ] = {}
 
-    def register_global(self, factory: GlobalFactory) -> None:
-        self._global_factories.append(factory)
+    def register_global(
+        self,
+        factory: GlobalFactory,
+        availability: GlobalAvailability | None = None,
+    ) -> None:
+        self._global_factories.append((factory, availability))
 
     def register_config(
-        self, config_type: type[object], factory: ConfigFactory
+        self,
+        config_type: type[object],
+        factory: ConfigFactory,
+        availability: ConfigAvailability | None = None,
     ) -> None:
         if config_type in self._config_factories:
             raise ValueError(f"config type {config_type.__name__!r} is already registered")
-        self._config_factories[config_type] = factory
+        self._config_factories[config_type] = (factory, availability)
 
     def build(self, configs: Iterable[object]) -> tuple[ProviderBinding, ...]:
-        bindings = [_normalized(factory()) for factory in self._global_factories]
+        bindings = [
+            _normalized(factory())
+            for factory, availability in self._global_factories
+            if availability is None or availability() is True
+        ]
         for config in configs:
-            factory = self._config_factories.get(type(config))
-            if factory is None:
+            registration = self._config_factories.get(type(config))
+            if registration is None:
                 raise UnknownProviderConfig(
                     f"provider config type {type(config).__name__!r} is not registered"
                 )
+            factory, availability = registration
+            if availability is not None and availability(config) is not True:
+                continue
             binding = _normalized(factory(config))
             configured_id = getattr(config, "provider_id", None)
             if binding.provider_id != configured_id:

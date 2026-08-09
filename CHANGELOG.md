@@ -17,12 +17,41 @@ This project follows [Semantic Versioning](https://semver.org/).
 - Provider source contracts are OS-neutral; the OpenUsage Bar distribution
   separately verifies that every source registered in its shipped catalog
   supports macOS.
-- The public roadmap now reports the released v0.6.0 RC baseline and keeps the
-  0 / 5 external Canary state distinct from repository test results.
+- The public roadmap keeps the published v0.7.1 baseline, the v0.8.6 RC
+  candidate, and the 0 / 5 external Canary state distinct from repository test
+  results.
 - Product branding: user-facing docs now use the **UsageHub** name (formerly
   OpenUsage Bar). The `openusage` technical namespace (config paths, sockets,
   `openusage-bar` CLI, Local API v1 contract) remains compatible; app-bundle
   renaming is scheduled with the cross-platform release.
+
+## 0.8.6 - 2026-08-08
+
+### Added
+
+- Cross-platform Observer packaging foundations for macOS, Windows, and Linux,
+  including a self-contained native Collector and renderer-isolated Desktop
+  proxy.
+- An optional, disabled-by-default Gateway Core with Should-Send, five Provider
+  adapters, PII-safe caching, bounded fallback, and pull-driven Gateway-native
+  streaming.
+- Observer-first Automation and Data Health capability surfaces with explicit
+  unknown, disabled, partial, degraded, and last-good states.
+
+### Security
+
+- Gateway JSON and SSE are rebuilt from closed versioned contracts; live source
+  events are validated lazily before wire delivery and rejected material is
+  never reflected.
+- Windows Local API and Desktop token reads require verified owner/System ACLs;
+  packaged artifacts reject credentials, token files, private databases,
+  prompts, responses, and private home paths.
+
+### Release status
+
+- This heading prepares the `0.8.6` RC candidate metadata. It does not assert a
+  published tag, a completed Windows/Linux native run, or an activated external
+  Canary clock.
 
 ## 0.7.1 - 2026-08-04
 

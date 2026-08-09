@@ -1108,18 +1108,26 @@ public enum GeneratedProviderCatalog {
         ),
     ]
     public static let quickConnectURLs: [String: String] = [
+        "anthropic": "https://console.anthropic.com",
         "cc_switch": "https://ccswitch.io",
         "codex": "https://chatgpt.com/codex",
         "deepseek": "https://platform.deepseek.com",
+        "gemini_api": "https://aistudio.google.com",
+        "google": "https://aistudio.google.com",
         "minimax": "https://platform.minimaxi.com",
         "moonshot": "https://platform.moonshot.cn",
         "omniroute": "http://localhost:20128",
+        "openai": "https://platform.openai.com",
         "step_plan": "https://platform.stepfun.com",
     ]
     public static let apiKeyURLs: [String: String] = [
+        "anthropic": "https://console.anthropic.com/settings/keys",
         "deepseek": "https://platform.deepseek.com/api_keys",
+        "gemini_api": "https://aistudio.google.com/app/apikey",
+        "google": "https://aistudio.google.com/app/apikey",
         "minimax": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
         "moonshot": "https://platform.moonshot.cn/console/api-keys",
+        "openai": "https://platform.openai.com/api-keys",
         "step_plan": "https://platform.stepfun.com/api-keys",
     ]
 }

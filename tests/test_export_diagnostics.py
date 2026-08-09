@@ -1050,6 +1050,12 @@ class ExportDiagnosticsTests(unittest.TestCase):
                     handle,
                 )
             output = root / "diagnostics.json"
+            (root / "gateway-cache.sqlite3").write_text(
+                "gateway-cache-private-response-sentinel", encoding="utf-8"
+            )
+            (root / "gateway-telemetry.sqlite3").write_text(
+                "gateway-telemetry-private-request-sentinel", encoding="utf-8"
+            )
             with TwoRouteServer(socket_path):
                 result = subprocess.run(
                     [
@@ -1061,10 +1067,18 @@ class ExportDiagnosticsTests(unittest.TestCase):
                 )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(output.stat().st_mode & 0o777, 0o600)
-            exported = json.loads(output.read_text(encoding="utf-8"))
+            exported_text = output.read_text(encoding="utf-8")
+            exported = json.loads(exported_text)
             self.assertEqual(exported["schemaVersion"], "openusage-diagnostics-1")
             self.assertEqual(exported["product"], {"build": "4", "version": "0.4.0"})
-            self.assertNotIn(str(Path.home()), output.read_text(encoding="utf-8"))
+            self.assertNotIn(str(Path.home()), exported_text)
+            for forbidden in (
+                "gateway-cache.sqlite3",
+                "gateway-telemetry.sqlite3",
+                "gateway-cache-private-response-sentinel",
+                "gateway-telemetry-private-request-sentinel",
+            ):
+                self.assertNotIn(forbidden, exported_text)
             privacy = subprocess.run(
                 [str(ROOT / ".build-venv/bin/python"), str(ROOT / "scripts/privacy_scan.py"), str(output)],
                 capture_output=True,

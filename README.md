@@ -1,4 +1,5 @@
-<!-- openusage-release-version: 0.7.1 -->
+<!-- openusage-release-version: 0.8.6 -->
+<!-- openusage-build-identity: product=UsageHub candidate=0.8.6 build=28 channel=rc stage=candidate publication=not_published published=v0.7.1 -->
 <div align="center">
 
 # UsageHub
@@ -26,8 +27,9 @@ UsageHub（原 OpenUsage Bar）把 AI 订阅额度、API 消耗、本地编码�
 
 <p align="center"><sub>真实 SwiftUI 界面，使用隔离的合成账本生成。未读取用户账本、Keychain 或真实额度。</sub></p>
 
-> 当前公开预发布版：**0.6.0 RC**，用于自愿参加、无遥测的外部
-> Canary。当前合格外部机器仍为 **0 / 5**，30 天时钟为
+> 当前仓库预发布候选版：**0.8.6 RC**。它只有在完整验证、原生三平台
+> 打包与候选发布完成后才进入自愿参加、无遥测的外部 Canary；当前已发布
+> 基线仍为 **v0.7.1**。当前合格外部机器仍为 **0 / 5**，30 天时钟为
 > **`not_started`**；实时状态见
 > [Canary 跟踪 Issue #33](https://github.com/tttboy123/openusage-bar/issues/33)。
 > 支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple
@@ -85,7 +87,7 @@ flowchart LR
 
 ## 快速安装
 
-[下载 OpenUsage Bar v0.7.1 DMG（Apple Silicon）](https://github.com/tttboy123/openusage-bar/releases/download/v0.7.1/OpenUsage-Bar-v0.7.1-macos-arm64.dmg)
+[下载 OpenUsage Bar v0.8.6 候选 DMG（发布后可用，Apple Silicon）](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg)
 
 1. 打开下载的 DMG。
 2. 将 **OpenUsage Bar** 拖入 **Applications**。

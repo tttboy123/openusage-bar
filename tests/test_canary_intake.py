@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -8,6 +9,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FORM = ROOT / ".github" / "ISSUE_TEMPLATE" / "canary_report.yml"
 PROTOCOL = ROOT / "docs" / "canary.md"
+RELEASE_STATE = json.loads(
+    (ROOT / "openusage_bar/resources/release-state.v1.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 class CanaryIntakeContractTests(unittest.TestCase):
@@ -51,7 +57,10 @@ class CanaryIntakeContractTests(unittest.TestCase):
         self.assertIn("aggregate Balance state/quality/stale counts", protocol)
         self.assertIn("scripts/verify_canary_surfaces.py", protocol)
         self.assertIn("scripts/verify_canary_candidate.py", protocol)
-        self.assertIn("--version 0.7.1", protocol)
+        self.assertIn(
+            f"--version {RELEASE_STATE['currentVersion']}",
+            protocol,
+        )
         self.assertIn("gh attestation verify", protocol)
         self.assertIn("--signer-workflow", protocol)
         self.assertRegex(

@@ -1,53 +1,854 @@
 name: desktop-build
 
 on:
+  workflow_dispatch:
   push:
     paths:
+      - ".github/action-pins.json"
       - "web/**"
       - "desktop/**"
+      - "build_support.py"
+      - "openusage_bar/**"
+      - "openusage_collector.py"
+      - "openusage_settings.py"
+      - "requirements-build.txt"
+      - "requirements-linux.txt"
+      - "setup.py"
+      - "docs/native-ci-evidence.md"
+      - "docs/observer-native-runner-prerequisites.md"
+      - "docs/observer-source-native-evidence.md"
+      - "docs/distribution-trust-posture.md"
+      - "docs/release-handoff.md"
+      - "docs/product-version-truth.md"
+      - "docs/schemas/artifact-build-identity-v1.schema.json"
+      - "docs/gateway-performance.md"
+      - "docs/schemas/distribution-trust-posture-v1.schema.json"
+      - "docs/schemas/gateway-performance-v1.schema.json"
+      - "docs/schemas/native-ci-evidence-v1.schema.json"
+      - "docs/schemas/observer-source-native-evidence-v1.schema.json"
+      - "docs/schemas/release-handoff-v1.schema.json"
+      - "docs/schemas/product-version-truth-v1.schema.json"
+      - "scripts/appimage_payload_offset.py"
+      - "scripts/extract_nsis_payload.py"
+      - "scripts/distribution_trust_posture.py"
+      - "scripts/native_ci_evidence.py"
+      - "scripts/observer_source_native_evidence.py"
+      - "scripts/release_handoff.py"
+      - "scripts/measure_gateway_performance.py"
+      - "scripts/release_artifact_audit.py"
+      - "scripts/smoke_gateway.py"
+      - "scripts/verify_action_pins.py"
+      - "scripts/verify_product_version_truth.py"
+      - "scripts/verify_artifact_build_identity.py"
+      - "tests/test_bounded_process.py"
+      - "tests/test_bounded_process_windows*.py"
+      - "tests/test_collector_cli.py"
+      - "tests/test_desktop_packaging_contract.py"
+      - "tests/test_distribution_trust_posture.py"
+      - "tests/test_extract_nsis_payload.py"
+      - "tests/test_gateway_*.py"
+      - "tests/fixtures/gateway/performance-v1.json"
+      - "tests/test_local_api.py"
+      - "tests/test_native_ci_evidence.py"
+      - "tests/test_observer_source_native_evidence.py"
+      - "tests/test_release_handoff.py"
+      - "tests/test_product_version_truth.py"
+      - "tests/test_artifact_build_identity.py"
+      - "tests/test_observer_platform_matrix.py"
+      - "tests/test_appimage_payload_offset.py"
+      - "tests/test_python_distribution.py"
+      - "tests/test_release_artifact_audit*.py"
+      - "tests/test_runtime_capabilities.py"
+      - "tests/test_smoke_gateway.py"
       - ".github/workflows/desktop-build.yml"
+      - "README.md"
+      - "README.en.md"
+      - "ROADMAP.md"
   pull_request:
     paths:
+      - ".github/action-pins.json"
       - "web/**"
       - "desktop/**"
+      - "build_support.py"
+      - "openusage_bar/**"
+      - "openusage_collector.py"
+      - "openusage_settings.py"
+      - "requirements-build.txt"
+      - "requirements-linux.txt"
+      - "setup.py"
+      - "docs/native-ci-evidence.md"
+      - "docs/observer-native-runner-prerequisites.md"
+      - "docs/observer-source-native-evidence.md"
+      - "docs/distribution-trust-posture.md"
+      - "docs/release-handoff.md"
+      - "docs/product-version-truth.md"
+      - "docs/schemas/artifact-build-identity-v1.schema.json"
+      - "docs/gateway-performance.md"
+      - "docs/schemas/distribution-trust-posture-v1.schema.json"
+      - "docs/schemas/gateway-performance-v1.schema.json"
+      - "docs/schemas/native-ci-evidence-v1.schema.json"
+      - "docs/schemas/observer-source-native-evidence-v1.schema.json"
+      - "docs/schemas/release-handoff-v1.schema.json"
+      - "docs/schemas/product-version-truth-v1.schema.json"
+      - "scripts/appimage_payload_offset.py"
+      - "scripts/extract_nsis_payload.py"
+      - "scripts/distribution_trust_posture.py"
+      - "scripts/native_ci_evidence.py"
+      - "scripts/observer_source_native_evidence.py"
+      - "scripts/release_handoff.py"
+      - "scripts/measure_gateway_performance.py"
+      - "scripts/release_artifact_audit.py"
+      - "scripts/smoke_gateway.py"
+      - "scripts/verify_action_pins.py"
+      - "scripts/verify_product_version_truth.py"
+      - "scripts/verify_artifact_build_identity.py"
+      - "tests/test_bounded_process.py"
+      - "tests/test_bounded_process_windows*.py"
+      - "tests/test_collector_cli.py"
+      - "tests/test_desktop_packaging_contract.py"
+      - "tests/test_distribution_trust_posture.py"
+      - "tests/test_extract_nsis_payload.py"
+      - "tests/test_gateway_*.py"
+      - "tests/fixtures/gateway/performance-v1.json"
+      - "tests/test_local_api.py"
+      - "tests/test_native_ci_evidence.py"
+      - "tests/test_observer_source_native_evidence.py"
+      - "tests/test_release_handoff.py"
+      - "tests/test_product_version_truth.py"
+      - "tests/test_artifact_build_identity.py"
+      - "tests/test_observer_platform_matrix.py"
+      - "tests/test_appimage_payload_offset.py"
+      - "tests/test_python_distribution.py"
+      - "tests/test_release_artifact_audit*.py"
+      - "tests/test_runtime_capabilities.py"
+      - "tests/test_smoke_gateway.py"
+      - ".github/workflows/desktop-build.yml"
+      - "README.md"
+      - "README.en.md"
+      - "ROADMAP.md"
 
 permissions:
   contents: read
 
 jobs:
   package:
-    name: package (${{ matrix.os }})
+    name: package (${{ matrix.platform }}/${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - platform: mac
+            arch: x64
+            os: macos-15-intel
+            runner_arch: X64
             args: --mac
-            artifact: UsageHub-*.dmg
-          - os: windows-latest
+            builder_arch: --x64
+            package_root: dist-desktop/mac/UsageHub.app
+            upload_name: usagehub-mac-x64
+            artifact_arch: x64
+            artifact_ext: dmg
+            collector: openusage-collector
+          - platform: mac
+            arch: arm64
+            os: macos-15
+            runner_arch: ARM64
+            args: --mac
+            builder_arch: --arm64
+            package_root: dist-desktop/mac-arm64/UsageHub.app
+            upload_name: usagehub-mac-arm64
+            artifact_arch: arm64
+            artifact_ext: dmg
+            collector: openusage-collector
+          - platform: win
+            arch: x64
+            os: windows-2025
+            runner_arch: X64
             args: --win
-            artifact: UsageHub*.exe
-          - os: ubuntu-latest
+            builder_arch: --x64
+            package_root: dist-desktop/win-unpacked
+            upload_name: usagehub-win-x64
+            artifact_arch: x64
+            artifact_ext: exe
+            collector: openusage-collector.exe
+          - platform: win
+            arch: arm64
+            os: windows-11-arm
+            runner_arch: ARM64
+            args: --win
+            builder_arch: --arm64
+            package_root: dist-desktop/win-arm64-unpacked
+            upload_name: usagehub-win-arm64
+            artifact_arch: arm64
+            artifact_ext: exe
+            collector: openusage-collector.exe
+          - platform: linux
+            arch: x64
+            os: ubuntu-24.04
+            runner_arch: X64
             args: --linux
-            artifact: UsageHub-*.AppImage
+            builder_arch: --x64
+            package_root: dist-desktop/linux-unpacked
+            upload_name: usagehub-linux-x64
+            artifact_arch: x86_64
+            artifact_ext: AppImage
+            collector: openusage-collector
+          - platform: linux
+            arch: arm64
+            os: ubuntu-24.04-arm
+            runner_arch: ARM64
+            args: --linux
+            builder_arch: --arm64
+            package_root: dist-desktop/linux-arm64-unpacked
+            upload_name: usagehub-linux-arm64
+            artifact_arch: arm64
+            artifact_ext: AppImage
+            collector: openusage-collector
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out source
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up pinned Python
+        id: setup_python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          architecture: ${{ matrix.arch }}
+      - name: Set up pinned Node
+        id: setup_node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.16.0"
+          architecture: ${{ matrix.arch }}
+      - name: Verify action pins
+        id: action_pins
+        shell: bash
+        run: python scripts/verify_action_pins.py
+      - name: Verify product and version truth
+        id: product_version_truth
+        shell: bash
+        run: python scripts/verify_product_version_truth.py
+      - name: Verify artifact build identity
+        id: artifact_build_identity
+        shell: bash
+        run: python scripts/verify_artifact_build_identity.py
+      - name: Verify runner identity
+        id: runner_identity
+        shell: bash
+        env:
+          CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CI_RUNNER_OS: ${{ runner.os }}
+          CI_RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          test "$CI_RUNNER_ENVIRONMENT" = "github-hosted"
+          test "$CI_RUNNER_OS" = "$RUNNER_OS"
+          test "$CI_RUNNER_ARCH" = "${{ matrix.runner_arch }}"
+      - name: Install collector build dependencies
+        id: install_collector
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check \
+            "pyinstaller==6.22.0" \
+            "setuptools==83.0.0"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            python -m pip install --require-hashes -r requirements-linux.txt
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            python -m pip install --require-hashes -r requirements-build.txt
+          fi
+      - name: Run portable Observer and Gateway contracts
+        id: contracts
+        shell: bash
+        run: |
+          python -m unittest \
+            tests.test_bounded_process \
+            tests.test_bounded_process_windows \
+            tests.test_appimage_payload_offset \
+            tests.test_artifact_build_identity \
+            tests.test_collector_cli \
+            tests.test_desktop_packaging_contract \
+            tests.test_distribution_trust_posture \
+            tests.test_extract_nsis_payload \
+            tests.test_gateway_api \
+            tests.test_gateway_api_schema \
+            tests.test_gateway_cache \
+            tests.test_gateway_config \
+            tests.test_gateway_event_stream_validation \
+            tests.test_gateway_fallback \
+            tests.test_gateway_pipeline \
+            tests.test_gateway_performance_measurement \
+            tests.test_gateway_pii \
+            tests.test_gateway_response_contract \
+            tests.test_gateway_runtime \
+            tests.test_gateway_runtime_capability \
+            tests.test_gateway_runtime_telemetry \
+            tests.test_gateway_should_send \
+            tests.test_gateway_stream_transport \
+            tests.test_gateway_streaming \
+            tests.test_gateway_telemetry \
+            tests.test_gateway_telemetry_composition \
+            tests.test_gateway_telemetry_hardening \
+            tests.test_gateway_upstream_streaming \
+            tests.test_local_api \
+            tests.test_native_ci_evidence \
+            tests.test_observer_source_native_evidence \
+            tests.test_product_version_truth \
+            tests.test_release_handoff \
+            tests.test_observer_platform_matrix \
+            tests.test_python_distribution \
+            tests.test_release_artifact_audit \
+            tests.test_release_artifact_audit_hardening \
+            tests.test_release_artifact_audit_url_paths \
+            tests.test_runtime_capabilities \
+            tests.test_smoke_gateway
+      - name: Run native Windows Job contracts
+        id: windows_native
+        if: matrix.platform == 'win'
+        shell: bash
+        run: python -m unittest tests.test_bounded_process_windows_native
       - name: Install web dependencies
+        id: web_install
         working-directory: web
         run: npm ci
+      - name: Audit web dependencies
+        id: web_audit
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
+      - name: Run web tests
+        id: web_tests
+        working-directory: web
+        run: npm test
       - name: Build web frontend
+        id: web_build
         working-directory: web
         run: npm run build
       - name: Install desktop dependencies
+        id: desktop_install
         working-directory: desktop
         run: npm ci
-      - name: Package desktop app
+      - name: Audit desktop dependencies
+        id: desktop_audit
         working-directory: desktop
-        run: npx electron-builder ${{ matrix.args }} --publish never
-      - name: Upload artifact
+        run: npm audit --audit-level=high
+      - name: Verify Windows packaging toolchain
+        id: windows_packaging_toolchain
+        if: matrix.platform == 'win'
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          $builderVersion = (node -p "require('./node_modules/electron-builder/package.json').version").Trim()
+          if ($LASTEXITCODE -ne 0 -or $builderVersion -cne "26.15.3") {
+            throw "Unexpected electron-builder version"
+          }
+          $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+          if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
+            throw "Pinned 7-Zip executable is unavailable"
+          }
+          $sevenZipInfo = (& $sevenZip i | Out-String)
+          if (
+            $LASTEXITCODE -ne 0 -or
+            $sevenZipInfo -notmatch '(?m)^7-Zip(?: \(z\))? 26\.02(?:\s|$)'
+          ) {
+            throw "Unexpected 7-Zip version"
+          }
+      - name: Run desktop tests
+        id: desktop_tests
+        working-directory: desktop
+        run: npm test
+      - name: Build bundled collector
+        id: collector_build
+        shell: bash
+        run: |
+          collector_name="${{ matrix.collector }}"
+          collector_name="${collector_name%.exe}"
+          pyinstaller_args=(
+            --clean
+            --noconfirm
+            --onefile
+            --name "$collector_name"
+            --distpath dist-collector
+            --workpath build-collector/work
+            --specpath build-collector
+            --paths .
+            --collect-submodules openusage_bar
+            --collect-data openusage_bar
+          )
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            pyinstaller_args+=(
+              --collect-submodules secretstorage
+              --collect-submodules jeepney
+            )
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            pyinstaller_args+=(--hidden-import Security)
+          fi
+          python -m PyInstaller "${pyinstaller_args[@]}" openusage_collector.py
+          test -f "./dist-collector/${{ matrix.collector }}"
+      - name: Smoke bundled collector status
+        id: collector_status
+        shell: bash
+        run: ./dist-collector/${{ matrix.collector }} --offline status --format json
+      - name: Smoke bundled Gateway modes
+        id: gateway_smoke
+        shell: bash
+        run: python scripts/smoke_gateway.py --all --collector "./dist-collector/${{ matrix.collector }}"
+      - name: Smoke desktop runtime capability
+        id: desktop_runtime_capability_smoke
+        shell: bash
+        run: node desktop/scripts/smoke_runtime_capability.mjs --collector "./dist-collector/${{ matrix.collector }}"
+      - name: Package desktop app
+        id: desktop_package
+        working-directory: desktop
+        run: npx electron-builder ${{ matrix.args }} ${{ matrix.builder_arch }} --publish never
+      - name: Audit packaged collector
+        id: unpacked_audit
+        shell: bash
+        run: |
+          package_root="${{ matrix.package_root }}"
+          test -d "$package_root"
+          python scripts/release_artifact_audit.py \
+            --desktop-package "$package_root" \
+            "${{ matrix.collector }}" \
+            --built-collector "./dist-collector/${{ matrix.collector }}"
+      - name: Resolve final artifact
+        id: artifact
+        shell: bash
+        run: |
+          version="$(node -p "require('./desktop/package.json').version")"
+          artifact_path="dist-desktop/UsageHub-${version}-${{ matrix.platform }}-${{ matrix.artifact_arch }}.${{ matrix.artifact_ext }}"
+          test -f "$artifact_path"
+          printf 'path=%s\n' "$artifact_path" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+      - name: Audit final macOS DMG
+        id: final_mac
+        if: matrix.platform == 'mac'
+        shell: bash
+        env:
+          FINAL_ARTIFACT: ${{ steps.artifact.outputs.path }}
+          TRUST_REPORT: dist-evidence/usagehub-distribution-trust-${{ matrix.platform }}-${{ matrix.arch }}.json
+        run: |
+          set -euo pipefail
+          artifact="$FINAL_ARTIFACT"
+          snapshot_root="$(mktemp -d "$RUNNER_TEMP/usagehub-dmg-snapshot.XXXXXX")"
+          snapshot="$snapshot_root/${artifact##*/}"
+          mount_root="$(mktemp -d "$RUNNER_TEMP/usagehub-dmg.XXXXXX")"
+          attached=0
+          keep_snapshot=0
+          cleanup() {
+            if [[ "$attached" == "1" ]]; then
+              hdiutil detach "$mount_root" >/dev/null
+            fi
+            rmdir "$mount_root"
+            if [[ "$keep_snapshot" == "0" ]]; then
+              /bin/rm -f "$snapshot"
+              rmdir "$snapshot_root"
+            fi
+          }
+          trap cleanup EXIT
+          /bin/cp "$artifact" "$snapshot"
+          /bin/chmod 0400 "$snapshot"
+          /usr/bin/cmp -s "$artifact" "$snapshot"
+          snapshot_digest="$(/usr/bin/shasum -a 256 "$snapshot" | /usr/bin/awk '{print $1}')"
+          test -n "$snapshot_digest"
+          hdiutil verify "$snapshot"
+          hdiutil attach -readonly -nobrowse -noautoopen -owners off -mountpoint "$mount_root" "$snapshot"
+          attached=1
+          package_root="$mount_root/UsageHub.app"
+          test -d "$package_root"
+          mkdir -p dist-evidence
+          python scripts/release_artifact_audit.py \
+            --desktop-package "$package_root" \
+            "${{ matrix.collector }}" \
+            --built-collector "./dist-collector/${{ matrix.collector }}" \
+            --require-final-native-metadata
+          python scripts/smoke_gateway.py --all \
+            --collector "$package_root/Contents/Resources/collector/${{ matrix.collector }}"
+          python scripts/distribution_trust_posture.py inspect \
+            --platform mac \
+            --package-root "$package_root" \
+            --artifact "$snapshot" \
+            --output "$TRUST_REPORT"
+          final_snapshot_digest="$(/usr/bin/shasum -a 256 "$snapshot" | /usr/bin/awk '{print $1}')"
+          test "$final_snapshot_digest" = "$snapshot_digest"
+          hdiutil detach "$mount_root"
+          attached=0
+          rmdir "$mount_root"
+          keep_snapshot=1
+          printf 'path=%s\n' "$snapshot" >> "$GITHUB_OUTPUT"
+          trap - EXIT
+      - name: Install pinned Linux final-package audit toolchain
+        id: linux_final_toolchain
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            "squashfs-tools=1:4.6.1-1build1"
+          installed_version="$(dpkg-query --show --showformat='${Version}' squashfs-tools)"
+          test "$installed_version" = "1:4.6.1-1build1"
+      - name: Audit final Windows NSIS payload
+        id: final_win
+        if: matrix.platform == 'win'
+        shell: pwsh
+        env:
+          FINAL_ARTIFACT: ${{ steps.artifact.outputs.path }}
+          TRUST_REPORT: dist-evidence/usagehub-distribution-trust-${{ matrix.platform }}-${{ matrix.arch }}.json
+        run: |
+          $snapshotRoot = Join-Path $env:RUNNER_TEMP ("usagehub-nsis-snapshot-" + [guid]::NewGuid().ToString("N"))
+          New-Item -ItemType Directory -Path $snapshotRoot | Out-Null
+          $snapshot = Join-Path $snapshotRoot ([System.IO.Path]::GetFileName($env:FINAL_ARTIFACT))
+          Copy-Item -LiteralPath $env:FINAL_ARTIFACT -Destination $snapshot
+          [System.IO.File]::SetAttributes($snapshot, [System.IO.FileAttributes]::ReadOnly)
+          $originalHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $env:FINAL_ARTIFACT).Hash
+          $snapshotHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $snapshot).Hash
+          if ($originalHash -cne $snapshotHash) {
+            throw "Final Windows snapshot mismatch"
+          }
+          $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+          $appRoot = Join-Path $env:RUNNER_TEMP ("usagehub-nsis-" + [guid]::NewGuid().ToString("N"))
+          python scripts/extract_nsis_payload.py `
+            --seven-zip "$sevenZip" `
+            --installer "$snapshot" `
+            --arch "${{ matrix.arch }}" `
+            --output "$appRoot" `
+            --expected-seven-zip-version "26.02"
+          if ($LASTEXITCODE -ne 0) {
+            throw "NSIS payload extraction audit failed"
+          }
+          python scripts/release_artifact_audit.py `
+            --desktop-package "$appRoot" `
+            "${{ matrix.collector }}" `
+            --built-collector "./dist-collector/${{ matrix.collector }}" `
+            --require-final-native-metadata
+          if ($LASTEXITCODE -ne 0) {
+            throw "Final Windows app audit failed"
+          }
+          New-Item -ItemType Directory -Force -Path "dist-evidence" | Out-Null
+          python scripts/distribution_trust_posture.py inspect `
+            --platform win `
+            --package-root "$appRoot" `
+            --artifact "$snapshot" `
+            --output "$env:TRUST_REPORT"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Distribution trust posture inspection failed"
+          }
+          $finalSnapshotHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $snapshot).Hash
+          if ($finalSnapshotHash -cne $snapshotHash) {
+            throw "Final Windows snapshot changed during audit"
+          }
+          "path=$snapshot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Audit final Linux AppImage payload
+        id: final_linux
+        if: matrix.platform == 'linux'
+        shell: bash
+        env:
+          FINAL_ARTIFACT: ${{ steps.artifact.outputs.path }}
+          TRUST_REPORT: dist-evidence/usagehub-distribution-trust-${{ matrix.platform }}-${{ matrix.arch }}.json
+        run: |
+          set -euo pipefail
+          snapshot_root="$(mktemp -d "$RUNNER_TEMP/usagehub-appimage-snapshot.XXXXXX")"
+          snapshot="$snapshot_root/${FINAL_ARTIFACT##*/}"
+          keep_snapshot=0
+          cleanup() {
+            if [[ "$keep_snapshot" == "0" ]]; then
+              /bin/rm -f "$snapshot"
+              rmdir "$snapshot_root"
+            fi
+          }
+          trap cleanup EXIT
+          /bin/cp "$FINAL_ARTIFACT" "$snapshot"
+          /bin/chmod 0400 "$snapshot"
+          /usr/bin/cmp -s "$FINAL_ARTIFACT" "$snapshot"
+          snapshot_digest="$(/usr/bin/sha256sum "$snapshot" | /usr/bin/awk '{print $1}')"
+          test -n "$snapshot_digest"
+          appRoot="$RUNNER_TEMP/usagehub-appimage-${{ matrix.arch }}"
+          test ! -e "$appRoot"
+          payload_offset="$(
+            python scripts/appimage_payload_offset.py \
+              --appimage "$snapshot" \
+              --architecture "${{ matrix.arch }}"
+          )"
+          unsquashfs -no-progress -offset "$payload_offset" \
+            -dest "$appRoot" "$snapshot"
+          test -d "$appRoot"
+          python scripts/release_artifact_audit.py \
+            --desktop-package "$appRoot" \
+            "${{ matrix.collector }}" \
+            --built-collector "./dist-collector/${{ matrix.collector }}" \
+            --require-final-native-metadata
+          mkdir -p dist-evidence
+          python scripts/distribution_trust_posture.py inspect \
+            --platform linux \
+            --package-root "$appRoot" \
+            --artifact "$snapshot" \
+            --output "$TRUST_REPORT"
+          final_snapshot_digest="$(/usr/bin/sha256sum "$snapshot" | /usr/bin/awk '{print $1}')"
+          test "$final_snapshot_digest" = "$snapshot_digest"
+          keep_snapshot=1
+          printf 'path=%s\n' "$snapshot" >> "$GITHUB_OUTPUT"
+          trap - EXIT
+      - name: Select audited final artifact
+        id: audited_artifact
+        shell: bash
+        env:
+          MAC_SNAPSHOT: ${{ steps.final_mac.outputs.path }}
+          WINDOWS_SNAPSHOT: ${{ steps.final_win.outputs.path }}
+          LINUX_SNAPSHOT: ${{ steps.final_linux.outputs.path }}
+          TARGET_PLATFORM: ${{ matrix.platform }}
+        run: |
+          case "$TARGET_PLATFORM" in
+            mac) final_artifact="$MAC_SNAPSHOT" ;;
+            win) final_artifact="$WINDOWS_SNAPSHOT" ;;
+            linux) final_artifact="$LINUX_SNAPSHOT" ;;
+            *) exit 1 ;;
+          esac
+          test -f "$final_artifact"
+          printf 'path=%s\n' "$final_artifact" >> "$GITHUB_OUTPUT"
+      - name: Verify packaged build identity binding
+        id: packaged_build_identity
+        shell: bash
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          MAC_AUDIT: ${{ steps.final_mac.outcome }}
+          WINDOWS_AUDIT: ${{ steps.final_win.outcome }}
+          LINUX_AUDIT: ${{ steps.final_linux.outcome }}
+        run: |
+          python scripts/verify_artifact_build_identity.py
+          case "$TARGET_PLATFORM" in
+            mac) audit_outcome="$MAC_AUDIT" ;;
+            win) audit_outcome="$WINDOWS_AUDIT" ;;
+            linux) audit_outcome="$LINUX_AUDIT" ;;
+            *) exit 1 ;;
+          esac
+          test "$audit_outcome" = "success"
+      - name: Verify distribution trust posture
+        id: distribution_trust_posture
+        shell: bash
+        env:
+          FINAL_ARTIFACT: ${{ steps.audited_artifact.outputs.path }}
+          TRUST_REPORT: dist-evidence/usagehub-distribution-trust-${{ matrix.platform }}-${{ matrix.arch }}.json
+        run: |
+          python scripts/distribution_trust_posture.py verify \
+            --report "$TRUST_REPORT" \
+            --platform "${{ matrix.platform }}" \
+            --artifact "$FINAL_ARTIFACT"
+          printf 'path=%s\n' "$TRUST_REPORT" >> "$GITHUB_OUTPUT"
+      - name: Prepare pinned Linux Observer secret service
+        id: linux_observer_secret_service
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            "dbus-user-session=1.14.10-4ubuntu4.1" \
+            "gnome-keyring=46.1-2build1"
+          dbus_version="$(
+            dpkg-query --show --showformat='${Version}' dbus-user-session
+          )"
+          keyring_version="$(
+            dpkg-query --show --showformat='${Version}' gnome-keyring
+          )"
+          test "$dbus_version" = "1.14.10-4ubuntu4.1"
+          test "$keyring_version" = "46.1-2build1"
+      - name: Probe and verify Observer source evidence
+        id: observer_source_evidence
+        if: matrix.platform != 'mac'
+        shell: bash
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          source_evidence_path="dist-evidence/observer-source-native-evidence-${{ matrix.platform }}-${{ matrix.arch }}.json"
+          mkdir -p dist-evidence
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            test -n "$RUNNER_TEMP"
+            session_root="$(mktemp -d "$RUNNER_TEMP/openusage-observer-keyring.XXXXXX")"
+            cleanup_session() {
+              case "$session_root" in
+                "$RUNNER_TEMP"/openusage-observer-keyring.*)
+                  if [[ -e "$session_root" ]]; then
+                    find "$session_root" -depth -delete
+                  fi
+                  ;;
+                *) return 1 ;;
+              esac
+            }
+            trap cleanup_session EXIT
+            mkdir -p \
+              "$session_root/config" \
+              "$session_root/data" \
+              "$session_root/runtime"
+            chmod 0700 \
+              "$session_root/config" \
+              "$session_root/data" \
+              "$session_root/runtime"
+            OBSERVER_KEYRING_ROOT="$session_root" \
+            OBSERVER_SOURCE_EVIDENCE="$source_evidence_path" \
+              dbus-run-session -- bash -euo pipefail <<'OBSERVER_SOURCE_SESSION'
+              export XDG_CONFIG_HOME="$OBSERVER_KEYRING_ROOT/config"
+              export XDG_DATA_HOME="$OBSERVER_KEYRING_ROOT/data"
+              export XDG_RUNTIME_DIR="$OBSERVER_KEYRING_ROOT/runtime"
+              cleanup_keyring() {
+                gnome-keyring-daemon --shutdown >/dev/null 2>&1 || true
+              }
+              trap cleanup_keyring EXIT
+              if ! printf '\n' | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; then
+                echo "observer_source_evidence_invalid reason=secret_service_start_failed" >&2
+                exit 1
+              fi
+              python scripts/observer_source_native_evidence.py probe \
+                --output "$OBSERVER_SOURCE_EVIDENCE"
+              python scripts/observer_source_native_evidence.py verify \
+                --evidence "$OBSERVER_SOURCE_EVIDENCE"
+          OBSERVER_SOURCE_SESSION
+            trap - EXIT
+            cleanup_session
+          else
+            python scripts/observer_source_native_evidence.py probe \
+              --output "$source_evidence_path"
+            python scripts/observer_source_native_evidence.py verify \
+              --evidence "$source_evidence_path"
+          fi
+          printf 'path=%s\n' "$source_evidence_path" >> "$GITHUB_OUTPUT"
+      - name: Generate native CI evidence
+        id: evidence
+        shell: bash
+        env:
+          CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CI_RUNNER_OS: ${{ runner.os }}
+          CI_RUNNER_ARCH: ${{ runner.arch }}
+          CI_SOURCE_SHA: ${{ github.sha }}
+          CI_SOURCE_EVENT: ${{ github.event_name }}
+          CI_RUN_ID: ${{ github.run_id }}
+          CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+          TRUST_POSTURE_REPORT: ${{ steps.distribution_trust_posture.outputs.path }}
+        run: |
+          evidence_path="dist-evidence/usagehub-native-evidence-${{ matrix.platform }}-${{ matrix.arch }}.json"
+          mkdir -p dist-evidence
+          python_version="$(python -c 'import platform; print(platform.python_version())')"
+          node_version="$(node -p 'process.versions.node')"
+          pyinstaller_version="$(python -c 'import PyInstaller; print(PyInstaller.__version__)')"
+          electron_builder_version="$(node -p "require('./desktop/node_modules/electron-builder/package.json').version")"
+          observer_source_args=()
+          if [[ "${{ matrix.platform }}" != "mac" ]]; then
+            observer_source_args=(
+              --observer-source-evidence "${{ steps.observer_source_evidence.outputs.path }}"
+            )
+          fi
+          python scripts/native_ci_evidence.py generate \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --runner-label "${{ matrix.os }}" \
+            --runner-environment "$CI_RUNNER_ENVIRONMENT" \
+            --runner-os "$CI_RUNNER_OS" \
+            --runner-arch "$CI_RUNNER_ARCH" \
+            --collector "./dist-collector/${{ matrix.collector }}" \
+            --artifact "${{ steps.audited_artifact.outputs.path }}" \
+            --trust-posture-report "$TRUST_POSTURE_REPORT" \
+            --build-identity "openusage_bar/resources/artifact-build-identity.v1.json" \
+            --product-truth "openusage_bar/resources/product-version-truth.v1.json" \
+            --version "${{ steps.artifact.outputs.version }}" \
+            --source-sha "$CI_SOURCE_SHA" \
+            --source-event "$CI_SOURCE_EVENT" \
+            --run-id "$CI_RUN_ID" \
+            --run-attempt "$CI_RUN_ATTEMPT" \
+            --python-version "$python_version" \
+            --node-version "$node_version" \
+            --pyinstaller-version "$pyinstaller_version" \
+            --electron-builder-version "$electron_builder_version" \
+            --check "actionPins=${{ steps.action_pins.outcome }}" \
+            --check "productVersionTruth=${{ steps.product_version_truth.outcome }}" \
+            --check "runnerArchitecture=${{ steps.runner_identity.outcome }}" \
+            --check "pythonContracts=${{ steps.contracts.outcome }}" \
+            --check "windowsNativeProcessTests=${{ steps.windows_native.outcome }}" \
+            --check "webDependencyAudit=${{ steps.web_audit.outcome }}" \
+            --check "webTests=${{ steps.web_tests.outcome }}" \
+            --check "webBuild=${{ steps.web_build.outcome }}" \
+            --check "desktopDependencyAudit=${{ steps.desktop_audit.outcome }}" \
+            --check "desktopTests=${{ steps.desktop_tests.outcome }}" \
+            --check "collectorStatus=${{ steps.collector_status.outcome }}" \
+            --check "gatewaySelfTest=${{ steps.gateway_smoke.outcome }}" \
+            --check "desktopRuntimeCapabilitySmoke=${{ steps.desktop_runtime_capability_smoke.outcome }}" \
+            --check "unpackedPackageAudit=${{ steps.unpacked_audit.outcome }}" \
+            --check "distributionTrustPosture=${{ steps.distribution_trust_posture.outcome }}" \
+            --check "packagedBuildIdentity=${{ steps.packaged_build_identity.outcome }}" \
+            --check "finalMacContainerAudit=${{ steps.final_mac.outcome }}" \
+            --check "finalWindowsContainerAudit=${{ steps.final_win.outcome }}" \
+            --check "finalLinuxContainerAudit=${{ steps.final_linux.outcome }}" \
+            "${observer_source_args[@]}" \
+            --output "$evidence_path"
+          printf 'path=%s\n' "$evidence_path" >> "$GITHUB_OUTPUT"
+      - name: Verify native CI evidence
+        id: evidence_verify
+        shell: bash
+        env:
+          TRUST_POSTURE_REPORT: ${{ steps.distribution_trust_posture.outputs.path }}
+        run: |
+          python scripts/native_ci_evidence.py verify \
+            --evidence "${{ steps.evidence.outputs.path }}" \
+            --collector "./dist-collector/${{ matrix.collector }}" \
+            --artifact "${{ steps.audited_artifact.outputs.path }}" \
+            --trust-posture-report "$TRUST_POSTURE_REPORT"
+      - name: Assemble and verify local release handoff
+        id: release_handoff
+        shell: bash
+        env:
+          TRUST_POSTURE_REPORT: ${{ steps.distribution_trust_posture.outputs.path }}
+        run: |
+          handoff_parent="dist-handoff"
+          bundle_dir="$handoff_parent/${{ matrix.platform }}-${{ matrix.arch }}"
+          mkdir -p "$handoff_parent"
+          test ! -e "$bundle_dir"
+          python scripts/release_handoff.py assemble \
+            --bundle-dir "$bundle_dir" \
+            --collector "./dist-collector/${{ matrix.collector }}" \
+            --artifact "${{ steps.audited_artifact.outputs.path }}" \
+            --evidence "${{ steps.evidence.outputs.path }}" \
+            --trust-posture-report "$TRUST_POSTURE_REPORT"
+          python scripts/release_handoff.py verify \
+            --bundle-dir "$bundle_dir"
+          printf 'path=%s\n' "$bundle_dir" >> "$GITHUB_OUTPUT"
+      - name: Upload artifact and evidence
+        id: upload_bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: usagehub-${{ matrix.os }}
-          path: dist-desktop/${{ matrix.artifact }}
+          name: ${{ matrix.upload_name }}
+          path: ${{ steps.release_handoff.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+  gateway-performance:
+    name: gateway performance evidence (manual/non-blocking)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up pinned Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          architecture: x64
+      - name: Verify action pins
+        run: python scripts/verify_action_pins.py
+      - name: Verify performance evidence contracts
+        run: |
+          python -m unittest tests.test_gateway_performance_measurement
+          python scripts/measure_gateway_performance.py smoke
+      - name: Measure Gateway performance
+        env:
+          CI_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          mkdir -p dist-evidence
+          python scripts/measure_gateway_performance.py run \
+            --source-commit "$CI_SOURCE_SHA" \
+            --source-tree-state clean \
+            --output dist-evidence/gateway-performance-v1.json
+      - name: Verify Gateway performance report
+        run: |
+          python scripts/measure_gateway_performance.py verify \
+            --report dist-evidence/gateway-performance-v1.json
+      - name: Upload Gateway performance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: usagehub-gateway-performance-linux-x64
+          path: dist-evidence/gateway-performance-v1.json
           if-no-files-found: error

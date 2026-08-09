@@ -14,7 +14,12 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "verify_canary_candidate.py"
-VERSION = "0.7.1"
+RELEASE_STATE = json.loads(
+    (ROOT / "openusage_bar/resources/release-state.v1.json").read_text(
+        encoding="utf-8"
+    )
+)
+VERSION = RELEASE_STATE["currentVersion"]
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 REPOSITORY = "tttboy123/openusage-bar"
 WORKFLOW = f"{REPOSITORY}/.github/workflows/release.yml"
@@ -164,7 +169,8 @@ class CanaryCandidateVerifierTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout,
-            "canary_candidate_verified version=0.7.1 assets=6 attestations=6\n",
+            f"canary_candidate_verified version={VERSION} "
+            "assets=6 attestations=6\n",
         )
         invocations = self.gh_log.read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(invocations), 6)

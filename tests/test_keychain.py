@@ -1,3 +1,4 @@
+import builtins
 import io
 import json
 import subprocess
@@ -6,7 +7,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from openusage_bar.bounded_process import BoundedProcessError
 from openusage_bar.keychain import (
@@ -19,6 +20,7 @@ from openusage_bar.keychain import (
     MacOSKeychain,
     UnsupportedPlatformKeychainError,
     WindowsCredentialManagerAPI,
+    default_keychain,
     run_native_keychain_write,
 )
 
@@ -246,6 +248,50 @@ class KeychainTests(unittest.TestCase):
 
 
 class CrossPlatformKeychainTests(unittest.TestCase):
+    def test_linux_default_keychain_construction_does_not_import_secretstorage(self):
+        real_import = builtins.__import__
+        secretstorage_imports = []
+
+        def guarded_import(name, *args, **kwargs):
+            if name == "secretstorage":
+                secretstorage_imports.append(name)
+                raise ImportError("secretstorage must remain lazy")
+            return real_import(name, *args, **kwargs)
+
+        with (
+            patch("openusage_bar.keychain.sys.platform", "linux"),
+            patch("builtins.__import__", side_effect=guarded_import),
+        ):
+            keychain = default_keychain()
+
+        self.assertIsInstance(keychain, HeadlessKeychain)
+        self.assertEqual(secretstorage_imports, [])
+
+    def test_linux_credential_read_fails_closed_when_secretstorage_is_missing(self):
+        real_import = builtins.__import__
+        private_path = "/Users/private/.local/lib/python/secretstorage.py"
+
+        def unavailable_import(name, *args, **kwargs):
+            if name == "secretstorage":
+                raise ImportError(f"missing optional module at {private_path}")
+            return real_import(name, *args, **kwargs)
+
+        with (
+            patch("openusage_bar.keychain.sys.platform", "linux"),
+            patch("builtins.__import__", side_effect=unavailable_import),
+        ):
+            keychain = default_keychain()
+            with self.assertRaises(KeychainError) as raised:
+                keychain.get("provider-main")
+
+        public_error = str(raised.exception)
+        self.assertEqual(
+            public_error,
+            "Linux Secret Service requires the optional 'secretstorage' dependency",
+        )
+        self.assertNotIn("ImportError", public_error)
+        self.assertNotIn(private_path, public_error)
+
     def test_headless_keychain_maps_account_to_fixed_service(self):
         api = Mock()
         api.get.return_value = b"secret"
