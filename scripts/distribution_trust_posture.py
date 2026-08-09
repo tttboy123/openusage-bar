@@ -75,12 +75,28 @@ _NOTARIZATION_ENUMS = {
     "win": frozenset({"not_applicable"}),
     "linux": frozenset({"not_applicable"}),
 }
+_TRUST_DIAGNOSTIC_STAGES = frozenset(
+    {
+        "windows_tool_unavailable",
+        "windows_tool_failed",
+        "windows_status_shape",
+        "windows_status_unknown",
+    }
+)
 
 Runner = Callable[..., subprocess.CompletedProcess[Any]]
 
 
 def _inspection_error() -> ValueError:
     return ValueError("distribution trust inspection failed")
+
+
+def _emit_trust_diagnostic(stage: str) -> None:
+    if (
+        stage in _TRUST_DIAGNOSTIC_STAGES
+        and os.environ.get("OPENUSAGE_TRUST_STAGE_DIAGNOSTIC") == "1"
+    ):
+        print(f"distribution_trust_stage={stage}", file=sys.stderr)
 
 
 def _verification_error() -> ValueError:
@@ -327,11 +343,16 @@ def _windows_observation(artifact: Path, runner: Runner) -> tuple[str, str]:
         ),
     )
     outcome = _run_tool(runner, command, env=environment)
-    if outcome is None or outcome[0] != 0:
+    if outcome is None:
+        _emit_trust_diagnostic("windows_tool_unavailable")
+        signing = "unknown"
+    elif outcome[0] != 0:
+        _emit_trust_diagnostic("windows_tool_failed")
         signing = "unknown"
     else:
         values = outcome[1].splitlines()
         if len(values) != 1:
+            _emit_trust_diagnostic("windows_status_shape")
             signing = "unknown"
         else:
             signing = {
@@ -341,6 +362,8 @@ def _windows_observation(artifact: Path, runner: Runner) -> tuple[str, str]:
                 "NotTrusted": "invalid",
                 "UnknownError": "invalid",
             }.get(values[0].strip(), "unknown")
+            if signing == "unknown":
+                _emit_trust_diagnostic("windows_status_unknown")
     return signing, "not_applicable"
 
 

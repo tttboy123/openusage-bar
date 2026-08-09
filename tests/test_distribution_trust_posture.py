@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
+import os
+from pathlib import Path
 import plistlib
 import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from unittest import mock
 
 from openusage_bar.bounded_process import BoundedProcessError
 
@@ -412,6 +416,29 @@ class DistributionTrustPostureTests(unittest.TestCase):
                     self.assertNotIn(
                         "PRIVATE_CANARY", json.dumps(report, sort_keys=True)
                     )
+
+    def test_windows_tool_diagnostic_is_opt_in_closed_and_path_free(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package_root, artifact = _fixture(Path(directory), "win")
+            diagnostic = io.StringIO()
+            with mock.patch.dict(
+                os.environ,
+                {"OPENUSAGE_TRUST_STAGE_DIAGNOSTIC": "1"},
+            ), contextlib.redirect_stderr(diagnostic):
+                report = self.inspect(
+                    "win",
+                    package_root,
+                    artifact,
+                    ToolRunner(error=OSError("PRIVATE_CANARY")),
+                )
+
+            self.assertEqual(report["platformCodeSigning"], "unknown")
+            self.assertEqual(
+                diagnostic.getvalue(),
+                "distribution_trust_stage=windows_tool_unavailable\n",
+            )
+            self.assertNotIn(str(artifact), diagnostic.getvalue())
+            self.assertNotIn("PRIVATE_CANARY", diagnostic.getvalue())
 
     def test_platform_tool_argv_and_process_bounds_are_fixed(self):
         with tempfile.TemporaryDirectory() as directory:

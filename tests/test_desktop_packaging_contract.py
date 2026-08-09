@@ -818,6 +818,17 @@ class DesktopPackagingContractTests(unittest.TestCase):
             "FINAL_ARTIFACT: ${{ steps.artifact.outputs.path }}",
             final_gate,
         )
+        windows_audit = source.index("- name: Audit final Windows NSIS payload")
+        linux_audit = source.index("- name: Audit final Linux AppImage payload")
+        windows_gate = source[windows_audit:linux_audit]
+        self.assertIn(
+            'OPENUSAGE_TRUST_STAGE_DIAGNOSTIC: "1"',
+            windows_gate,
+        )
+        self.assertNotIn(
+            "OPENUSAGE_TRUST_STAGE_DIAGNOSTIC",
+            source[:windows_audit],
+        )
         self.assertIn('--artifact "$snapshot"', final_gate)
         self.assertIn("- name: Select audited final artifact", final_gate)
         self.assertIn(

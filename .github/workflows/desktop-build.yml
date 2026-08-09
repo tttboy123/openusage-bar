@@ -496,6 +496,7 @@ jobs:
         shell: pwsh
         env:
           FINAL_ARTIFACT: ${{ steps.artifact.outputs.path }}
+          OPENUSAGE_TRUST_STAGE_DIAGNOSTIC: "1"
           TRUST_REPORT: dist-evidence/usagehub-distribution-trust-${{ matrix.platform }}-${{ matrix.arch }}.json
         run: |
           $snapshotRoot = Join-Path $env:RUNNER_TEMP ("usagehub-nsis-snapshot-" + [guid]::NewGuid().ToString("N"))
