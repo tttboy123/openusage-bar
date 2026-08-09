@@ -372,7 +372,10 @@ function readPrivateToken(
     }
 
     let flags = fs.constants.O_RDONLY;
-    if (typeof fs.constants.O_NOFOLLOW === "number") {
+    if (
+      process.platform !== "win32" &&
+      typeof fs.constants.O_NOFOLLOW === "number"
+    ) {
       flags |= fs.constants.O_NOFOLLOW;
     }
     if (typeof fs.constants.O_CLOEXEC === "number") {

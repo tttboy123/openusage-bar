@@ -9,6 +9,7 @@ import path from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
+const approveFixtureWindowsAcl = () => true;
 
 test("discovers the private Local API and Gateway endpoints per platform", () => {
   const { discoverPrivateRuntime } = require("../gateway_proxy.js");
@@ -1506,7 +1507,11 @@ test("injects distinct private tokens and returns only bounded sanitized respons
       target: "/v1/snapshot",
       headers: { "if-none-match": 'W/"browser-etag"' },
     }),
-    { runtime, platform: process.platform },
+    {
+      runtime,
+      platform: process.platform,
+      verifyWindowsAcl: approveFixtureWindowsAcl,
+    },
   );
   const capabilityResult = await fetchRendererResponse(
     classifyRendererRequest({
@@ -1514,7 +1519,11 @@ test("injects distinct private tokens and returns only bounded sanitized respons
       target: "/gateway/v1/health",
       headers: {},
     }),
-    { runtime, platform: process.platform },
+    {
+      runtime,
+      platform: process.platform,
+      verifyWindowsAcl: approveFixtureWindowsAcl,
+    },
   );
 
   assert.equal(localResult.statusCode, 200);
@@ -1729,6 +1738,7 @@ test("never follows redirects and contains timeout or oversized Gateway failures
   const redirected = await fetchRendererResponse(localRequest, {
     runtime,
     platform: process.platform,
+    verifyWindowsAcl: approveFixtureWindowsAcl,
   });
   assert.equal(redirected.statusCode, 302);
   assert.equal(trapHits, 0);
@@ -1738,6 +1748,7 @@ test("never follows redirects and contains timeout or oversized Gateway failures
   const timedOut = await fetchRendererResponse(capabilityRequest, {
     runtime,
     platform: process.platform,
+    verifyWindowsAcl: approveFixtureWindowsAcl,
     deadlineMs: 50,
   });
   assert.ok(Date.now() - started < 1_000);
@@ -1752,6 +1763,7 @@ test("never follows redirects and contains timeout or oversized Gateway failures
     const invalid = await fetchRendererResponse(capabilityRequest, {
       runtime,
       platform: process.platform,
+      verifyWindowsAcl: approveFixtureWindowsAcl,
     });
     assert.equal(JSON.parse(invalid.body).observer.operational, "ready", mode);
     assert.deepEqual(
@@ -1765,6 +1777,7 @@ test("never follows redirects and contains timeout or oversized Gateway failures
   const gatewayRedirect = await fetchRendererResponse(capabilityRequest, {
     runtime,
     platform: process.platform,
+    verifyWindowsAcl: approveFixtureWindowsAcl,
   });
   assert.deepEqual(JSON.parse(gatewayRedirect.body).gateway.lastError, {
     code: "gateway_unavailable",
@@ -1810,6 +1823,7 @@ test("serves the renderer API boundary without reflecting credentials or private
       gateway: null,
     },
     platform: process.platform,
+    verifyWindowsAcl: approveFixtureWindowsAcl,
   });
   const rendererServer = http.createServer((request, response) => {
     if (!isRendererApiTarget(request.url)) {
@@ -1921,6 +1935,7 @@ test("bridges one canonical bounded Should-Send request without exposing private
       },
     },
     platform: process.platform,
+    verifyWindowsAcl: approveFixtureWindowsAcl,
   });
   const renderer = http.createServer((request, response) => {
     if (!isRendererApiTarget(request.url)) {
@@ -2088,6 +2103,7 @@ test("normalizes optional Should-Send timing before it crosses the renderer brid
       },
     },
     platform: process.platform,
+    verifyWindowsAcl: approveFixtureWindowsAcl,
   });
   const renderer = http.createServer((request, response) => {
     if (!isRendererApiTarget(request.url)) {
