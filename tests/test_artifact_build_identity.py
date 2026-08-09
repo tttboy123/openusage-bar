@@ -38,6 +38,19 @@ def _canonical_json(payload: dict[str, object]) -> bytes:
 
 
 class ArtifactBuildIdentityContractTests(unittest.TestCase):
+    def test_git_checkout_preserves_canonical_identity_line_endings(self):
+        attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+        rules = set(attributes.splitlines())
+        workflow = (ROOT / ".github/workflows/desktop-build.yml").read_text(
+            encoding="utf-8"
+        )
+
+        for path in (IDENTITY, WEB_COPY, SWIFT_COPY):
+            relative = path.relative_to(ROOT).as_posix()
+            with self.subTest(path=relative):
+                self.assertIn(f"{relative} text eol=lf", rules)
+        self.assertEqual(workflow.count('- ".gitattributes"'), 2)
+
     def test_identity_is_closed_canonical_and_derived_from_product_truth(self):
         truth = json.loads(TRUTH.read_text(encoding="utf-8"))
         identity = json.loads(IDENTITY.read_text(encoding="ascii"))
