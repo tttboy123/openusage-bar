@@ -217,10 +217,16 @@ def _write_posture_report(
         "schemaVersion": "distribution-trust-posture/v1",
         "targetPlatform": platform,
     }
-    path.write_text(
-        json.dumps(report, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
-        + "\n",
-        encoding="utf-8",
+    path.write_bytes(
+        (
+            json.dumps(
+                report,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("ascii")
     )
 
 
@@ -236,9 +242,8 @@ def _write_source_evidence(
         moonshot_verified=moonshot_verified,
         codex_verified=codex_verified,
     )
-    path.write_text(
-        source_evidence_module.canonical_evidence_json(payload),
-        encoding="ascii",
+    path.write_bytes(
+        source_evidence_module.canonical_evidence_json(payload).encode("ascii")
     )
     return payload
 

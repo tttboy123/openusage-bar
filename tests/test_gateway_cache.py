@@ -292,6 +292,48 @@ class SQLiteGatewayCacheSecurityTests(unittest.TestCase):
 
 
 class SQLiteGatewayCacheBehaviorTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows-native diagnostic contract")
+    def test_windows_private_wal_cache_initializes_without_hidden_platform_error(self):
+        failures: list[tuple[str, BaseException]] = []
+        original_prepare = gateway_cache._prepare_private_database
+
+        def recording_prepare(path):
+            try:
+                return original_prepare(path)
+            except BaseException as error:
+                failures.append(("prepare", error))
+                raise
+
+        class RecordingCache(SQLiteGatewayCache):
+            def _initialize_database(self):
+                try:
+                    return super()._initialize_database()
+                except BaseException as error:
+                    failures.append(("initialize", error))
+                    raise
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            gateway_cache,
+            "_prepare_private_database",
+            recording_prepare,
+        ):
+            try:
+                cache = RecordingCache(
+                    Path(directory) / "gateway-cache.sqlite3"
+                )
+            except RuntimeError:
+                self.assertTrue(failures)
+                stage, error = failures[0]
+                code = getattr(error, "winerror", None)
+                if code is None:
+                    code = getattr(error, "sqlite_errorcode", None)
+                self.fail(
+                    "Windows cache initialization failed "
+                    f"stage={stage} type={type(error).__name__} code={code}"
+                )
+            else:
+                cache.close()
+
     def test_hot_exact_hit_reuses_the_already_validated_safe_response(self) -> None:
         _, keys, candidate = _candidate(
             "hot validation request",

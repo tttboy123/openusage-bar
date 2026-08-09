@@ -445,9 +445,10 @@ class ObserverSourceNativeEvidenceTests(unittest.TestCase):
             self.assertNotIn(private_value, stderr.getvalue())
 
             evidence_path = root / "evidence.json"
-            evidence_path.write_text(
-                evidence.canonical_evidence_json(valid_payload("linux")),
-                encoding="ascii",
+            evidence_path.write_bytes(
+                evidence.canonical_evidence_json(
+                    valid_payload("linux")
+                ).encode("ascii")
             )
             stdout = io.StringIO()
             stderr = io.StringIO()

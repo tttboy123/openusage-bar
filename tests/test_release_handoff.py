@@ -435,9 +435,10 @@ class ReleaseHandoffTests(unittest.TestCase):
             )
             legacy = json.loads(evidence.read_text(encoding="ascii"))
             del legacy["observerSourceEvidence"]
-            evidence.write_text(
-                json.dumps(legacy, indent=2, sort_keys=True) + "\n",
-                encoding="ascii",
+            evidence.write_bytes(
+                (
+                    json.dumps(legacy, indent=2, sort_keys=True) + "\n"
+                ).encode("ascii")
             )
             bundle = root / "legacy-bundle"
 

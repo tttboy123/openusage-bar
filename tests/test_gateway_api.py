@@ -964,7 +964,7 @@ class GatewayHTTPTests(unittest.TestCase):
         router = GatewayRouter(mode=GatewayMode.ADVISE, policy=policy, proxy=None)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            relative = Path(os.path.relpath(root / "relative.token", Path.cwd()))
+            relative = Path("relative.token")
             with self.assertRaises(ValueError):
                 create_gateway_server(router, port=0, token_path=relative)
             self.assertFalse((root / "relative.token").exists())

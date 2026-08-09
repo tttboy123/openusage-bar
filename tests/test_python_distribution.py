@@ -308,8 +308,9 @@ class PythonDistributionContractTests(unittest.TestCase):
                     "wheel distribution identity must remain openusage-bar on macOS",
                 )
                 metadata = archive.read(metadata_member).decode("utf-8")
-                self.assertIn("\nName: openusage-bar\n", f"\n{metadata}")
-                self.assertIn(f"\nVersion: {version}\n", f"\n{metadata}")
+                metadata_lines = metadata.splitlines()
+                self.assertIn("Name: openusage-bar", metadata_lines)
+                self.assertIn(f"Version: {version}", metadata_lines)
 
         source_python_members = {
             path.relative_to(ROOT).as_posix()

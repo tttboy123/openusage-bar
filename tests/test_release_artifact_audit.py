@@ -2,6 +2,7 @@ import io
 import hashlib
 import inspect
 import json
+import os
 import plistlib
 import stat
 import struct
@@ -168,6 +169,33 @@ def write_desktop_package(
 
 
 class ReleaseArtifactAuditTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows-native file identity contract")
+    def test_windows_path_and_descriptor_metadata_share_stable_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "app.asar"
+            _write_asar(path)
+            linked = path.lstat()
+            descriptor = os.open(
+                path,
+                os.O_RDONLY | getattr(os, "O_BINARY", 0),
+            )
+            try:
+                opened = os.fstat(descriptor)
+            finally:
+                os.close(descriptor)
+
+        fields = (
+            "st_dev",
+            "st_ino",
+            "st_size",
+            "st_mtime_ns",
+            "st_ctime_ns",
+        )
+        self.assertEqual(
+            tuple(getattr(linked, field) for field in fields),
+            tuple(getattr(opened, field) for field in fields),
+        )
+
     def test_cli_reports_only_a_safe_rule_identifier(self):
         error = io.StringIO()
         with redirect_stderr(error):
