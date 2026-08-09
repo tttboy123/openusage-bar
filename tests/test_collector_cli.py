@@ -319,6 +319,11 @@ class CollectorCLITests(unittest.TestCase):
 
     def test_manual_windows_tcp_daemon_uses_shared_default_token_path_and_preserves_override(self):
         local_app_data = r"C:\Users\example\AppData\Local"
+
+        class CatalogMonitor:
+            def maybe_run(self):
+                return None
+
         cases = (
             (
                 "explicit",
@@ -365,6 +370,7 @@ class CollectorCLITests(unittest.TestCase):
                         refresher=FakeRefresher(),
                         stop_event=threading.Event(),
                         waiter=lambda _seconds: True,
+                        catalog_monitor=CatalogMonitor(),
                     )
 
                 self.assertEqual((code, out, err), (0, "", ""))
