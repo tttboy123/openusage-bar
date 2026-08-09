@@ -691,7 +691,8 @@ class SQLiteGatewayCacheBehaviorTests(unittest.TestCase):
             try:
                 self.assertEqual(cache.journal_mode, "wal")
                 self.assertEqual(cache.size_cap_bytes, 100 * 1024 * 1024)
-                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                if os.name != "nt":
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
             finally:
                 cache.close()
 

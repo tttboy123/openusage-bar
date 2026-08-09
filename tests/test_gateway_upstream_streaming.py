@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Iterable
 from unittest.mock import patch
@@ -613,10 +614,14 @@ class GatewayUpstreamStreamingContractTests(unittest.TestCase):
                 _TrackedChunks((complete_wire,)),
             )
 
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            cache = SQLiteGatewayCache(
+                Path(directory) / "gateway-cache.sqlite3"
+            )
+            stack.callback(cache.close)
             runtime = GatewayRuntime(
                 egress=egress,
-                cache=SQLiteGatewayCache(Path(directory) / "gateway-cache.sqlite3"),
+                cache=cache,
             )
             delivery = _dispatch_events(runtime, _payload())
             handler = _bare_handler(_FailOnWrite(fail_on_write=2))
@@ -648,7 +653,11 @@ class GatewayUpstreamStreamingContractTests(unittest.TestCase):
             "terminal flush": {"fail_on_flush": 3},
         }
         for name, writer_options in failures.items():
-            with self.subTest(case=name), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(case=name),
+                tempfile.TemporaryDirectory() as directory,
+                ExitStack() as stack,
+            ):
                 close_probe = _CloseProbe()
                 calls = 0
 
@@ -666,11 +675,13 @@ class GatewayUpstreamStreamingContractTests(unittest.TestCase):
                         _TrackedChunks((retry_wire,)),
                     )
 
+                cache = SQLiteGatewayCache(
+                    Path(directory) / "gateway-cache.sqlite3"
+                )
+                stack.callback(cache.close)
                 runtime = GatewayRuntime(
                     egress=egress,
-                    cache=SQLiteGatewayCache(
-                        Path(directory) / "gateway-cache.sqlite3"
-                    ),
+                    cache=cache,
                 )
                 delivery = _dispatch_events(runtime, _payload())
                 writer = _FailOnWrite(**writer_options)
@@ -716,7 +727,11 @@ class GatewayUpstreamStreamingContractTests(unittest.TestCase):
             "malformed terminal": (delta, b"data: {not-json}\n\n"),
         }
         for name, first_chunks in cases.items():
-            with self.subTest(case=name), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(case=name),
+                tempfile.TemporaryDirectory() as directory,
+                ExitStack() as stack,
+            ):
                 calls = 0
 
                 def egress(*_args, **_kwargs):
@@ -733,11 +748,13 @@ class GatewayUpstreamStreamingContractTests(unittest.TestCase):
                         _TrackedChunks((wire,)),
                     )
 
+                cache = SQLiteGatewayCache(
+                    Path(directory) / "gateway-cache.sqlite3"
+                )
+                stack.callback(cache.close)
                 runtime = GatewayRuntime(
                     egress=egress,
-                    cache=SQLiteGatewayCache(
-                        Path(directory) / "gateway-cache.sqlite3"
-                    ),
+                    cache=cache,
                 )
 
                 first = list(_dispatch_events(runtime, _payload()))

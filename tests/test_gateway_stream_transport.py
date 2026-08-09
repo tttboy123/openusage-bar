@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 
 import openusage_bar.gateway.server as gateway_server_module
@@ -63,15 +64,17 @@ class GatewayStreamTransportTests(unittest.TestCase):
             },
         }
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            cache = SQLiteGatewayCache(
+                Path(directory) / "gateway-cache.sqlite3"
+            )
+            stack.callback(cache.close)
             router = GatewayRouter(
                 GatewayMode.GATEWAY,
                 policy=None,
                 proxy=GatewayRuntime(
                     egress=egress,
-                    cache=SQLiteGatewayCache(
-                        Path(directory) / "gateway-cache.sqlite3"
-                    ),
+                    cache=cache,
                 ),
             )
 
