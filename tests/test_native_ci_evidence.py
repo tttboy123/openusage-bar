@@ -1638,6 +1638,16 @@ class NativeCiEvidenceTests(unittest.TestCase):
             )
             self.assertNotIn("Traceback", verified.stderr)
 
+    def test_json_depth_preflight_ignores_brackets_inside_strings(self):
+        evidence_module._preflight_json_depth(
+            json.dumps({"value": "[" * 100 + "\\\"" + "]" * 100})
+        )
+        with self.assertRaisesRegex(
+            evidence_module.EvidenceError,
+            "^evidence_depth_invalid$",
+        ):
+            evidence_module._preflight_json_depth("[" * 17 + "]" * 17)
+
     def test_workflow_fetches_release_tags_before_product_truth_verification(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         checkout_start = source.index("- name: Check out source")

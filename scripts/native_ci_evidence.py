@@ -791,6 +791,29 @@ def _validate_json_complexity(value: Any) -> None:
             stack.extend((item, depth + 1) for item in current)
 
 
+def _preflight_json_depth(raw: str) -> None:
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > 16:
+                _fail("evidence_depth_invalid")
+        elif character in "]}":
+            depth -= 1
+
+
 def _load_evidence(path: Path) -> tuple[dict[str, Any], str]:
     descriptor, metadata = _open_regular(path, "evidence")
     if metadata.st_size <= 0 or metadata.st_size > MAX_EVIDENCE_BYTES:
@@ -811,6 +834,7 @@ def _load_evidence(path: Path) -> tuple[dict[str, Any], str]:
         if total != metadata.st_size or not _same_file(metadata, after):
             _fail("evidence_not_regular")
         raw = b"".join(chunks).decode("utf-8")
+        _preflight_json_depth(raw)
         payload = json.loads(
             raw,
             object_pairs_hook=_reject_duplicate_pairs,
