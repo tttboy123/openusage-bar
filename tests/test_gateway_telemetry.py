@@ -5,8 +5,9 @@ import sqlite3
 import stat
 import tempfile
 import threading
+import time
 import unittest
-from contextlib import closing
+from contextlib import closing, contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -497,6 +498,79 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
                     "SELECT COUNT(*) FROM request_aggregates"
                 ).fetchone()[0]
             self.assertEqual(count, 4)
+
+    def test_independent_handles_serialize_record_writers(self) -> None:
+        """Independent handles coordinate ordinary in-process record writes."""
+
+        now = datetime(2026, 8, 8, 12, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "gateway-telemetry.sqlite3"
+            stores = tuple(GatewayTelemetryStore(path) for _index in range(4))
+            barrier = threading.Barrier(len(stores))
+            writer_lock = threading.Lock()
+            active_writers = 0
+            maximum_active_writers = 0
+            original_write_connection = GatewayTelemetryStore._write_connection
+
+            @contextmanager
+            def slow_write_connection(
+                store: GatewayTelemetryStore,
+                *,
+                busy_timeout_ms: int = 5_000,
+            ):
+                nonlocal active_writers, maximum_active_writers
+                with writer_lock:
+                    active_writers += 1
+                    maximum_active_writers = max(
+                        maximum_active_writers,
+                        active_writers,
+                    )
+                    if active_writers > 1:
+                        active_writers -= 1
+                        raise sqlite3.OperationalError(
+                            "concurrent telemetry writers"
+                        )
+                try:
+                    time.sleep(0.05)
+                    with original_write_connection(
+                        store,
+                        busy_timeout_ms=busy_timeout_ms,
+                    ) as connection:
+                        yield connection
+                finally:
+                    with writer_lock:
+                        active_writers -= 1
+
+            def write(index: int) -> None:
+                barrier.wait(timeout=5)
+                _record_request(
+                    stores[index],
+                    request_id=f"serialized-{index}",
+                    finished_at=now + timedelta(milliseconds=index),
+                )
+
+            try:
+                with patch.object(
+                    GatewayTelemetryStore,
+                    "_write_connection",
+                    slow_write_connection,
+                ), ThreadPoolExecutor(max_workers=len(stores)) as pool:
+                    futures = [
+                        pool.submit(write, index)
+                        for index in range(len(stores))
+                    ]
+                    for future in futures:
+                        future.result(timeout=5)
+            finally:
+                for store in stores:
+                    store.close()
+
+            with closing(sqlite3.connect(path)) as inspector:
+                count = inspector.execute(
+                    "SELECT COUNT(*) FROM request_aggregates"
+                ).fetchone()[0]
+            self.assertEqual(count, len(stores))
+            self.assertEqual(maximum_active_writers, 1)
 
 
 if __name__ == "__main__":

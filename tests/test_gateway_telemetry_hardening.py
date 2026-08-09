@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import openusage_bar.gateway.telemetry as telemetry_module
 from openusage_bar.gateway.providers import ProviderResult
 from openusage_bar.gateway.runtime import GatewayRuntime
 from openusage_bar.gateway.telemetry import GatewayTelemetryStore
@@ -531,6 +532,43 @@ class GatewayTelemetryScopePrivacyTests(unittest.TestCase):
 
 
 class GatewayTelemetryContentionTests(unittest.TestCase):
+    def test_windows_acl_finalization_stays_off_completed_response_hot_path(
+        self,
+    ) -> None:
+        class WindowsSecurity:
+            pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "gateway-telemetry.sqlite3"
+            store = GatewayTelemetryStore(path)
+            runtime = GatewayRuntime(
+                egress=lambda *_args, **_kwargs: _json_result(),
+                telemetry=store,
+            )
+
+            def slow_finalization(_path: Path) -> None:
+                time.sleep(_MAX_COMPLETED_RESPONSE_SECONDS + 0.05)
+
+            try:
+                with patch.object(
+                    telemetry_module,
+                    "_WINDOWS_FILE_SECURITY",
+                    WindowsSecurity(),
+                ), patch.object(
+                    telemetry_module,
+                    "_tighten_database_files",
+                    side_effect=slow_finalization,
+                ) as finalization:
+                    started = time.monotonic()
+                    response = runtime(_payload("safe-windows-model"))
+                    elapsed = time.monotonic() - started
+            finally:
+                store.close()
+
+        self.assertEqual(response["status"], "complete")
+        self.assertLess(elapsed, _MAX_COMPLETED_RESPONSE_SECONDS)
+        finalization.assert_not_called()
+
     def test_burn_query_detects_write_gap_created_during_its_read(self) -> None:
         """A lock-racing completion invalidates an already-started query."""
 

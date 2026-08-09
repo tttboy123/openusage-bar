@@ -47,6 +47,7 @@ SANITIZED_ERROR_CODES = frozenset(
 _BUSY_TIMEOUT_SECONDS = 5.0
 _BUSY_TIMEOUT_MS = int(_BUSY_TIMEOUT_SECONDS * 1_000)
 _OPERATION_BUSY_TIMEOUT_MS = 50
+_IN_PROCESS_WRITE_WAIT_SECONDS = 0.5
 _MAX_SQLITE_INTEGER = (1 << 63) - 1
 _MAX_REQUEST_ID_BYTES = 4_096
 _MAX_MODEL_LENGTH = 256
@@ -129,14 +130,32 @@ _EXPECTED_OBJECTS = {
 
 
 class _IncompleteWindowState:
-    """Share known telemetry gaps across handles for one database path."""
+    """Share telemetry gaps and bounded writer coordination for one path."""
 
-    __slots__ = ("_lock", "_next_generation", "_latest_by_scope")
+    __slots__ = (
+        "_lock",
+        "_writer_lock",
+        "_next_generation",
+        "_latest_by_scope",
+    )
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._writer_lock = threading.Lock()
         self._next_generation = 0
         self._latest_by_scope: dict[tuple[str, str], tuple[str, int]] = {}
+
+    @contextmanager
+    def serialized_writer(self) -> Iterator[None]:
+        acquired = self._writer_lock.acquire(
+            timeout=_IN_PROCESS_WRITE_WAIT_SECONDS
+        )
+        if not acquired:
+            raise RuntimeError(_OPERATION_ERROR)
+        try:
+            yield
+        finally:
+            self._writer_lock.release()
 
     def mark(self, provider_id: str, model_scope: str, finished_at: str) -> None:
         key = (provider_id, model_scope)
@@ -322,36 +341,38 @@ class GatewayTelemetryStore:
         )
         try:
             with self._try_operation_lock():
-                cutoff = self._automatic_retention_cutoff()
-                with self._write_connection(
-                    busy_timeout_ms=_OPERATION_BUSY_TIMEOUT_MS
-                ) as connection:
-                    connection.execute(
-                        """
-                        INSERT INTO request_aggregates (
-                            request_id_hash, provider_id, model_id, started_at,
-                            finished_at, status_class, input_tokens,
-                            output_tokens, latency_ms, estimated_cost,
-                            actual_cost, cache_outcome, fallback_count, error_code
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(request_id_hash) DO UPDATE SET
-                            provider_id = excluded.provider_id,
-                            model_id = excluded.model_id,
-                            started_at = excluded.started_at,
-                            finished_at = excluded.finished_at,
-                            status_class = excluded.status_class,
-                            input_tokens = excluded.input_tokens,
-                            output_tokens = excluded.output_tokens,
-                            latency_ms = excluded.latency_ms,
-                            estimated_cost = excluded.estimated_cost,
-                            actual_cost = excluded.actual_cost,
-                            cache_outcome = excluded.cache_outcome,
-                            fallback_count = excluded.fallback_count,
-                            error_code = excluded.error_code
-                        """,
-                        record,
-                    )
-                    self._delete_before_cutoff(connection, cutoff)
+                with self._incomplete_state.serialized_writer():
+                    cutoff = self._automatic_retention_cutoff()
+                    with self._write_connection(
+                        busy_timeout_ms=_OPERATION_BUSY_TIMEOUT_MS
+                    ) as connection:
+                        connection.execute(
+                            """
+                            INSERT INTO request_aggregates (
+                                request_id_hash, provider_id, model_id,
+                                started_at, finished_at, status_class,
+                                input_tokens, output_tokens, latency_ms,
+                                estimated_cost, actual_cost, cache_outcome,
+                                fallback_count, error_code
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(request_id_hash) DO UPDATE SET
+                                provider_id = excluded.provider_id,
+                                model_id = excluded.model_id,
+                                started_at = excluded.started_at,
+                                finished_at = excluded.finished_at,
+                                status_class = excluded.status_class,
+                                input_tokens = excluded.input_tokens,
+                                output_tokens = excluded.output_tokens,
+                                latency_ms = excluded.latency_ms,
+                                estimated_cost = excluded.estimated_cost,
+                                actual_cost = excluded.actual_cost,
+                                cache_outcome = excluded.cache_outcome,
+                                fallback_count = excluded.fallback_count,
+                                error_code = excluded.error_code
+                            """,
+                            record,
+                        )
+                        self._delete_before_cutoff(connection, cutoff)
         except (OSError, sqlite3.Error):
             self._mark_incomplete(record)
             raise RuntimeError(_OPERATION_ERROR) from None
@@ -581,7 +602,12 @@ class GatewayTelemetryStore:
             yield connection
         finally:
             connection.close()
-            _tighten_database_files(self.path)
+            # Windows sidecars inherit the protected DACL established before
+            # the database is opened. Re-running native ACL mutation for every
+            # completed response is both redundant and an unbounded hot-path
+            # operation. POSIX still tightens each transient WAL/SHM file.
+            if _WINDOWS_FILE_SECURITY is None:
+                _tighten_database_files(self.path)
 
     @contextmanager
     def _read_connection(
