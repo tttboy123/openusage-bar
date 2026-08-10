@@ -488,19 +488,27 @@ jobs:
           mkdir -p "$settings_smoke_home"
           export HOME="$settings_smoke_home"
           export USERPROFILE="$settings_smoke_home"
+          settings_expected='{"version":1,"ok":false,"code":"not_found"}'
+          editor_expected=$'{"version":1,"event":"ready"}\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}'
+          account_smoke_expected='{"version":1,"ok":true,"code":"ok"}'
+          if [[ "${{ matrix.platform }}" == "win" ]]; then
+            settings_expected+=$'\r'
+            editor_expected=$'{"version":1,"event":"ready"}\r\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}\r'
+            account_smoke_expected+=$'\r'
+          fi
           set +e
           settings_output="$(printf '%s' '{"version":1,"action":"remove_pool","pool":{"poolId":"ci-smoke"},"expectedRevision":1}' | "./dist-settings/${{ matrix.settings }}" gateway-account-mutate 2>"$RUNNER_TEMP/openusage-settings-smoke.stderr")"
           settings_status=$?
           set -e
           test "$settings_status" -eq 1
-          test "$settings_output" = '{"version":1,"ok":false,"code":"not_found"}'
+          test "$settings_output" = "$settings_expected"
           test ! -s "$RUNNER_TEMP/openusage-settings-smoke.stderr"
           set +e
           editor_output="$("./dist-settings/${{ matrix.settings }}" gateway-account-editor --ui-self-test 2>"$RUNNER_TEMP/openusage-settings-editor-smoke.stderr")"
           editor_status=$?
           set -e
           test "$editor_status" -eq 0
-          test "$editor_output" = $'{"version":1,"event":"ready"}\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}'
+          test "$editor_output" = "$editor_expected"
           test ! -s "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr"
           if [[ "${{ matrix.platform }}" == "linux" ]]; then
             test -n "$RUNNER_TEMP"
@@ -527,6 +535,7 @@ jobs:
             ACCOUNT_SMOKE_HOME="$settings_smoke_home" \
             ACCOUNT_KEYRING_ROOT="$account_keyring_root" \
             ACCOUNT_SETTINGS_HELPER="./dist-settings/${{ matrix.settings }}" \
+            ACCOUNT_SMOKE_EXPECTED="$account_smoke_expected" \
             ACCOUNT_SMOKE_STDERR="$RUNNER_TEMP/openusage-account-credential-smoke.stderr" \
               dbus-run-session -- bash -euo pipefail <<'ACCOUNT_CREDENTIAL_SESSION'
               export HOME="$ACCOUNT_SMOKE_HOME"
@@ -550,10 +559,10 @@ jobs:
               )"
               account_smoke_status=$?
               set -e
-              if [[ "$account_smoke_status" -ne 0 || "$account_smoke_output" != '{"version":1,"ok":true,"code":"ok"}' || -s "$ACCOUNT_SMOKE_STDERR" ]]; then
+              if [[ "$account_smoke_status" -ne 0 || "$account_smoke_output" != "$ACCOUNT_SMOKE_EXPECTED" || -s "$ACCOUNT_SMOKE_STDERR" ]]; then
                 printf '%s\n' "$account_smoke_output"
                 test "$account_smoke_status" -eq 0
-                test "$account_smoke_output" = '{"version":1,"ok":true,"code":"ok"}'
+                test "$account_smoke_output" = "$ACCOUNT_SMOKE_EXPECTED"
                 test ! -s "$ACCOUNT_SMOKE_STDERR"
               fi
           ACCOUNT_CREDENTIAL_SESSION
@@ -569,10 +578,10 @@ jobs:
             )"
             account_smoke_status=$?
             set -e
-            if [[ "$account_smoke_status" -ne 0 || "$account_smoke_output" != '{"version":1,"ok":true,"code":"ok"}' || -s "$account_smoke_stderr" ]]; then
+            if [[ "$account_smoke_status" -ne 0 || "$account_smoke_output" != "$account_smoke_expected" || -s "$account_smoke_stderr" ]]; then
               printf '%s\n' "$account_smoke_output"
               test "$account_smoke_status" -eq 0
-              test "$account_smoke_output" = '{"version":1,"ok":true,"code":"ok"}'
+              test "$account_smoke_output" = "$account_smoke_expected"
               test ! -s "$account_smoke_stderr"
             fi
           fi

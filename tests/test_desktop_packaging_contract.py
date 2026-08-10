@@ -732,6 +732,24 @@ class DesktopPackagingContractTests(unittest.TestCase):
             "set -e command substitution must not hide the safe stdout envelope",
         )
 
+    def test_windows_settings_smoke_requires_exact_native_crlf_transport(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        steps = _mapping_list(source, section="steps", item_indent=6)
+        smoke = next(
+            step for step in steps if step.get("name") == "Smoke bundled settings helper"
+        )["run"]
+
+        self.assertIn('if [[ "${{ matrix.platform }}" == "win" ]]; then', smoke)
+        self.assertIn("settings_expected+=$'\\r'", smoke)
+        self.assertIn("editor_expected=$'", smoke)
+        self.assertIn("\\r\\n", smoke)
+        self.assertIn("account_smoke_expected+=$'\\r'", smoke)
+        self.assertNotRegex(
+            smoke,
+            r"tr\s+.*-d|sed\s+.*\\r|replace\(.*\\r|strip\(",
+            "Windows CRLF must be matched exactly, not normalized away",
+        )
+
     def test_linux_native_gateway_account_credential_smoke_uses_pinned_private_secret_service_session(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         steps = _mapping_list(source, section="steps", item_indent=6)
