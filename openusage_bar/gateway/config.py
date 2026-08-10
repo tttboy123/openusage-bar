@@ -75,6 +75,9 @@ class GatewayConfig:
         account_ids = tuple(account.account_id for account in self.accounts)
         if len(set(account_ids)) != len(account_ids):
             raise ValueError("Gateway account IDs must be unique.")
+        account_display_ids = tuple(account.display_id for account in self.accounts)
+        if len(set(account_display_ids)) != len(account_display_ids):
+            raise ValueError("Gateway account display IDs must be unique.")
         pool_ids = tuple(pool.pool_id for pool in self.account_pools)
         if len(set(pool_ids)) != len(pool_ids):
             raise ValueError("Gateway pool IDs must be unique.")

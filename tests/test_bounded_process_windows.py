@@ -439,6 +439,85 @@ class ProcessScopeTests(unittest.TestCase):
                 )
                 self.assertEqual(process.kill_calls, 0)
 
+    def test_cleanup_observed_output_overflow_wins_over_timeout(self):
+        release_reader = threading.Event()
+        stream = FakeStream(on_close=release_reader.set)
+        process = FakeProcess(stdout=stream, poll_result=None)
+        scope = FakeScope(exited=False)
+
+        def read_stream(_stream, _target, _limit, overflow, _reader_failed):
+            release_reader.wait(1)
+            overflow.set()
+
+        with (
+            patch.object(bounded_process.subprocess, "Popen", return_value=process),
+            patch.object(bounded_process, "_read_stream", new=read_stream),
+            patch.object(
+                bounded_process.time,
+                "monotonic",
+                side_effect=[0.0, 2.0],
+            ),
+            self.assertRaises(BoundedProcessError) as raised,
+        ):
+            bounded_process.run_bounded(
+                ["fake-exporter"],
+                timeout=1,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                _platform="win32",
+                _scope_factory=lambda _platform: scope,
+            )
+
+        self.assertEqual(raised.exception.code, "output_overflow")
+        self.assertTrue(release_reader.is_set())
+        self.assertEqual(scope.calls.count(("terminate",)), 1)
+        self.assertEqual(scope.calls.count(("close",)), 1)
+        self.assertFalse(
+            any(
+                thread.name == "bounded-process-reader" and thread.is_alive()
+                for thread in threading.enumerate()
+            )
+        )
+
+    def test_process_exit_does_not_hide_concurrent_output_overflow(self):
+        release_reader = threading.Event()
+        reader_done = threading.Event()
+        stream = FakeStream()
+        process = FakeProcess(stdout=stream, poll_result=0)
+
+        class OverflowDuringPollScope(FakeScope):
+            def direct_child_exited(self):
+                self.calls.append(("poll",))
+                release_reader.set()
+                reader_done.wait(1)
+                return True
+
+        scope = OverflowDuringPollScope(exited=True)
+
+        def read_stream(_stream, _target, _limit, overflow, _reader_failed):
+            release_reader.wait(1)
+            overflow.set()
+            reader_done.set()
+
+        with (
+            patch.object(bounded_process.subprocess, "Popen", return_value=process),
+            patch.object(bounded_process, "_read_stream", new=read_stream),
+            self.assertRaises(BoundedProcessError) as raised,
+        ):
+            bounded_process.run_bounded(
+                ["fake-exporter"],
+                timeout=1,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                _platform="win32",
+                _scope_factory=lambda _platform: scope,
+            )
+
+        self.assertEqual(raised.exception.code, "output_overflow")
+        self.assertTrue(reader_done.is_set())
+        self.assertEqual(scope.calls.count(("terminate",)), 1)
+        self.assertEqual(scope.calls.count(("close",)), 1)
+
     def test_unexpected_input_writer_failure_is_sanitized_and_cleans_scope(self):
         input_stream = FakeStream()
         process = FakeProcess(stdin=input_stream, poll_result=None)

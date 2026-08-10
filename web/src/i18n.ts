@@ -46,6 +46,7 @@ export const messages = {
     getApiKey: "Get API Key",
     connected: "connected",
     addConnection: "Add Connection",
+    browseProviderPresets: "Browse provider presets",
     settings: "Settings",
     comingSoon: "This surface ships with the UsageHub v0.8 cross-platform client.",
     addProvider: "Add Provider",
@@ -55,8 +56,8 @@ export const messages = {
     apiKey: "API Key",
     showApiKey: "Show API key",
     hideApiKey: "Hide API key",
-    testEndpoint: "Test Endpoint",
-    testing: "Testing...",
+    checkConsoleReachability: "Check console reachability",
+    checkingConsoleReachability: "Checking console reachability…",
     back: "Back",
     save: "Save",
     apiKeyRequired: "API key is required",
@@ -380,7 +381,7 @@ export const messages = {
     copy: "Copy",
     copied: "Copied",
     daysLabel: "days",
-    webPreviewNote: "Credentials are never entered or saved here. Add them through the native menu bar / tray app.",
+    webPreviewNote: "This browser surface is read-only. It never accepts or stores credentials.",
     savedPreview: "Saved to local preview",
     showLess: "Show less",
     accountPoolsTitle: "Account Pools",
@@ -398,6 +399,43 @@ export const messages = {
       "Pool management is available only in the trusted desktop app. This Web view is read-only.",
     accountPoolsTrusted: "Pool management is available through the trusted desktop host.",
     accountPoolsNoAccounts: "Add at least one account before creating a Pool.",
+    addGatewayAccount: "Add Gateway account",
+    gatewayAccountActions: "Gateway account actions",
+    editGatewayAccount: "Edit account",
+    replaceGatewayCredential: "Replace credential",
+    removeGatewayAccount: "Remove account",
+    chooseGatewayProvider: "Gateway Provider",
+    gatewayAccountSecureWindow:
+      "Choose a Gateway Provider, then enter account details only in the trusted secure window.",
+    gatewayAccountNoCredentialFields:
+      "No credential fields are shown here. Secrets never enter this renderer.",
+    continueSecureWindow: "Continue in secure window",
+    openingSecureWindow: "Opening secure window…",
+    gatewayAccountTrusted:
+      "Gateway accounts can be managed through the trusted desktop host. Account secrets stay in the secure window.",
+    gatewayAccountChecking: "Checking secure-window availability…",
+    gatewayAccountReadOnly:
+      "Gateway account management is unavailable here. This Web view is read-only and does not render host actions.",
+    gatewayAccountOperationOpened: "Secure window opened. Complete or cancel the action there.",
+    gatewayAccountOperationPending: "Waiting for the secure window…",
+    gatewayAccountOperationSucceeded: "Gateway account updated.",
+    gatewayAccountOperationCancelled: "Gateway account action cancelled. No change was made.",
+    gatewayAccountOperationTimedOut: "The secure window timed out. No change was made.",
+    gatewayPublicListRefreshFailed:
+      "The Gateway account was updated, but the public account list could not be refreshed.",
+    gatewayAccountOperationUnavailable:
+      "Gateway account management is temporarily unavailable. No change was made.",
+    gatewayAccountErrorAccountInUse:
+      "This account is still used by a Pool. Remove it from every Pool before trying again.",
+    gatewayAccountErrorNotFound: "This Gateway account no longer exists.",
+    gatewayAccountErrorAlreadyExists: "A matching Gateway account already exists.",
+    gatewayAccountErrorInvalidInput: "Check the account details in the secure window and try again.",
+    gatewayAccountErrorCredentialUnavailable:
+      "The operating-system credential store is unavailable. No credential was changed.",
+    gatewayAccountErrorConfigWriteFailed:
+      "The Gateway configuration could not be saved. No partial change was kept.",
+    gatewayAccountErrorHelperBusy:
+      "Another secure account window is already open. Finish or cancel it, then try again.",
     poolDefinitionsTitle: "Configured Pools",
     poolDefinitionsEmpty: "No Pools are configured.",
     poolId: "Pool ID",
@@ -494,6 +532,7 @@ export const messages = {
     getApiKey: "获取 API Key",
     connected: "已连接",
     addConnection: "添加连接",
+    browseProviderPresets: "浏览 Provider 预设",
     settings: "设置",
     comingSoon: "该界面随 UsageHub v0.8 跨端客户端提供。",
     addProvider: "添加 Provider",
@@ -503,8 +542,8 @@ export const messages = {
     apiKey: "API Key",
     showApiKey: "显示 API Key",
     hideApiKey: "隐藏 API Key",
-    testEndpoint: "测速",
-    testing: "测速中...",
+    checkConsoleReachability: "检查控制台可访问性",
+    checkingConsoleReachability: "正在检查控制台可访问性…",
     back: "返回",
     save: "保存",
     apiKeyRequired: "需要填写 API Key",
@@ -811,7 +850,7 @@ export const messages = {
     copy: "复制",
     copied: "已复制",
     daysLabel: "天",
-    webPreviewNote: "此处不会输入或保存凭证。请通过原生菜单栏/托盘 App 添加。",
+    webPreviewNote: "此浏览器界面为只读，不会接收或保存任何凭证。",
     savedPreview: "已保存到本地预览",
     showLess: "收起",
     accountPoolsTitle: "账号池",
@@ -828,6 +867,43 @@ export const messages = {
       "Pool 管理仅在可信桌面应用中可用。当前 Web 视图为只读。",
     accountPoolsTrusted: "可通过可信桌面宿主管理 Pool。",
     accountPoolsNoAccounts: "请先添加至少一个账号，再创建 Pool。",
+    addGatewayAccount: "添加 Gateway 账号",
+    gatewayAccountActions: "Gateway 账号操作",
+    editGatewayAccount: "编辑账号",
+    replaceGatewayCredential: "替换凭证",
+    removeGatewayAccount: "移除账号",
+    chooseGatewayProvider: "Gateway Provider",
+    gatewayAccountSecureWindow:
+      "选择 Gateway Provider 后，仅在可信安全窗口中输入账号详情。",
+    gatewayAccountNoCredentialFields:
+      "此处不显示凭证字段，Secret 绝不会进入当前渲染端。",
+    continueSecureWindow: "在安全窗口中继续",
+    openingSecureWindow: "正在打开安全窗口…",
+    gatewayAccountTrusted:
+      "可通过可信桌面宿主管理 Gateway 账号；账号 Secret 仅留在安全窗口中。",
+    gatewayAccountChecking: "正在检查安全窗口可用性…",
+    gatewayAccountReadOnly:
+      "此处无法管理 Gateway 账号。当前 Web 视图为只读，不会渲染宿主操作按钮。",
+    gatewayAccountOperationOpened: "安全窗口已打开，请在其中完成或取消操作。",
+    gatewayAccountOperationPending: "正在等待安全窗口…",
+    gatewayAccountOperationSucceeded: "Gateway 账号已更新。",
+    gatewayAccountOperationCancelled: "Gateway 账号操作已取消，未进行任何更改。",
+    gatewayAccountOperationTimedOut: "安全窗口已超时，未进行任何更改。",
+    gatewayPublicListRefreshFailed:
+      "Gateway 账号已更新，但无法刷新公开账号列表。",
+    gatewayAccountOperationUnavailable:
+      "Gateway 账号管理暂时不可用，未进行任何更改。",
+    gatewayAccountErrorAccountInUse:
+      "此账号仍被 Pool 使用。请先将它从所有 Pool 中移除，再重试。",
+    gatewayAccountErrorNotFound: "此 Gateway 账号已不存在。",
+    gatewayAccountErrorAlreadyExists: "已存在匹配的 Gateway 账号。",
+    gatewayAccountErrorInvalidInput: "请检查安全窗口中的账号信息后重试。",
+    gatewayAccountErrorCredentialUnavailable:
+      "操作系统凭证存储不可用，凭证未发生更改。",
+    gatewayAccountErrorConfigWriteFailed:
+      "无法保存 Gateway 配置，未保留不完整的更改。",
+    gatewayAccountErrorHelperBusy:
+      "另一个安全账号窗口已打开。请先完成或取消该操作，再重试。",
     poolDefinitionsTitle: "已配置的 Pool",
     poolDefinitionsEmpty: "尚未配置 Pool。",
     poolId: "Pool ID",

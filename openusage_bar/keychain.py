@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import selectors
 import signal
 import subprocess
@@ -19,6 +20,10 @@ SERVICE = "com.lune.openusage-menubar"
 INTERNAL_KEYCHAIN_COMMAND = "__keychain-write"
 MAX_KEYCHAIN_VALUE_BYTES = 64 * 1024
 MAX_KEYCHAIN_PROTOCOL_BYTES = MAX_KEYCHAIN_VALUE_BYTES * 6 + 4_096
+_GATEWAY_MUTABLE_ACCOUNT_PATTERN = re.compile(
+    r"^(?:openai|anthropic|deepseek|openrouter)\."
+    r"account-[0-9a-f]{32}\.gateway-api-key$"
+)
 
 
 class KeychainError(RuntimeError):
@@ -306,6 +311,15 @@ def _valid_keychain_identifier(value: object) -> bool:
     )
 
 
+def _mutable_keychain_account(value: object) -> bool:
+    if not _valid_account(value):
+        return False
+    assert isinstance(value, str)
+    if value.endswith(".oasis-token"):
+        return True
+    return _GATEWAY_MUTABLE_ACCOUNT_PATTERN.fullmatch(value) is not None
+
+
 def _write_protocol_response(output_stream: BinaryIO, payload: dict) -> None:
     output_stream.write(
         json.dumps(
@@ -333,14 +347,12 @@ def run_native_keychain_write(
             raise ValueError("invalid request")
         action = payload.get("action")
         account = payload.get("account")
-        if not _valid_account(account):
+        if not _mutable_keychain_account(account):
             raise ValueError("invalid request")
         resolved = keychain or MacOSKeychain()
         if action == "set" and set(payload) == {
             "version", "action", "account", "secret",
         }:
-            if not account.endswith(".oasis-token"):
-                raise ValueError("invalid request")
             secret = payload.get("secret")
             if (
                 not isinstance(secret, str)
@@ -349,6 +361,15 @@ def run_native_keychain_write(
             ):
                 raise ValueError("invalid request")
             resolved.set(account, secret)
+            _write_protocol_response(
+                output_stream,
+                {"version": 1, "ok": True},
+            )
+            return 0
+        if action == "delete" and set(payload) == {
+            "version", "action", "account",
+        }:
+            resolved.delete(account)
             _write_protocol_response(
                 output_stream,
                 {"version": 1, "ok": True},
@@ -458,7 +479,7 @@ class BoundedMacOSKeychain:
             return None
 
     def set(self, account: str, secret: str) -> None:
-        if not _valid_account(account) or not account.endswith(".oasis-token"):
+        if not _mutable_keychain_account(account):
             raise KeychainError("Keychain account is invalid")
         if (
             not isinstance(secret, str)
@@ -471,6 +492,17 @@ class BoundedMacOSKeychain:
             "action": "set",
             "account": account,
             "secret": secret,
+        })
+        if set(response) != {"version", "ok"} or response.get("ok") is not True:
+            raise KeychainError("Keychain helper failed")
+
+    def delete(self, account: str) -> None:
+        if not _mutable_keychain_account(account):
+            raise KeychainError("Keychain account is invalid")
+        response = self._request({
+            "version": 1,
+            "action": "delete",
+            "account": account,
         })
         if set(response) != {"version", "ok"} or response.get("ok") is not True:
             raise KeychainError("Keychain helper failed")

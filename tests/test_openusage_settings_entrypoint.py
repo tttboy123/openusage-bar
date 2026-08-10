@@ -140,6 +140,32 @@ class SettingsEntrypointTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 13)
         mutate.assert_called_once_with(sys.stdin, sys.stdout)
 
+    def test_gateway_provider_editor_is_dispatched_without_opening_appkit(self):
+        with patch.object(
+            sys, "argv", ["openusage_settings.py", "gateway-account-editor"]
+        ), patch(
+            "openusage_bar.gateway.account_editor_tk.run_gateway_account_editor",
+            return_value=17,
+        ) as editor, patch.dict(sys.modules, {"openusage_bar.ui": None}):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path("openusage_settings.py", run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 17)
+        editor.assert_called_once_with(sys.stdin, sys.stdout)
+
+    def test_gateway_provider_editor_self_test_is_dispatched_without_opening_appkit(self):
+        with patch.object(
+            sys, "argv", ["openusage_settings.py", "gateway-account-editor", "--ui-self-test"]
+        ), patch(
+            "openusage_bar.gateway.account_editor_tk.run_gateway_account_editor_self_test",
+            return_value=0,
+        ) as self_test, patch.dict(sys.modules, {"openusage_bar.ui": None}):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path("openusage_settings.py", run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 0)
+        self_test.assert_called_once_with(sys.stdout)
+
     def test_private_keychain_operation_is_dispatched_without_opening_appkit(self):
         with patch.object(
             sys, "argv", ["openusage_settings.py", "__keychain-write"]

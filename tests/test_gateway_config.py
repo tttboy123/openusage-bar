@@ -5,7 +5,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 from openusage_bar.gateway.accounts import ProviderAccountRef
 from openusage_bar.gateway.config import (
@@ -242,6 +242,31 @@ class GatewayConfigTests(unittest.TestCase):
                     path.write_bytes(json.dumps(payload).encode("utf-8"))
                     with self.assertRaises(ValueError):
                         load_gateway_config(path)
+
+    def test_config_rejects_duplicate_public_account_display_ids(self) -> None:
+        first = ProviderAccountRef(
+            provider_id="openai",
+            account_id="primary",
+            alias="Primary",
+            credential_account="openai.primary.gateway-api-key",
+        )
+        second = ProviderAccountRef(
+            provider_id=first.provider_id,
+            account_id=first.account_id.upper(),
+            alias="Duplicate Display",
+            credential_account=(
+                f"{first.provider_id}.{first.account_id.upper()}.gateway-api-key"
+            ),
+        )
+
+        with patch.object(
+            ProviderAccountRef,
+            "display_id",
+            new_callable=PropertyMock,
+            return_value="acct_0123456789ab",
+        ):
+            with self.assertRaises(ValueError):
+                GatewayConfig(accounts=(first, second))
 
     def test_config_recursively_rejects_secret_shaped_fields(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

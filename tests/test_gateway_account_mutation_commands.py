@@ -74,10 +74,52 @@ class FakeConfigStore:
         self.saved.append(config)
 
 
+class SequencedKeychain:
+    def __init__(
+        self,
+        events: list[tuple[object, ...]],
+        *,
+        existing: str | None,
+        set_errors: tuple[Exception | None, ...] = (),
+        delete_errors: tuple[Exception | None, ...] = (),
+    ) -> None:
+        self.events = events
+        self.existing = existing
+        self.set_errors = list(set_errors)
+        self.delete_errors = list(delete_errors)
+
+    def get(self, account_name: str) -> str | None:
+        self.events.append(("keychain.get", account_name, self.existing))
+        return self.existing
+
+    def set(self, account_name: str, secret: str) -> None:
+        self.events.append(("keychain.set", account_name, secret))
+        error = self.set_errors.pop(0) if self.set_errors else None
+        if error is not None:
+            raise error
+
+    def delete(self, account_name: str) -> None:
+        self.events.append(("keychain.delete", account_name, None))
+        error = self.delete_errors.pop(0) if self.delete_errors else None
+        if error is not None:
+            raise error
+
+
+class AccountIdFactory:
+    def __init__(self, *values: str) -> None:
+        self.values = list(values)
+        self.calls = 0
+
+    def __call__(self) -> str:
+        self.calls += 1
+        if not self.values:
+            raise RuntimeError("private id factory exhausted")
+        return self.values.pop(0)
+
+
 def create_account_request(
     *,
     provider_id: str = "openai",
-    account_id: str = "work",
     alias: str = "Work",
     secret: str = "sk-private-material",
 ) -> io.StringIO:
@@ -88,7 +130,6 @@ def create_account_request(
                 "action": "create_account",
                 "account": {
                     "providerId": provider_id,
-                    "accountId": account_id,
                     "alias": alias,
                 },
                 "credentialMaterial": {"providerKey": secret},
@@ -100,17 +141,19 @@ def create_account_request(
 
 def edit_account_request(
     *,
+    display_id: str | None = None,
     alias: str = "New",
     secret: str | None = "new-secret",
 ) -> io.StringIO:
+    if display_id is None:
+        display_id = expected_account().display_id
     return io.StringIO(
         json.dumps(
             {
                 "version": 1,
                 "action": "edit_account",
                 "account": {
-                    "providerId": "openai",
-                    "accountId": "work",
+                    "displayId": display_id,
                     "alias": alias,
                 },
                 "credentialMaterial": {"providerKey": secret},
@@ -149,6 +192,7 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
             stdout,
             store=store,
             keychain=keychain,
+            account_id_factory=AccountIdFactory("work"),
         )
 
         account = expected_account()
@@ -192,6 +236,98 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, rendered)
 
+    def test_create_account_generates_unique_private_ids_for_duplicate_aliases(
+        self,
+    ) -> None:
+        first_id = "account-00000000000000000000000000000001"
+        second_id = "account-00000000000000000000000000000002"
+        first_account = ProviderAccountRef(
+            provider_id="openai",
+            account_id=first_id,
+            alias="Work",
+            credential_account=f"openai.{first_id}.gateway-api-key",
+        )
+        events: list[tuple[object, ...]] = []
+        keychain = FakeKeychain(events)
+        store = FakeConfigStore(
+            events,
+            initial=GatewayConfig(
+                enabled=True,
+                mode=GatewayMode.ADVISE,
+                accounts=(first_account,),
+            ),
+        )
+        stdout = io.StringIO()
+
+        exit_code = run_gateway_account_mutation(
+            create_account_request(alias="Work", secret="sk-private-material"),
+            stdout,
+            store=store,
+            keychain=keychain,
+            account_id_factory=AccountIdFactory(first_id, second_id),
+        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(len(store.saved), 1)
+        saved = store.saved[0]
+        self.assertEqual(
+            [account.account_id for account in saved.accounts],
+            [first_id, second_id],
+        )
+        self.assertEqual(saved.accounts[0].alias, saved.accounts[1].alias)
+        self.assertNotEqual(saved.accounts[0].display_id, saved.accounts[1].display_id)
+        self.assertEqual(
+            events[0],
+            ("keychain.get", f"openai.{second_id}.gateway-api-key", None),
+        )
+        self.assertEqual(
+            events[1],
+            (
+                "keychain.set",
+                f"openai.{second_id}.gateway-api-key",
+                "sk-private-material",
+            ),
+        )
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["account"]["displayId"], saved.accounts[1].display_id)
+        rendered_request = create_account_request(alias="Work").getvalue().casefold()
+        rendered_response = stdout.getvalue().casefold()
+        for forbidden in (first_id, second_id, "accountid", "account_id", "gateway-api-key"):
+            self.assertNotIn(forbidden, rendered_request)
+            self.assertNotIn(forbidden, rendered_response)
+
+    def test_create_account_id_generation_exhaustion_fails_before_mutation(self) -> None:
+        colliding_id = "account-00000000000000000000000000000001"
+        existing_account = ProviderAccountRef(
+            provider_id="openai",
+            account_id=colliding_id,
+            alias="Work",
+            credential_account=f"openai.{colliding_id}.gateway-api-key",
+        )
+        events: list[tuple[object, ...]] = []
+        store = FakeConfigStore(
+            events,
+            initial=GatewayConfig(accounts=(existing_account,)),
+        )
+        stdout = io.StringIO()
+
+        exit_code = run_gateway_account_mutation(
+            create_account_request(alias="Work", secret="sk-private-material"),
+            stdout,
+            store=store,
+            keychain=FakeKeychain(events),
+            account_id_factory=AccountIdFactory(*(colliding_id for _ in range(8))),
+        )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(events, [])
+        self.assertEqual(store.saved, [])
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {"version": 1, "ok": False, "code": "account_id_unavailable"},
+        )
+        self.assertNotIn("sk-private-material", stdout.getvalue())
+
     def test_create_account_rolls_back_credential_when_config_save_fails(self) -> None:
         events: list[tuple[object, ...]] = []
         keychain = FakeKeychain(events)
@@ -203,6 +339,7 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
             stdout,
             store=store,
             keychain=keychain,
+            account_id_factory=AccountIdFactory("work"),
         )
 
         self.assertEqual(exit_code, 1)
@@ -242,6 +379,7 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
             stdout,
             store=store,
             keychain=keychain,
+            account_id_factory=AccountIdFactory("work"),
         )
 
         self.assertEqual(exit_code, 1)
@@ -288,6 +426,7 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
             stdout,
             store=store,
             keychain=keychain,
+            account_id_factory=AccountIdFactory("work"),
         )
 
         self.assertEqual(exit_code, 1)
@@ -313,7 +452,7 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
                 (
                     '{"version":1,"action":"create_account",'
                     '"account":{"providerId":"anthropic","providerId":"openai",'
-                    '"accountId":"work","alias":"Work"},'
+                    '"alias":"Work"},'
                     '"credentialMaterial":{"providerKey":"sk-private-material"}}'
                 ),
             ),
@@ -389,6 +528,42 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
                 )
                 self.assertNotIn("sk-private-material", stdout.getvalue())
 
+    def test_create_account_rejects_private_account_id_before_mutation(self) -> None:
+        events: list[tuple[object, ...]] = []
+        keychain = FakeKeychain(events)
+        store = FakeConfigStore(events)
+        stdout = io.StringIO()
+
+        exit_code = run_gateway_account_mutation(
+            io.StringIO(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "action": "create_account",
+                        "account": {
+                            "providerId": "openai",
+                            "accountId": "work",
+                            "alias": "Work",
+                        },
+                        "credentialMaterial": {"providerKey": "sk-private-material"},
+                    },
+                    separators=(",", ":"),
+                )
+            ),
+            stdout,
+            store=store,
+            keychain=keychain,
+        )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(events, [])
+        self.assertEqual(store.saved, [])
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {"version": 1, "ok": False, "code": "invalid_request"},
+        )
+        self.assertNotIn("sk-private-material", stdout.getvalue())
+
     def test_create_account_credential_write_failure_is_sanitized(self) -> None:
         private_error = OSError(
             "private credential write failed at /Users/example/.secret"
@@ -403,6 +578,7 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
             stdout,
             store=store,
             keychain=keychain,
+            account_id_factory=AccountIdFactory("work"),
         )
 
         self.assertEqual(exit_code, 1)
@@ -541,6 +717,80 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, rendered)
 
+    def test_edit_account_reports_restore_old_secret_rollback_failure(self) -> None:
+        old_account = ProviderAccountRef(
+            provider_id="openai",
+            account_id="work",
+            alias="Old",
+            credential_account="openai.work.gateway-api-key",
+        )
+        initial = GatewayConfig(accounts=(old_account,))
+        events: list[tuple[object, ...]] = []
+        keychain = SequencedKeychain(
+            events,
+            existing="old-secret",
+            set_errors=(None, OSError("private old secret restore failed")),
+        )
+        store = FakeConfigStore(events, initial=initial, error=OSError("private path"))
+        stdout = io.StringIO()
+
+        exit_code = run_gateway_account_mutation(
+            edit_account_request(display_id=old_account.display_id),
+            stdout,
+            store=store,
+            keychain=keychain,
+        )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(
+            [event[0] for event in events],
+            ["keychain.get", "keychain.set", "store.save", "keychain.set"],
+        )
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {"version": 1, "ok": False, "code": "credential_rollback_failed"},
+        )
+        rendered = stdout.getvalue().casefold()
+        for forbidden in ("old-secret", "new-secret", "private", "gateway-api-key"):
+            self.assertNotIn(forbidden, rendered)
+
+    def test_edit_account_reports_delete_new_secret_rollback_failure(self) -> None:
+        old_account = ProviderAccountRef(
+            provider_id="openai",
+            account_id="work",
+            alias="Old",
+            credential_account="openai.work.gateway-api-key",
+        )
+        initial = GatewayConfig(accounts=(old_account,))
+        events: list[tuple[object, ...]] = []
+        keychain = SequencedKeychain(
+            events,
+            existing=None,
+            delete_errors=(OSError("private new secret delete failed"),),
+        )
+        store = FakeConfigStore(events, initial=initial, error=OSError("private path"))
+        stdout = io.StringIO()
+
+        exit_code = run_gateway_account_mutation(
+            edit_account_request(display_id=old_account.display_id),
+            stdout,
+            store=store,
+            keychain=keychain,
+        )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(
+            [event[0] for event in events],
+            ["keychain.get", "keychain.set", "store.save", "keychain.delete"],
+        )
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {"version": 1, "ok": False, "code": "credential_rollback_failed"},
+        )
+        rendered = stdout.getvalue().casefold()
+        for forbidden in ("new-secret", "private", "gateway-api-key"):
+            self.assertNotIn(forbidden, rendered)
+
     def test_edit_account_alias_only_does_not_touch_keychain(self) -> None:
         old_account = ProviderAccountRef(
             provider_id="openai",
@@ -599,6 +849,48 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
             "providerkey",
         ):
             self.assertNotIn(forbidden, rendered)
+
+    def test_create_account_public_display_id_roundtrips_to_alias_only_edit(self) -> None:
+        create_events: list[tuple[object, ...]] = []
+        create_store = FakeConfigStore(create_events)
+        create_stdout = io.StringIO()
+
+        create_exit = run_gateway_account_mutation(
+            create_account_request(alias="Work", secret="sk-private-material"),
+            create_stdout,
+            store=create_store,
+            keychain=FakeKeychain(create_events),
+        )
+
+        self.assertEqual(create_exit, 0)
+        created = create_store.saved[0]
+        display_id = json.loads(create_stdout.getvalue())["account"]["displayId"]
+        self.assertEqual(display_id, created.accounts[0].display_id)
+
+        edit_events: list[tuple[object, ...]] = []
+        edit_store = FakeConfigStore(edit_events, initial=created)
+        edit_stdout = io.StringIO()
+        edit_request = edit_account_request(
+            display_id=display_id,
+            alias="Renamed",
+            secret=None,
+        )
+
+        edit_exit = run_gateway_account_mutation(
+            edit_request,
+            edit_stdout,
+            store=edit_store,
+            keychain=FakeKeychain(edit_events, existing="sk-private-material"),
+        )
+
+        self.assertEqual(edit_exit, 0)
+        self.assertEqual([event[0] for event in edit_events], ["store.save"])
+        self.assertEqual(edit_store.saved[0].accounts[0].alias, "Renamed")
+        rendered_request = edit_request.getvalue().casefold()
+        rendered_output = edit_stdout.getvalue().casefold()
+        for forbidden in ("accountid", "account_id", "work", "gateway-api-key"):
+            self.assertNotIn(forbidden, rendered_request)
+            self.assertNotIn(forbidden, rendered_output)
 
     def test_remove_account_deletes_credential_and_secret_free_config(self) -> None:
         old_secret = "old-secret"
@@ -773,6 +1065,54 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
             "account_id",
             "work",
         ):
+            self.assertNotIn(forbidden, rendered)
+
+    def test_remove_account_reports_restore_secret_rollback_failure(self) -> None:
+        removed_account = ProviderAccountRef(
+            provider_id="openai",
+            account_id="work",
+            alias="Work",
+            credential_account="openai.work.gateway-api-key",
+        )
+        initial = GatewayConfig(accounts=(removed_account,))
+        request = io.StringIO(
+            json.dumps(
+                {
+                    "version": 1,
+                    "action": "remove_account",
+                    "account": {"displayId": removed_account.display_id},
+                    "credentialMaterial": {},
+                },
+                separators=(",", ":"),
+            )
+        )
+        events: list[tuple[object, ...]] = []
+        keychain = SequencedKeychain(
+            events,
+            existing="old-secret",
+            set_errors=(OSError("private restore failed"),),
+        )
+        store = FakeConfigStore(events, initial=initial, error=OSError("private path"))
+        stdout = io.StringIO()
+
+        exit_code = run_gateway_account_mutation(
+            request,
+            stdout,
+            store=store,
+            keychain=keychain,
+        )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(
+            [event[0] for event in events],
+            ["keychain.get", "keychain.delete", "store.save", "keychain.set"],
+        )
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {"version": 1, "ok": False, "code": "credential_rollback_failed"},
+        )
+        rendered = stdout.getvalue().casefold()
+        for forbidden in ("old-secret", "private", "gateway-api-key"):
             self.assertNotIn(forbidden, rendered)
 
     def test_create_pool_resolves_public_members_and_saves_secret_free_pool(
@@ -1127,13 +1467,13 @@ class GatewayAccountMutationCommandTests(unittest.TestCase):
                 start.wait(timeout=2)
                 exit_code = run_gateway_account_mutation(
                     create_account_request(
-                        account_id=account_id,
                         alias=alias,
                         secret=secret,
                     ),
                     output,
                     store=store,
                     keychain=keychain,
+                    account_id_factory=AccountIdFactory(account_id),
                 )
                 payload = json.loads(output.getvalue())
                 self.assertEqual(exit_code, 0, payload)

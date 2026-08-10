@@ -30,6 +30,7 @@
       "main.js",
       "package.json",
       "product_version_truth.js",
+      "gateway_account_operations.js",
       "runtime_capability.js",
       "settings_runtime.js",
       "tray_state.js"

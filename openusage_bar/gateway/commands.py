@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import secrets
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Any, Protocol, TextIO
+from typing import Any, Callable, Protocol, TextIO
 
 from ..keychain import default_keychain
 from .accounts import AccountState, ProviderAccountRef
@@ -16,14 +17,17 @@ from .pools import AccountPool, PoolMember, PoolStrategy
 
 MAX_REQUEST_BYTES = 131_072
 MAX_PROVIDER_KEY_BYTES = 64 * 1024
+MAX_ACCOUNT_ID_ATTEMPTS = 8
 
 
 @dataclass(frozen=True)
 class _MutationRequest:
     action: str
     account: ProviderAccountRef | None = None
+    provider_id: str | None = None
     secret: str | None = None
     display_id: str | None = None
+    alias: str | None = None
     pool: dict[str, object] | None = None
     expected_revision: int | None = None
 
@@ -45,6 +49,7 @@ def run_gateway_account_mutation(
     *,
     store: GatewayConfigStorage | None = None,
     keychain: GatewayCredentialStore | None = None,
+    account_id_factory: Callable[[], str] | None = None,
 ) -> int:
     try:
         raw = input_stream.read(MAX_REQUEST_BYTES + 1)
@@ -65,10 +70,35 @@ def run_gateway_account_mutation(
         try:
             with context:
                 current = resolved_store.load()
-                if request.action == "create_account" and request.account is not None:
-                    result = _create_account(
+                if (
+                    request.action == "create_account"
+                    and request.provider_id is not None
+                    and request.alias is not None
+                ):
+                    result, created = _create_account(
                         current,
-                        request.account,
+                        request.provider_id,
+                        request.alias,
+                        request.secret,
+                        store=resolved_store,
+                        keychain=resolved_keychain,
+                        account_id_factory=(
+                            account_id_factory or _random_private_account_id
+                        ),
+                        output_stream=output_stream,
+                    )
+                    if result is not None:
+                        return result
+                    public_account = created
+                elif (
+                    request.action == "edit_account"
+                    and request.display_id is not None
+                    and request.alias is not None
+                ):
+                    result, edited = _edit_account(
+                        current,
+                        request.display_id,
+                        request.alias,
                         request.secret,
                         store=resolved_store,
                         keychain=resolved_keychain,
@@ -76,19 +106,7 @@ def run_gateway_account_mutation(
                     )
                     if result is not None:
                         return result
-                    public_account = request.account
-                elif request.action == "edit_account" and request.account is not None:
-                    result = _edit_account(
-                        current,
-                        request.account,
-                        request.secret,
-                        store=resolved_store,
-                        keychain=resolved_keychain,
-                        output_stream=output_stream,
-                    )
-                    if result is not None:
-                        return result
-                    public_account = request.account
+                    public_account = edited
                 elif request.action == "remove_account" and request.display_id is not None:
                     result, removed = _remove_account(
                         current,
@@ -160,17 +178,27 @@ def run_gateway_account_mutation(
 
 def _create_account(
     current: GatewayConfig,
-    account: ProviderAccountRef,
+    provider_id: str,
+    alias: str,
     secret: str | None,
     *,
     store: GatewayConfigStorage,
     keychain: GatewayCredentialStore,
+    account_id_factory: Callable[[], str],
     output_stream: TextIO,
-) -> int | None:
+) -> tuple[int | None, ProviderAccountRef | None]:
     if secret is None:
-        return _write_response(output_stream, False, "invalid_request")
-    if not supports_provider_account_credentials(account.provider_id):
-        return _write_response(output_stream, False, "unsupported_provider")
+        return _write_response(output_stream, False, "invalid_request"), None
+    if not supports_provider_account_credentials(provider_id):
+        return _write_response(output_stream, False, "unsupported_provider"), None
+    account = _new_provider_account(
+        current,
+        provider_id=provider_id,
+        alias=alias,
+        account_id_factory=account_id_factory,
+    )
+    if account is None:
+        return _write_response(output_stream, False, "account_id_unavailable"), None
     updated = GatewayConfig(
         enabled=current.enabled,
         mode=current.mode,
@@ -184,13 +212,13 @@ def _create_account(
     try:
         existing = keychain.get(account.credential_account)
     except Exception:
-        return _write_response(output_stream, False, "credential_backend_unavailable")
+        return _write_response(output_stream, False, "credential_backend_unavailable"), None
     if existing is not None:
-        return _write_response(output_stream, False, "already_exists")
+        return _write_response(output_stream, False, "already_exists"), None
     try:
         keychain.set(account.credential_account, secret)
     except Exception:
-        return _write_response(output_stream, False, "credential_write_failed")
+        return _write_response(output_stream, False, "credential_write_failed"), None
     try:
         store.save(updated)
     except Exception:
@@ -199,8 +227,40 @@ def _create_account(
             account.credential_account,
             old_secret=None,
         ):
-            return _write_response(output_stream, False, "credential_rollback_failed")
-        return _write_response(output_stream, False, "config_write_failed")
+            return _write_response(output_stream, False, "credential_rollback_failed"), None
+        return _write_response(output_stream, False, "config_write_failed"), None
+    return None, account
+
+
+def _random_private_account_id() -> str:
+    return f"account-{secrets.token_hex(16)}"
+
+
+def _new_provider_account(
+    current: GatewayConfig,
+    *,
+    provider_id: str,
+    alias: str,
+    account_id_factory: Callable[[], str],
+) -> ProviderAccountRef | None:
+    existing_account_ids = {account.account_id for account in current.accounts}
+    existing_display_ids = {account.display_id for account in current.accounts}
+    for _attempt in range(MAX_ACCOUNT_ID_ATTEMPTS):
+        try:
+            account_id = account_id_factory()
+            if type(account_id) is not str or account_id in existing_account_ids:
+                continue
+            account = ProviderAccountRef(
+                provider_id=provider_id,
+                account_id=account_id,
+                alias=alias,
+                credential_account=f"{provider_id}.{account_id}.gateway-api-key",
+            )
+        except Exception:
+            continue
+        if account.display_id in existing_display_ids:
+            continue
+        return account
     return None
 
 
@@ -469,26 +529,36 @@ def _pool_from_payload(
 
 def _edit_account(
     current: GatewayConfig,
-    account: ProviderAccountRef,
+    display_id: str,
+    alias: str,
     secret: str | None,
     *,
     store: GatewayConfigStorage,
     keychain: GatewayCredentialStore,
     output_stream: TextIO,
-) -> int | None:
-    if not supports_provider_account_credentials(account.provider_id):
-        return _write_response(output_stream, False, "unsupported_provider")
+) -> tuple[int | None, ProviderAccountRef | None]:
     index = next(
         (
             position
             for position, existing in enumerate(current.accounts)
-            if existing.provider_id == account.provider_id
-            and existing.account_id == account.account_id
+            if existing.display_id == display_id
         ),
         None,
     )
     if index is None:
-        return _write_response(output_stream, False, "not_found")
+        return _write_response(output_stream, False, "not_found"), None
+    existing = current.accounts[index]
+    if not supports_provider_account_credentials(existing.provider_id):
+        return _write_response(output_stream, False, "unsupported_provider"), None
+    try:
+        account = ProviderAccountRef(
+            provider_id=existing.provider_id,
+            account_id=existing.account_id,
+            alias=alias,
+            credential_account=existing.credential_account,
+        )
+    except Exception:
+        return _write_response(output_stream, False, "invalid_request"), None
 
     updated_accounts = list(current.accounts)
     updated_accounts[index] = account
@@ -506,20 +576,20 @@ def _edit_account(
         try:
             store.save(updated)
         except Exception:
-            return _write_response(output_stream, False, "config_write_failed")
-        return None
+            return _write_response(output_stream, False, "config_write_failed"), None
+        return None, account
 
     try:
         old_secret = keychain.get(account.credential_account)
     except Exception:
-        return _write_response(output_stream, False, "credential_backend_unavailable")
+        return _write_response(output_stream, False, "credential_backend_unavailable"), None
     if old_secret is not None and type(old_secret) is not str:
-        return _write_response(output_stream, False, "credential_backend_unavailable")
+        return _write_response(output_stream, False, "credential_backend_unavailable"), None
 
     try:
         keychain.set(account.credential_account, secret)
     except Exception:
-        return _write_response(output_stream, False, "credential_write_failed")
+        return _write_response(output_stream, False, "credential_write_failed"), None
     try:
         store.save(updated)
     except Exception:
@@ -528,9 +598,9 @@ def _edit_account(
             account.credential_account,
             old_secret=old_secret,
         ):
-            return _write_response(output_stream, False, "credential_rollback_failed")
-        return _write_response(output_stream, False, "config_write_failed")
-    return None
+            return _write_response(output_stream, False, "credential_rollback_failed"), None
+        return _write_response(output_stream, False, "config_write_failed"), None
+    return None, account
 
 
 def _restore_credential(
@@ -597,34 +667,60 @@ def _mutation_request(value: object) -> _MutationRequest:
         assert type(action) is str and type(display_id) is str
         return _MutationRequest(action=action, display_id=display_id)
 
-    if type(account_payload) is not dict or set(account_payload) != {
-        "providerId",
-        "accountId",
-        "alias",
-    }:
-        raise ValueError("invalid request")
     if type(credential_payload) is not dict or set(credential_payload) != {
         "providerKey",
     }:
         raise ValueError("invalid request")
-    provider_id = account_payload.get("providerId")
-    account_id = account_payload.get("accountId")
-    alias = account_payload.get("alias")
-    secret = credential_payload.get("providerKey")
-    if type(provider_id) is not str or type(account_id) is not str:
-        raise ValueError("invalid request")
-    if action == "create_account" and not _valid_provider_key(secret):
-        raise ValueError("invalid request")
-    if action == "edit_account" and secret is not None and not _valid_provider_key(secret):
-        raise ValueError("invalid request")
-    account = ProviderAccountRef(
-        provider_id=provider_id,
-        account_id=account_id,
-        alias=alias,
-        credential_account=f"{provider_id}.{account_id}.gateway-api-key",
-    )
-    assert type(action) is str
-    return _MutationRequest(action=action, account=account, secret=secret)
+    if action == "create_account":
+        if type(account_payload) is not dict or set(account_payload) != {
+            "providerId",
+            "alias",
+        }:
+            raise ValueError("invalid request")
+        provider_id = account_payload.get("providerId")
+        alias = account_payload.get("alias")
+        secret = credential_payload.get("providerKey")
+        if type(provider_id) is not str or type(alias) is not str:
+            raise ValueError("invalid request")
+        if not _valid_provider_key(secret):
+            raise ValueError("invalid request")
+        try:
+            ProviderAccountRef(
+                provider_id=provider_id,
+                account_id="account-validation",
+                alias=alias,
+                credential_account=f"{provider_id}.account-validation.gateway-api-key",
+            )
+        except Exception:
+            raise ValueError("invalid request") from None
+        assert type(action) is str
+        return _MutationRequest(
+            action=action,
+            provider_id=provider_id,
+            alias=alias,
+            secret=secret,
+        )
+    if action == "edit_account":
+        if type(account_payload) is not dict or set(account_payload) != {
+            "displayId",
+            "alias",
+        }:
+            raise ValueError("invalid request")
+        display_id = account_payload.get("displayId")
+        alias = account_payload.get("alias")
+        secret = credential_payload.get("providerKey")
+        if not _valid_display_id(display_id) or type(alias) is not str:
+            raise ValueError("invalid request")
+        if secret is not None and not _valid_provider_key(secret):
+            raise ValueError("invalid request")
+        assert type(action) is str and type(display_id) is str
+        return _MutationRequest(
+            action=action,
+            display_id=display_id,
+            alias=alias,
+            secret=secret,
+        )
+    raise ValueError("invalid request")
 
 
 def _pool_mutation_request(

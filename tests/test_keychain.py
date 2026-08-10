@@ -142,7 +142,7 @@ class KeychainTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     authorizer.authorize(service=service, account=account)
 
-    def test_native_helper_rejects_reads_and_only_writes_step_plan_token(self):
+    def test_native_helper_rejects_reads_and_mutates_allowlisted_credentials(self):
         keychain = Mock()
         keychain.get.return_value = "密钥"
         output = io.BytesIO()
@@ -181,6 +181,42 @@ class KeychainTests(unittest.TestCase):
         )
 
         output = io.BytesIO()
+        gateway_account = "openai.account-0123456789abcdef0123456789abcdef.gateway-api-key"
+        code = run_native_keychain_write(
+            io.BytesIO(json.dumps({
+                "version": 1,
+                "action": "set",
+                "account": gateway_account,
+                "secret": "sk-private-gateway",
+            }).encode()),
+            output,
+            keychain=keychain,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "version": 1, "ok": True,
+        })
+        keychain.set.assert_called_with(
+            gateway_account, "sk-private-gateway"
+        )
+
+        output = io.BytesIO()
+        code = run_native_keychain_write(
+            io.BytesIO(json.dumps({
+                "version": 1,
+                "action": "delete",
+                "account": gateway_account,
+            }).encode()),
+            output,
+            keychain=keychain,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "version": 1, "ok": True,
+        })
+        keychain.delete.assert_called_once_with(gateway_account)
+
+        output = io.BytesIO()
         code = run_native_keychain_write(
             io.BytesIO(json.dumps({
                 "version": 1,
@@ -195,17 +231,49 @@ class KeychainTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), {
             "version": 1, "ok": False,
         })
-        self.assertEqual(keychain.set.call_count, 1)
+        self.assertEqual(keychain.set.call_count, 2)
 
-    def test_bounded_keychain_reads_via_reader_and_privately_writes_session(self):
+    def test_native_helper_rejects_gateway_default_and_malformed_mutable_accounts(self):
+        keychain = Mock()
+
+        for account in (
+            "openai.gateway-api-key",
+            "openai.work.gateway-api-key",
+            "ollama.account-0123456789abcdef0123456789abcdef.gateway-api-key",
+            "unknown.account-0123456789abcdef0123456789abcdef.gateway-api-key",
+            "openai.account-0123456789abcdef0123456789abcdeg.gateway-api-key",
+        ):
+            with self.subTest(account=account):
+                output = io.BytesIO()
+                code = run_native_keychain_write(
+                    io.BytesIO(json.dumps({
+                        "version": 1,
+                        "action": "set",
+                        "account": account,
+                        "secret": "must-not-be-written",
+                    }).encode()),
+                    output,
+                    keychain=keychain,
+                )
+
+                self.assertEqual(code, 1)
+                self.assertEqual(json.loads(output.getvalue()), {
+                    "version": 1, "ok": False,
+                })
+
+        keychain.set.assert_not_called()
+
+    def test_bounded_keychain_reads_via_reader_and_privately_mutates_credentials(self):
         with tempfile.TemporaryDirectory() as directory:
             helper = Path(directory) / "keychain-helper.py"
             capture = Path(directory) / "capture.json"
             helper.write_text(
-                "import json,sys\n"
+                "import json,sys,pathlib\n"
                 "request=json.loads(sys.stdin.buffer.read())\n"
-                f"open({str(capture)!r},'w').write(json.dumps({{"
-                "'argv':sys.argv[1:],'request':request}))\n"
+                f"path=pathlib.Path({str(capture)!r})\n"
+                "items=json.loads(path.read_text()) if path.exists() else []\n"
+                "items.append({'argv':sys.argv[1:],'request':request})\n"
+                "path.write_text(json.dumps(items))\n"
                 "response={'version':1,'ok':True}\n"
                 "sys.stdout.write(json.dumps(response))\n",
                 encoding="utf-8",
@@ -223,11 +291,28 @@ class KeychainTests(unittest.TestCase):
             self.assertFalse(capture.exists())
             secret = "rotated-private-token"
             keychain.set("step-plan-main.oasis-token", secret)
+            gateway_secret = "sk-private-gateway"
+            gateway_account = (
+                "openai.account-0123456789abcdef0123456789abcdef.gateway-api-key"
+            )
+            keychain.set(gateway_account, gateway_secret)
+            keychain.delete(gateway_account)
             captured = json.loads(capture.read_text(encoding="utf-8"))
 
-        self.assertEqual(captured["argv"], ["__keychain-write"])
-        self.assertEqual(captured["request"]["secret"], secret)
+        self.assertEqual([item["argv"] for item in captured], [
+            ["__keychain-write"],
+            ["__keychain-write"],
+            ["__keychain-write"],
+        ])
+        self.assertEqual(captured[0]["request"]["secret"], secret)
+        self.assertEqual(captured[1]["request"]["secret"], gateway_secret)
+        self.assertEqual(captured[2]["request"], {
+            "version": 1,
+            "action": "delete",
+            "account": gateway_account,
+        })
         self.assertNotIn(secret, " ".join(keychain.command))
+        self.assertNotIn(gateway_secret, " ".join(keychain.command))
 
     def test_bounded_keychain_timeout_is_sanitized_and_reaped(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -245,6 +330,27 @@ class KeychainTests(unittest.TestCase):
             with self.assertRaises(KeychainError) as raised:
                 keychain.set("step-plan-main.oasis-token", "never-in-error")
             self.assertNotIn("never-in-error", str(raised.exception))
+
+    def test_bounded_keychain_rejects_malformed_gateway_write_accounts_before_helper(self):
+        helper = Mock()
+        keychain = BoundedMacOSKeychain(
+            helper_command=(sys.executable, "-c"),
+            reader=Mock(get=Mock(return_value=None)),
+        )
+        keychain._request = helper
+
+        for account in (
+            "openai.gateway-api-key",
+            "openai.work.gateway-api-key",
+            "ollama.account-0123456789abcdef0123456789abcdef.gateway-api-key",
+        ):
+            with self.subTest(account=account):
+                with self.assertRaises(KeychainError):
+                    keychain.set(account, "private-secret")
+                with self.assertRaises(KeychainError):
+                    keychain.delete(account)
+
+        helper.assert_not_called()
 
 
 class CrossPlatformKeychainTests(unittest.TestCase):

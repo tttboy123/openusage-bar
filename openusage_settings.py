@@ -28,6 +28,16 @@ def main(argv: list[str] | None = None) -> int:
         from openusage_bar.gateway.commands import run_gateway_account_mutation
 
         return run_gateway_account_mutation(sys.stdin, sys.stdout)
+    if arguments == ["gateway-account-editor"]:
+        from openusage_bar.gateway.account_editor_tk import run_gateway_account_editor
+
+        return run_gateway_account_editor(sys.stdin, sys.stdout)
+    if arguments == ["gateway-account-editor", "--ui-self-test"]:
+        from openusage_bar.gateway.account_editor_tk import (
+            run_gateway_account_editor_self_test,
+        )
+
+        return run_gateway_account_editor_self_test(sys.stdout)
     if arguments == ["__keychain-write"]:
         from openusage_bar.keychain import run_native_keychain_write
 

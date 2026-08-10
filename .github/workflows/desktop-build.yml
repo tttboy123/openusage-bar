@@ -7,6 +7,8 @@ on:
       - ".gitattributes"
       - ".github/action-pins.json"
       - "web/**"
+      - "web/e2e/**"
+      - "web/playwright.config.ts"
       - "desktop/**"
       - "build_support.py"
       - "openusage_bar/**"
@@ -37,6 +39,7 @@ on:
       - "scripts/release_handoff.py"
       - "scripts/measure_gateway_performance.py"
       - "scripts/release_artifact_audit.py"
+      - "scripts/smoke_gateway_account_credentials.py"
       - "scripts/smoke_gateway.py"
       - "scripts/verify_action_pins.py"
       - "scripts/verify_product_version_truth.py"
@@ -47,7 +50,10 @@ on:
       - "tests/test_desktop_packaging_contract.py"
       - "tests/test_distribution_trust_posture.py"
       - "tests/test_extract_nsis_payload.py"
+      - "tests/test_gateway_account_editor_model.py"
+      - "tests/test_gateway_account_editor_tk.py"
       - "tests/test_gateway_*.py"
+      - "tests/test_keychain.py"
       - "tests/fixtures/gateway/performance-v1.json"
       - "tests/test_local_api.py"
       - "tests/test_native_ci_evidence.py"
@@ -59,6 +65,8 @@ on:
       - "tests/test_appimage_payload_offset.py"
       - "tests/test_python_distribution.py"
       - "tests/test_release_artifact_audit*.py"
+      - "tests/test_openusage_settings_entrypoint.py"
+      - "tests/test_smoke_gateway_account_credentials.py"
       - "tests/test_runtime_capabilities.py"
       - "tests/test_smoke_gateway.py"
       - ".github/workflows/desktop-build.yml"
@@ -70,6 +78,8 @@ on:
       - ".gitattributes"
       - ".github/action-pins.json"
       - "web/**"
+      - "web/e2e/**"
+      - "web/playwright.config.ts"
       - "desktop/**"
       - "build_support.py"
       - "openusage_bar/**"
@@ -100,6 +110,7 @@ on:
       - "scripts/release_handoff.py"
       - "scripts/measure_gateway_performance.py"
       - "scripts/release_artifact_audit.py"
+      - "scripts/smoke_gateway_account_credentials.py"
       - "scripts/smoke_gateway.py"
       - "scripts/verify_action_pins.py"
       - "scripts/verify_product_version_truth.py"
@@ -110,7 +121,10 @@ on:
       - "tests/test_desktop_packaging_contract.py"
       - "tests/test_distribution_trust_posture.py"
       - "tests/test_extract_nsis_payload.py"
+      - "tests/test_gateway_account_editor_model.py"
+      - "tests/test_gateway_account_editor_tk.py"
       - "tests/test_gateway_*.py"
+      - "tests/test_keychain.py"
       - "tests/fixtures/gateway/performance-v1.json"
       - "tests/test_local_api.py"
       - "tests/test_native_ci_evidence.py"
@@ -122,6 +136,8 @@ on:
       - "tests/test_appimage_payload_offset.py"
       - "tests/test_python_distribution.py"
       - "tests/test_release_artifact_audit*.py"
+      - "tests/test_openusage_settings_entrypoint.py"
+      - "tests/test_smoke_gateway_account_credentials.py"
       - "tests/test_runtime_capabilities.py"
       - "tests/test_smoke_gateway.py"
       - ".github/workflows/desktop-build.yml"
@@ -278,6 +294,8 @@ jobs:
             tests.test_desktop_packaging_contract \
             tests.test_distribution_trust_posture \
             tests.test_extract_nsis_payload \
+            tests.test_gateway_account_editor_model \
+            tests.test_gateway_account_editor_tk \
             tests.test_gateway_account_pool \
             tests.test_gateway_account_mutation_commands \
             tests.test_gateway_api \
@@ -300,9 +318,11 @@ jobs:
             tests.test_gateway_telemetry_composition \
             tests.test_gateway_telemetry_hardening \
             tests.test_gateway_upstream_streaming \
+            tests.test_keychain \
             tests.test_local_api \
             tests.test_native_ci_evidence \
             tests.test_observer_source_native_evidence \
+            tests.test_openusage_settings_entrypoint \
             tests.test_product_version_truth \
             tests.test_release_handoff \
             tests.test_observer_platform_matrix \
@@ -311,6 +331,7 @@ jobs:
             tests.test_release_artifact_audit_hardening \
             tests.test_release_artifact_audit_url_paths \
             tests.test_runtime_capabilities \
+            tests.test_smoke_gateway_account_credentials \
             tests.test_smoke_gateway
       - name: Run native Windows Job contracts
         id: windows_native
@@ -321,6 +342,16 @@ jobs:
         id: web_install
         working-directory: web
         run: npm ci
+      - name: Install Gateway Account Playwright browser
+        id: gateway_account_playwright_install
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Run Gateway Account browser E2E
+        id: gateway_account_e2e
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        working-directory: web
+        run: npm run test:e2e:gateway-account
       - name: Audit web dependencies
         id: web_audit
         working-directory: web
@@ -419,6 +450,8 @@ jobs:
             --paths .
             --collect-submodules openusage_bar
             --collect-data openusage_bar
+            --hidden-import tkinter
+            --hidden-import tkinter.ttk
           )
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             pyinstaller_args+=(
@@ -430,6 +463,23 @@ jobs:
           fi
           python -m PyInstaller "${pyinstaller_args[@]}" openusage_settings.py
           test -f "./dist-settings/${{ matrix.settings }}"
+      - name: Prepare pinned Linux Observer secret service
+        id: linux_observer_secret_service
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            "dbus-user-session=1.14.10-4ubuntu4.1" \
+            "gnome-keyring=46.1-2build1"
+          dbus_version="$(
+            dpkg-query --show --showformat='${Version}' dbus-user-session
+          )"
+          keyring_version="$(
+            dpkg-query --show --showformat='${Version}' gnome-keyring
+          )"
+          test "$dbus_version" = "1.14.10-4ubuntu4.1"
+          test "$keyring_version" = "46.1-2build1"
       - name: Smoke bundled settings helper
         id: settings_smoke
         shell: bash
@@ -445,6 +495,72 @@ jobs:
           test "$settings_status" -eq 1
           test "$settings_output" = '{"version":1,"ok":false,"code":"not_found"}'
           test ! -s "$RUNNER_TEMP/openusage-settings-smoke.stderr"
+          set +e
+          editor_output="$("./dist-settings/${{ matrix.settings }}" gateway-account-editor --ui-self-test 2>"$RUNNER_TEMP/openusage-settings-editor-smoke.stderr")"
+          editor_status=$?
+          set -e
+          test "$editor_status" -eq 0
+          test "$editor_output" = $'{"version":1,"event":"ready"}\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}'
+          test ! -s "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr"
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            test -n "$RUNNER_TEMP"
+            account_keyring_root="$(mktemp -d "$RUNNER_TEMP/openusage-account-keyring.XXXXXX")"
+            cleanup_account_keyring() {
+              case "$account_keyring_root" in
+                "$RUNNER_TEMP"/openusage-account-keyring.*)
+                  if [[ -e "$account_keyring_root" ]]; then
+                    find "$account_keyring_root" -depth -delete
+                  fi
+                  ;;
+                *) return 1 ;;
+              esac
+            }
+            trap cleanup_account_keyring EXIT
+            mkdir -p \
+              "$account_keyring_root/config" \
+              "$account_keyring_root/data" \
+              "$account_keyring_root/runtime"
+            chmod 0700 \
+              "$account_keyring_root/config" \
+              "$account_keyring_root/data" \
+              "$account_keyring_root/runtime"
+            ACCOUNT_SMOKE_HOME="$settings_smoke_home" \
+            ACCOUNT_KEYRING_ROOT="$account_keyring_root" \
+            ACCOUNT_SETTINGS_HELPER="./dist-settings/${{ matrix.settings }}" \
+            ACCOUNT_SMOKE_STDERR="$RUNNER_TEMP/openusage-account-credential-smoke.stderr" \
+              dbus-run-session -- bash -euo pipefail <<'ACCOUNT_CREDENTIAL_SESSION'
+              export HOME="$ACCOUNT_SMOKE_HOME"
+              export USERPROFILE="$ACCOUNT_SMOKE_HOME"
+              export XDG_CONFIG_HOME="$ACCOUNT_KEYRING_ROOT/config"
+              export XDG_DATA_HOME="$ACCOUNT_KEYRING_ROOT/data"
+              export XDG_RUNTIME_DIR="$ACCOUNT_KEYRING_ROOT/runtime"
+              cleanup_keyring() {
+                gnome-keyring-daemon --shutdown >/dev/null 2>&1 || true
+              }
+              trap cleanup_keyring EXIT
+              if ! printf '\n' | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; then
+                echo "gateway_account_credentials_invalid" >&2
+                exit 1
+              fi
+              account_smoke_output="$(
+                python scripts/smoke_gateway_account_credentials.py \
+                  --settings-helper "$ACCOUNT_SETTINGS_HELPER" \
+                  2>"$ACCOUNT_SMOKE_STDERR"
+              )"
+              test "$account_smoke_output" = '{"version":1,"ok":true,"code":"ok"}'
+              test ! -s "$ACCOUNT_SMOKE_STDERR"
+          ACCOUNT_CREDENTIAL_SESSION
+            trap - EXIT
+            cleanup_account_keyring
+          else
+            account_smoke_output="$(
+              python scripts/smoke_gateway_account_credentials.py \
+                --settings-helper "./dist-settings/${{ matrix.settings }}" \
+                2>"$RUNNER_TEMP/openusage-account-credential-smoke.stderr"
+            )"
+            test "$account_smoke_output" = '{"version":1,"ok":true,"code":"ok"}'
+            test ! -s "$RUNNER_TEMP/openusage-account-credential-smoke.stderr"
+          fi
       - name: Smoke desktop runtime capability
         id: desktop_runtime_capability_smoke
         shell: bash
@@ -693,23 +809,6 @@ jobs:
             --platform "${{ matrix.platform }}" \
             --artifact "$FINAL_ARTIFACT"
           printf 'path=%s\n' "$TRUST_REPORT" >> "$GITHUB_OUTPUT"
-      - name: Prepare pinned Linux Observer secret service
-        id: linux_observer_secret_service
-        if: matrix.platform == 'linux'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            "dbus-user-session=1.14.10-4ubuntu4.1" \
-            "gnome-keyring=46.1-2build1"
-          dbus_version="$(
-            dpkg-query --show --showformat='${Version}' dbus-user-session
-          )"
-          keyring_version="$(
-            dpkg-query --show --showformat='${Version}' gnome-keyring
-          )"
-          test "$dbus_version" = "1.14.10-4ubuntu4.1"
-          test "$keyring_version" = "46.1-2build1"
       - name: Probe and verify Observer source evidence
         id: observer_source_evidence
         if: matrix.platform != 'mac'

@@ -25,16 +25,35 @@ import {
   type EditablePool,
   type PoolHostActionFailureCode,
 } from "../accountPoolActions";
+import {
+  buildGatewayAccountIntent,
+  createBrowserGatewayAccountHostAdapter,
+  normalizeGatewayAccountCapability,
+  normalizeGatewayAccountLaunchError,
+  normalizeGatewayAccountOperationResponse,
+  normalizeGatewayAccountOperationStatus,
+  type GatewayProviderPreset,
+  type GatewayAccountAction,
+  type GatewayAccountHostAdapter,
+  type GatewayAccountOperationFailureCode,
+  type GatewayAccountOperationResponse,
+  type GatewayAccountOperationStatus,
+} from "../gatewayAccountActions";
 import AddProviderDialog from "../components/AddProviderDialog";
 import {
   AccountPoolEditorDialog,
   AccountPoolRemoveDialog,
 } from "../components/AccountPoolDialogs";
+import {
+  GatewayAccountCreateDialog,
+  ProviderAccountActions,
+} from "../components/ProviderAccountActions";
 import ProviderCard from "../components/ProviderCard";
 import { type Messages, tpl } from "../i18n";
 
 const ACCOUNT_POOLS_PATH = "/gateway/v1/account-pools";
 const DEFAULT_HOST_ADAPTER = createBrowserAccountPoolHostAdapter();
+const DEFAULT_GATEWAY_ACCOUNT_HOST_ADAPTER = createBrowserGatewayAccountHostAdapter();
 
 type HostAvailability = "checking" | "trusted" | "readOnly";
 type PoolFeedback = "saved" | "removed" | "refreshFailed" | null;
@@ -46,9 +65,11 @@ type EditorState = {
 export default function ProvidersPage({
   t,
   accountPoolHostAdapter = DEFAULT_HOST_ADAPTER,
+  gatewayAccountHostAdapter = DEFAULT_GATEWAY_ACCOUNT_HOST_ADAPTER,
 }: {
   t: Messages;
   accountPoolHostAdapter?: AccountPoolHostAdapter;
+  gatewayAccountHostAdapter?: GatewayAccountHostAdapter;
 }) {
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [sources, setSources] = useState<SourceItem[]>([]);
@@ -64,6 +85,17 @@ export default function ProvidersPage({
   const [mutationPending, setMutationPending] = useState(false);
   const [mutationError, setMutationError] = useState<PoolHostActionFailureCode | null>(null);
   const [poolFeedback, setPoolFeedback] = useState<PoolFeedback>(null);
+  const [gatewayAccountHostAvailability, setGatewayAccountHostAvailability] =
+    useState<HostAvailability>("checking");
+  const [gatewayAccountCreateOpen, setGatewayAccountCreateOpen] = useState(false);
+  const [gatewayAccountLaunchPending, setGatewayAccountLaunchPending] = useState(false);
+  const [gatewayAccountOperation, setGatewayAccountOperation] = useState<
+    GatewayAccountOperationResponse | GatewayAccountOperationStatus | null
+  >(null);
+  const [gatewayAccountOperationError, setGatewayAccountOperationError] = useState<
+    GatewayAccountOperationFailureCode | "invalid_intent" | null
+  >(null);
+  const [gatewayPublicListRefreshFailed, setGatewayPublicListRefreshFailed] = useState(false);
 
   const load = async (quiet = false) => {
     if (!quiet) setIsRefreshing(true);
@@ -113,6 +145,26 @@ export default function ProvidersPage({
   }, [accountPoolHostAdapter]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    setGatewayAccountHostAvailability("checking");
+    gatewayAccountHostAdapter.readCapability(controller.signal).then(
+      (value) => {
+        if (!controller.signal.aborted) {
+          setGatewayAccountHostAvailability(
+            normalizeGatewayAccountCapability(value) === null
+              ? "readOnly"
+              : "trusted",
+          );
+        }
+      },
+      () => {
+        if (!controller.signal.aborted) setGatewayAccountHostAvailability("readOnly");
+      },
+    );
+    return () => controller.abort();
+  }, [gatewayAccountHostAdapter]);
+
+  useEffect(() => {
     const id = setInterval(() => load(true), 60000);
     return () => clearInterval(id);
   }, []);
@@ -122,12 +174,104 @@ export default function ProvidersPage({
   );
   const quickByFamily = new Map(quick.map((q) => [q.familyId, q]));
   const accountPools = accountPoolsViewModel(accountPoolsSnapshot);
+  const gatewayAccountBusy =
+    gatewayAccountLaunchPending ||
+    gatewayAccountOperation?.state === "opened" ||
+    gatewayAccountOperation?.state === "pending";
 
   const refreshAccountPools = useCallback(async () => {
     const value = await fetchAccountPoolsSnapshot();
     if (normalizeAccountPools(value) === null) throw new Error("invalid account pool snapshot");
     setAccountPoolsSnapshot(value);
   }, []);
+
+  async function launchGatewayAccountIntent(
+    action: GatewayAccountAction,
+    target: { preset: GatewayProviderPreset } | { displayId: string },
+  ) {
+    if (
+      gatewayAccountHostAvailability !== "trusted" ||
+      gatewayAccountLaunchPending
+    ) {
+      return;
+    }
+    const intent = buildGatewayAccountIntent(action, target);
+    if (intent === null) {
+      setGatewayAccountOperationError("invalid_intent");
+      return;
+    }
+    setGatewayAccountLaunchPending(true);
+    setGatewayAccountOperation(null);
+    setGatewayAccountOperationError(null);
+    setGatewayPublicListRefreshFailed(false);
+    try {
+      const raw = await gatewayAccountHostAdapter.launch(intent);
+      const launchError = normalizeGatewayAccountLaunchError(raw);
+      if (launchError !== null) {
+        setGatewayAccountOperationError(launchError.error.code);
+        return;
+      }
+      const opened = normalizeGatewayAccountOperationResponse(raw);
+      if (opened === null) {
+        setGatewayAccountOperationError("service_unavailable");
+        return;
+      }
+      setGatewayAccountOperation(opened);
+      setGatewayAccountCreateOpen(false);
+    } catch {
+      setGatewayAccountOperationError("service_unavailable");
+    } finally {
+      setGatewayAccountLaunchPending(false);
+    }
+  }
+
+  useEffect(() => {
+    if (
+      gatewayAccountOperation === null ||
+      (gatewayAccountOperation.state !== "opened" &&
+        gatewayAccountOperation.state !== "pending")
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      gatewayAccountHostAdapter
+        .readOperation(gatewayAccountOperation.operationId, controller.signal)
+        .then(async (value) => {
+          if (controller.signal.aborted) return;
+          const status = normalizeGatewayAccountOperationStatus(value);
+          if (
+            status === null ||
+            status.operationId !== gatewayAccountOperation.operationId
+          ) {
+            setGatewayAccountOperation(null);
+            setGatewayAccountOperationError("service_unavailable");
+            return;
+          }
+          setGatewayAccountOperation(status);
+          setGatewayAccountOperationError(
+            status.state === "failed" ? status.code : null,
+          );
+          if (status.state === "succeeded") {
+            try {
+              await refreshAccountPools();
+              setGatewayPublicListRefreshFailed(false);
+            } catch {
+              setGatewayPublicListRefreshFailed(true);
+            }
+          }
+        }, () => {
+          if (!controller.signal.aborted) {
+            setGatewayAccountOperation(null);
+            setGatewayAccountOperationError("service_unavailable");
+          }
+        });
+    }, 1200);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [gatewayAccountHostAdapter, gatewayAccountOperation, refreshAccountPools]);
 
   async function mutatePool(
     action: AccountPoolHostAction,
@@ -187,7 +331,7 @@ export default function ProvidersPage({
           onClick={() => setDialogOpen(true)}
         >
           <Plus size={16} />
-          {t.addConnection}
+          {t.browseProviderPresets}
         </button>
         <div className="toolbar-right">
           <span className="dim">
@@ -211,7 +355,16 @@ export default function ProvidersPage({
         t={t}
         model={accountPools}
         hostAvailability={hostAvailability}
+        gatewayAccountHostAvailability={gatewayAccountHostAvailability}
+        gatewayAccountBusy={gatewayAccountBusy}
         feedback={poolFeedback}
+        gatewayAccountOperation={gatewayAccountOperation}
+        gatewayAccountOperationError={gatewayAccountOperationError}
+        gatewayPublicListRefreshFailed={gatewayPublicListRefreshFailed}
+        onCreateGatewayAccount={() => setGatewayAccountCreateOpen(true)}
+        onGatewayAccountAction={(action, displayId) =>
+          launchGatewayAccountIntent(action, { displayId })
+        }
         onCreate={() => {
           setMutationError(null);
           setEditor({ mode: "create", pool: null });
@@ -232,6 +385,18 @@ export default function ProvidersPage({
         onClose={() => setDialogOpen(false)}
         t={t}
       />
+      {gatewayAccountCreateOpen ? (
+        <GatewayAccountCreateDialog
+          pending={gatewayAccountLaunchPending}
+          onCancel={() => {
+            if (!gatewayAccountLaunchPending) setGatewayAccountCreateOpen(false);
+          }}
+          onContinue={(preset) =>
+            launchGatewayAccountIntent("gatewayAccount.openCreate", { preset })
+          }
+          t={t}
+        />
+      ) : null}
       {editor ? (
         <AccountPoolEditorDialog
           key={`${editor.mode}:${editor.pool?.poolId ?? "new"}:${editor.pool?.revision ?? 0}`}
@@ -301,7 +466,14 @@ function AccountPoolsSection({
   t,
   model,
   hostAvailability,
+  gatewayAccountHostAvailability,
+  gatewayAccountBusy,
   feedback,
+  gatewayAccountOperation,
+  gatewayAccountOperationError,
+  gatewayPublicListRefreshFailed,
+  onCreateGatewayAccount,
+  onGatewayAccountAction,
   onCreate,
   onEdit,
   onRemove,
@@ -310,7 +482,17 @@ function AccountPoolsSection({
   t: Messages;
   model: ReturnType<typeof accountPoolsViewModel>;
   hostAvailability: HostAvailability;
+  gatewayAccountHostAvailability: HostAvailability;
+  gatewayAccountBusy: boolean;
   feedback: PoolFeedback;
+  gatewayAccountOperation: GatewayAccountOperationResponse | GatewayAccountOperationStatus | null;
+  gatewayAccountOperationError: GatewayAccountOperationFailureCode | "invalid_intent" | null;
+  gatewayPublicListRefreshFailed: boolean;
+  onCreateGatewayAccount: () => void;
+  onGatewayAccountAction: (
+    action: Exclude<GatewayAccountAction, "gatewayAccount.openCreate">,
+    displayId: string,
+  ) => void;
   onCreate: () => void;
   onEdit: (pool: AccountPoolDefinition) => void;
   onRemove: (pool: AccountPoolDefinition) => void;
@@ -337,16 +519,49 @@ function AccountPoolsSection({
             {t.accountPoolsPrivacyNote}
           </p>
         </div>
-        <button
-          type="button"
-          className="secondary-btn account-pools-create"
-          disabled={hostAvailability !== "trusted" || model.accounts.length === 0}
-          aria-describedby="account-pool-create-note"
-          onClick={onCreate}
-        >
-          {t.createPool}
-        </button>
+        <div className="account-pools-head-actions">
+          {gatewayAccountHostAvailability === "trusted" ? (
+            <button
+              type="button"
+              className="secondary-btn gateway-account-create"
+              disabled={gatewayAccountBusy}
+              onClick={onCreateGatewayAccount}
+            >
+              {t.addGatewayAccount}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="secondary-btn account-pools-create"
+            disabled={hostAvailability !== "trusted" || model.accounts.length === 0}
+            aria-describedby="account-pool-create-note"
+            onClick={onCreate}
+          >
+            {t.createPool}
+          </button>
+        </div>
       </div>
+      <p className="gateway-account-management-note">
+        {gatewayAccountHostAvailability === "checking"
+          ? t.gatewayAccountChecking
+          : gatewayAccountHostAvailability === "trusted"
+            ? t.gatewayAccountTrusted
+            : t.gatewayAccountReadOnly}
+      </p>
+      {gatewayAccountOperation || gatewayAccountOperationError || gatewayPublicListRefreshFailed ? (
+        <div
+          className="gateway-account-operation"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {gatewayAccountOperationError
+            ? gatewayAccountOperationErrorText(gatewayAccountOperationError, t)
+            : gatewayPublicListRefreshFailed
+              ? t.gatewayPublicListRefreshFailed
+              : gatewayAccountOperationText(gatewayAccountOperation, t)}
+        </div>
+      ) : null}
       <p id="account-pool-create-note" className="account-pools-create-note">
         {hostAvailability === "trusted"
           ? model.accounts.length === 0
@@ -399,6 +614,9 @@ function AccountPoolsSection({
                 key={`${account.displayId}:${index}`}
                 account={account}
                 index={index}
+                gatewayAccountTrusted={gatewayAccountHostAvailability === "trusted"}
+                gatewayAccountBusy={gatewayAccountBusy}
+                onGatewayAccountAction={onGatewayAccountAction}
                 t={t}
               />
             ))}
@@ -479,10 +697,19 @@ function AccountPoolDefinitionCard({
 function AccountPoolAccountCard({
   account,
   index,
+  gatewayAccountTrusted,
+  gatewayAccountBusy,
+  onGatewayAccountAction,
   t,
 }: {
   account: AccountPoolAccountViewModel;
   index: number;
+  gatewayAccountTrusted: boolean;
+  gatewayAccountBusy: boolean;
+  onGatewayAccountAction: (
+    action: Exclude<GatewayAccountAction, "gatewayAccount.openCreate">,
+    displayId: string,
+  ) => void;
   t: Messages;
 }) {
   const titleId = `account-pool-card-title-${index}`;
@@ -521,6 +748,10 @@ function AccountPoolAccountCard({
       </div>
       <dl id={detailId} className="account-pool-facts">
         <div>
+          <dt>{t.providerCol}</dt>
+          <dd>{account.providerId}</dd>
+        </div>
+        <div>
           <dt>{t.priority}</dt>
           <dd>{account.priority}</dd>
         </div>
@@ -538,6 +769,13 @@ function AccountPoolAccountCard({
         </div>
       </dl>
       <p className="account-pool-memberships">{poolText}</p>
+      <ProviderAccountActions
+        trusted={gatewayAccountTrusted}
+        busy={gatewayAccountBusy}
+        displayId={account.displayId}
+        onAction={onGatewayAccountAction}
+        t={t}
+      />
     </article>
   );
 }
@@ -585,6 +823,37 @@ function poolMutationError(code: PoolHostActionFailureCode, t: Messages): string
   if (code === "pool_references_unknown_account") return t.poolUnknownAccount;
   if (code === "invalid_request") return t.poolMutationInvalid;
   return t.poolMutationUnavailable;
+}
+
+function gatewayAccountOperationText(
+  operation: GatewayAccountOperationResponse | GatewayAccountOperationStatus | null,
+  t: Messages,
+): string {
+  if (operation === null) return t.gatewayAccountOperationUnavailable;
+  if (operation.state === "opened") return t.gatewayAccountOperationOpened;
+  if (operation.state === "pending") return t.gatewayAccountOperationPending;
+  if (operation.state === "succeeded") return t.gatewayAccountOperationSucceeded;
+  if (operation.state === "cancelled") return t.gatewayAccountOperationCancelled;
+  if (operation.state === "timed_out") return t.gatewayAccountOperationTimedOut;
+  return gatewayAccountOperationErrorText(operation.code, t);
+}
+
+function gatewayAccountOperationErrorText(
+  code: GatewayAccountOperationFailureCode | "invalid_intent",
+  t: Messages,
+): string {
+  if (code === "account_in_use") return t.gatewayAccountErrorAccountInUse;
+  if (code === "not_found") return t.gatewayAccountErrorNotFound;
+  if (code === "already_exists") return t.gatewayAccountErrorAlreadyExists;
+  if (code === "invalid_intent" || code === "invalid_input") {
+    return t.gatewayAccountErrorInvalidInput;
+  }
+  if (code === "credential_unavailable") {
+    return t.gatewayAccountErrorCredentialUnavailable;
+  }
+  if (code === "config_write_failed") return t.gatewayAccountErrorConfigWriteFailed;
+  if (code === "helper_busy") return t.gatewayAccountErrorHelperBusy;
+  return t.gatewayAccountOperationUnavailable;
 }
 
 async function fetchAccountPoolsSnapshot(): Promise<unknown> {

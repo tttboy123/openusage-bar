@@ -5,6 +5,7 @@ const path = require("path");
 
 const MAX_RUNTIME_PATH_LENGTH = 4096;
 const HOST_ACTION_ARGS = Object.freeze(["gateway-account-mutate"]);
+const GATEWAY_ACCOUNT_EDITOR_ARGS = Object.freeze(["gateway-account-editor"]);
 
 function resolveHostActionExecutor({
   isPackaged = false,
@@ -24,6 +25,32 @@ function resolveHostActionExecutor({
   } catch {
     // Host action mutation is a trusted packaged-helper boundary. Fail closed
     // without reflecting filesystem or environment details to the renderer.
+    return null;
+  }
+}
+
+function resolveGatewayAccountEditorExecutor(options = {}) {
+  const resolved = resolvePackagedSettingsHelper(options);
+  return resolved === null
+    ? null
+    : { command: resolved, args: [...GATEWAY_ACCOUNT_EDITOR_ARGS] };
+}
+
+function resolvePackagedSettingsHelper({
+  isPackaged = false,
+  resourcesPath,
+  platform = process.platform,
+  pathExists = fs.existsSync,
+} = {}) {
+  try {
+    if (isPackaged !== true || typeof pathExists !== "function") return null;
+    const pathApi = platformPath(platform);
+    if (pathApi === null) return null;
+    const root = validatedAbsolutePath(resourcesPath, pathApi);
+    if (root === null) return null;
+    const command = settingsHelperCommand(root, platform, pathApi);
+    return command !== null && pathExists(command) === true ? command : null;
+  } catch {
     return null;
   }
 }
@@ -62,4 +89,4 @@ function validatedAbsolutePath(value, pathApi) {
   return normalized && pathApi.isAbsolute(normalized) ? normalized : null;
 }
 
-module.exports = { resolveHostActionExecutor };
+module.exports = { resolveGatewayAccountEditorExecutor, resolveHostActionExecutor };

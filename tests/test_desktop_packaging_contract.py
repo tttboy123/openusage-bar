@@ -667,10 +667,86 @@ class DesktopPackagingContractTests(unittest.TestCase):
         self.assertIn("openusage_settings.py", build)
         self.assertIn("dist-settings", build)
         self.assertIn("matrix.settings", build)
+        self.assertIn("--hidden-import tkinter", build)
+        self.assertIn("--hidden-import tkinter.ttk", build)
         self.assertIn("./dist-settings/${{ matrix.settings }}", smoke)
         self.assertIn("gateway-account-mutate", smoke)
         self.assertIn('"version":1', smoke)
         self.assertIn('"action":"remove_pool"', smoke)
+        self.assertIn("gateway-account-editor --ui-self-test", smoke)
+        self.assertIn('{"version":1,"event":"ready"}', smoke)
+        self.assertIn(
+            '{"version":1,"event":"terminal","state":"succeeded","code":"ok"}',
+            smoke,
+        )
+
+    def test_ci_runs_native_gateway_account_credential_smoke_after_tk_self_test(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        steps = _mapping_list(source, section="steps", item_indent=6)
+        by_name = {step.get("name"): step for step in steps}
+        smoke = by_name["Smoke bundled settings helper"]["run"]
+
+        self.assertIn(
+            "gateway-account-editor --ui-self-test",
+            smoke,
+            "Tk self-test must stay distinct from native credential roundtrip",
+        )
+        self.assertIn("scripts/smoke_gateway_account_credentials.py", smoke)
+        self.assertIn("--settings-helper", smoke)
+        self.assertIn("./dist-settings/${{ matrix.settings }}", smoke)
+        self.assertIn(
+            '{"version":1,"ok":true,"code":"ok"}',
+            smoke,
+            "native credential smoke success envelope must remain exact and safe",
+        )
+        self.assertLess(
+            smoke.index("gateway-account-editor --ui-self-test"),
+            smoke.index("scripts/smoke_gateway_account_credentials.py"),
+        )
+        self.assertNotRegex(
+            smoke,
+            r"OPENUSAGE_.*FAKE|FakeKeychain|MOCK_KEYCHAIN",
+            "packaged native smoke must not fake the platform credential backend",
+        )
+
+    def test_linux_native_gateway_account_credential_smoke_uses_pinned_private_secret_service_session(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        steps = _mapping_list(source, section="steps", item_indent=6)
+        smoke = next(
+            step for step in steps if step.get("name") == "Smoke bundled settings helper"
+        )["run"]
+
+        self.assertIn("dbus-user-session=1.14.10-4ubuntu4.1", source)
+        self.assertIn("gnome-keyring=46.1-2build1", source)
+        self.assertIn("if [[ \"${{ matrix.platform }}\" == \"linux\" ]]; then", smoke)
+        self.assertIn("dbus-run-session -- bash -euo pipefail", smoke)
+        self.assertIn("gnome-keyring-daemon --unlock --components=secrets", smoke)
+        for variable in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR"):
+            self.assertIn(variable, smoke)
+
+    def test_native_gateway_account_credential_smoke_is_a_portable_contract_and_path_trigger(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        contracts = next(
+            step
+            for step in _mapping_list(source, section="steps", item_indent=6)
+            if step.get("name") == "Run portable Observer and Gateway contracts"
+        )["run"]
+        for test_module in (
+            "tests.test_gateway_account_editor_model",
+            "tests.test_gateway_account_editor_tk",
+            "tests.test_keychain",
+            "tests.test_openusage_settings_entrypoint",
+            "tests.test_smoke_gateway_account_credentials",
+        ):
+            self.assertIn(test_module, contracts)
+        for event in ("push", "pull_request"):
+            paths = _event_paths(source, event)
+            self.assertIn("scripts/smoke_gateway_account_credentials.py", paths)
+            self.assertIn("tests/test_gateway_account_editor_model.py", paths)
+            self.assertIn("tests/test_gateway_account_editor_tk.py", paths)
+            self.assertIn("tests/test_keychain.py", paths)
+            self.assertIn("tests/test_openusage_settings_entrypoint.py", paths)
+            self.assertIn("tests/test_smoke_gateway_account_credentials.py", paths)
 
     def test_ci_smokes_exact_frozen_collector_across_modes_and_credential_failure(self):
         source = WORKFLOW.read_text(encoding="utf-8")
@@ -794,6 +870,55 @@ class DesktopPackagingContractTests(unittest.TestCase):
             "true",
             "High/Critical production dependency findings must stop packaging",
         )
+
+    def test_gateway_account_playwright_e2e_runs_once_on_linux_x64_without_handoff_upload(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        steps = _mapping_list(source, section="steps", item_indent=6)
+        by_name = {step.get("name"): step for step in steps}
+        web_install = by_name["Install web dependencies"]
+        browser_install = by_name["Install Gateway Account Playwright browser"]
+        e2e = by_name["Run Gateway Account browser E2E"]
+        upload_steps = [
+            step
+            for step in steps
+            if step.get("uses", "").startswith("actions/upload-artifact@")
+        ]
+
+        self.assertLess(steps.index(web_install), steps.index(browser_install))
+        self.assertLess(steps.index(browser_install), steps.index(e2e))
+        self.assertEqual(browser_install.get("working-directory"), "web")
+        self.assertEqual(e2e.get("working-directory"), "web")
+        self.assertEqual(
+            browser_install.get("if"),
+            "matrix.platform == 'linux' && matrix.arch == 'x64'",
+        )
+        self.assertEqual(
+            e2e.get("if"),
+            "matrix.platform == 'linux' && matrix.arch == 'x64'",
+        )
+        self.assertEqual(
+            _active_shell_commands(browser_install["run"]),
+            [["npx", "playwright", "install", "--with-deps", "chromium"]],
+        )
+        self.assertEqual(
+            _active_shell_commands(e2e["run"]),
+            [["npm", "run", "test:e2e:gateway-account"]],
+        )
+        self.assertEqual(
+            [step.get("name") for step in upload_steps],
+            ["${{ matrix.upload_name }}"],
+            "Gateway Account E2E must not add a sixth retained handoff upload",
+        )
+        self.assertEqual(
+            [step.get("path") for step in upload_steps],
+            ["${{ steps.release_handoff.outputs.path }}"],
+        )
+        self.assertNotIn("playwright-report", source)
+        self.assertNotIn("test-results", source)
+        for event in ("push", "pull_request"):
+            paths = _event_paths(source, event)
+            self.assertIn("web/e2e/**", paths)
+            self.assertIn("web/playwright.config.ts", paths)
 
     def test_ci_fails_closed_on_high_or_critical_desktop_dependency_audit(self):
         source = WORKFLOW.read_text(encoding="utf-8")

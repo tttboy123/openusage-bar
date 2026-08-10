@@ -140,7 +140,7 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
 
   if (!open) return null;
 
-  async function testEndpoint() {
+  async function checkConsoleReachability() {
     if (!selected) return;
     setTesting(true);
     setLatency(null);
@@ -282,16 +282,16 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
               <button
                 type="button"
                 className="icon-btn"
-                onClick={testEndpoint}
+                onClick={checkConsoleReachability}
                 disabled={testing}
               >
                 {testing ? (
                   <>
                     <span className="spinner" aria-hidden="true" />
-                    {t.testing}
+                    {t.checkingConsoleReachability}
                   </>
                 ) : (
-                  t.testEndpoint
+                  t.checkConsoleReachability
                 )}
               </button>
               {latency !== null ? (

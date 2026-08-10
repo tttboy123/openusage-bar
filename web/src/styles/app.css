@@ -680,6 +680,27 @@ select option { background: var(--surface); color: var(--text); }
   font-size: 0.98rem;
   font-weight: 650;
 }
+.account-pools-head-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.gateway-account-management-note,
+.gateway-account-operation,
+.gateway-account-privacy-note {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.gateway-account-operation {
+  padding: 9px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface-alt);
+}
 .account-pools-note,
 .account-pools-create-note,
 .account-pools-summary,
@@ -688,6 +709,17 @@ select option { background: var(--surface); color: var(--text); }
   color: var(--text-dim);
   font-size: 0.76rem;
   line-height: 1.45;
+}
+.provider-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+.provider-account-actions .icon-btn {
+  min-height: 40px;
+  padding: 6px 9px;
 }
 .account-pools-create { flex: none; }
 .account-pools-summary {
@@ -855,6 +887,11 @@ select option { background: var(--surface); color: var(--text); }
 .account-pool-dialog {
   width: min(720px, calc(100vw - 32px));
   max-height: calc(100dvh - 32px);
+}
+.gateway-account-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
 }
 .account-pool-form {
   display: grid;
@@ -1078,12 +1115,17 @@ select option { background: var(--surface); color: var(--text); }
   .provider-actions { opacity: 1; }
   .account-pools-panel { padding: 14px; }
   .account-pools-head { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .account-pools-head-actions { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; }
+  .account-pools-head-actions button { width: 100%; justify-content: center; }
   .account-pools-create { justify-self: start; }
   .account-pools-list { grid-template-columns: minmax(0, 1fr); }
   .account-pool-definitions { grid-template-columns: minmax(0, 1fr); }
   .account-pool-card-main { display: grid; grid-template-columns: minmax(0, 1fr); }
   .account-pool-facts { grid-template-columns: minmax(0, 1fr); }
   .account-pool-dialog { width: min(100%, calc(100vw - 16px)); max-height: calc(100dvh - 16px); padding: 16px; }
+  .gateway-account-dialog { width: min(100%, calc(100vw - 16px)); max-height: calc(100dvh - 16px); padding: 16px; }
+  .provider-account-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .provider-account-actions .icon-btn { width: 100%; justify-content: flex-start; }
   .account-pool-member-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
   .account-pool-definition-members li { display: grid; grid-template-columns: minmax(0, 1fr); }
   .account-pool-definition-actions { justify-content: flex-start; }

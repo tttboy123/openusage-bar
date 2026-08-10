@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WEB_SOURCE = ROOT / "web/src"
 ADD_PROVIDER_DIALOG = WEB_SOURCE / "components/AddProviderDialog.tsx"
+PROVIDER_ACCOUNT_ACTIONS = WEB_SOURCE / "components/ProviderAccountActions.tsx"
 
 ALLOWED_STORAGE_KEYS = {"usagehub.lang"}
 FORBIDDEN_VALUE_NAME = re.compile(
@@ -115,6 +116,40 @@ class WebRendererPrivacyTests(unittest.TestCase):
             )
 
         self.assertEqual(violations, [])
+
+    def test_gateway_account_actions_have_no_credential_inputs_or_state(self) -> None:
+        source = PROVIDER_ACCOUNT_ACTIONS.read_text(encoding="utf-8")
+        credential_markers = (
+            "apikey",
+            "authorization",
+            "cookie",
+            "credential",
+            "password",
+            "secret",
+            "session",
+            "token",
+        )
+
+        credential_state = [
+            match.group("name")
+            for match in STATE_DECLARATION.finditer(source)
+            if any(
+                marker in normalized_identifier(match.group("name"))
+                for marker in credential_markers
+            )
+        ]
+        credential_inputs = []
+        for index, match in enumerate(INPUT_ELEMENT.finditer(source), start=1):
+            attributes = match.group("attributes")
+            normalized_attributes = normalized_identifier(attributes)
+            if (
+                re.search(r"\bpassword\b", attributes, re.IGNORECASE)
+                or any(marker in normalized_attributes for marker in credential_markers)
+            ):
+                credential_inputs.append(index)
+
+        self.assertEqual(credential_state, [])
+        self.assertEqual(credential_inputs, [])
 
     def test_add_provider_dialog_endpoint_probe_omits_browser_credentials(self) -> None:
         source = ADD_PROVIDER_DIALOG.read_text(encoding="utf-8")

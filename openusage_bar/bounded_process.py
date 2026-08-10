@@ -275,6 +275,16 @@ def run_bounded(
     reader_failed = threading.Event()
     writer_failed = threading.Event()
     readers: list[threading.Thread] = []
+
+    def prioritize_observed_failure(current: str | None) -> str | None:
+        if current == "runner_failed" or writer_failed.is_set():
+            return "runner_failed"
+        if reader_failed.is_set():
+            return "reader_failed"
+        if current in {None, "timeout"} and overflow.is_set():
+            return "output_overflow"
+        return current
+
     for stream, target, limit in (
         (process.stdout, captured_stdout, stdout_limit),
         (process.stderr, captured_stderr, stderr_limit),
@@ -373,6 +383,7 @@ def run_bounded(
             input_writer.join(timeout=1)
             if input_writer.is_alive():
                 failure_code = "runner_failed"
+        failure_code = prioritize_observed_failure(failure_code)
 
     if failure_code is not None:
         raise BoundedProcessError(failure_code)

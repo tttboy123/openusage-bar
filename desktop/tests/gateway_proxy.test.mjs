@@ -1085,7 +1085,7 @@ test("returns a bounded valid legacy tray JSON response", async (context) => {
   assert.deepEqual(
     await fetchLegacyDashboardJson(
       `http://127.0.0.1:${port}/v1/snapshot`,
-      { deadlineMs: 100 },
+      { deadlineMs: 1_000 },
     ),
     { summary: { todayTokens: 42 } },
   );

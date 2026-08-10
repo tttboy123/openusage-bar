@@ -6,6 +6,10 @@ const http = require("http");
 const path = require("path");
 const { TextDecoder } = require("util");
 const { composeRendererCapability } = require("./runtime_capability");
+const {
+  createGatewayAccountOperationHost,
+  isGatewayAccountEditorExecutor,
+} = require("./gateway_account_operations");
 
 const LOCAL_API_PORT = 17821;
 const GATEWAY_PORT = 17823;
@@ -56,6 +60,23 @@ const ACCOUNT_POOL_STATUSES = new Set([
 const ACCOUNT_QUOTA_STATES = new Set(["available", "exhausted", "unknown"]);
 const ACCOUNT_COOLDOWN_STATES = new Set(["active", "inactive", "unknown"]);
 const HOST_ACTION_API_VERSION = "host-action.openusage/v1";
+const GATEWAY_ACCOUNT_HOST_API_VERSION = "gateway-account-host.openusage/v1";
+const GATEWAY_ACCOUNT_OPEN_CREATE = "gatewayAccount.openCreate";
+const GATEWAY_ACCOUNT_OPEN_EDIT = "gatewayAccount.openEdit";
+const GATEWAY_ACCOUNT_OPEN_REPLACE = "gatewayAccount.openReplace";
+const GATEWAY_ACCOUNT_OPEN_REMOVE = "gatewayAccount.openRemove";
+const GATEWAY_ACCOUNT_ACTIONS = Object.freeze([
+  GATEWAY_ACCOUNT_OPEN_CREATE,
+  GATEWAY_ACCOUNT_OPEN_EDIT,
+  GATEWAY_ACCOUNT_OPEN_REPLACE,
+  GATEWAY_ACCOUNT_OPEN_REMOVE,
+]);
+const GATEWAY_ACCOUNT_PRESETS = new Set([
+  "openai",
+  "anthropic",
+  "deepseek",
+  "openrouter",
+]);
 const ACCOUNT_POOL_CREATE_ACTION = "accountPool.create";
 const ACCOUNT_POOL_EDIT_ACTION = "accountPool.edit";
 const ACCOUNT_POOL_REMOVE_ACTION = "accountPool.remove";
@@ -267,6 +288,28 @@ function classifyRendererRequest({ method, target, headers = {} }) {
       headers: { "Content-Type": "application/json" },
     };
   }
+  if (target === "/host/v2/gateway-account-operations") {
+    if (method !== "POST") return null;
+    const hostHeaders = normalizeRendererHeaders(headers, {
+      allowContentLength: true,
+    });
+    if (
+      hostHeaders === null ||
+      hostHeaders["content-type"] !== "application/json" ||
+      !isBoundedContentLength(
+        hostHeaders["content-length"],
+        MAX_HOST_ACTION_REQUEST_BYTES,
+      )
+    ) {
+      return null;
+    }
+    return {
+      service: "host",
+      method,
+      target,
+      headers: { "Content-Type": "application/json" },
+    };
+  }
 
   const normalizedHeaders = normalizeRendererHeaders(headers);
   if (normalizedHeaders === null) return null;
@@ -295,6 +338,28 @@ function classifyRendererRequest({ method, target, headers = {} }) {
       service: "host",
       method,
       target,
+      headers: {},
+    };
+  }
+  if (target === "/host/v2/gateway-account-capabilities") {
+    if (method !== "GET") return null;
+    return {
+      service: "host",
+      method,
+      target,
+      headers: {},
+    };
+  }
+  const gatewayAccountOperationPoll = target.match(
+    /^\/host\/v2\/gateway-account-operations\/(op_[0-9a-f]{32})$/u,
+  );
+  if (gatewayAccountOperationPoll !== null) {
+    if (method !== "GET") return null;
+    return {
+      service: "host",
+      method,
+      target,
+      operationId: gatewayAccountOperationPoll[1],
       headers: {},
     };
   }
@@ -953,6 +1018,8 @@ async function fetchRendererResponse(
     verifyWindowsAcl,
     deadlineMs = DEFAULT_DEADLINE_MS,
     hostActionExecutor,
+    gatewayAccountEditorExecutor,
+    gatewayAccountOperationHost,
     spawnProcess = childProcess.spawn,
   } = {},
 ) {
@@ -960,6 +1027,42 @@ async function fetchRendererResponse(
     if (classified?.service !== "host") {
       throw new Error("private service unavailable");
     }
+  }
+  if (
+    classified.service === "host" &&
+    classified.method === "GET" &&
+    classified.operationId !== undefined
+  ) {
+    const result = gatewayAccountOperationHost?.poll(classified.operationId);
+    return result === null || result === undefined
+      ? rendererJsonResponse({ error: { code: "not_found" } }, 404)
+      : rendererJsonResponse(result);
+  }
+  if (
+    classified.service === "host" &&
+    classified.method === "POST" &&
+    classified.target === "/host/v2/gateway-account-operations"
+  ) {
+    const result = await gatewayAccountOperationHost?.open(
+      classified.gatewayAccountIntent,
+    );
+    if (result?.kind === "busy") {
+      return rendererJsonResponse({ error: { code: "helper_busy" } }, 409);
+    }
+    if (result?.kind !== "opened") throw requestFailure("unavailable");
+    return rendererJsonResponse(result.response, 202);
+  }
+  if (
+    classified.service === "host" &&
+    classified.method === "GET" &&
+    classified.target === "/host/v2/gateway-account-capabilities"
+  ) {
+    return rendererJsonResponse(
+      gatewayAccountOperationCapabilities({
+        gatewayAccountEditorExecutor,
+        platform,
+      }),
+    );
   }
   if (
     classified.service === "host" &&
@@ -1672,6 +1775,48 @@ function sanitizeHostActionRequest(body) {
   return null;
 }
 
+function sanitizeGatewayAccountOperationRequest(body) {
+  if (body === null || typeof body !== "object") return null;
+  const actionDescriptor = Object.getOwnPropertyDescriptor(body, "action");
+  if (
+    actionDescriptor === undefined ||
+    !Object.prototype.hasOwnProperty.call(actionDescriptor, "value")
+  ) {
+    return null;
+  }
+  const action = actionDescriptor.value;
+  if (action === GATEWAY_ACCOUNT_OPEN_CREATE) {
+    const request = ownDataRecord(body, ["apiVersion", "action", "preset"]);
+    if (
+      request === null ||
+      request.apiVersion !== GATEWAY_ACCOUNT_HOST_API_VERSION ||
+      request.action !== GATEWAY_ACCOUNT_OPEN_CREATE ||
+      !GATEWAY_ACCOUNT_PRESETS.has(request.preset)
+    ) {
+      return null;
+    }
+    return request;
+  }
+  if (
+    action === GATEWAY_ACCOUNT_OPEN_EDIT ||
+    action === GATEWAY_ACCOUNT_OPEN_REPLACE ||
+    action === GATEWAY_ACCOUNT_OPEN_REMOVE
+  ) {
+    const request = ownDataRecord(body, ["apiVersion", "action", "displayId"]);
+    if (
+      request === null ||
+      request.apiVersion !== GATEWAY_ACCOUNT_HOST_API_VERSION ||
+      request.action !== action ||
+      typeof request.displayId !== "string" ||
+      !/^acct_[0-9a-f]{12}$/u.test(request.displayId)
+    ) {
+      return null;
+    }
+    return request;
+  }
+  return null;
+}
+
 function sanitizeHostActionRequestBody(body) {
   const value = parseStrictJsonObject(body, MAX_HOST_ACTION_REQUEST_BYTES);
   if (value === null) return null;
@@ -1687,6 +1832,21 @@ function hostActionCapabilities({ hostActionExecutor } = {}) {
           ACCOUNT_POOL_EDIT_ACTION,
           ACCOUNT_POOL_REMOVE_ACTION,
         ]
+      : [],
+  };
+}
+
+function gatewayAccountOperationCapabilities({
+  gatewayAccountEditorExecutor,
+  platform,
+} = {}) {
+  return {
+    apiVersion: GATEWAY_ACCOUNT_HOST_API_VERSION,
+    actions: validGatewayAccountEditorExecutor(
+      gatewayAccountEditorExecutor,
+      platform,
+    )
+      ? [...GATEWAY_ACCOUNT_ACTIONS]
       : [],
   };
 }
@@ -1864,6 +2024,10 @@ function validHostActionExecutor(value) {
     return false;
   }
   return true;
+}
+
+function validGatewayAccountEditorExecutor(value, platform) {
+  return isGatewayAccountEditorExecutor(value, platform);
 }
 
 function isHostActionRevision(value) {
@@ -2694,6 +2858,18 @@ function rendererJsonResponse(payload, statusCode = 200) {
 }
 
 function createRendererApiHandler(options) {
+  const gatewayAccountOperationHost = createGatewayAccountOperationHost({
+    executor: options?.gatewayAccountEditorExecutor,
+    spawnProcess: options?.spawnProcess ?? childProcess.spawn,
+    randomBytes: options?.gatewayAccountOperationRandomBytes,
+    readyDeadlineMs: options?.gatewayAccountOperationReadyDeadlineMs,
+    lifetimeMs: options?.gatewayAccountOperationLifetimeMs,
+    terminalTtlMs: options?.gatewayAccountOperationTerminalTtlMs,
+    maxRecords: options?.gatewayAccountOperationMaxRecords,
+    now: options?.gatewayAccountOperationNow,
+    platform: options?.platform,
+  });
+  const handlerOptions = { ...options, gatewayAccountOperationHost };
   return async function handleRendererApi(request, response) {
     let headers;
     let classified;
@@ -2722,6 +2898,38 @@ function createRendererApiHandler(options) {
       return;
     }
     try {
+      if (
+        classified.method === "POST" &&
+        classified.target === "/host/v2/gateway-account-operations"
+      ) {
+        const declaredLength = Number(rendererHeader(headers, "content-length"));
+        let submitted;
+        try {
+          submitted = await readRendererHostActionBody(
+            request,
+            declaredLength,
+            options?.deadlineMs,
+          );
+        } catch {
+          sendSafeProblemAndClose(
+            request,
+            response,
+            502,
+            "service_unavailable",
+          );
+          return;
+        }
+        const value = parseStrictJsonObject(
+          submitted,
+          MAX_HOST_ACTION_REQUEST_BYTES,
+        );
+        const gatewayAccountIntent = sanitizeGatewayAccountOperationRequest(value);
+        if (gatewayAccountIntent === null) {
+          sendSafeProblem(response, 400, "invalid_intent", false);
+          return;
+        }
+        classified = { ...classified, gatewayAccountIntent };
+      }
       if (
         classified.method === "POST" &&
         classified.target === "/gateway/v1/should-send"
@@ -2778,7 +2986,7 @@ function createRendererApiHandler(options) {
         }
         classified = { ...classified, actionRequest };
       }
-      const result = await fetchRendererResponse(classified, options);
+      const result = await fetchRendererResponse(classified, handlerOptions);
       response.writeHead(result.statusCode, result.headers);
       if (request.method === "HEAD") {
         response.end();
@@ -2879,6 +3087,7 @@ module.exports = {
   readPrivateToken,
   sanitizeAccountPoolsPayload,
   sanitizeHostActionRequest,
+  sanitizeGatewayAccountOperationRequest,
   startOrProbeLegacyDashboard,
   startOrProbePrivateObserver,
   validatePrivateUnixSocket,

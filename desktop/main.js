@@ -1,5 +1,8 @@
 const { resolveCollectorCommand } = require("./collector_runtime");
-const { resolveHostActionExecutor } = require("./settings_runtime");
+const {
+  resolveGatewayAccountEditorExecutor,
+  resolveHostActionExecutor,
+} = require("./settings_runtime");
 const { app, BrowserWindow, Tray, Menu, dialog, nativeImage, nativeTheme, shell, globalShortcut } = require("electron");
 const http = require("http");
 const os = require("os");
@@ -49,6 +52,12 @@ function createPrivateApiHandler() {
     runtime: privateRuntime,
     platform: process.platform,
     verifyWindowsAcl,
+    gatewayAccountEditorExecutor: resolveGatewayAccountEditorExecutor({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      platform: process.platform,
+      pathExists: existsSync,
+    }),
     hostActionExecutor: resolveHostActionExecutor({
       isPackaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
