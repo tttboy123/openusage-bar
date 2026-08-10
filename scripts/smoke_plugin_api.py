@@ -18,6 +18,21 @@ _MAX_REPORT_BYTES = 64 * 1024
 _PROCESS_TIMEOUT_SECONDS = 30
 _GENERIC_SELF_TEST_ERROR = "packaged Plugin self-test failed"
 
+
+class PluginSmokeStageError(ValueError):
+    """One closed diagnostic stage without subprocess output or paths."""
+
+    def __init__(self, stage: str) -> None:
+        if stage not in {
+            "collector",
+            "bridge_loom",
+            "bridge_codex",
+            "bridge_claude_code",
+        }:
+            raise ValueError(_GENERIC_SELF_TEST_ERROR)
+        self.stage = stage
+        super().__init__(_GENERIC_SELF_TEST_ERROR)
+
 _EXPECTED_COLLECTOR_REPORT: dict[str, object] = {
     "apiVersion": _API_VERSION,
     "object": "plugin.server_self_test",
@@ -140,17 +155,28 @@ def run_frozen_plugin_smoke(
 
     collector_binary = _validated_binary(collector)
     bridge_binary = _validated_binary(bridge)
-    _run_exact_report(
-        [collector_binary, "__plugin-self-test", "--format", "json"],
-        _EXPECTED_COLLECTOR_REPORT,
-        command_runner=command_runner,
-    )
-    for mode in _BRIDGE_MODES:
+    try:
         _run_exact_report(
-            [bridge_binary, mode, "--self-test", "--format", "json"],
-            _expected_bridge_report(mode),
+            [collector_binary, "__plugin-self-test", "--format", "json"],
+            _EXPECTED_COLLECTOR_REPORT,
             command_runner=command_runner,
         )
+    except ValueError:
+        raise PluginSmokeStageError("collector") from None
+    for mode in _BRIDGE_MODES:
+        try:
+            _run_exact_report(
+                [bridge_binary, mode, "--self-test", "--format", "json"],
+                _expected_bridge_report(mode),
+                command_runner=command_runner,
+            )
+        except ValueError:
+            stage = {
+                "loom-stdio": "bridge_loom",
+                "codex-stdio": "bridge_codex",
+                "claude-code-stdio": "bridge_claude_code",
+            }[mode]
+            raise PluginSmokeStageError(stage) from None
     return json.loads(_canonical_json(_EXPECTED_REPORT))
 
 
@@ -161,8 +187,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parsed = parser.parse_args(arguments)
     try:
         report = run_frozen_plugin_smoke(parsed.collector, parsed.bridge)
+    except PluginSmokeStageError as error:
+        sys.stderr.write(f"packaged Plugin smoke failed stage={error.stage}\n")
+        return 1
     except ValueError:
-        sys.stderr.write("packaged Plugin smoke failed\n")
+        sys.stderr.write("packaged Plugin smoke failed stage=input\n")
         return 1
     print(_canonical_json(report))
     return 0

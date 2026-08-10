@@ -261,8 +261,46 @@ class PluginPackagedSmokeTests(unittest.TestCase):
 
         self.assertEqual(status, 1)
         self.assertEqual(output.getvalue(), "")
-        self.assertEqual(error.getvalue(), "packaged Plugin smoke failed\n")
+        self.assertEqual(
+            error.getvalue(), "packaged Plugin smoke failed stage=input\n"
+        )
         self.assertNotIn("CANARY", error.getvalue())
+
+    def test_failure_diagnostics_expose_only_the_closed_stage(self) -> None:
+        module = smoke_plugin_api()
+
+        for failed_index, expected_stage in enumerate(
+            ("collector", "bridge_loom", "bridge_codex", "bridge_claude_code")
+        ):
+            calls = 0
+
+            def runner(command, **_kwargs):
+                nonlocal calls
+                index = calls
+                calls += 1
+                if index == failed_index:
+                    return subprocess.CompletedProcess(
+                        command,
+                        1,
+                        stdout="PRIVATE_STDOUT",
+                        stderr="PRIVATE_STDERR",
+                    )
+                payload = (
+                    COLLECTOR_REPORT
+                    if command[1] == "__plugin-self-test"
+                    else bridge_report(command[1])
+                )
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=json.dumps(payload), stderr=""
+                )
+
+            with self.subTest(stage=expected_stage):
+                with self.assertRaises(module.PluginSmokeStageError) as raised:
+                    module.run_frozen_plugin_smoke(
+                        self.collector, self.bridge, command_runner=runner
+                    )
+                self.assertEqual(raised.exception.stage, expected_stage)
+                self.assertNotIn("PRIVATE", str(raised.exception))
 
 
 if __name__ == "__main__":
