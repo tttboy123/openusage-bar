@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..openusage_catalog import EXPECTED_PROVIDER_IDS
+from ..provider_ids import OPENUSAGE_PROVIDER_IDS as EXPECTED_PROVIDER_IDS
 
 
 API_VERSION = "plugin.openusage/v1"

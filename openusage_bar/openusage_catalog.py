@@ -12,9 +12,10 @@ from typing import BinaryIO, Callable
 
 from .openusage_adapter import child_subprocess_environment, openusage_path
 from .provider_catalog import catalog
+from .provider_ids import OPENUSAGE_PROVIDER_IDS
 
 
-EXPECTED_PROVIDER_IDS = tuple(sorted(catalog.upstream_family_ids))
+EXPECTED_PROVIDER_IDS = OPENUSAGE_PROVIDER_IDS
 _PROVIDER_ROW = re.compile(rb"^  - ([A-Za-z0-9._-]+)\r?\n?$")
 _VERSION_LINE = re.compile(
     rb"^([0-9]+\.[0-9]+\.[0-9]+) \(([0-9a-f]{7,40})\) built [^\r\n]+\r?\n?$"

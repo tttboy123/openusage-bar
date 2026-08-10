@@ -8,6 +8,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from .config import ID_PATTERN
+from .provider_ids import OPENUSAGE_PROVIDER_IDS
 
 
 PROVIDER_CATEGORIES = frozenset({"api", "subscription", "local_tool"})
@@ -85,19 +86,7 @@ SOURCE_VERIFICATIONS = frozenset(
     {"live_account", "fixture", "upstream_declared", "unverified"}
 )
 
-_EXPECTED_UPSTREAM_FAMILY_IDS = tuple(
-    sorted(
-        {
-            "openai", "anthropic", "azure_openai", "alibaba_cloud",
-            "openrouter", "perplexity", "groq", "mistral", "moonshot",
-            "deepseek", "xai", "zai", "gemini_api", "opencode",
-            "gemini_cli", "copilot", "cursor", "claude_code", "codex",
-            "amp", "goose", "hermes", "mux", "droid", "crush",
-            "roocode", "kilo_code", "kiro_cli", "zed", "codebuff",
-            "kimi_cli", "openclaw", "pi", "qwen_cli", "ollama",
-        }
-    )
-)
+_EXPECTED_UPSTREAM_FAMILY_IDS = OPENUSAGE_PROVIDER_IDS
 _EXPECTED_BUILTIN_FAMILY_IDS = (
     "cc_switch",
     "minimax",

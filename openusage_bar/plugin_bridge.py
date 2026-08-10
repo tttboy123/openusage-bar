@@ -17,6 +17,11 @@ from openusage_bar.plugin.contracts import (
     CAPABILITY_IDS,
     ContractError,
     sanitize_response as sanitize_plugin_response,
+    validate_advice_request,
+    validate_health_request,
+    validate_outcome_request,
+    validate_quotas_request,
+    validate_usage_request,
 )
 
 
@@ -255,6 +260,17 @@ def _validate_request(
     elif method == "POST":
         if route not in _POST_ROUTES or type(body) is not dict:
             raise _BridgeFailure
+        validator = {
+            "/plugin/v1/health/query": validate_health_request,
+            "/plugin/v1/outcomes": validate_outcome_request,
+            "/plugin/v1/quotas/query": validate_quotas_request,
+            "/plugin/v1/route-advice": validate_advice_request,
+            "/plugin/v1/usage/query": validate_usage_request,
+        }[route]
+        try:
+            body = validator(body)
+        except ContractError:
+            raise _BridgeFailure from None
         if route in _IDEMPOTENT_ROUTES:
             if (
                 type(idempotency_key) is not str

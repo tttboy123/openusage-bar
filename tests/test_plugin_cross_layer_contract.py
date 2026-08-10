@@ -219,12 +219,20 @@ class PluginCrossLayerContractTests(unittest.TestCase):
             name
             for name in imported_modules
             if name.startswith("openusage_bar.gateway")
+            or name.endswith("openusage_catalog")
+            or name.endswith("provider_catalog")
             or "credential" in name.casefold()
             or "keychain" in name.casefold()
         )
         self.assertEqual(forbidden_imports, [])
         self.assertNotIn("api.token", bridge_source)
         self.assertNotIn("gateway.token", bridge_source)
+        contracts_source = (
+            ROOT / "openusage_bar/plugin/contracts.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("provider_ids", contracts_source)
+        self.assertNotIn("openusage_catalog", contracts_source)
+        self.assertNotIn("provider_catalog", contracts_source)
 
         bridge = importlib.import_module("openusage_bar.plugin_bridge")
         self.assertEqual(tuple(bridge.BRIDGE_MODES), BRIDGE_MODES)

@@ -171,6 +171,18 @@ class PluginBridgeTests(unittest.TestCase):
                 "idempotencyKey": None,
                 "token": "CANARY",
             },
+            {
+                "requestId": "request_" + "b" * 32,
+                "method": "POST",
+                "route": "/plugin/v1/usage/query",
+                "body": {
+                    "apiVersion": "plugin.openusage/v1",
+                    "from": "2026-08-01",
+                    "to": "2026-08-02",
+                    "credential": "CANARY",
+                },
+                "idempotencyKey": None,
+            },
         )
         for value in invalid:
             with self.subTest(value=value):
@@ -194,6 +206,55 @@ class PluginBridgeTests(unittest.TestCase):
             ),
             1,
         )
+
+    def test_bridge_accepts_only_the_five_exact_public_post_bodies(self) -> None:
+        bridge = self.bridge()
+        valid = {
+            "/plugin/v1/health/query": {
+                "apiVersion": "plugin.openusage/v1",
+            },
+            "/plugin/v1/usage/query": {
+                "apiVersion": "plugin.openusage/v1",
+                "from": "2026-08-01",
+                "to": "2026-08-02",
+            },
+            "/plugin/v1/quotas/query": {
+                "apiVersion": "plugin.openusage/v1",
+                "limit": 8,
+            },
+            "/plugin/v1/route-advice": {
+                "apiVersion": "plugin.openusage/v1",
+                "provider": "openai",
+                "model": "gpt-5",
+                "estimatedTokens": 1024,
+                "window": "1h",
+            },
+            "/plugin/v1/outcomes": {
+                "apiVersion": "plugin.openusage/v1",
+                "decisionId": "decision_" + "a" * 32,
+                "outcome": "succeeded",
+                "reason": None,
+                "occurredAt": "2026-08-10T07:00:00.000000Z",
+            },
+        }
+        for route, body in valid.items():
+            with self.subTest(route=route):
+                key = (
+                    "idem_" + "b" * 32
+                    if route in {
+                        "/plugin/v1/route-advice",
+                        "/plugin/v1/outcomes",
+                    }
+                    else None
+                )
+                validated = bridge._validate_request({
+                    "requestId": "request_" + "c" * 32,
+                    "method": "POST",
+                    "route": route,
+                    "body": body,
+                    "idempotencyKey": key,
+                })
+                self.assertEqual(validated[2:], (route, body, key))
 
     def test_response_framing_rejects_redirects_encoding_and_length_drift(self) -> None:
         bridge = self.bridge()
