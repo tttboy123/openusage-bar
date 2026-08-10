@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "node scripts/verify-build-identity.mjs && node scripts/gen-tokens.mjs && tsc --noEmit && vite build && node scripts/verify-build-identity.mjs --dist",
-    "test": "npm run test:dates && npm run test:runtime-capability && npm run test:observer-platform-capability && npm run test:observer-platform-ui && npm run test:data-health-view-state && npm run test:data-health-contract && npm run test:mobile-navigation-ui && npm run test:service-status-ui && npm run test:runtime-capability-ui && npm run test:data-health-capability && npm run test:should-send-advice-ui && npm run test:account-pools-model && npm run test:account-pools && npm run test:product-version-truth && npm run test:product-build-identity-ui",
+    "test": "npm run test:dates && npm run test:runtime-capability && npm run test:observer-platform-capability && npm run test:observer-platform-ui && npm run test:data-health-view-state && npm run test:data-health-contract && npm run test:mobile-navigation-ui && npm run test:service-status-ui && npm run test:runtime-capability-ui && npm run test:data-health-capability && npm run test:should-send-advice-ui && npm run test:account-pools-model && npm run test:account-pool-actions && npm run test:account-pools && npm run test:product-version-truth && npm run test:product-build-identity-ui",
     "test:dates": "tsc --outDir .test-dist --module es2022 --target es2022 --skipLibCheck src/dates.ts && node --test tests/dates.test.mjs",
     "test:runtime-capability": "tsc --outDir .test-dist --module es2022 --target es2022 --skipLibCheck src/runtimeCapability.ts && node --test tests/gateway-capability.test.mjs",
     "test:observer-platform-capability": "tsc --outDir .test-dist --module es2022 --target es2022 --skipLibCheck src/observerPlatformCapability.ts && node --test tests/observer-platform-capability.test.mjs",
@@ -19,6 +19,7 @@
     "test:data-health-capability": "tsc --outDir .test-dist --module es2022 --target es2022 --skipLibCheck src/i18n.ts src/runtimeCapability.ts src/runtimeCapabilityViewModel.ts && node --test tests/data-health-capability.test.mjs",
     "test:should-send-advice-ui": "tsc --outDir .test-dist --module es2022 --target es2022 --skipLibCheck src/i18n.ts src/runtimeCapability.ts && node --test tests/should-send-advice-ui.test.mjs",
     "test:account-pools-model": "tsc --outDir .test-dist --module es2022 --target es2022 --skipLibCheck src/accountPools.ts && node --test tests/account-pools-model.test.mjs",
+    "test:account-pool-actions": "tsc --outDir .test-dist --module es2022 --target es2022 --skipLibCheck src/accountPoolActions.ts && node --test tests/account-pool-actions-model.test.mjs",
     "test:account-pools": "node --test tests/account-pools.test.mjs",
     "test:product-version-truth": "tsc --outDir .test-dist --module es2022 --target es2022 --skipLibCheck src/productVersionTruth.ts && node --test tests/product-version-truth.test.mjs",
     "test:product-build-identity-ui": "node --test tests/product-build-identity-ui.test.mjs",

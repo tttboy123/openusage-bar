@@ -150,6 +150,7 @@ jobs:
             artifact_arch: x64
             artifact_ext: dmg
             collector: openusage-collector
+            settings: openusage-settings
           - platform: mac
             arch: arm64
             os: macos-15
@@ -161,6 +162,7 @@ jobs:
             artifact_arch: arm64
             artifact_ext: dmg
             collector: openusage-collector
+            settings: openusage-settings
           - platform: win
             arch: x64
             os: windows-2025
@@ -172,6 +174,7 @@ jobs:
             artifact_arch: x64
             artifact_ext: exe
             collector: openusage-collector.exe
+            settings: openusage-settings.exe
           - platform: win
             arch: arm64
             os: windows-11-arm
@@ -183,6 +186,7 @@ jobs:
             artifact_arch: arm64
             artifact_ext: exe
             collector: openusage-collector.exe
+            settings: openusage-settings.exe
           - platform: linux
             arch: x64
             os: ubuntu-24.04
@@ -194,6 +198,7 @@ jobs:
             artifact_arch: x86_64
             artifact_ext: AppImage
             collector: openusage-collector
+            settings: openusage-settings
           - platform: linux
             arch: arm64
             os: ubuntu-24.04-arm
@@ -205,6 +210,7 @@ jobs:
             artifact_arch: arm64
             artifact_ext: AppImage
             collector: openusage-collector
+            settings: openusage-settings
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out source
@@ -273,6 +279,7 @@ jobs:
             tests.test_distribution_trust_posture \
             tests.test_extract_nsis_payload \
             tests.test_gateway_account_pool \
+            tests.test_gateway_account_mutation_commands \
             tests.test_gateway_api \
             tests.test_gateway_api_schema \
             tests.test_gateway_cache \
@@ -395,6 +402,49 @@ jobs:
         id: gateway_smoke
         shell: bash
         run: python scripts/smoke_gateway.py --all --collector "./dist-collector/${{ matrix.collector }}"
+      - name: Build bundled settings helper
+        id: settings_build
+        shell: bash
+        run: |
+          settings_name="${{ matrix.settings }}"
+          settings_name="${settings_name%.exe}"
+          pyinstaller_args=(
+            --clean
+            --noconfirm
+            --onefile
+            --name "$settings_name"
+            --distpath dist-settings
+            --workpath build-settings/work
+            --specpath build-settings
+            --paths .
+            --collect-submodules openusage_bar
+            --collect-data openusage_bar
+          )
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            pyinstaller_args+=(
+              --collect-submodules secretstorage
+              --collect-submodules jeepney
+            )
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            pyinstaller_args+=(--hidden-import Security)
+          fi
+          python -m PyInstaller "${pyinstaller_args[@]}" openusage_settings.py
+          test -f "./dist-settings/${{ matrix.settings }}"
+      - name: Smoke bundled settings helper
+        id: settings_smoke
+        shell: bash
+        run: |
+          settings_smoke_home="$RUNNER_TEMP/openusage-settings-smoke"
+          mkdir -p "$settings_smoke_home"
+          export HOME="$settings_smoke_home"
+          export USERPROFILE="$settings_smoke_home"
+          set +e
+          settings_output="$(printf '%s' '{"version":1,"action":"remove_pool","pool":{"poolId":"ci-smoke"},"expectedRevision":1}' | "./dist-settings/${{ matrix.settings }}" gateway-account-mutate 2>"$RUNNER_TEMP/openusage-settings-smoke.stderr")"
+          settings_status=$?
+          set -e
+          test "$settings_status" -eq 1
+          test "$settings_output" = '{"version":1,"ok":false,"code":"not_found"}'
+          test ! -s "$RUNNER_TEMP/openusage-settings-smoke.stderr"
       - name: Smoke desktop runtime capability
         id: desktop_runtime_capability_smoke
         shell: bash
@@ -414,7 +464,8 @@ jobs:
           python scripts/release_artifact_audit.py \
             --desktop-package "$package_root" \
             "${{ matrix.collector }}" \
-            --built-collector "./dist-collector/${{ matrix.collector }}"
+            --built-collector "./dist-collector/${{ matrix.collector }}" \
+            --built-settings "./dist-settings/${{ matrix.settings }}"
       - name: Resolve final artifact
         id: artifact
         shell: bash
@@ -465,6 +516,7 @@ jobs:
             --desktop-package "$package_root" \
             "${{ matrix.collector }}" \
             --built-collector "./dist-collector/${{ matrix.collector }}" \
+            --built-settings "./dist-settings/${{ matrix.settings }}" \
             --require-final-native-metadata
           python scripts/smoke_gateway.py --all \
             --collector "$package_root/Contents/Resources/collector/${{ matrix.collector }}"
@@ -525,6 +577,7 @@ jobs:
             --desktop-package "$appRoot" `
             "${{ matrix.collector }}" `
             --built-collector "./dist-collector/${{ matrix.collector }}" `
+            --built-settings "./dist-settings/${{ matrix.settings }}" `
             --require-final-native-metadata
           if ($LASTEXITCODE -ne 0) {
             throw "Final Windows app audit failed"
@@ -581,6 +634,7 @@ jobs:
             --desktop-package "$appRoot" \
             "${{ matrix.collector }}" \
             --built-collector "./dist-collector/${{ matrix.collector }}" \
+            --built-settings "./dist-settings/${{ matrix.settings }}" \
             --require-final-native-metadata
           mkdir -p dist-evidence
           python scripts/distribution_trust_posture.py inspect \

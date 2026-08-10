@@ -432,6 +432,7 @@ class AccountPoolTests(unittest.TestCase):
                     {
                         "alias": "Primary",
                         "displayId": self.primary.display_id,
+                        "providerId": "openai",
                         "status": "ready",
                         "quota": {
                             "state": "available",
@@ -453,6 +454,7 @@ class AccountPoolTests(unittest.TestCase):
                     {
                         "alias": "Backup",
                         "displayId": self.secondary.display_id,
+                        "providerId": "openai",
                         "status": "cooldown",
                         "quota": {
                             "state": "unknown",
@@ -471,19 +473,63 @@ class AccountPoolTests(unittest.TestCase):
                         "priority": 20,
                         "weight": 1,
                     },
-                ]
+                ],
+                "pools": [
+                    {
+                        "poolId": "daily-coding",
+                        "revision": 3,
+                        "strategy": "quota-aware",
+                        "members": [
+                            {
+                                "displayId": self.primary.display_id,
+                                "priority": 10,
+                                "weight": 1,
+                            },
+                            {
+                                "displayId": self.secondary.display_id,
+                                "priority": 20,
+                                "weight": 1,
+                            },
+                        ],
+                        "crossProviderFallback": False,
+                        "crossModelFallback": False,
+                        "crossRegionFallback": False,
+                    }
+                ],
             },
         )
         rendered = json.dumps(payload, sort_keys=True).casefold()
         self.assertNotIn("gateway-api-key", rendered)
         self.assertNotIn("credential", rendered)
         self.assertNotIn("account_id", rendered)
+        self.assertEqual(validate_account_pools_public_payload(payload), payload)
+
+        legacy_root = {"accounts": json.loads(json.dumps(payload["accounts"]))}
+        self.assertIsNone(validate_account_pools_public_payload(legacy_root))
 
         hostile = json.loads(json.dumps(payload))
         hostile["accounts"][0]["displayId"] = (
             "openai.primary.gateway-api-key"
         )
         self.assertIsNone(validate_account_pools_public_payload(hostile))
+
+        private_account = json.loads(json.dumps(payload))
+        private_account["accounts"][0]["accountId"] = "primary"
+        self.assertIsNone(validate_account_pools_public_payload(private_account))
+
+        private_pool = json.loads(json.dumps(payload))
+        private_pool["pools"][0]["members"][0]["account_id"] = "primary"
+        self.assertIsNone(validate_account_pools_public_payload(private_pool))
+
+        unknown_member = json.loads(json.dumps(payload))
+        unknown_member["pools"][0]["members"][0]["displayId"] = "acct_ffffffffffff"
+        self.assertIsNone(validate_account_pools_public_payload(unknown_member))
+
+        duplicate_member = json.loads(json.dumps(payload))
+        duplicate_member["pools"][0]["members"][1]["displayId"] = (
+            duplicate_member["pools"][0]["members"][0]["displayId"]
+        )
+        self.assertIsNone(validate_account_pools_public_payload(duplicate_member))
 
         backend_down = account_pools_public_payload(
             accounts=(self.primary,),

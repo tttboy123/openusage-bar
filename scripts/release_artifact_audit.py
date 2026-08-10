@@ -740,6 +740,7 @@ def inspect_desktop_package(
     platform: str,
     *,
     built_collector: Path | None = None,
+    built_settings: Path | None = None,
     canonical_identity: Path | None = None,
     product_truth: Path | None = None,
     require_final_native_metadata: bool = False,
@@ -805,6 +806,39 @@ def inspect_desktop_package(
             built_collector,
             platform,
         )
+    if built_settings is not None:
+        settings_name = (
+            "openusage-settings.exe" if platform == "win32"
+            else "openusage-settings"
+        )
+        settings_directory = resource_root / "settings"
+        try:
+            directory_stat = settings_directory.lstat()
+            if not stat.S_ISDIR(directory_stat.st_mode):
+                raise ArtifactError("collector")
+            with os.scandir(settings_directory) as entries:
+                first = next(entries, None)
+                second = next(entries, None)
+            if first is None or second is not None or first.name != settings_name:
+                raise ArtifactError("collector")
+            settings_stat = first.stat(follow_symlinks=False)
+        except OSError as error:
+            raise ArtifactError("collector") from error
+        if (
+            not stat.S_ISREG(settings_stat.st_mode)
+            or settings_stat.st_size > MAX_DESKTOP_MEMBER_BYTES
+            or (
+                platform != "win32"
+                and settings_stat.st_mode
+                & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                == 0
+            )
+        ):
+            raise ArtifactError("collector")
+        packaged_settings = Path(first.path)
+        if not _native_collector(packaged_settings, platform):
+            raise ArtifactError("binary")
+        _verify_built_collector(packaged_settings, built_settings, platform)
 
     desktop_entries: list[Path] = []
     for member, _size in _desktop_files(package_root):
@@ -939,13 +973,17 @@ def audit(path: Path) -> None:
 
 
 def main(arguments: list[str]) -> int:
+    require_final_native_metadata = bool(
+        arguments and arguments[-1] == "--require-final-native-metadata"
+    )
+    desktop_core = arguments[:-1] if require_final_native_metadata else arguments
     desktop_arguments = (
-        len(arguments) in {5, 6}
-        and arguments[0] == "--desktop-package"
-        and arguments[3] == "--built-collector"
+        len(desktop_core) in {5, 7}
+        and desktop_core[0] == "--desktop-package"
+        and desktop_core[3] == "--built-collector"
         and (
-            len(arguments) == 5
-            or arguments[5] == "--require-final-native-metadata"
+            len(desktop_core) == 5
+            or desktop_core[5] == "--built-settings"
         )
     )
     if len(arguments) != 1 and not desktop_arguments:
@@ -958,7 +996,10 @@ def main(arguments: list[str]) -> int:
                 root,
                 _desktop_platform(root, arguments[2]),
                 built_collector=Path(arguments[4]),
-                require_final_native_metadata=len(arguments) == 6,
+                built_settings=(
+                    Path(desktop_core[6]) if len(desktop_core) == 7 else None
+                ),
+                require_final_native_metadata=require_final_native_metadata,
             )
         else:
             audit(Path(arguments[0]))

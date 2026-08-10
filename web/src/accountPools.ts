@@ -9,6 +9,14 @@ export type AccountPoolStatus =
 export type AccountQuotaState = "available" | "exhausted" | "unknown";
 export type AccountCooldownState = "active" | "inactive" | "unknown";
 export type AccountPoolStatusTone = "positive" | "warning" | "negative" | "neutral" | "unknown";
+export type AccountPoolStrategy =
+  | "fixed-first"
+  | "round-robin"
+  | "sticky"
+  | "quota-aware"
+  | "cost"
+  | "latency"
+  | "reliability";
 
 export interface AccountQuota {
   state: AccountQuotaState;
@@ -31,6 +39,7 @@ export interface AccountPoolMembership {
 export interface AccountPoolAccount {
   alias: string | null;
   displayId: string;
+  providerId: string;
   status: AccountPoolStatus;
   quota: AccountQuota;
   cooldown: AccountCooldown;
@@ -39,8 +48,25 @@ export interface AccountPoolAccount {
   weight: number;
 }
 
+export interface AccountPoolMember {
+  displayId: string;
+  priority: number;
+  weight: number;
+}
+
+export interface AccountPoolDefinition {
+  poolId: string;
+  revision: number;
+  strategy: AccountPoolStrategy;
+  members: AccountPoolMember[];
+  crossProviderFallback: boolean;
+  crossModelFallback: boolean;
+  crossRegionFallback: boolean;
+}
+
 export interface AccountPools {
   accounts: AccountPoolAccount[];
+  pools: AccountPoolDefinition[];
 }
 
 export type AccountPoolStatusKey =
@@ -59,6 +85,7 @@ export interface AccountPoolAccountViewModel extends AccountPoolAccount {
 export interface AccountPoolsViewModel {
   state: "ready" | "empty" | "unknown";
   accounts: AccountPoolAccountViewModel[];
+  pools: AccountPoolDefinition[];
   summary: {
     total: number;
     disabled: number;
@@ -71,10 +98,11 @@ type JsonRecord = Record<PropertyKey, unknown>;
 
 type OwnRead = { ok: true; value: unknown } | { ok: false; value?: never };
 
-const ROOT_FIELDS = ["accounts"] as const;
+const ROOT_FIELDS = ["accounts", "pools"] as const;
 const ACCOUNT_FIELDS = [
   "alias",
   "displayId",
+  "providerId",
   "status",
   "quota",
   "cooldown",
@@ -85,6 +113,16 @@ const ACCOUNT_FIELDS = [
 const QUOTA_FIELDS = ["state", "remaining", "limit", "resetAt"] as const;
 const COOLDOWN_FIELDS = ["state", "until"] as const;
 const MEMBERSHIP_FIELDS = ["poolId", "priority", "weight"] as const;
+const POOL_FIELDS = [
+  "poolId",
+  "revision",
+  "strategy",
+  "members",
+  "crossProviderFallback",
+  "crossModelFallback",
+  "crossRegionFallback",
+] as const;
+const POOL_MEMBER_FIELDS = ["displayId", "priority", "weight"] as const;
 
 const STATUS_VALUES = new Set<AccountPoolStatus>([
   "ready",
@@ -104,18 +142,33 @@ const COOLDOWN_STATE_VALUES = new Set<AccountCooldownState>([
   "inactive",
   "unknown",
 ]);
+const POOL_STRATEGY_VALUES = new Set<AccountPoolStrategy>([
+  "fixed-first",
+  "round-robin",
+  "sticky",
+  "quota-aware",
+  "cost",
+  "latency",
+  "reliability",
+]);
 
 const MAX_TEXT_LENGTH = 128;
 const MAX_TIMESTAMP_LENGTH = 64;
 const MAX_ACCOUNTS = 256;
 const MAX_MEMBERSHIPS = 64;
+const MAX_POOLS = 64;
+const MAX_POOL_MEMBERS = 64;
 const MAX_PRIORITY = 1_000_000;
 const MAX_WEIGHT = 1_000_000;
+const MAX_POOL_PRIORITY = 10_000;
+const MAX_POOL_WEIGHT = 100;
 const ACCOUNT_DISPLAY_ID = /^acct_[0-9a-f]{12}$/u;
+const PUBLIC_ID = /^[A-Za-z0-9._-]+$/u;
 
 const UNKNOWN_MODEL = {
   state: "unknown",
   accounts: [],
+  pools: [],
   summary: {
     total: 0,
     disabled: 0,
@@ -128,16 +181,36 @@ export function normalizeAccountPools(value: unknown): AccountPools | null {
   try {
     if (!isRecord(value) || !exactOwnKeys(value, ROOT_FIELDS)) return null;
     const accountsRead = readOwn(value, "accounts");
-    if (!accountsRead.ok || !Array.isArray(accountsRead.value)) return null;
-    if (accountsRead.value.length > MAX_ACCOUNTS) return null;
+    const poolsRead = readOwn(value, "pools");
+    if (!accountsRead.ok || !poolsRead.ok) return null;
+    const accountItems = exactDataArray(accountsRead.value, 0, MAX_ACCOUNTS);
+    const poolItems = exactDataArray(poolsRead.value, 0, MAX_POOLS);
+    if (accountItems === null || poolItems === null) return null;
 
     const accounts: AccountPoolAccount[] = [];
-    for (const item of accountsRead.value) {
+    const displayIds = new Set<string>();
+    for (const item of accountItems) {
       const account = normalizeAccount(item);
-      if (account === null) return null;
+      if (account === null || displayIds.has(account.displayId)) return null;
+      displayIds.add(account.displayId);
       accounts.push(account);
     }
-    return { accounts };
+    const pools: AccountPoolDefinition[] = [];
+    const poolIds = new Set<string>();
+    for (const item of poolItems) {
+      const pool = normalizePool(item, displayIds);
+      if (pool === null || poolIds.has(pool.poolId)) return null;
+      poolIds.add(pool.poolId);
+      pools.push(pool);
+    }
+    if (
+      accounts.some((account) =>
+        account.pools.some((membership) => !poolIds.has(membership.poolId)),
+      )
+    ) {
+      return null;
+    }
+    return { accounts, pools };
   } catch {
     return null;
   }
@@ -156,6 +229,7 @@ export function accountPoolsViewModel(value: unknown): AccountPoolsViewModel {
   return {
     state: accounts.length === 0 ? "empty" : "ready",
     accounts,
+    pools: normalized.pools,
     summary: {
       total: accounts.length,
       disabled: accounts.filter((account) => account.status === "disabled").length,
@@ -172,6 +246,7 @@ function normalizeAccount(value: unknown): AccountPoolAccount | null {
 
   const alias = nullablePublicText(readValue(value, "alias"));
   const displayId = publicText(readValue(value, "displayId"));
+  const providerId = publicIdentifier(readValue(value, "providerId"));
   const status = normalizeStatus(readValue(value, "status"));
   const quota = normalizeQuota(readValue(value, "quota"));
   const cooldown = normalizeCooldown(readValue(value, "cooldown"));
@@ -183,6 +258,7 @@ function normalizeAccount(value: unknown): AccountPoolAccount | null {
     alias === undefined ||
     displayId === null ||
     !ACCOUNT_DISPLAY_ID.test(displayId) ||
+    providerId === null ||
     status === null ||
     quota === null ||
     cooldown === null ||
@@ -196,6 +272,7 @@ function normalizeAccount(value: unknown): AccountPoolAccount | null {
   return {
     alias,
     displayId,
+    providerId,
     status,
     quota,
     cooldown,
@@ -203,6 +280,76 @@ function normalizeAccount(value: unknown): AccountPoolAccount | null {
     priority,
     weight,
   };
+}
+
+function normalizePool(
+  value: unknown,
+  accountDisplayIds: ReadonlySet<string>,
+): AccountPoolDefinition | null {
+  if (!isRecord(value) || !exactOwnKeys(value, POOL_FIELDS)) return null;
+  const poolId = publicIdentifier(readValue(value, "poolId"));
+  const revision = boundedInteger(readValue(value, "revision"), Number.MAX_SAFE_INTEGER);
+  const strategyValue = readValue(value, "strategy");
+  const strategy =
+    typeof strategyValue === "string" &&
+    POOL_STRATEGY_VALUES.has(strategyValue as AccountPoolStrategy)
+      ? (strategyValue as AccountPoolStrategy)
+      : null;
+  const members = normalizePoolMembers(readValue(value, "members"), accountDisplayIds);
+  const crossProviderFallback = readValue(value, "crossProviderFallback");
+  const crossModelFallback = readValue(value, "crossModelFallback");
+  const crossRegionFallback = readValue(value, "crossRegionFallback");
+  if (
+    poolId === null ||
+    revision === null ||
+    revision < 1 ||
+    strategy === null ||
+    members === null ||
+    typeof crossProviderFallback !== "boolean" ||
+    typeof crossModelFallback !== "boolean" ||
+    typeof crossRegionFallback !== "boolean"
+  ) {
+    return null;
+  }
+  return {
+    poolId,
+    revision,
+    strategy,
+    members,
+    crossProviderFallback,
+    crossModelFallback,
+    crossRegionFallback,
+  };
+}
+
+function normalizePoolMembers(
+  value: unknown,
+  accountDisplayIds: ReadonlySet<string>,
+): AccountPoolMember[] | null {
+  const items = exactDataArray(value, 1, MAX_POOL_MEMBERS);
+  if (items === null) return null;
+  const members: AccountPoolMember[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (!isRecord(item) || !exactOwnKeys(item, POOL_MEMBER_FIELDS)) return null;
+    const displayId = publicText(readValue(item, "displayId"));
+    const priority = boundedInteger(readValue(item, "priority"), MAX_POOL_PRIORITY);
+    const weight = boundedInteger(readValue(item, "weight"), MAX_POOL_WEIGHT);
+    if (
+      displayId === null ||
+      !ACCOUNT_DISPLAY_ID.test(displayId) ||
+      !accountDisplayIds.has(displayId) ||
+      seen.has(displayId) ||
+      priority === null ||
+      weight === null ||
+      weight < 1
+    ) {
+      return null;
+    }
+    seen.add(displayId);
+    members.push({ displayId, priority, weight });
+  }
+  return members;
 }
 
 function normalizeQuota(value: unknown): AccountQuota | null {
@@ -240,10 +387,11 @@ function normalizeCooldown(value: unknown): AccountCooldown | null {
 }
 
 function normalizeMemberships(value: unknown): AccountPoolMembership[] | null {
-  if (!Array.isArray(value) || value.length > MAX_MEMBERSHIPS) return null;
+  const items = exactDataArray(value, 0, MAX_MEMBERSHIPS);
+  if (items === null) return null;
   const memberships: AccountPoolMembership[] = [];
   const seen = new Set<string>();
-  for (const item of value) {
+  for (const item of items) {
     if (!isRecord(item) || !exactOwnKeys(item, MEMBERSHIP_FIELDS)) return null;
     const poolId = publicText(readValue(item, "poolId"));
     const priority = boundedInteger(readValue(item, "priority"), MAX_PRIORITY);
@@ -301,8 +449,14 @@ function cloneUnknownModel(): AccountPoolsViewModel {
   return {
     state: UNKNOWN_MODEL.state,
     accounts: [],
+    pools: [],
     summary: { ...UNKNOWN_MODEL.summary },
   };
+}
+
+function publicIdentifier(value: unknown): string | null {
+  const text = publicText(value);
+  return text !== null && PUBLIC_ID.test(text) ? text : null;
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -313,12 +467,43 @@ function exactOwnKeys(value: JsonRecord, expected: readonly string[]): boolean {
   try {
     const names = Object.getOwnPropertyNames(value);
     return (
+      Object.getPrototypeOf(value) === Object.prototype &&
       Object.getOwnPropertySymbols(value).length === 0 &&
       names.length === expected.length &&
       expected.every((key) => names.includes(key))
     );
   } catch {
     return false;
+  }
+}
+
+function exactDataArray(
+  value: unknown,
+  minimumLength: number,
+  maximumLength: number,
+): unknown[] | null {
+  try {
+    if (
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Array.prototype ||
+      value.length < minimumLength ||
+      value.length > maximumLength
+    ) {
+      return null;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (Reflect.ownKeys(descriptors).length !== value.length + 1) return null;
+    const result: unknown[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      const descriptor = descriptors[String(index)];
+      if (!descriptor || !("value" in descriptor) || descriptor.enumerable !== true) {
+        return null;
+      }
+      result.push(descriptor.value);
+    }
+    return result;
+  } catch {
+    return null;
   }
 }
 

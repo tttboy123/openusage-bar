@@ -40,6 +40,14 @@ def _valid_stored_credential(value: object) -> bool:
     )
 
 
+def supports_provider_account_credentials(provider_id: object) -> bool:
+    return (
+        type(provider_id) is str
+        and provider_id in _PROVIDER_CREDENTIAL_ACCOUNTS
+        and _PROVIDER_CREDENTIAL_ACCOUNTS[provider_id] is not None
+    )
+
+
 def execute_provider_call(
     provider_id: str,
     request_body: bytes,
@@ -117,4 +125,8 @@ def execute_provider_call(
         raise _provider_error("upstream_unavailable", True) from None
 
 
-__all__ = ["execute_provider_call", "validate_provider_endpoint"]
+__all__ = [
+    "execute_provider_call",
+    "supports_provider_account_credentials",
+    "validate_provider_endpoint",
+]

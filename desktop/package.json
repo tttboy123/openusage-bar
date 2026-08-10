@@ -31,6 +31,7 @@
       "package.json",
       "product_version_truth.js",
       "runtime_capability.js",
+      "settings_runtime.js",
       "tray_state.js"
     ],
     "extraResources": [
@@ -58,6 +59,10 @@
         {
           "from": "../dist-collector/openusage-collector",
           "to": "collector/openusage-collector"
+        },
+        {
+          "from": "../dist-settings/openusage-settings",
+          "to": "settings/openusage-settings"
         }
       ]
     },
@@ -69,6 +74,10 @@
         {
           "from": "../dist-collector/openusage-collector.exe",
           "to": "collector/openusage-collector.exe"
+        },
+        {
+          "from": "../dist-settings/openusage-settings.exe",
+          "to": "settings/openusage-settings.exe"
         }
       ]
     },
@@ -86,6 +95,10 @@
         {
           "from": "../dist-collector/openusage-collector",
           "to": "collector/openusage-collector"
+        },
+        {
+          "from": "../dist-settings/openusage-settings",
+          "to": "settings/openusage-settings"
         }
       ]
     }

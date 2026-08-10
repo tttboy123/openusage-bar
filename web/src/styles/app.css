@@ -776,6 +776,204 @@ select option { background: var(--surface); color: var(--text); }
   color: var(--text-dim);
   font-size: 0.78rem;
 }
+.account-pool-feedback {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface-alt);
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+.account-pool-definitions-head {
+  margin-top: 14px;
+  border-top: 1px solid var(--hairline);
+  padding-top: 12px;
+}
+.account-pool-definitions-head h4 {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+.account-pool-definitions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+.account-pool-definition-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-alt);
+}
+.account-pool-identity h5 {
+  margin: 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+.account-pool-definition-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.account-pool-definition-actions .icon-btn {
+  min-height: 36px;
+  padding: 5px 8px;
+}
+.account-pool-definition-members {
+  list-style: none;
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+}
+.account-pool-definition-members li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: 0.73rem;
+}
+.account-pool-definition-members li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.account-pool-definition-members li span:last-child {
+  flex: none;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+.account-pool-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+}
+.account-pool-form {
+  display: grid;
+  gap: 14px;
+}
+.account-pool-field {
+  display: grid;
+  gap: 5px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 550;
+}
+.account-pool-field-error,
+.account-pool-dialog-error {
+  margin: -8px 0 0;
+  color: var(--bad);
+  font-size: 0.76rem;
+}
+.account-pool-dialog-error {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--bad);
+  border-radius: 8px;
+  background: var(--bad-soft);
+}
+.account-pool-revision {
+  margin: -8px 0 0;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+.account-pool-members-fieldset,
+.account-pool-fallback-fieldset {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+}
+.account-pool-members-fieldset legend,
+.account-pool-fallback-fieldset legend {
+  padding: 0 5px;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+.account-pool-member-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 110px 100px;
+  gap: 9px;
+  align-items: end;
+  min-width: 0;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.account-pool-member-row:last-of-type { border-bottom: 0; }
+.account-pool-member-row > label:not(.account-pool-member-choice) {
+  display: grid;
+  gap: 4px;
+  color: var(--text-faint);
+  font-size: 0.68rem;
+}
+.account-pool-member-row input[type="number"] {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+.account-pool-member-choice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.account-pool-member-choice span {
+  display: grid;
+  min-width: 0;
+}
+.account-pool-member-choice strong,
+.account-pool-member-choice small { overflow-wrap: anywhere; }
+.account-pool-member-choice small { color: var(--text-faint); font-family: var(--font-mono); }
+.account-pool-fallback-fieldset > p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+.account-pool-fallback-fieldset > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+.account-pool-fallback-fieldset input,
+.account-pool-member-choice input { width: 18px; height: 18px; flex: none; }
+.account-pool-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+.account-pool-dialog-actions button { min-height: 44px; }
+.danger-btn {
+  min-height: 40px;
+  padding: 7px 12px;
+  border: 1px solid var(--bad);
+  border-radius: 8px;
+  background: var(--bad-soft);
+  color: var(--bad);
+  font-weight: 650;
+  cursor: pointer;
+}
+.danger-btn:disabled { opacity: 0.5; cursor: default; }
+.account-pool-remove-dialog > p { color: var(--text-dim); }
  .provider-grid {
    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
  }
@@ -882,8 +1080,15 @@ select option { background: var(--surface); color: var(--text); }
   .account-pools-head { display: grid; grid-template-columns: minmax(0, 1fr); }
   .account-pools-create { justify-self: start; }
   .account-pools-list { grid-template-columns: minmax(0, 1fr); }
+  .account-pool-definitions { grid-template-columns: minmax(0, 1fr); }
   .account-pool-card-main { display: grid; grid-template-columns: minmax(0, 1fr); }
   .account-pool-facts { grid-template-columns: minmax(0, 1fr); }
+  .account-pool-dialog { width: min(100%, calc(100vw - 16px)); max-height: calc(100dvh - 16px); padding: 16px; }
+  .account-pool-member-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+  .account-pool-definition-members li { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .account-pool-definition-actions { justify-content: flex-start; }
+  .account-pool-dialog-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .account-pool-dialog-actions button { width: 100%; }
   .trend-bars { overflow-x: auto; }
   .heatmap-scroll { max-width: 100%; }
 }

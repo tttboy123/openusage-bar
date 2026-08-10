@@ -14,6 +14,37 @@ const PRIVATE_CANARIES = {
   header: "CANARY_HEADER",
 };
 
+test("normalizes the exact public account and Pool projection", () => {
+  const payload = accountPoolsPayload();
+  payload.accounts = payload.accounts.map((item) => ({
+    ...item,
+    providerId: "openai",
+  }));
+  payload.accounts[0].pools = [
+    { poolId: "default", priority: 10, weight: 80 },
+  ];
+  payload.pools = [
+    {
+      poolId: "default",
+      revision: 3,
+      strategy: "quota-aware",
+      members: [
+        { displayId: "acct_000000007f3a", priority: 10, weight: 80 },
+        { displayId: "acct_000000000001", priority: 30, weight: 20 },
+      ],
+      crossProviderFallback: false,
+      crossModelFallback: true,
+      crossRegionFallback: false,
+    },
+  ];
+
+  assert.deepEqual(normalizeAccountPools(payload), {
+    accounts: payload.accounts,
+    pools: payload.pools,
+  });
+  assert.doesNotMatch(JSON.stringify(normalizeAccountPools(payload)), /accountId|credential|token|path|header/iu);
+});
+
 test("normalizes only the renderer-safe account pool public shape", () => {
   const normalized = normalizeAccountPools(accountPoolsPayload());
 
@@ -22,6 +53,7 @@ test("normalizes only the renderer-safe account pool public shape", () => {
       {
         alias: "Team primary",
         displayId: "acct_000000007f3a",
+        providerId: "openai",
         status: "ready",
         quota: {
           state: "available",
@@ -51,6 +83,7 @@ test("normalizes only the renderer-safe account pool public shape", () => {
       {
         alias: null,
         displayId: "acct_000000000001",
+        providerId: "openai",
         status: "disabled",
         quota: {
           state: "unknown",
@@ -65,6 +98,30 @@ test("normalizes only the renderer-safe account pool public shape", () => {
         pools: [],
         priority: 100,
         weight: 0,
+      },
+    ],
+    pools: [
+      {
+        poolId: "default",
+        revision: 1,
+        strategy: "fixed-first",
+        members: [
+          { displayId: "acct_000000007f3a", priority: 10, weight: 80 },
+        ],
+        crossProviderFallback: false,
+        crossModelFallback: false,
+        crossRegionFallback: false,
+      },
+      {
+        poolId: "overflow",
+        revision: 1,
+        strategy: "fixed-first",
+        members: [
+          { displayId: "acct_000000007f3a", priority: 30, weight: 20 },
+        ],
+        crossProviderFallback: false,
+        crossModelFallback: false,
+        crossRegionFallback: false,
       },
     ],
   });
@@ -102,14 +159,16 @@ test("rejects credential, external reference, token, path, and header fields", (
 test("distinguishes unknown, disabled, and backend unavailable states", () => {
   const payload = accountPoolsPayload({
     accounts: [
-      account({ displayId: "acct_000000000002", status: "future_status" }),
-      account({ displayId: "acct_000000000001", status: "disabled", weight: 0 }),
+      account({ displayId: "acct_000000000002", status: "future_status", pools: [] }),
+      account({ displayId: "acct_000000000001", status: "disabled", weight: 0, pools: [] }),
       account({
         displayId: "acct_000000000003",
         status: "backend_unavailable",
         cooldown: cooldown({ state: "unknown" }),
+        pools: [],
       }),
     ],
+    pools: [],
   });
 
   assert.deepEqual(normalizeAccountPools(payload)?.accounts.map((item) => item.status), [
@@ -199,10 +258,29 @@ test("fails closed for accessors, symbols, and invalid account facts", () => {
   );
 });
 
+test("never invokes hostile account or Pool array accessors", () => {
+  let invoked = 0;
+  for (const field of ["accounts", "pools"]) {
+    const payload = accountPoolsPayload();
+    const items = payload[field];
+    const original = items[0];
+    Object.defineProperty(items, "0", {
+      enumerable: true,
+      get() {
+        invoked += 1;
+        return original;
+      },
+    });
+    assert.equal(normalizeAccountPools(payload), null, field);
+  }
+  assert.equal(invoked, 0);
+});
+
 test("builds a stable empty or unknown view model without reflecting hostile input", () => {
-  assert.deepEqual(accountPoolsViewModel({ accounts: [] }), {
+  assert.deepEqual(accountPoolsViewModel({ accounts: [], pools: [] }), {
     state: "empty",
     accounts: [],
+    pools: [],
     summary: {
       total: 0,
       disabled: 0,
@@ -213,11 +291,13 @@ test("builds a stable empty or unknown view model without reflecting hostile inp
 
   const model = accountPoolsViewModel({
     accounts: [],
+    pools: [],
     credentialStoreAccount: "CANARY_CREDENTIAL_STORE_ACCOUNT",
   });
   assert.deepEqual(model, {
     state: "unknown",
     accounts: [],
+    pools: [],
     summary: {
       total: 0,
       disabled: 0,
@@ -243,6 +323,19 @@ function accountPoolsPayload(overrides = {}) {
         weight: 0,
       }),
     ],
+    pools: [
+      pool(),
+      pool({
+        poolId: "overflow",
+        members: [
+          poolMember({
+            displayId: "acct_000000007f3a",
+            priority: 30,
+            weight: 20,
+          }),
+        ],
+      }),
+    ],
     ...overrides,
   };
 }
@@ -251,10 +344,33 @@ function account(overrides = {}) {
   return {
     alias: "Team primary",
     displayId: "acct_000000007f3a",
+    providerId: "openai",
     status: "ready",
     quota: quota(),
     cooldown: cooldown(),
     pools: [membership(), membership({ poolId: "overflow", priority: 30, weight: 20 })],
+    priority: 10,
+    weight: 80,
+    ...overrides,
+  };
+}
+
+function pool(overrides = {}) {
+  return {
+    poolId: "default",
+    revision: 1,
+    strategy: "fixed-first",
+    members: [poolMember()],
+    crossProviderFallback: false,
+    crossModelFallback: false,
+    crossRegionFallback: false,
+    ...overrides,
+  };
+}
+
+function poolMember(overrides = {}) {
+  return {
+    displayId: "acct_000000007f3a",
     priority: 10,
     weight: 80,
     ...overrides,

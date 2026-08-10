@@ -177,6 +177,7 @@ test("sanitizes the exact Account Pool renderer projection", () => {
   const safe = {
     accounts: [
       {
+        providerId: "openai",
         alias: "Work",
         displayId: "acct_0123456789ab",
         status: "unknown",
@@ -185,6 +186,19 @@ test("sanitizes the exact Account Pool renderer projection", () => {
         pools: [{ poolId: "daily-coding", priority: 10, weight: 1 }],
         priority: 10,
         weight: 1,
+      },
+    ],
+    pools: [
+      {
+        poolId: "daily-coding",
+        revision: 3,
+        strategy: "quota-aware",
+        members: [
+          { displayId: "acct_0123456789ab", priority: 10, weight: 1 },
+        ],
+        crossProviderFallback: false,
+        crossModelFallback: true,
+        crossRegionFallback: false,
       },
     ],
   };
@@ -205,12 +219,32 @@ test("sanitizes the exact Account Pool renderer projection", () => {
       sanitizeAccountPoolsPayload(Buffer.from(JSON.stringify(hostile), "utf8")),
       null,
     );
+    const hostilePool = structuredClone(safe);
+    hostilePool.pools[0][field] = "CANARY";
+    assert.equal(
+      sanitizeAccountPoolsPayload(
+        Buffer.from(JSON.stringify(hostilePool), "utf8"),
+      ),
+      null,
+    );
   }
   const disguisedCredentialKey = structuredClone(safe);
   disguisedCredentialKey.accounts[0].displayId = "openai.work.gateway-api-key";
   assert.equal(
     sanitizeAccountPoolsPayload(
       Buffer.from(JSON.stringify(disguisedCredentialKey), "utf8"),
+    ),
+    null,
+  );
+  const duplicatePoolMember = structuredClone(safe);
+  duplicatePoolMember.pools[0].members.push({
+    displayId: "acct_0123456789ab",
+    priority: 20,
+    weight: 2,
+  });
+  assert.equal(
+    sanitizeAccountPoolsPayload(
+      Buffer.from(JSON.stringify(duplicatePoolMember), "utf8"),
     ),
     null,
   );
@@ -1935,6 +1969,432 @@ test("serves the renderer API boundary without reflecting credentials or private
     unavailable.body.toString("utf8"),
     /api\.token|private token|ENOENT|openusage-desktop-handler/,
   );
+});
+
+test("serves same-origin host action capabilities without UA inference", async (context) => {
+  const {
+    createRendererApiHandler,
+    isRendererApiTarget,
+  } = require("../gateway_proxy.js");
+  assert.equal(isRendererApiTarget("/host/v1/capabilities"), true);
+  assert.equal(isRendererApiTarget("/host/v1/actions"), true);
+
+  const readonlyHandler = createRendererApiHandler({ runtime: null });
+  const readonlyServer = http.createServer((request, response) => {
+    if (!isRendererApiTarget(request.url)) {
+      response.statusCode = 404;
+      response.end();
+      return;
+    }
+    readonlyHandler(request, response);
+  });
+  const readonlyPort = await listenTcp(readonlyServer);
+  context.after(async () => {
+    await closeServer(readonlyServer);
+  });
+
+  const readonly = await requestTcp(readonlyPort, "/host/v1/capabilities", {
+    headers: { "User-Agent": "Standalone Browser" },
+  });
+  assert.equal(readonly.statusCode, 200);
+  assert.deepEqual(JSON.parse(readonly.body.toString("utf8")), {
+    apiVersion: "host-action.openusage/v1",
+    actions: [],
+  });
+
+  const enabledHandler = createRendererApiHandler({
+    runtime: null,
+    hostActionExecutor: {
+      command: "/usr/local/bin/openusage-settings",
+      args: ["gateway-account-mutate"],
+    },
+  });
+  const enabledServer = http.createServer(enabledHandler);
+  const enabledPort = await listenTcp(enabledServer);
+  context.after(async () => {
+    await closeServer(enabledServer);
+  });
+
+  const enabled = await requestTcp(enabledPort, "/host/v1/capabilities");
+  assert.equal(enabled.statusCode, 200);
+  assert.deepEqual(JSON.parse(enabled.body.toString("utf8")), {
+    apiVersion: "host-action.openusage/v1",
+    actions: [
+      "accountPool.create",
+      "accountPool.edit",
+      "accountPool.remove",
+    ],
+  });
+});
+
+test("executes one sanitized host action through a bounded shell-free command", async (context) => {
+  const {
+    createRendererApiHandler,
+    isRendererApiTarget,
+  } = require("../gateway_proxy.js");
+  const spawnCalls = [];
+  const spawnProcess = (command, args, options) => {
+    const child = new EventEmitter();
+    child.stdin = {
+      write(chunk) {
+        child.input = `${child.input ?? ""}${chunk.toString("utf8")}`;
+      },
+      end() {
+        process.nextTick(() => {
+          child.stdout.emit(
+            "data",
+            Buffer.from(
+              JSON.stringify({
+                version: 1,
+                ok: true,
+                code: "ok",
+                pool: {
+                  poolId: "daily-coding",
+                  revision: 8,
+                },
+              }),
+            ),
+          );
+          child.emit("close", 0, null);
+        });
+      },
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => {
+      child.killed = true;
+    };
+    spawnCalls.push({ command, args, options, child });
+    return child;
+  };
+  const handler = createRendererApiHandler({
+    runtime: null,
+    hostActionExecutor: {
+      command: "/usr/local/bin/openusage-settings",
+      args: ["gateway-account-mutate"],
+    },
+    spawnProcess,
+    deadlineMs: 100,
+  });
+  const server = http.createServer((request, response) => {
+    if (!isRendererApiTarget(request.url)) {
+      response.statusCode = 404;
+      response.end();
+      return;
+    }
+    handler(request, response);
+  });
+  const port = await listenTcp(server);
+  context.after(async () => {
+    await closeServer(server);
+  });
+
+  const requestBody = Buffer.from(JSON.stringify({
+    apiVersion: "host-action.openusage/v1",
+    action: "accountPool.edit",
+    expectedRevision: 7,
+    pool: {
+      poolId: "daily-coding",
+      strategy: "round-robin",
+      members: [{ displayId: "acct_0123456789ab", priority: 0, weight: 100 }],
+      crossProviderFallback: true,
+      crossModelFallback: false,
+      crossRegionFallback: true,
+    },
+  }), "utf8");
+  const ok = await requestTcp(port, "/host/v1/actions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": String(requestBody.length),
+    },
+    body: requestBody,
+  });
+
+  assert.equal(ok.statusCode, 200);
+  assert.deepEqual(JSON.parse(ok.body.toString("utf8")), {
+    apiVersion: "host-action.openusage/v1",
+    action: "accountPool.edit",
+    ok: true,
+    code: "ok",
+    pool: { poolId: "daily-coding", revision: 8 },
+  });
+  assert.equal(spawnCalls.length, 1);
+  assert.equal(spawnCalls[0].command, "/usr/local/bin/openusage-settings");
+  assert.deepEqual(spawnCalls[0].args, ["gateway-account-mutate"]);
+  assert.deepEqual(spawnCalls[0].options, {
+    shell: false,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  assert.deepEqual(JSON.parse(spawnCalls[0].child.input), {
+    version: 1,
+    action: "edit_pool",
+    pool: {
+      poolId: "daily-coding",
+      strategy: "round-robin",
+      members: [{ displayId: "acct_0123456789ab", priority: 0, weight: 100 }],
+      crossProviderFallback: true,
+      crossModelFallback: false,
+      crossRegionFallback: true,
+    },
+    expectedRevision: 7,
+  });
+  assert.doesNotMatch(ok.body.toString("utf8"), /credential|token|CANARY/i);
+
+  const hostileBody = Buffer.from(JSON.stringify({
+    apiVersion: "host-action.openusage/v1",
+    action: "accountPool.remove",
+    expectedRevision: 7,
+    pool: { poolId: "daily-coding", token: "CANARY" },
+  }), "utf8");
+  const hostile = await requestTcp(port, "/host/v1/actions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": String(hostileBody.length),
+    },
+    body: hostileBody,
+  });
+  assert.equal(hostile.statusCode, 400);
+  assert.equal(spawnCalls.length, 1);
+  assert.doesNotMatch(hostile.body.toString("utf8"), /CANARY|token/i);
+});
+
+test("rejects host action executor responses without the exact versioned envelope", async (context) => {
+  const {
+    createRendererApiHandler,
+    isRendererApiTarget,
+  } = require("../gateway_proxy.js");
+  const outputs = [
+    JSON.stringify({ ok: true, code: "ok" }),
+    JSON.stringify({ version: 2, ok: true, code: "ok" }),
+    JSON.stringify({ version: "1", ok: true, code: "ok" }),
+    '{"version":1,"version":1,"ok":true,"code":"ok"}',
+    JSON.stringify({ version: 1, ok: true, code: "ok", token: "CANARY" }),
+  ];
+  let outputIndex = 0;
+  const spawnProcess = () => {
+    const child = new EventEmitter();
+    child.stdin = {
+      write() {},
+      end() {
+        process.nextTick(() => {
+          child.stdout.emit("data", Buffer.from(outputs[outputIndex]));
+          outputIndex += 1;
+          child.emit("close", 0, null);
+        });
+      },
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => {};
+    return child;
+  };
+  const handler = createRendererApiHandler({
+    runtime: null,
+    hostActionExecutor: {
+      command: "/usr/local/bin/openusage-settings",
+      args: ["gateway-account-mutate"],
+    },
+    spawnProcess,
+    deadlineMs: 100,
+  });
+  const server = http.createServer((request, response) => {
+    if (!isRendererApiTarget(request.url)) {
+      response.statusCode = 404;
+      response.end();
+      return;
+    }
+    handler(request, response);
+  });
+  const port = await listenTcp(server);
+  context.after(async () => {
+    await closeServer(server);
+  });
+
+  const requestBody = Buffer.from(JSON.stringify({
+    apiVersion: "host-action.openusage/v1",
+    action: "accountPool.remove",
+    expectedRevision: 7,
+    pool: { poolId: "daily-coding" },
+  }), "utf8");
+  for (let index = 0; index < outputs.length; index += 1) {
+    const response = await requestTcp(port, "/host/v1/actions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": String(requestBody.length),
+      },
+      body: requestBody,
+    });
+    assert.equal(response.statusCode, 502, outputs[index]);
+    assert.doesNotMatch(response.body.toString("utf8"), /CANARY|token/i);
+  }
+});
+
+test("maps safe host action business failures from exit 1 without turning them into transport failures", async (context) => {
+  const {
+    createRendererApiHandler,
+    isRendererApiTarget,
+  } = require("../gateway_proxy.js");
+  const spawnProcess = () => {
+    const child = new EventEmitter();
+    child.stdin = {
+      write() {},
+      end() {
+        process.nextTick(() => {
+          child.stdout.emit(
+            "data",
+            Buffer.from(JSON.stringify({
+              version: 1,
+              ok: false,
+              code: "revision_conflict",
+            })),
+          );
+          child.emit("close", 1, null);
+        });
+      },
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => {};
+    return child;
+  };
+  const handler = createRendererApiHandler({
+    runtime: null,
+    hostActionExecutor: {
+      command: "/usr/local/bin/openusage-settings",
+      args: ["gateway-account-mutate"],
+    },
+    spawnProcess,
+    deadlineMs: 100,
+  });
+  const server = http.createServer((request, response) => {
+    if (!isRendererApiTarget(request.url)) {
+      response.statusCode = 404;
+      response.end();
+      return;
+    }
+    handler(request, response);
+  });
+  const port = await listenTcp(server);
+  context.after(async () => {
+    await closeServer(server);
+  });
+
+  const requestBody = Buffer.from(JSON.stringify({
+    apiVersion: "host-action.openusage/v1",
+    action: "accountPool.edit",
+    expectedRevision: 7,
+    pool: {
+      poolId: "daily-coding",
+      strategy: "round-robin",
+      members: [{ displayId: "acct_0123456789ab", priority: 0, weight: 100 }],
+      crossProviderFallback: true,
+      crossModelFallback: false,
+      crossRegionFallback: true,
+    },
+  }), "utf8");
+  const response = await requestTcp(port, "/host/v1/actions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": String(requestBody.length),
+    },
+    body: requestBody,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body.toString("utf8")), {
+    apiVersion: "host-action.openusage/v1",
+    action: "accountPool.edit",
+    ok: false,
+    code: "revision_conflict",
+  });
+});
+
+test("rejects host action executor exit states that contradict the sanitized envelope", async (context) => {
+  const {
+    createRendererApiHandler,
+    isRendererApiTarget,
+  } = require("../gateway_proxy.js");
+  const cases = [
+    {
+      close: [0, null],
+      output: { version: 1, ok: false, code: "revision_conflict" },
+    },
+    {
+      close: [1, null],
+      output: { version: 1, ok: true, code: "ok" },
+    },
+    {
+      close: [2, null],
+      output: { version: 1, ok: false, code: "revision_conflict" },
+    },
+    {
+      close: [0, "SIGTERM"],
+      output: { version: 1, ok: true, code: "ok" },
+    },
+  ];
+  let index = 0;
+  const spawnProcess = () => {
+    const child = new EventEmitter();
+    child.stdin = {
+      write() {},
+      end() {
+        process.nextTick(() => {
+          const item = cases[index];
+          index += 1;
+          child.stdout.emit("data", Buffer.from(JSON.stringify(item.output)));
+          child.emit("close", ...item.close);
+        });
+      },
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => {};
+    return child;
+  };
+  const handler = createRendererApiHandler({
+    runtime: null,
+    hostActionExecutor: {
+      command: "/usr/local/bin/openusage-settings",
+      args: ["gateway-account-mutate"],
+    },
+    spawnProcess,
+    deadlineMs: 100,
+  });
+  const server = http.createServer((request, response) => {
+    if (!isRendererApiTarget(request.url)) {
+      response.statusCode = 404;
+      response.end();
+      return;
+    }
+    handler(request, response);
+  });
+  const port = await listenTcp(server);
+  context.after(async () => {
+    await closeServer(server);
+  });
+
+  const requestBody = Buffer.from(JSON.stringify({
+    apiVersion: "host-action.openusage/v1",
+    action: "accountPool.remove",
+    expectedRevision: 7,
+    pool: { poolId: "daily-coding" },
+  }), "utf8");
+  for (const item of cases) {
+    const response = await requestTcp(port, "/host/v1/actions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": String(requestBody.length),
+      },
+      body: requestBody,
+    });
+    assert.equal(response.statusCode, 502, JSON.stringify(item));
+  }
 });
 
 test("bridges one canonical bounded Should-Send request without exposing private state", async (context) => {

@@ -456,6 +456,48 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
                     )
                 self.assertEqual(raised.exception.reason, "binary")
 
+    def test_desktop_package_requires_sha256_match_to_bundled_settings_helper(self):
+        signature = inspect.signature(audit_module.inspect_desktop_package)
+        self.assertIn("built_settings", signature.parameters)
+        cases = (
+            ("darwin", "Contents/Resources", "openusage-settings"),
+            ("win32", "resources", "openusage-settings.exe"),
+            ("linux", "resources", "openusage-settings"),
+        )
+        if os.name == "nt":
+            cases = (cases[1],)
+        for platform, resources, executable_name in cases:
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                root = base / "package"
+                write_desktop_package(root, platform)
+                packaged = root / resources / "settings" / executable_name
+                packaged.parent.mkdir(parents=True)
+                native = native_collector_bytes(platform, b"settings-same-build")
+                packaged.write_bytes(native)
+                packaged.chmod(0o755)
+                built = base / "dist-settings" / executable_name
+                built.parent.mkdir(parents=True)
+                built.write_bytes(native)
+                built.chmod(0o755)
+
+                audit_module.inspect_desktop_package(
+                    root,
+                    platform,
+                    built_settings=built,
+                )
+
+                packaged.write_bytes(
+                    native_collector_bytes(platform, b"settings-different")
+                )
+                with self.assertRaises(ArtifactError) as raised:
+                    audit_module.inspect_desktop_package(
+                        root,
+                        platform,
+                        built_settings=built,
+                    )
+                self.assertEqual(raised.exception.reason, "collector")
+
     def test_desktop_package_cli_requires_built_collector_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)

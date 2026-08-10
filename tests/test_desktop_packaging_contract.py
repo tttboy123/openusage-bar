@@ -47,6 +47,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "x64",
         "artifact_ext": "dmg",
         "collector": "openusage-collector",
+        "settings": "openusage-settings",
     },
     {
         "platform": "mac",
@@ -60,6 +61,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "arm64",
         "artifact_ext": "dmg",
         "collector": "openusage-collector",
+        "settings": "openusage-settings",
     },
     {
         "platform": "win",
@@ -73,6 +75,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "x64",
         "artifact_ext": "exe",
         "collector": "openusage-collector.exe",
+        "settings": "openusage-settings.exe",
     },
     {
         "platform": "win",
@@ -86,6 +89,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "arm64",
         "artifact_ext": "exe",
         "collector": "openusage-collector.exe",
+        "settings": "openusage-settings.exe",
     },
     {
         "platform": "linux",
@@ -99,6 +103,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "x86_64",
         "artifact_ext": "AppImage",
         "collector": "openusage-collector",
+        "settings": "openusage-settings",
     },
     {
         "platform": "linux",
@@ -112,6 +117,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "arm64",
         "artifact_ext": "AppImage",
         "collector": "openusage-collector",
+        "settings": "openusage-settings",
     },
 ]
 
@@ -642,6 +648,30 @@ class DesktopPackagingContractTests(unittest.TestCase):
         self.assertIn("release_artifact_audit.py", by_name[required[4]]["run"])
         self.assertIn("matrix.collector", by_name[required[4]]["run"])
 
+    def test_ci_builds_and_smokes_the_fixed_settings_helper_before_packaging(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        steps = _mapping_list(source, section="steps", item_indent=6)
+        by_name = {step.get("name"): step for step in steps}
+        required = [
+            "Build bundled settings helper",
+            "Smoke bundled settings helper",
+            "Package desktop app",
+        ]
+        indices = [
+            next(index for index, step in enumerate(steps) if step.get("name") == name)
+            for name in required
+        ]
+        self.assertEqual(indices, sorted(indices))
+        build = by_name[required[0]]["run"]
+        smoke = by_name[required[1]]["run"]
+        self.assertIn("openusage_settings.py", build)
+        self.assertIn("dist-settings", build)
+        self.assertIn("matrix.settings", build)
+        self.assertIn("./dist-settings/${{ matrix.settings }}", smoke)
+        self.assertIn("gateway-account-mutate", smoke)
+        self.assertIn('"version":1', smoke)
+        self.assertIn('"action":"remove_pool"', smoke)
+
     def test_ci_smokes_exact_frozen_collector_across_modes_and_credential_failure(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         steps = _mapping_list(source, section="steps", item_indent=6)
@@ -690,6 +720,8 @@ class DesktopPackagingContractTests(unittest.TestCase):
                 "${{matrix.collector}}",
                 "--built-collector",
                 collector,
+                "--built-settings",
+                "./dist-settings/${{matrix.settings}}",
             ]],
             "CI must pass one exact desktop audit command in the CLI contract order",
         )

@@ -352,7 +352,7 @@ class GatewayRouter:
                 return 200, copy.deepcopy(_SCHEMA)
             if path == "/gateway/v1/account-pools":
                 if self._mode is GatewayMode.OBSERVE or self._account_pools is None:
-                    return 200, {"accounts": []}
+                    return 200, {"accounts": [], "pools": []}
                 try:
                     candidate = self._account_pools()
                     payload = validate_account_pools_public_payload(candidate)

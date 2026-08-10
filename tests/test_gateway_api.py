@@ -45,6 +45,7 @@ ACCOUNT_POOLS = {
         {
             "alias": "Work",
             "displayId": "acct_0123456789ab",
+            "providerId": "openai",
             "status": "unknown",
             "quota": {
                 "state": "unknown",
@@ -59,7 +60,24 @@ ACCOUNT_POOLS = {
             "priority": 10,
             "weight": 1,
         }
-    ]
+    ],
+    "pools": [
+        {
+            "poolId": "daily-coding",
+            "revision": 3,
+            "strategy": "fixed-first",
+            "members": [
+                {
+                    "displayId": "acct_0123456789ab",
+                    "priority": 10,
+                    "weight": 1,
+                }
+            ],
+            "crossProviderFallback": False,
+            "crossModelFallback": False,
+            "crossRegionFallback": False,
+        }
+    ],
 }
 
 
@@ -296,7 +314,7 @@ class GatewayRouterTests(unittest.TestCase):
         )
         self.assertEqual(
             unavailable.dispatch("GET", "/gateway/v1/account-pools", b""),
-            (200, {"accounts": []}),
+            (200, {"accounts": [], "pools": []}),
         )
 
         hostile = GatewayRouter(

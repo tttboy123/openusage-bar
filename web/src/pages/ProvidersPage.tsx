@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Plus, HardDrives, ArrowClockwise } from "@phosphor-icons/react";
+import { useCallback, useEffect, useState } from "react";
+import { Plus, HardDrives, ArrowClockwise, PencilSimple, Trash } from "@phosphor-icons/react";
 import {
   fetchProviders,
   fetchSources,
@@ -10,16 +10,46 @@ import {
 } from "../api";
 import {
   accountPoolsViewModel,
+  normalizeAccountPools,
   type AccountPoolAccountViewModel,
+  type AccountPoolDefinition,
   type AccountPoolStatusTone,
 } from "../accountPools";
+import {
+  buildPoolHostAction,
+  createBrowserAccountPoolHostAdapter,
+  normalizePoolHostActionResult,
+  normalizeTrustedHostCapability,
+  type AccountPoolHostAction,
+  type AccountPoolHostAdapter,
+  type EditablePool,
+  type PoolHostActionFailureCode,
+} from "../accountPoolActions";
 import AddProviderDialog from "../components/AddProviderDialog";
+import {
+  AccountPoolEditorDialog,
+  AccountPoolRemoveDialog,
+} from "../components/AccountPoolDialogs";
 import ProviderCard from "../components/ProviderCard";
 import { type Messages, tpl } from "../i18n";
 
 const ACCOUNT_POOLS_PATH = "/gateway/v1/account-pools";
+const DEFAULT_HOST_ADAPTER = createBrowserAccountPoolHostAdapter();
 
-export default function ProvidersPage({ t }: { t: Messages }) {
+type HostAvailability = "checking" | "trusted" | "readOnly";
+type PoolFeedback = "saved" | "removed" | "refreshFailed" | null;
+type EditorState = {
+  mode: "create" | "edit";
+  pool: AccountPoolDefinition | null;
+} | null;
+
+export default function ProvidersPage({
+  t,
+  accountPoolHostAdapter = DEFAULT_HOST_ADAPTER,
+}: {
+  t: Messages;
+  accountPoolHostAdapter?: AccountPoolHostAdapter;
+}) {
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [quick, setQuick] = useState<QuickConnectItem[]>([]);
@@ -28,6 +58,12 @@ export default function ProvidersPage({ t }: { t: Messages }) {
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [hostAvailability, setHostAvailability] = useState<HostAvailability>("checking");
+  const [editor, setEditor] = useState<EditorState>(null);
+  const [poolToRemove, setPoolToRemove] = useState<AccountPoolDefinition | null>(null);
+  const [mutationPending, setMutationPending] = useState(false);
+  const [mutationError, setMutationError] = useState<PoolHostActionFailureCode | null>(null);
+  const [poolFeedback, setPoolFeedback] = useState<PoolFeedback>(null);
 
   const load = async (quiet = false) => {
     if (!quiet) setIsRefreshing(true);
@@ -59,6 +95,24 @@ export default function ProvidersPage({ t }: { t: Messages }) {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
+    setHostAvailability("checking");
+    accountPoolHostAdapter.readCapability(controller.signal).then(
+      (value) => {
+        if (!controller.signal.aborted) {
+          setHostAvailability(
+            normalizeTrustedHostCapability(value) === null ? "readOnly" : "trusted",
+          );
+        }
+      },
+      () => {
+        if (!controller.signal.aborted) setHostAvailability("readOnly");
+      },
+    );
+    return () => controller.abort();
+  }, [accountPoolHostAdapter]);
+
+  useEffect(() => {
     const id = setInterval(() => load(true), 60000);
     return () => clearInterval(id);
   }, []);
@@ -68,6 +122,61 @@ export default function ProvidersPage({ t }: { t: Messages }) {
   );
   const quickByFamily = new Map(quick.map((q) => [q.familyId, q]));
   const accountPools = accountPoolsViewModel(accountPoolsSnapshot);
+
+  const refreshAccountPools = useCallback(async () => {
+    const value = await fetchAccountPoolsSnapshot();
+    if (normalizeAccountPools(value) === null) throw new Error("invalid account pool snapshot");
+    setAccountPoolsSnapshot(value);
+  }, []);
+
+  async function mutatePool(
+    action: AccountPoolHostAction,
+    pool: EditablePool | { poolId: string },
+    expectedRevision: number | null,
+  ) {
+    if (hostAvailability !== "trusted" || mutationPending) return;
+    const request = buildPoolHostAction(action, pool, expectedRevision);
+    if (request === null) {
+      setMutationError("invalid_request");
+      return;
+    }
+    setMutationPending(true);
+    setMutationError(null);
+    setPoolFeedback(null);
+    try {
+      const raw = await accountPoolHostAdapter.mutate(request);
+      const result = normalizePoolHostActionResult(raw);
+      if (result === null || result.action !== action) {
+        setMutationError("service_unavailable");
+        return;
+      }
+      if (!result.ok) {
+        setMutationError(result.code);
+        return;
+      }
+      setEditor(null);
+      setPoolToRemove(null);
+      try {
+        await refreshAccountPools();
+        setPoolFeedback(action === "accountPool.remove" ? "removed" : "saved");
+      } catch {
+        setPoolFeedback("refreshFailed");
+      }
+    } catch {
+      setMutationError("service_unavailable");
+    } finally {
+      setMutationPending(false);
+    }
+  }
+
+  async function retryPoolRefresh() {
+    try {
+      await refreshAccountPools();
+      setPoolFeedback(null);
+    } catch {
+      setPoolFeedback("refreshFailed");
+    }
+  }
 
   return (
     <>
@@ -98,13 +207,70 @@ export default function ProvidersPage({ t }: { t: Messages }) {
           </button>
         </div>
       </div>
-      <AccountPoolsSection t={t} model={accountPools} />
+      <AccountPoolsSection
+        t={t}
+        model={accountPools}
+        hostAvailability={hostAvailability}
+        feedback={poolFeedback}
+        onCreate={() => {
+          setMutationError(null);
+          setEditor({ mode: "create", pool: null });
+        }}
+        onEdit={(pool) => {
+          setMutationError(null);
+          setEditor({ mode: "edit", pool });
+        }}
+        onRemove={(pool) => {
+          setMutationError(null);
+          setPoolToRemove(pool);
+        }}
+        onRetryRefresh={retryPoolRefresh}
+      />
       <AddProviderDialog
         open={dialogOpen}
         presets={quick}
         onClose={() => setDialogOpen(false)}
         t={t}
       />
+      {editor ? (
+        <AccountPoolEditorDialog
+          key={`${editor.mode}:${editor.pool?.poolId ?? "new"}:${editor.pool?.revision ?? 0}`}
+          mode={editor.mode}
+          accounts={accountPools.accounts}
+          pool={editor.pool}
+          pending={mutationPending}
+          error={mutationError ? poolMutationError(mutationError, t) : null}
+          onCancel={() => {
+            if (!mutationPending) setEditor(null);
+          }}
+          onSubmit={(pool) =>
+            mutatePool(
+              editor.mode === "create" ? "accountPool.create" : "accountPool.edit",
+              pool,
+              editor.pool?.revision ?? null,
+            )
+          }
+          t={t}
+        />
+      ) : null}
+      {poolToRemove ? (
+        <AccountPoolRemoveDialog
+          pool={poolToRemove}
+          pending={mutationPending}
+          error={mutationError ? poolMutationError(mutationError, t) : null}
+          onCancel={() => {
+            if (!mutationPending) setPoolToRemove(null);
+          }}
+          onConfirm={() =>
+            mutatePool(
+              "accountPool.remove",
+              { poolId: poolToRemove.poolId },
+              poolToRemove.revision,
+            )
+          }
+          t={t}
+        />
+      ) : null}
       <section className="provider-grid" aria-label={t.navProviders}>
         {providers.map((item) => (
          <ProviderCard
@@ -134,9 +300,21 @@ export default function ProvidersPage({ t }: { t: Messages }) {
 function AccountPoolsSection({
   t,
   model,
+  hostAvailability,
+  feedback,
+  onCreate,
+  onEdit,
+  onRemove,
+  onRetryRefresh,
 }: {
   t: Messages;
   model: ReturnType<typeof accountPoolsViewModel>;
+  hostAvailability: HostAvailability;
+  feedback: PoolFeedback;
+  onCreate: () => void;
+  onEdit: (pool: AccountPoolDefinition) => void;
+  onRemove: (pool: AccountPoolDefinition) => void;
+  onRetryRefresh: () => void;
 }) {
   const describedBy = "account-pools-note";
   const summary = tpl(t.accountPoolsSummary, {
@@ -162,22 +340,62 @@ function AccountPoolsSection({
         <button
           type="button"
           className="secondary-btn account-pools-create"
-          aria-disabled="true"
+          disabled={hostAvailability !== "trusted" || model.accounts.length === 0}
           aria-describedby="account-pool-create-note"
-          onClick={(event) => event.preventDefault()}
+          onClick={onCreate}
         >
           {t.createPool}
         </button>
       </div>
       <p id="account-pool-create-note" className="account-pools-create-note">
-        {t.createPoolUnverified}
+        {hostAvailability === "trusted"
+          ? model.accounts.length === 0
+            ? t.accountPoolsNoAccounts
+            : t.accountPoolsTrusted
+          : t.accountPoolsReadOnly}
       </p>
+      {feedback ? (
+        <div className="account-pool-feedback" role="status" aria-live="polite" aria-atomic="true">
+          <span>
+            {feedback === "saved"
+              ? t.poolSaved
+              : feedback === "removed"
+                ? t.poolRemoved
+                : t.poolRefreshFailed}
+          </span>
+          {feedback === "refreshFailed" ? (
+            <button type="button" className="btn-link" onClick={onRetryRefresh}>
+              {t.retryPoolRefresh}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {model.state === "ready" ? (
         <>
           <p className="account-pools-summary">{summary}</p>
+          <div className="account-pool-definitions-head">
+            <h4>{t.poolDefinitionsTitle}</h4>
+          </div>
+          {model.pools.length > 0 ? (
+            <div className="account-pool-definitions" role="list">
+              {model.pools.map((pool) => (
+                <AccountPoolDefinitionCard
+                  key={`${pool.poolId}:${pool.revision}`}
+                  pool={pool}
+                  accounts={model.accounts}
+                  trusted={hostAvailability === "trusted"}
+                  onEdit={() => onEdit(pool)}
+                  onRemove={() => onRemove(pool)}
+                  t={t}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="account-pools-empty">{t.poolDefinitionsEmpty}</p>
+          )}
           <div className="account-pools-list" role="list">
             {model.accounts.map((account, index) => (
-              <AccountPoolCard
+              <AccountPoolAccountCard
                 key={`${account.displayId}:${index}`}
                 account={account}
                 index={index}
@@ -202,7 +420,63 @@ function AccountPoolsSection({
   );
 }
 
-function AccountPoolCard({
+function AccountPoolDefinitionCard({
+  pool,
+  accounts,
+  trusted,
+  onEdit,
+  onRemove,
+  t,
+}: {
+  pool: AccountPoolDefinition;
+  accounts: AccountPoolAccountViewModel[];
+  trusted: boolean;
+  onEdit: () => void;
+  onRemove: () => void;
+  t: Messages;
+}) {
+  const aliases = new Map(
+    accounts.map((account) => [account.displayId, account.alias ?? account.displayId]),
+  );
+  const fallback = tpl(t.poolFallbackSummary, {
+    provider: pool.crossProviderFallback ? t.fallbackAllowed : t.fallbackBlocked,
+    model: pool.crossModelFallback ? t.fallbackAllowed : t.fallbackBlocked,
+    region: pool.crossRegionFallback ? t.fallbackAllowed : t.fallbackBlocked,
+  });
+  return (
+    <article className="account-pool-definition-card" role="listitem">
+      <div className="account-pool-card-main">
+        <div className="account-pool-identity">
+          <h5>{pool.poolId}</h5>
+          <span className="account-pool-display-id">{pool.strategy} · {t.poolRevision} {pool.revision}</span>
+        </div>
+        {trusted ? (
+          <div className="account-pool-definition-actions">
+            <button type="button" className="icon-btn" onClick={onEdit} aria-label={`${t.editPool}: ${pool.poolId}`}>
+              <PencilSimple size={15} aria-hidden="true" />
+              {t.editPool}
+            </button>
+            <button type="button" className="icon-btn" onClick={onRemove} aria-label={`${t.removePool}: ${pool.poolId}`}>
+              <Trash size={15} aria-hidden="true" />
+              {t.removePool}
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <ul className="account-pool-definition-members">
+        {pool.members.map((member) => (
+          <li key={member.displayId}>
+            <span>{aliases.get(member.displayId) ?? member.displayId}</span>
+            <span>{t.priority} {member.priority} · {t.weight} {member.weight}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="account-pool-memberships">{fallback}</p>
+    </article>
+  );
+}
+
+function AccountPoolAccountCard({
   account,
   index,
   t,
@@ -302,6 +576,15 @@ function quotaText(account: AccountPoolAccountViewModel, t: Messages): string {
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+}
+
+function poolMutationError(code: PoolHostActionFailureCode, t: Messages): string {
+  if (code === "revision_conflict") return t.poolRevisionConflict;
+  if (code === "already_exists") return t.poolAlreadyExists;
+  if (code === "not_found") return t.poolNotFound;
+  if (code === "pool_references_unknown_account") return t.poolUnknownAccount;
+  if (code === "invalid_request") return t.poolMutationInvalid;
+  return t.poolMutationUnavailable;
 }
 
 async function fetchAccountPoolsSnapshot(): Promise<unknown> {

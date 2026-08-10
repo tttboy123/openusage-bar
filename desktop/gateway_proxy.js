@@ -21,6 +21,8 @@ const MAX_CAPABILITY_RESPONSE_BYTES = 64 * 1024;
 const MAX_ACCOUNT_POOLS_RESPONSE_BYTES = 64 * 1024;
 const MAX_SHOULD_SEND_REQUEST_BYTES = 8 * 1024;
 const MAX_SHOULD_SEND_RESPONSE_BYTES = 8 * 1024;
+const MAX_HOST_ACTION_REQUEST_BYTES = 16 * 1024;
+const MAX_HOST_ACTION_RESPONSE_BYTES = 8 * 1024;
 const DEFAULT_DEADLINE_MS = 5_000;
 const WINDOWS_ACL_TIMEOUT_MS = 2_000;
 const WINDOWS_ACL_MAX_BUFFER = 8 * 1024;
@@ -53,6 +55,22 @@ const ACCOUNT_POOL_STATUSES = new Set([
 ]);
 const ACCOUNT_QUOTA_STATES = new Set(["available", "exhausted", "unknown"]);
 const ACCOUNT_COOLDOWN_STATES = new Set(["active", "inactive", "unknown"]);
+const HOST_ACTION_API_VERSION = "host-action.openusage/v1";
+const ACCOUNT_POOL_CREATE_ACTION = "accountPool.create";
+const ACCOUNT_POOL_EDIT_ACTION = "accountPool.edit";
+const ACCOUNT_POOL_REMOVE_ACTION = "accountPool.remove";
+const ACCOUNT_POOL_MUTATE_VERSION = 1;
+const ACCOUNT_POOL_STRATEGIES = new Set([
+  "fixed-first",
+  "round-robin",
+  "sticky",
+  "quota-aware",
+  "cost",
+  "latency",
+  "reliability",
+]);
+const MAX_ACCOUNT_POOL_ID_LENGTH = 128;
+const MAX_ACCOUNT_POOL_MEMBERS = 64;
 
 const WINDOWS_ACL_SCRIPT = String.raw`
 & {
@@ -227,6 +245,28 @@ function classifyRendererRequest({ method, target, headers = {} }) {
       },
     };
   }
+  if (target === "/host/v1/actions") {
+    if (method !== "POST") return null;
+    const hostHeaders = normalizeRendererHeaders(headers, {
+      allowContentLength: true,
+    });
+    if (
+      hostHeaders === null ||
+      hostHeaders["content-type"] !== "application/json" ||
+      !isBoundedContentLength(
+        hostHeaders["content-length"],
+        MAX_HOST_ACTION_REQUEST_BYTES,
+      )
+    ) {
+      return null;
+    }
+    return {
+      service: "host",
+      method,
+      target,
+      headers: { "Content-Type": "application/json" },
+    };
+  }
 
   const normalizedHeaders = normalizeRendererHeaders(headers);
   if (normalizedHeaders === null) return null;
@@ -247,6 +287,15 @@ function classifyRendererRequest({ method, target, headers = {} }) {
       method,
       target,
       headers: { Accept: "application/json" },
+    };
+  }
+  if (target === "/host/v1/capabilities") {
+    if (method !== "GET") return null;
+    return {
+      service: "host",
+      method,
+      target,
+      headers: {},
     };
   }
   if (method !== "GET" && method !== "HEAD") return null;
@@ -321,11 +370,15 @@ function normalizeRendererHeaders(
 }
 
 function isBoundedShouldSendContentLength(value) {
+  return isBoundedContentLength(value, MAX_SHOULD_SEND_REQUEST_BYTES);
+}
+
+function isBoundedContentLength(value, maximumBytes) {
   if (typeof value !== "string" || !/^[1-9][0-9]{0,3}$/u.test(value)) {
     return false;
   }
   const length = Number(value);
-  return length >= 1 && length <= MAX_SHOULD_SEND_REQUEST_BYTES;
+  return length >= 1 && length <= maximumBytes;
 }
 
 function readPrivateToken(
@@ -899,10 +952,34 @@ async function fetchRendererResponse(
     platform = process.platform,
     verifyWindowsAcl,
     deadlineMs = DEFAULT_DEADLINE_MS,
+    hostActionExecutor,
+    spawnProcess = childProcess.spawn,
   } = {},
 ) {
   if (!classified || !runtime) {
-    throw new Error("private service unavailable");
+    if (classified?.service !== "host") {
+      throw new Error("private service unavailable");
+    }
+  }
+  if (
+    classified.service === "host" &&
+    classified.method === "GET" &&
+    classified.target === "/host/v1/capabilities"
+  ) {
+    return rendererJsonResponse(hostActionCapabilities({ hostActionExecutor }));
+  }
+  if (
+    classified.service === "host" &&
+    classified.method === "POST" &&
+    classified.target === "/host/v1/actions"
+  ) {
+    const result = await executeHostActionCommand(classified.actionRequest, {
+      hostActionExecutor,
+      spawnProcess,
+      deadlineMs,
+    });
+    if (result === null) throw requestFailure("unavailable");
+    return rendererJsonResponse(result);
   }
   const requestOptions = { platform, verifyWindowsAcl, deadlineMs };
   if (
@@ -1360,9 +1437,11 @@ function sanitizeAccountPoolsPayload(body) {
   const value = parseStrictJsonObject(body, MAX_ACCOUNT_POOLS_RESPONSE_BYTES);
   if (
     value === null ||
-    !hasExactOwnKeys(value, ["accounts"]) ||
+    !hasExactOwnKeys(value, ["accounts", "pools"]) ||
     !Array.isArray(value.accounts) ||
-    value.accounts.length > 256
+    value.accounts.length > 256 ||
+    !Array.isArray(value.pools) ||
+    value.pools.length > 64
   ) {
     return null;
   }
@@ -1374,13 +1453,22 @@ function sanitizeAccountPoolsPayload(body) {
     displayIds.add(account.displayId);
     accounts.push(account);
   }
-  return { accounts };
+  const pools = [];
+  const poolIds = new Set();
+  for (const item of value.pools) {
+    const pool = sanitizeAccountPoolPublicPool(item);
+    if (pool === null || poolIds.has(pool.poolId)) return null;
+    poolIds.add(pool.poolId);
+    pools.push(pool);
+  }
+  return { accounts, pools };
 }
 
 function sanitizeAccountPoolAccount(value) {
   if (
     !isJsonRecord(value) ||
     !hasExactOwnKeys(value, [
+      "providerId",
       "alias",
       "displayId",
       "status",
@@ -1393,6 +1481,7 @@ function sanitizeAccountPoolAccount(value) {
   ) {
     return null;
   }
+  const providerId = boundedShouldSendText(value.providerId, 128);
   const alias = value.alias === null
     ? null
     : boundedShouldSendText(value.alias, 128);
@@ -1401,6 +1490,8 @@ function sanitizeAccountPoolAccount(value) {
   const cooldown = sanitizeAccountCooldown(value.cooldown);
   const pools = sanitizeAccountPoolMemberships(value.pools);
   if (
+    providerId === null ||
+    !isPublicPoolId(providerId) ||
     (value.alias !== null && alias === null) ||
     displayId === null ||
     !/^acct_[0-9a-f]{12}$/u.test(displayId) ||
@@ -1414,6 +1505,7 @@ function sanitizeAccountPoolAccount(value) {
     return null;
   }
   return {
+    providerId,
     alias,
     displayId,
     status: value.status,
@@ -1422,6 +1514,41 @@ function sanitizeAccountPoolAccount(value) {
     pools,
     priority: value.priority,
     weight: value.weight,
+  };
+}
+
+function sanitizeAccountPoolPublicPool(value) {
+  if (
+    !isJsonRecord(value) ||
+    !hasExactOwnKeys(value, [
+      "poolId",
+      "revision",
+      "strategy",
+      "members",
+      "crossProviderFallback",
+      "crossModelFallback",
+      "crossRegionFallback",
+    ]) ||
+    !isPublicPoolId(value.poolId) ||
+    !Number.isSafeInteger(value.revision) ||
+    value.revision < 1 ||
+    !ACCOUNT_POOL_STRATEGIES.has(value.strategy) ||
+    typeof value.crossProviderFallback !== "boolean" ||
+    typeof value.crossModelFallback !== "boolean" ||
+    typeof value.crossRegionFallback !== "boolean"
+  ) {
+    return null;
+  }
+  const members = sanitizeHostActionPoolMembers(value.members);
+  if (members === null) return null;
+  return {
+    poolId: value.poolId,
+    revision: value.revision,
+    strategy: value.strategy,
+    members,
+    crossProviderFallback: value.crossProviderFallback,
+    crossModelFallback: value.crossModelFallback,
+    crossRegionFallback: value.crossRegionFallback,
   };
 }
 
@@ -1482,6 +1609,427 @@ function sanitizeAccountPoolMemberships(value) {
     result.push({ poolId, priority: item.priority, weight: item.weight });
   }
   return result;
+}
+
+function sanitizeHostActionRequest(body) {
+  const request = ownDataRecord(body, [
+    "apiVersion",
+    "action",
+    "expectedRevision",
+    "pool",
+  ]);
+  if (
+    request === null ||
+    request.apiVersion !== HOST_ACTION_API_VERSION
+  ) {
+    return null;
+  }
+  if (request.action === ACCOUNT_POOL_CREATE_ACTION) {
+    if (request.expectedRevision !== null) return null;
+    const pool = sanitizeHostActionCreatePool(request.pool);
+    if (pool === null) return null;
+    return {
+      apiVersion: HOST_ACTION_API_VERSION,
+      action: ACCOUNT_POOL_CREATE_ACTION,
+      command: {
+        version: ACCOUNT_POOL_MUTATE_VERSION,
+        action: "create_pool",
+        pool,
+        expectedRevision: null,
+      },
+    };
+  }
+  if (request.action === ACCOUNT_POOL_EDIT_ACTION) {
+    if (!isHostActionRevision(request.expectedRevision)) return null;
+    const pool = sanitizeHostActionCreatePool(request.pool);
+    if (pool === null) return null;
+    return {
+      apiVersion: HOST_ACTION_API_VERSION,
+      action: ACCOUNT_POOL_EDIT_ACTION,
+      command: {
+        version: ACCOUNT_POOL_MUTATE_VERSION,
+        action: "edit_pool",
+        pool,
+        expectedRevision: request.expectedRevision,
+      },
+    };
+  }
+  if (request.action === ACCOUNT_POOL_REMOVE_ACTION) {
+    if (!isHostActionRevision(request.expectedRevision)) return null;
+    const pool = sanitizeHostActionRemovePool(request.pool);
+    if (pool === null) return null;
+    return {
+      apiVersion: HOST_ACTION_API_VERSION,
+      action: ACCOUNT_POOL_REMOVE_ACTION,
+      command: {
+        version: ACCOUNT_POOL_MUTATE_VERSION,
+        action: "remove_pool",
+        pool,
+        expectedRevision: request.expectedRevision,
+      },
+    };
+  }
+  return null;
+}
+
+function sanitizeHostActionRequestBody(body) {
+  const value = parseStrictJsonObject(body, MAX_HOST_ACTION_REQUEST_BYTES);
+  if (value === null) return null;
+  return sanitizeHostActionRequest(value);
+}
+
+function hostActionCapabilities({ hostActionExecutor } = {}) {
+  return {
+    apiVersion: HOST_ACTION_API_VERSION,
+    actions: validHostActionExecutor(hostActionExecutor)
+      ? [
+          ACCOUNT_POOL_CREATE_ACTION,
+          ACCOUNT_POOL_EDIT_ACTION,
+          ACCOUNT_POOL_REMOVE_ACTION,
+        ]
+      : [],
+  };
+}
+
+function executeHostActionCommand(
+  actionRequest,
+  {
+    hostActionExecutor,
+    spawnProcess = childProcess.spawn,
+    deadlineMs = DEFAULT_DEADLINE_MS,
+  } = {},
+) {
+  if (
+    actionRequest === null ||
+    typeof actionRequest !== "object" ||
+    !validHostActionExecutor(hostActionExecutor) ||
+    typeof spawnProcess !== "function"
+  ) {
+    return Promise.resolve(null);
+  }
+  const input = Buffer.from(JSON.stringify(actionRequest.command), "utf8");
+  if (input.length === 0 || input.length > MAX_HOST_ACTION_REQUEST_BYTES) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawnProcess(hostActionExecutor.command, hostActionExecutor.args, {
+        shell: false,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    if (
+      child === null ||
+      typeof child !== "object" ||
+      typeof child.once !== "function" ||
+      typeof child.kill !== "function" ||
+      child.stdin === null ||
+      typeof child.stdin !== "object" ||
+      typeof child.stdin.write !== "function" ||
+      typeof child.stdin.end !== "function" ||
+      child.stdout === null ||
+      typeof child.stdout !== "object" ||
+      typeof child.stdout.on !== "function" ||
+      child.stderr === null ||
+      typeof child.stderr !== "object" ||
+      typeof child.stderr.on !== "function"
+    ) {
+      terminateChild(child);
+      resolve(null);
+      return;
+    }
+    let settled = false;
+    let stdoutLength = 0;
+    let stderrLength = 0;
+    const stdout = [];
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      resolve(value);
+    };
+    const fail = () => {
+      terminateChild(child);
+      finish(null);
+    };
+    const deadline = setTimeout(fail, validDeadline(deadlineMs));
+    child.stdout.on("data", (chunk) => {
+      if (settled || !Buffer.isBuffer(chunk)) {
+        fail();
+        return;
+      }
+      stdoutLength += chunk.length;
+      if (stdoutLength > MAX_HOST_ACTION_RESPONSE_BYTES) {
+        fail();
+        return;
+      }
+      stdout.push(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      if (settled || !Buffer.isBuffer(chunk)) {
+        fail();
+        return;
+      }
+      stderrLength += chunk.length;
+      if (stderrLength > MAX_HOST_ACTION_RESPONSE_BYTES) fail();
+    });
+    child.once("error", fail);
+    child.once("close", (code, signal) => {
+      if (settled) return;
+      if ((code !== 0 && code !== 1) || signal !== null) {
+        finish(null);
+        return;
+      }
+      const result = sanitizeHostActionCommandResult(
+        Buffer.concat(stdout, stdoutLength),
+        actionRequest.action,
+      );
+      if (result === null || result.ok !== (code === 0)) {
+        finish(null);
+        return;
+      }
+      finish(result);
+    });
+    try {
+      child.stdin.write(input);
+      child.stdin.end();
+    } catch {
+      fail();
+    }
+  });
+}
+
+function sanitizeHostActionCommandResult(body, action) {
+  const value = parseStrictJsonObject(body, MAX_HOST_ACTION_RESPONSE_BYTES);
+  if (value === null) return null;
+  const keys = Object.keys(value);
+  if (
+    !(
+      hasExactOwnKeys(value, ["version", "ok", "code"]) ||
+      hasExactOwnKeys(value, ["version", "ok", "code", "pool"])
+    ) ||
+    value.version !== ACCOUNT_POOL_MUTATE_VERSION ||
+    typeof value.ok !== "boolean" ||
+    typeof value.code !== "string" ||
+    !/^[a-z_]{1,64}$/u.test(value.code)
+  ) {
+    return null;
+  }
+  const result = {
+    apiVersion: HOST_ACTION_API_VERSION,
+    action,
+    ok: value.ok,
+    code: value.code,
+  };
+  if (keys.includes("pool")) {
+    const pool = sanitizeHostActionResultPool(value.pool);
+    if (pool === null) return null;
+    result.pool = pool;
+  }
+  return result;
+}
+
+function sanitizeHostActionResultPool(value) {
+  if (
+    !isJsonRecord(value) ||
+    !hasExactOwnKeys(value, ["poolId", "revision"]) ||
+    !isPublicPoolId(value.poolId) ||
+    !Number.isSafeInteger(value.revision) ||
+    value.revision < 1
+  ) {
+    return null;
+  }
+  return { poolId: value.poolId, revision: value.revision };
+}
+
+function validHostActionExecutor(value) {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    typeof value.command !== "string" ||
+    value.command.length === 0 ||
+    value.command.length > 4096 ||
+    /[\u0000-\u001f\u007f]/u.test(value.command) ||
+    !(path.isAbsolute(value.command) || path.win32.isAbsolute(value.command)) ||
+    !Array.isArray(value.args) ||
+    value.args.length !== 1 ||
+    value.args[0] !== "gateway-account-mutate"
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isHostActionRevision(value) {
+  return Number.isSafeInteger(value) && value >= 1;
+}
+
+function sanitizeHostActionRemovePool(value) {
+  const pool = ownDataRecord(value, ["poolId"]);
+  if (pool === null || !isPublicPoolId(pool.poolId)) return null;
+  return {
+    poolId: pool.poolId,
+  };
+}
+
+function sanitizeHostActionCreatePool(value) {
+  const pool = ownDataRecord(value, [
+    "poolId",
+    "strategy",
+    "members",
+    "crossProviderFallback",
+    "crossModelFallback",
+    "crossRegionFallback",
+  ]);
+  if (
+    pool === null ||
+    !isPublicPoolId(pool.poolId) ||
+    !ACCOUNT_POOL_STRATEGIES.has(pool.strategy) ||
+    typeof pool.crossProviderFallback !== "boolean" ||
+    typeof pool.crossModelFallback !== "boolean" ||
+    typeof pool.crossRegionFallback !== "boolean"
+  ) {
+    return null;
+  }
+  const members = sanitizeHostActionPoolMembers(pool.members);
+  if (members === null) return null;
+  return {
+    poolId: pool.poolId,
+    strategy: pool.strategy,
+    members,
+    crossProviderFallback: pool.crossProviderFallback,
+    crossModelFallback: pool.crossModelFallback,
+    crossRegionFallback: pool.crossRegionFallback,
+  };
+}
+
+function sanitizeHostActionPoolMembers(value) {
+  const items = ownDataArray(value, MAX_ACCOUNT_POOL_MEMBERS);
+  if (items === null || items.length === 0) return null;
+  const members = [];
+  const displayIds = new Set();
+  for (const item of items) {
+    const member = ownDataRecord(item, ["displayId", "priority", "weight"]);
+    if (
+      member === null ||
+      !/^acct_[0-9a-f]{12}$/u.test(member.displayId) ||
+      displayIds.has(member.displayId) ||
+      !Number.isInteger(member.priority) ||
+      member.priority < 0 ||
+      member.priority > 10_000 ||
+      !Number.isInteger(member.weight) ||
+      member.weight < 1 ||
+      member.weight > 100
+    ) {
+      return null;
+    }
+    displayIds.add(member.displayId);
+    members.push({
+      displayId: member.displayId,
+      priority: member.priority,
+      weight: member.weight,
+    });
+  }
+  return members;
+}
+
+function isPublicPoolId(value) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_ACCOUNT_POOL_ID_LENGTH &&
+    /^[A-Za-z0-9._-]+$/u.test(value)
+  );
+}
+
+function ownDataRecord(value, expectedKeys) {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return null;
+  }
+  let prototype;
+  let descriptors;
+  try {
+    prototype = Object.getPrototypeOf(value);
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch {
+    return null;
+  }
+  if (prototype !== Object.prototype) return null;
+  const expected = new Set(expectedKeys);
+  const keys = Reflect.ownKeys(descriptors);
+  if (
+    keys.length !== expectedKeys.length ||
+    keys.some((key) => typeof key !== "string" || !expected.has(key))
+  ) {
+    return null;
+  }
+  const result = {};
+  for (const key of expectedKeys) {
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined ||
+      !Object.prototype.hasOwnProperty.call(descriptor, "value") ||
+      descriptor.enumerable !== true
+    ) {
+      return null;
+    }
+    result[key] = descriptor.value;
+  }
+  return result;
+}
+
+function ownDataArray(value, maximumLength) {
+  if (
+    !Array.isArray(value) ||
+    !Number.isInteger(value.length) ||
+    value.length < 0 ||
+    value.length > maximumLength
+  ) {
+    return null;
+  }
+  let prototype;
+  let descriptors;
+  try {
+    prototype = Object.getPrototypeOf(value);
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch {
+    return null;
+  }
+  if (prototype !== Array.prototype) return null;
+  const keys = Reflect.ownKeys(descriptors);
+  if (keys.length !== value.length + 1) return null;
+  const lengthDescriptor = descriptors.length;
+  if (
+    lengthDescriptor === undefined ||
+    !Object.prototype.hasOwnProperty.call(lengthDescriptor, "value") ||
+    lengthDescriptor.value !== value.length
+  ) {
+    return null;
+  }
+  const items = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const key = String(index);
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined ||
+      !Object.prototype.hasOwnProperty.call(descriptor, "value") ||
+      descriptor.enumerable !== true
+    ) {
+      return null;
+    }
+    items.push(descriptor.value);
+  }
+  return items;
 }
 
 function isBoundedPublicInteger(value) {
@@ -1764,7 +2312,9 @@ function requestErrorKind(error, timedOut) {
 function isRendererApiTarget(target) {
   return (
     typeof target === "string" &&
-    (target.startsWith("/v1") || target.startsWith("/gateway"))
+    (target.startsWith("/v1") ||
+      target.startsWith("/gateway") ||
+      target.startsWith("/host/"))
   );
 }
 
@@ -2050,11 +2600,29 @@ function sendStaticFailure(
 }
 
 function readRendererShouldSendBody(request, declaredLength, deadlineMs) {
+  return readRendererBoundedBody(
+    request,
+    declaredLength,
+    MAX_SHOULD_SEND_REQUEST_BYTES,
+    deadlineMs,
+  );
+}
+
+function readRendererHostActionBody(request, declaredLength, deadlineMs) {
+  return readRendererBoundedBody(
+    request,
+    declaredLength,
+    MAX_HOST_ACTION_REQUEST_BYTES,
+    deadlineMs,
+  );
+}
+
+function readRendererBoundedBody(request, declaredLength, maximumBytes, deadlineMs) {
   return new Promise((resolve, reject) => {
     if (
       !Number.isInteger(declaredLength) ||
       declaredLength < 1 ||
-      declaredLength > MAX_SHOULD_SEND_REQUEST_BYTES ||
+      declaredLength > maximumBytes ||
       request === null ||
       typeof request !== "object" ||
       typeof request.on !== "function"
@@ -2081,7 +2649,7 @@ function readRendererShouldSendBody(request, declaredLength, deadlineMs) {
       total += chunk.length;
       if (
         total > declaredLength ||
-        total > MAX_SHOULD_SEND_REQUEST_BYTES
+        total > maximumBytes
       ) {
         finish(reject, requestFailure("invalid"));
         return;
@@ -2109,6 +2677,20 @@ function rendererHeader(headers, expectedName) {
     if (name.toLowerCase() === expectedName) return value;
   }
   return undefined;
+}
+
+function rendererJsonResponse(payload, statusCode = 200) {
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  return {
+    statusCode,
+    headers: {
+      "Cache-Control": "no-store",
+      "Content-Length": String(body.length),
+      "Content-Type": "application/json; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+    },
+    body,
+  };
 }
 
 function createRendererApiHandler(options) {
@@ -2167,6 +2749,34 @@ function createRendererApiHandler(options) {
           return;
         }
         classified = { ...classified, body };
+      }
+      if (
+        classified.method === "POST" &&
+        classified.target === "/host/v1/actions"
+      ) {
+        const declaredLength = Number(rendererHeader(headers, "content-length"));
+        let submitted;
+        try {
+          submitted = await readRendererHostActionBody(
+            request,
+            declaredLength,
+            options?.deadlineMs,
+          );
+        } catch {
+          sendSafeProblemAndClose(
+            request,
+            response,
+            502,
+            "service_unavailable",
+          );
+          return;
+        }
+        const actionRequest = sanitizeHostActionRequestBody(submitted);
+        if (actionRequest === null) {
+          sendSafeProblem(response, 400, "invalid_request", false);
+          return;
+        }
+        classified = { ...classified, actionRequest };
       }
       const result = await fetchRendererResponse(classified, options);
       response.writeHead(result.statusCode, result.headers);
@@ -2268,6 +2878,7 @@ module.exports = {
   probePrivateObserver,
   readPrivateToken,
   sanitizeAccountPoolsPayload,
+  sanitizeHostActionRequest,
   startOrProbeLegacyDashboard,
   startOrProbePrivateObserver,
   validatePrivateUnixSocket,

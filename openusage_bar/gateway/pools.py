@@ -404,6 +404,7 @@ def account_pools_public_payload(
         for member in pool.members
     ):
         raise ValueError("pool references an unknown account")
+    account_by_id = {account.account_id: account for account in accounts}
 
     candidate_map = {
         candidate.account.account_id: candidate for candidate in candidates
@@ -435,6 +436,7 @@ def account_pools_public_payload(
             {
                 "alias": account.alias,
                 "displayId": account.display_id,
+                "providerId": account.provider_id,
                 "status": status,
                 "quota": {
                     "state": quota_state,
@@ -448,7 +450,27 @@ def account_pools_public_payload(
                 "weight": memberships[0]["weight"] if memberships else 0,
             }
         )
-    return {"accounts": public_accounts}
+    public_pools: list[dict[str, object]] = []
+    for pool in pools:
+        public_pools.append(
+            {
+                "poolId": pool.pool_id,
+                "revision": pool.revision,
+                "strategy": pool.strategy.value,
+                "members": [
+                    {
+                        "displayId": account_by_id[member.account_id].display_id,
+                        "priority": member.priority,
+                        "weight": member.weight,
+                    }
+                    for member in pool.members
+                ],
+                "crossProviderFallback": pool.cross_provider_fallback,
+                "crossModelFallback": pool.cross_model_fallback,
+                "crossRegionFallback": pool.cross_region_fallback,
+            }
+        )
+    return {"accounts": public_accounts, "pools": public_pools}
 
 
 def _public_candidate_status(candidate: AccountCandidate | None) -> str:
@@ -472,12 +494,12 @@ def validate_account_pools_public_payload(
 ) -> dict[str, object] | None:
     """Rebuild the exact renderer contract, rejecting every additive field."""
 
-    if type(value) is not dict or set(value) != {"accounts"}:
+    if type(value) is not dict or set(value) != {"accounts", "pools"}:
         return None
     raw_accounts = value.get("accounts")
     if type(raw_accounts) is not list or len(raw_accounts) > 256:
         return None
-    result: list[dict[str, object]] = []
+    accounts: list[dict[str, object]] = []
     display_ids: set[str] = set()
     for raw in raw_accounts:
         account = _validated_public_account(raw)
@@ -488,14 +510,24 @@ def validate_account_pools_public_payload(
         if display_id in display_ids:
             return None
         display_ids.add(display_id)
-        result.append(account)
-    return {"accounts": result}
+        accounts.append(account)
+    pools = _validated_public_pools(value.get("pools"), display_ids)
+    if pools is None:
+        return None
+    pool_ids = {pool["poolId"] for pool in pools}
+    for account in accounts:
+        for membership in account["pools"]:
+            assert type(membership) is dict
+            if membership["poolId"] not in pool_ids:
+                return None
+    return {"accounts": accounts, "pools": pools}
 
 
 def _validated_public_account(value: object) -> dict[str, object] | None:
     fields = {
         "alias",
         "displayId",
+        "providerId",
         "status",
         "quota",
         "cooldown",
@@ -510,6 +542,9 @@ def _validated_public_account(value: object) -> dict[str, object] | None:
         return None
     display_id = value.get("displayId")
     if not _public_account_display_id(display_id):
+        return None
+    provider_id = value.get("providerId")
+    if not _stable_id(provider_id):
         return None
     status = value.get("status")
     if status not in {
@@ -533,6 +568,7 @@ def _validated_public_account(value: object) -> dict[str, object] | None:
     return {
         "alias": alias,
         "displayId": display_id,
+        "providerId": provider_id,
         "status": status,
         "quota": quota,
         "cooldown": cooldown,
@@ -599,6 +635,101 @@ def _validated_public_memberships(value: object) -> list[dict[str, object]] | No
             return None
         seen.add(pool_id)
         result.append({"poolId": pool_id, "priority": priority, "weight": weight})
+    return result
+
+
+def _validated_public_pools(
+    value: object,
+    account_display_ids: set[str],
+) -> list[dict[str, object]] | None:
+    if type(value) is not list or len(value) > 64:
+        return None
+    result: list[dict[str, object]] = []
+    seen_pool_ids: set[str] = set()
+    for item in value:
+        if type(item) is not dict or set(item) != {
+            "poolId",
+            "revision",
+            "strategy",
+            "members",
+            "crossProviderFallback",
+            "crossModelFallback",
+            "crossRegionFallback",
+        }:
+            return None
+        pool_id = item.get("poolId")
+        if (
+            not _public_text(pool_id)
+            or not _stable_id(pool_id)
+            or pool_id in seen_pool_ids
+        ):
+            return None
+        revision = item.get("revision")
+        if type(revision) is not int or not 1 <= revision <= 2**63 - 1:
+            return None
+        strategy = item.get("strategy")
+        if strategy not in {candidate.value for candidate in PoolStrategy}:
+            return None
+        members = _validated_public_pool_members(
+            item.get("members"),
+            account_display_ids,
+        )
+        if members is None:
+            return None
+        for key in (
+            "crossProviderFallback",
+            "crossModelFallback",
+            "crossRegionFallback",
+        ):
+            if type(item.get(key)) is not bool:
+                return None
+        seen_pool_ids.add(pool_id)
+        result.append(
+            {
+                "poolId": pool_id,
+                "revision": revision,
+                "strategy": strategy,
+                "members": members,
+                "crossProviderFallback": item["crossProviderFallback"],
+                "crossModelFallback": item["crossModelFallback"],
+                "crossRegionFallback": item["crossRegionFallback"],
+            }
+        )
+    return result
+
+
+def _validated_public_pool_members(
+    value: object,
+    account_display_ids: set[str],
+) -> list[dict[str, object]] | None:
+    if type(value) is not list or not 1 <= len(value) <= _MAX_POOL_MEMBERS:
+        return None
+    result: list[dict[str, object]] = []
+    seen_display_ids: set[str] = set()
+    for item in value:
+        if type(item) is not dict or set(item) != {"displayId", "priority", "weight"}:
+            return None
+        display_id = item.get("displayId")
+        priority = item.get("priority")
+        weight = item.get("weight")
+        if (
+            not _public_account_display_id(display_id)
+            or display_id not in account_display_ids
+            or display_id in seen_display_ids
+            or type(priority) is not int
+            or not 0 <= priority <= 10_000
+            or type(weight) is not int
+            or not 1 <= weight <= 100
+        ):
+            return None
+        seen_display_ids.add(display_id)
+        result.append(
+            {
+                "displayId": display_id,
+                "priority": priority,
+                "weight": weight,
+            }
+        )
     return result
 
 
