@@ -312,6 +312,7 @@
    const [searchParams, setSearchParams] = useSearchParams();
    const allSourcesButtonRef = useRef<HTMLButtonElement>(null);
    const pluginActionRef = useRef<HTMLButtonElement>(null);
+   const restorePluginActionFocusRef = useRef(false);
 
    const load = useCallback(async () => {
      try {
@@ -365,6 +366,7 @@
    }
 
    async function refreshPluginStatus(restoreFocus = false) {
+     if (restoreFocus) restorePluginActionFocusRef.current = true;
      setPluginRefreshing(true);
      try {
        const next = await fetchPluginConnections();
@@ -379,11 +381,14 @@
      } finally {
        setPluginLoaded(true);
        setPluginRefreshing(false);
-       if (restoreFocus) {
-         requestAnimationFrame(() => pluginActionRef.current?.focus());
-       }
      }
    }
+
+   useEffect(() => {
+     if (pluginRefreshing || !restorePluginActionFocusRef.current) return;
+     restorePluginActionFocusRef.current = false;
+     requestAnimationFrame(() => pluginActionRef.current?.focus());
+   }, [pluginRefreshing]);
 
    useEffect(() => {
      void load();
