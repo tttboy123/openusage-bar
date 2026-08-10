@@ -426,8 +426,10 @@ process.stdout.write(JSON.stringify({ nativeToken, windowsToken }));
                 "- name: Smoke bundled Plugin API",
                 "id: plugin_smoke",
                 "python scripts/smoke_plugin_api.py",
-                '--collector "./dist-collector/${{ matrix.collector }}"',
-                '--bridge "./dist-bridge/${{ matrix.bridge }}"',
+                'collector_path="$(python -c',
+                'bridge_path="$(python -c',
+                '--collector "$collector_path"',
+                '--bridge "$bridge_path"',
                 "npm run test:e2e:plugin-health",
             )
             if marker not in workflow

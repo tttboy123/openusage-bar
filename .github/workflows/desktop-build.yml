@@ -497,9 +497,11 @@ jobs:
         id: plugin_smoke
         shell: bash
         run: |
+          collector_path="$(python -c 'from pathlib import Path; print(Path("dist-collector/${{ matrix.collector }}").resolve(strict=True))')"
+          bridge_path="$(python -c 'from pathlib import Path; print(Path("dist-bridge/${{ matrix.bridge }}").resolve(strict=True))')"
           python scripts/smoke_plugin_api.py \
-            --collector "./dist-collector/${{ matrix.collector }}" \
-            --bridge "./dist-bridge/${{ matrix.bridge }}"
+            --collector "$collector_path" \
+            --bridge "$bridge_path"
       - name: Build bundled settings helper
         id: settings_build
         shell: bash

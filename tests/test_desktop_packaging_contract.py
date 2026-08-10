@@ -1052,14 +1052,26 @@ class DesktopPackagingContractTests(unittest.TestCase):
         self.assertNotIn("openusage_bar/resources/*.json", bridge_build["run"])
         self.assertEqual(
             _active_shell_commands(plugin_smoke["run"]),
-            [[
-                "python",
-                "scripts/smoke_plugin_api.py",
-                "--collector",
-                "./dist-collector/${{matrix.collector}}",
-                "--bridge",
-                "./dist-bridge/${{matrix.bridge}}",
-            ]],
+            [
+                [
+                    "collector_path=$(python -c 'from pathlib import Path; "
+                    "print(Path(dist-collector/${{matrix.collector}})"
+                    ".resolve(strict=True))')",
+                ],
+                [
+                    "bridge_path=$(python -c 'from pathlib import Path; "
+                    "print(Path(dist-bridge/${{matrix.bridge}})"
+                    ".resolve(strict=True))')",
+                ],
+                [
+                    "python",
+                    "scripts/smoke_plugin_api.py",
+                    "--collector",
+                    "$collector_path",
+                    "--bridge",
+                    "$bridge_path",
+                ],
+            ],
         )
 
         browser_install = by_name["Install Gateway Account Playwright browser"]
