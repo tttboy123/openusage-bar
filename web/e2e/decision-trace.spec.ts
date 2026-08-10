@@ -147,7 +147,192 @@ test("keyboard refresh replaces an empty runtime with a bounded timeline", async
   await expect(
     decisionTimeline(page).getByRole("heading", { name: "Pool selection" }),
   ).toBeVisible();
+  await expect(refresh).toBeFocused();
 });
+
+test("initial stalled load keeps the skeleton busy until a controlled response arrives", async ({ page }) => {
+  let releaseInitialLoad!: () => void;
+  const initialLoadGate = new Promise<void>((resolve) => {
+    releaseInitialLoad = resolve;
+  });
+  await installAutomationRoutes(page, async (route) => {
+    await initialLoadGate;
+    return json(route, { apiVersion: API_VERSION, traces: [] });
+  });
+  await openAutomation(page);
+
+  const timeline = decisionTimeline(page);
+  const refresh = timeline.getByRole("button", { name: "Refresh decisions" });
+  await expect(timeline.locator(".decision-trace-state")).toContainText(
+    "Loading recent decisions…",
+  );
+  await expect(timeline).toHaveAttribute("aria-busy", "true");
+  await expect(refresh).toBeDisabled();
+  await expect(page.locator(".service-status-announcement[role=status]")).toContainText(
+    "Loading recent decisions…",
+  );
+
+  releaseInitialLoad();
+  await expect(timeline).toHaveAttribute("aria-busy", "false");
+  await expect(timeline).toContainText(
+    "No decisions have been recorded in this runtime yet.",
+  );
+});
+
+test("failed refresh keeps the last loaded timeline busy, announced, and focused", async ({ page }) => {
+  let refreshing = false;
+  let announceRefreshStarted!: () => void;
+  let releaseRefresh!: () => void;
+  const refreshStarted = new Promise<void>((resolve) => {
+    announceRefreshStarted = resolve;
+  });
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  await installAutomationRoutes(page, async (route) => {
+    if (!refreshing) return json(route, decisionTraceEnvelope);
+    announceRefreshStarted();
+    await refreshGate;
+    return json(route, { error: { code: "service_unavailable" } }, 503);
+  });
+  await openAutomation(page);
+
+  const timeline = decisionTimeline(page);
+  const routeAdvice = timeline.getByRole("heading", { name: "Route advice" });
+  const refresh = timeline.getByRole("button", { name: "Refresh decisions" });
+  await expect(routeAdvice).toBeVisible();
+  refreshing = true;
+  await refresh.focus();
+  await page.keyboard.press("Enter");
+  await refreshStarted;
+
+  await expect(timeline).toHaveAttribute("aria-busy", "true");
+  await expect(refresh).toBeDisabled();
+  await expect(routeAdvice).toBeVisible();
+  await expect(timeline).toContainText(
+    "Refreshing recent decisions… Showing the last loaded decisions.",
+  );
+  await expect(page.locator(".service-status-announcement[role=status]")).toContainText(
+    "Refreshing recent decisions… Showing the last loaded decisions.",
+  );
+
+  releaseRefresh();
+  await expect(timeline).toHaveAttribute("aria-busy", "false");
+  await expect(refresh).toBeEnabled();
+  await expect(refresh).toBeFocused();
+  await expect(routeAdvice).toBeVisible();
+  await expect(timeline).toContainText(
+    "Could not refresh Decision Trace. Showing the last loaded decisions.",
+  );
+  await expect(timeline).not.toContainText("No decisions have been recorded");
+  await expect(timeline).not.toContainText("unrecognized contract");
+  await expect(timeline).not.toContainText("Decision Trace is unavailable");
+  await expect(page.locator(".service-status-announcement[role=status]")).toContainText(
+    "Could not refresh Decision Trace. Showing the last loaded decisions.",
+  );
+});
+
+test("refresh completion does not steal focus after the user chooses another control", async ({ page }) => {
+  let refreshing = false;
+  let announceRefreshStarted!: () => void;
+  let releaseRefresh!: () => void;
+  const refreshStarted = new Promise<void>((resolve) => {
+    announceRefreshStarted = resolve;
+  });
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  await installAutomationRoutes(page, async (route) => {
+    if (!refreshing) return json(route, decisionTraceEnvelope);
+    announceRefreshStarted();
+    await refreshGate;
+    return json(route, { error: { code: "service_unavailable" } }, 503);
+  });
+  await openAutomation(page);
+
+  const timeline = page.locator(".decision-trace-card");
+  const refresh = timeline.getByRole("button", { name: "Refresh decisions" });
+  await expect(
+    timeline.getByRole("heading", { name: "Route advice" }),
+  ).toBeVisible();
+  refreshing = true;
+  await refresh.focus();
+  await page.keyboard.press("Enter");
+  await refreshStarted;
+  await expect(timeline).toHaveAttribute("aria-busy", "true");
+
+  await page.getByRole("link", { name: "Activity" }).focus();
+  await page.keyboard.press("Tab");
+  const userChosenControl = page.getByRole("link", { name: "Usage Details" });
+  await expect(userChosenControl).toBeFocused();
+  releaseRefresh();
+
+  await expect(timeline).toHaveAttribute("aria-busy", "false");
+  await expect(timeline).toContainText(
+    "Could not refresh Decision Trace. Showing the last loaded decisions.",
+  );
+  await expect(userChosenControl).toBeFocused();
+  await expect(timeline.locator("button")).not.toBeFocused();
+});
+
+for (const failure of ["invalid", "aborted"] as const) {
+  test(`${failure} refresh crosses a controlled pending state before retaining the safe projection`, async ({ page }) => {
+    const privateCanary = `PRIVATE_${failure.toUpperCase()}_REFRESH_CANARY_d4b1`;
+    let refreshing = false;
+    let announceRefreshStarted!: () => void;
+    let releaseTerminal!: () => void;
+    const refreshStarted = new Promise<void>((resolve) => {
+      announceRefreshStarted = resolve;
+    });
+    const terminalGate = new Promise<void>((resolve) => {
+      releaseTerminal = resolve;
+    });
+    await installAutomationRoutes(page, async (route) => {
+      if (!refreshing) return json(route, decisionTraceEnvelope);
+      announceRefreshStarted();
+      await terminalGate;
+      if (failure === "invalid") {
+        return json(route, {
+          ...decisionTraceEnvelope,
+          prompt: privateCanary,
+        });
+      }
+      return route.abort("timedout");
+    });
+    await openAutomation(page);
+
+    const timeline = decisionTimeline(page);
+    const routeAdvice = timeline.getByRole("heading", { name: "Route advice" });
+    const refresh = timeline.getByRole("button", { name: "Refresh decisions" });
+    await expect(routeAdvice).toBeVisible();
+    refreshing = true;
+    await refresh.focus();
+    await page.keyboard.press("Enter");
+    await refreshStarted;
+
+    await expect(timeline).toHaveAttribute("aria-busy", "true");
+    await expect(refresh).toBeDisabled();
+    await expect(routeAdvice).toBeVisible();
+    await expect(timeline).toContainText(
+      "Refreshing recent decisions… Showing the last loaded decisions.",
+    );
+    await expect(timeline).not.toContainText(
+      "Could not refresh Decision Trace. Showing the last loaded decisions.",
+    );
+
+    releaseTerminal();
+    await expect(timeline).toHaveAttribute("aria-busy", "false");
+    await expect(timeline).toContainText(
+      "Could not refresh Decision Trace. Showing the last loaded decisions.",
+    );
+    await expect(routeAdvice).toBeVisible();
+    await expect(refresh).toBeFocused();
+    await expect(timeline).not.toContainText("No decisions have been recorded");
+    await expect(timeline).not.toContainText("unrecognized contract");
+    await expect(timeline).not.toContainText("Decision Trace is unavailable");
+    await expect(page.locator("body")).not.toContainText(privateCanary);
+  });
+}
 
 for (const viewport of [
   { width: 320, height: 720 },

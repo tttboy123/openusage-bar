@@ -273,11 +273,18 @@ export async function fetchShouldSendAdvice(
 
 export async function fetchDecisionTraces(): Promise<DecisionTraces | null> {
   const { normalizeDecisionTraces } = await import("./decisionTraces");
-  const payload = await getJson<unknown>("/gateway/v1/decision-traces", {
-    method: "GET",
-    credentials: "omit",
-  });
-  return normalizeDecisionTraces(payload);
+  const controller = new AbortController();
+  const deadline = globalThis.setTimeout(() => controller.abort(), 3_000);
+  try {
+    const payload = await getJson<unknown>("/gateway/v1/decision-traces", {
+      method: "GET",
+      credentials: "omit",
+      signal: controller.signal,
+    });
+    return normalizeDecisionTraces(payload);
+  } finally {
+    globalThis.clearTimeout(deadline);
+  }
 }
 
 export async function fetchPluginConnections(): Promise<PluginConnections | null> {

@@ -22,11 +22,11 @@ reference-machine admission instead of trusting a caller-supplied label.
 
 | Scenario | Release gate | Current result |
 | --- | --- | --- |
-| Should-Send authenticated loopback | p99 < 50 ms | Post-change clean local diagnostic: 2.266 ms worst p99, pass. |
-| Responses proxy overhead, paired | signed p99 delta < 200 ms | Post-change clean local diagnostic: 31.661 ms worst signed p99, pass. |
-| Exact cache core lookup | p99 < 5 ms | Post-change clean local diagnostic: 0.104 ms worst p99, pass. |
-| Exact cache authenticated loopback | informational only | Post-change clean local diagnostic: 29.479 ms worst p99; informational only. |
-| Responses throughput | every complete one-second bucket >= 100 successes | Post-change clean local diagnostic: 107/s worst complete bucket, zero errors, timeouts, and rate limits; pass. |
+| Should-Send authenticated loopback | p99 < 50 ms | Manual shared-runner diagnostic at `17b2298`: 2.428 ms worst p99, pass. |
+| Responses proxy overhead, paired | signed p99 delta < 200 ms | Manual shared-runner diagnostic at `17b2298`: 7.257 ms worst signed p99, pass. |
+| Exact cache core lookup | p99 < 5 ms | Manual shared-runner diagnostic at `17b2298`: 0.108 ms worst p99, pass. |
+| Exact cache authenticated loopback | informational only | Manual shared-runner diagnostic at `17b2298`: 9.963 ms worst p99; informational only. |
+| Responses throughput | every complete one-second bucket >= 100 successes | Manual shared-runner diagnostic at `17b2298`: 433/s worst complete bucket, zero errors, timeouts, and rate limits; pass. |
 
 The cache scenario status is derived from `responsesExactCacheHit.coreLookup`.
 `responsesExactCacheHit.e2eAuthenticatedLoopback` is nested with
@@ -156,6 +156,7 @@ performance evidence:
 | --- | --- |
 | `python -m unittest tests.test_gateway_performance_measurement tests.test_gateway_should_send tests.test_gateway_cache` | Local diagnostic PASS observed during documentation update. |
 | `python scripts/measure_gateway_performance.py smoke` | Local diagnostic PASS observed during documentation update: fixture egress only, no real credentials or Provider network. |
+| Manual shared-runner report at `17b2298`, run `31371566465` | The dispatch-only job verified and retained a clean Linux x64 report with `evidenceClass: diagnostic` and overall pass: Should-Send worst p99 2.428 ms; paired proxy worst signed p99 7.257 ms; cache core worst p99 0.108 ms; informational authenticated cache loopback 9.963 ms; throughput worst complete bucket 433 successes/s with zero errors, timeouts, and rate limits. The shared runner reports unknown power and storage class, so this is reproducible hosted diagnostic evidence, not a fixed reference-machine release result. |
 | Clean post-change three-round report at `ea51b13`, 2026-08-10 | Schema and semantic verifier pass with `evidenceClass: diagnostic`, source tree `clean`, and AC power. Should-Send worst p99 2.266 ms; paired proxy worst signed p99 31.661 ms; cache core worst p99 0.104 ms; informational authenticated cache loopback 29.479 ms; throughput worst complete bucket 107 successes/s with zero errors, timeouts, and rate limits. Overall pass. The pre-change run used battery power and a different foreground load, so this observation does not by itself attribute every improvement to the listener backlog change or become release evidence. |
 | Clean local three-round report at `b8c917c`, 2026-08-10 | Pre-optimization diagnostic, Apple M3 on battery with load approximately 4.7/8 cores: Should-Send worst p99 16.247 ms; paired proxy worst signed p99 86.057 ms; cache core worst p99 18.899 ms; informational authenticated cache loopback 148.199 ms; throughput worst complete bucket 9 successes/s with 16 total client timeouts across three rounds. Overall fail; not release evidence. |
 | Evidence-led listener change | The 16-client workload used a 32-thread cap while the inherited TCP listen backlog was only 5. The listener backlog now follows the already validated `max_threads`; authentication, worker capacity, deadlines, connection-close behavior, and telemetry semantics are unchanged. Cache security checks remain unchanged because isolated hot lookup p99 was approximately 0.065 ms and did not justify weakening per-lookup file identity or permission validation. |

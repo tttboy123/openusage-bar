@@ -43,7 +43,14 @@ import type {
 } from "../decisionTraces";
 
 type AdvicePhase = "idle" | "loading" | "result" | "error";
-type TracePhase = "loading" | "ready" | "empty" | "unavailable" | "unknown";
+type TracePhase =
+  | "loading"
+  | "refreshing"
+  | "refresh_failed"
+  | "ready"
+  | "empty"
+  | "unavailable"
+  | "unknown";
 type AdviceField = "provider" | "model" | "estimatedTokens" | "window";
 type AdviceErrorKey =
   | "shouldSendRequired"
@@ -368,6 +375,9 @@ export default function AutomationPage({ t }: { t: Messages }) {
   const adviceRequestGeneration = useRef(0);
   const [decisionTraces, setDecisionTraces] = useState<DecisionTrace[]>([]);
   const [tracePhase, setTracePhase] = useState<TracePhase>("loading");
+  const decisionTracesRef = useRef<DecisionTrace[]>([]);
+  const decisionTraceRefreshButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreDecisionTraceRefreshFocus = useRef(false);
   const traceRequestGeneration = useRef(0);
 
   const loadCapability = useCallback(async () => {
@@ -392,29 +402,42 @@ export default function AutomationPage({ t }: { t: Messages }) {
     void loadCapability();
   }, [loadCapability]);
 
-  const loadDecisionTraces = useCallback(async () => {
+  const loadDecisionTraces = useCallback(async (preserveLastGood = false) => {
     const generation = traceRequestGeneration.current + 1;
     traceRequestGeneration.current = generation;
-    setTracePhase("loading");
+    const hasLastGood =
+      preserveLastGood && decisionTracesRef.current.length > 0;
+    setTracePhase(hasLastGood ? "refreshing" : "loading");
     try {
       const result = await fetchDecisionTraces();
       if (generation !== traceRequestGeneration.current) return;
       if (result === null) {
-        setDecisionTraces([]);
-        setTracePhase("unknown");
+        if (hasLastGood) {
+          setTracePhase("refresh_failed");
+        } else {
+          decisionTracesRef.current = [];
+          setDecisionTraces([]);
+          setTracePhase("unknown");
+        }
       } else {
+        decisionTracesRef.current = result.traces;
         setDecisionTraces(result.traces);
         setTracePhase(result.traces.length === 0 ? "empty" : "ready");
       }
     } catch {
       if (generation !== traceRequestGeneration.current) return;
-      setDecisionTraces([]);
-      setTracePhase("unavailable");
+      if (hasLastGood) {
+        setTracePhase("refresh_failed");
+      } else {
+        decisionTracesRef.current = [];
+        setDecisionTraces([]);
+        setTracePhase("unavailable");
+      }
     }
   }, []);
 
   useEffect(() => {
-    void loadDecisionTraces();
+    void loadDecisionTraces(false);
     return () => {
       traceRequestGeneration.current += 1;
     };
@@ -519,13 +542,34 @@ export default function AutomationPage({ t }: { t: Messages }) {
   const decisionTraceAnnouncement =
     tracePhase === "loading"
       ? t.decisionTraceLoading
-      : tracePhase === "empty"
-        ? t.decisionTraceEmpty
-        : tracePhase === "unavailable"
-          ? t.decisionTraceUnavailable
-          : tracePhase === "unknown"
-            ? t.decisionTraceUnknown
-            : tpl(t.decisionTraceLoaded, { count: decisionTraces.length });
+      : tracePhase === "refreshing"
+        ? t.decisionTraceRefreshing
+        : tracePhase === "refresh_failed"
+          ? t.decisionTraceRefreshFailed
+          : tracePhase === "empty"
+            ? t.decisionTraceEmpty
+            : tracePhase === "unavailable"
+              ? t.decisionTraceUnavailable
+              : tracePhase === "unknown"
+                ? t.decisionTraceUnknown
+                : tpl(t.decisionTraceLoaded, {
+                    count: decisionTraces.length,
+                  });
+  const decisionTraceBusy =
+    tracePhase === "loading" || tracePhase === "refreshing";
+  useEffect(() => {
+    if (!decisionTraceBusy && restoreDecisionTraceRefreshFocus.current) {
+      restoreDecisionTraceRefreshFocus.current = false;
+      const refreshButton = decisionTraceRefreshButtonRef.current;
+      const activeElement = document.activeElement;
+      if (
+        refreshButton &&
+        (activeElement === refreshButton || activeElement === document.body)
+      ) {
+        refreshButton.focus();
+      }
+    }
+  }, [decisionTraceBusy]);
   return (
     <>
       <div className="service-status-strip">
@@ -1067,7 +1111,7 @@ export default function AutomationPage({ t }: { t: Messages }) {
       <section
         className="panel decision-trace-card"
         aria-labelledby="decision-trace-title"
-        aria-busy={tracePhase === "loading"}
+        aria-busy={decisionTraceBusy}
       >
         <div className="panel-head">
           <h3 id="decision-trace-title">{t.decisionTraceTitle}</h3>
@@ -1079,15 +1123,19 @@ export default function AutomationPage({ t }: { t: Messages }) {
               {t.decisionTraceRuntimeOnly}
             </p>
             <button
+              ref={decisionTraceRefreshButtonRef}
               type="button"
               className="icon-btn"
-              onClick={() => void loadDecisionTraces()}
-              disabled={tracePhase === "loading"}
-              aria-busy={tracePhase === "loading"}
+              onClick={() => {
+                restoreDecisionTraceRefreshFocus.current = true;
+                void loadDecisionTraces(true);
+              }}
+              disabled={decisionTraceBusy}
+              aria-busy={decisionTraceBusy}
             >
               <ArrowClockwise
                 size={16}
-                className={tracePhase === "loading" ? "spinning" : ""}
+                className={decisionTraceBusy ? "spinning" : ""}
                 aria-hidden="true"
               />
               {t.decisionTraceRefresh}
@@ -1098,8 +1146,20 @@ export default function AutomationPage({ t }: { t: Messages }) {
               <Skeleton lines={3} />
               <p>{t.decisionTraceLoading}</p>
             </div>
-          ) : tracePhase === "ready" ? (
-            <ol className="decision-trace-list">
+          ) : tracePhase === "ready" ||
+            tracePhase === "refreshing" ||
+            tracePhase === "refresh_failed" ? (
+            <>
+              {tracePhase === "refreshing" ? (
+                <p className="decision-trace-runtime-note">
+                  {t.decisionTraceRefreshing}
+                </p>
+              ) : tracePhase === "refresh_failed" ? (
+                <p className="decision-trace-runtime-note">
+                  {t.decisionTraceRefreshFailed}
+                </p>
+              ) : null}
+              <ol className="decision-trace-list">
               {decisionTraces.map((trace) => (
                 <li key={trace.traceId} className="decision-trace-item">
                   <article>
@@ -1267,7 +1327,8 @@ export default function AutomationPage({ t }: { t: Messages }) {
                   </article>
                 </li>
               ))}
-            </ol>
+              </ol>
+            </>
           ) : (
             <p className={`decision-trace-state decision-trace-${tracePhase}`}>
               {tracePhase === "empty"

@@ -345,6 +345,10 @@ export const messages = {
     decisionTraceRuntimeOnly:
       "Decision traces stay only in the current Gateway process memory; restarting clears them. They are not saved as history.",
     decisionTraceLoading: "Loading recent decisions…",
+    decisionTraceRefreshing:
+      "Refreshing recent decisions… Showing the last loaded decisions.",
+    decisionTraceRefreshFailed:
+      "Could not refresh Decision Trace. Showing the last loaded decisions.",
     decisionTraceEmpty:
       "No decisions have been recorded in this runtime yet.",
     decisionTraceUnavailable:
@@ -916,6 +920,10 @@ export const messages = {
     decisionTraceRuntimeOnly:
       "仅保存在当前 Gateway 进程内存中；重启会清空这些轨迹，不会保存为历史记录。",
     decisionTraceLoading: "正在加载最近决策…",
+    decisionTraceRefreshing:
+      "正在刷新最近决策…当前显示上次加载的决策。",
+    decisionTraceRefreshFailed:
+      "无法刷新决策轨迹；正在显示上次加载的决策。",
     decisionTraceEmpty: "当前运行期间尚未记录决策。",
     decisionTraceUnavailable:
       "决策轨迹不可用；可选 Gateway host 可能离线或不支持此能力。",

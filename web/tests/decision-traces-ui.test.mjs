@@ -67,16 +67,67 @@ test("Decision Trace fetch uses one credential-free relative GET and returns onl
   }
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], "/gateway/v1/decision-traces");
-  assert.deepEqual(calls[0][1], {
+  assert.ok(calls[0][1].signal instanceof AbortSignal);
+  assert.deepEqual({ ...calls[0][1], signal: undefined }, {
     method: "GET",
     credentials: "omit",
     cache: "no-store",
+    signal: undefined,
   });
   assert.match(apiSource, /normalizeDecisionTraces\(payload\)/u);
   assert.doesNotMatch(
     apiSource,
     /gateway\/v1\/decision-traces[^\n]*(?:token|credential|authorization|bearer)/iu,
   );
+});
+
+test("Decision Trace fetch aborts a stalled credential-free request after three seconds", async () => {
+  const api = await loadApiModule();
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const scheduledDelays = [];
+  const clearedHandles = [];
+  const timeoutHandle = Object.freeze({ kind: "decision-trace-timeout" });
+  let observedRequest = null;
+
+  globalThis.setTimeout = (callback, delay) => {
+    scheduledDelays.push(delay);
+    queueMicrotask(callback);
+    return timeoutHandle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    clearedHandles.push(handle);
+  };
+  globalThis.fetch = async (path, init) => {
+    observedRequest = { path, init };
+    assert.ok(init?.signal instanceof AbortSignal, "request must own an AbortSignal");
+    return new Promise((resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(init.signal.reason), {
+        once: true,
+      });
+    });
+  };
+
+  try {
+    await assert.rejects(api.fetchDecisionTraces(), { name: "AbortError" });
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+
+  assert.equal(observedRequest?.path, "/gateway/v1/decision-traces");
+  assert.equal(observedRequest?.init?.method, "GET");
+  assert.equal(observedRequest?.init?.credentials, "omit");
+  assert.deepEqual(scheduledDelays, [3_000]);
+  assert.deepEqual(clearedHandles, [timeoutHandle]);
+  assert.deepEqual(
+    Object.keys(observedRequest?.init ?? {}).sort(),
+    ["cache", "credentials", "method", "signal"],
+  );
+  assert.equal(observedRequest?.init?.headers, undefined);
+  assert.equal(observedRequest?.init?.body, undefined);
 });
 
 test("Decision Trace fetch reports an invalid projection as unknown without reflection", async () => {
@@ -109,6 +160,14 @@ test("Automation gives loading, empty, unavailable, and invalid-contract states 
       "仅保存在当前 Gateway 进程内存中；重启会清空这些轨迹，不会保存为历史记录。",
     ],
     decisionTraceLoading: ["Loading recent decisions…", "正在加载最近决策…"],
+    decisionTraceRefreshing: [
+      "Refreshing recent decisions… Showing the last loaded decisions.",
+      "正在刷新最近决策…当前显示上次加载的决策。",
+    ],
+    decisionTraceRefreshFailed: [
+      "Could not refresh Decision Trace. Showing the last loaded decisions.",
+      "无法刷新决策轨迹；正在显示上次加载的决策。",
+    ],
     decisionTraceEmpty: [
       "No decisions have been recorded in this runtime yet.",
       "当前运行期间尚未记录决策。",
@@ -144,7 +203,7 @@ test("Automation renders Decision Trace as an accessible in-page timeline with s
   assert.match(pageSource, /<time\s+dateTime=/u);
   assert.match(pageSource, /role="status"/u);
   assert.match(pageSource, /aria-live="polite"/u);
-  assert.match(pageSource, /aria-busy=\{tracePhase === "loading"\}/u);
+  assert.match(pageSource, /aria-busy=\{decisionTraceBusy\}/u);
   assert.match(pageSource, /type="button"[\s\S]*?decisionTraceRefresh/u);
   assert.match(pageSource, /trace\.pool\s*!==\s*null/u);
   assert.match(pageSource, /trace\.selected\s*!==\s*null/u);
