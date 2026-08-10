@@ -796,6 +796,13 @@ class DesktopPackagingContractTests(unittest.TestCase):
             smoke,
         )
         self.assertEqual(source.count("-ignore_readdir_race -depth -delete"), 2)
+        self.assertEqual(source.count("for cleanup_attempt in {1..20}; do"), 2)
+        self.assertEqual(source.count("sleep 0.1"), 2)
+        self.assertEqual(
+            source.count("-ignore_readdir_race -depth -delete 2>/dev/null"),
+            2,
+        )
+        self.assertEqual(source.count("native_keyring_cleanup_failed"), 2)
 
     def test_linux_native_gateway_account_credential_smoke_uses_pinned_private_secret_service_session(self):
         source = WORKFLOW.read_text(encoding="utf-8")
