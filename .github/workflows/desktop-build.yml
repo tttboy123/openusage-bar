@@ -479,6 +479,7 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             data_sep=";"
           fi
+          schema_path="$(python -c 'from pathlib import Path; print(Path("openusage_bar/resources/plugin-api-v1.schema.json").resolve(strict=True))')"
           pyinstaller_args=(
             --clean
             --noconfirm
@@ -488,7 +489,7 @@ jobs:
             --workpath build-bridge/work
             --specpath build-bridge
             --paths .
-            --add-data "openusage_bar/resources/plugin-api-v1.schema.json${data_sep}openusage_bar/resources"
+            --add-data "${schema_path}${data_sep}openusage_bar/resources"
           )
           python -m PyInstaller "${pyinstaller_args[@]}" openusage_plugin_bridge.py
           test -f "./dist-bridge/${{ matrix.bridge }}"

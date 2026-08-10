@@ -1037,8 +1037,15 @@ class DesktopPackagingContractTests(unittest.TestCase):
             bridge_build["run"],
         )
         self.assertIn(
+            'schema_path="$(python -c '
+            "'from pathlib import Path; "
+            'print(Path("openusage_bar/resources/plugin-api-v1.schema.json")'
+            ".resolve(strict=True))')\"",
+            bridge_build["run"],
+        )
+        self.assertIn(
             "--add-data "
-            '"openusage_bar/resources/plugin-api-v1.schema.json'
+            '"${schema_path}'
             '${data_sep}openusage_bar/resources"',
             bridge_build["run"],
         )

@@ -243,6 +243,13 @@ class PluginCrossLayerContractTests(unittest.TestCase):
             plugin_dir = Path(temporary) / "plugin"
             registry = PluginPrincipalRegistry.load_or_create(plugin_dir)
 
+            class AllowWindowsAcl:
+                def __init__(self) -> None:
+                    self.calls = 0
+
+                def verify_file(self, _descriptor: int) -> None:
+                    self.calls += 1
+
             for principal in PRINCIPALS[:3]:
                 with self.subTest(principal=principal):
                     token_path = registry.token_path(principal)
@@ -252,17 +259,44 @@ class PluginCrossLayerContractTests(unittest.TestCase):
                         and all(0x21 <= byte <= 0x7E for byte in token_bytes),
                         "registry token files must contain only the bearer token",
                     )
+                    native_windows_acl = AllowWindowsAcl()
                     token = bridge._read_principal_token(
                         principal,
-                        platform_name="posix",
+                        platform_name="nt" if os.name == "nt" else "posix",
+                        windows_security=(
+                            native_windows_acl if os.name == "nt" else None
+                        ),
                         token_path=token_path,
                     )
                     self.assertEqual(registry.authenticate(token), principal)
+                    self.assertEqual(
+                        native_windows_acl.calls, 1 if os.name == "nt" else 0
+                    )
+
+                    injected_windows_acl = AllowWindowsAcl()
+                    windows_token = bridge._read_principal_token(
+                        principal,
+                        platform_name="nt",
+                        windows_security=injected_windows_acl,
+                        token_path=token_path,
+                    )
+                    self.assertEqual(injected_windows_acl.calls, 1)
+                    self.assertEqual(
+                        registry.authenticate(windows_token), principal
+                    )
 
             desktop_token_path = registry.token_path("desktop")
             node_program = """
 const { readPrivateToken } = require('./desktop/gateway_proxy.js');
-process.stdout.write(readPrivateToken(process.argv[1], { platform: 'darwin' }));
+const nativeOptions = process.platform === 'win32'
+  ? { platform: 'win32', verifyWindowsAcl: () => true }
+  : { platform: process.platform };
+const nativeToken = readPrivateToken(process.argv[1], nativeOptions);
+const windowsToken = readPrivateToken(process.argv[1], {
+  platform: 'win32',
+  verifyWindowsAcl: () => true,
+});
+process.stdout.write(JSON.stringify({ nativeToken, windowsToken }));
 """
             completed = subprocess.run(
                 ["node", "-e", node_program, os.fspath(desktop_token_path)],
@@ -274,7 +308,16 @@ process.stdout.write(readPrivateToken(process.argv[1], { platform: 'darwin' }));
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(completed.stderr, "")
-            self.assertEqual(registry.authenticate(completed.stdout), "desktop")
+            desktop_tokens = json.loads(completed.stdout)
+            self.assertEqual(
+                set(desktop_tokens), {"nativeToken", "windowsToken"}
+            )
+            self.assertEqual(
+                registry.authenticate(desktop_tokens["nativeToken"]), "desktop"
+            )
+            self.assertEqual(
+                registry.authenticate(desktop_tokens["windowsToken"]), "desktop"
+            )
 
     def test_bridge_preserves_exact_result_too_large_422_errors(self) -> None:
         bridge = importlib.import_module("openusage_bar.plugin_bridge")

@@ -3,7 +3,9 @@ from __future__ import annotations
 import importlib
 import io
 import json
+from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
@@ -52,10 +54,17 @@ def smoke_plugin_api():
 
 
 class PluginPackagedSmokeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self._temporary.cleanup)
+        root = Path(self._temporary.name).resolve()
+        self.collector = str(root / "openusage-collector")
+        self.bridge = str(root / "openusage-plugin-bridge")
+
     def test_runs_one_server_and_three_bridge_synthetic_contracts(self) -> None:
         module = smoke_plugin_api()
-        collector = "/private/build/openusage-collector"
-        bridge = "/private/build/openusage-plugin-bridge"
+        collector = self.collector
+        bridge = self.bridge
         calls: list[list[str]] = []
 
         def successful_runner(command, **_kwargs):
@@ -96,11 +105,11 @@ class PluginPackagedSmokeTests(unittest.TestCase):
 
     def test_rejects_non_exact_or_ambiguous_reports_without_disclosure(self) -> None:
         module = smoke_plugin_api()
-        collector = "/Users/private/CANARY-collector"
-        bridge = "/Users/private/CANARY-bridge"
+        collector = self.collector
+        bridge = self.bridge
         invalid_reports = (
             "not-json",
-            json.dumps({**COLLECTOR_REPORT, "privatePath": collector}),
+            json.dumps({**COLLECTOR_REPORT, "privatePath": "CANARY_PRIVATE_PATH"}),
             json.dumps(COLLECTOR_REPORT) + json.dumps(COLLECTOR_REPORT),
             '{"ok":true,"ok":true}',
             '{"ok":NaN}',
@@ -152,8 +161,8 @@ class PluginPackagedSmokeTests(unittest.TestCase):
             with self.subTest(runner=runner.__name__):
                 with self.assertRaises(ValueError) as raised:
                     module.run_frozen_plugin_smoke(
-                        "/private/collector",
-                        "/private/bridge",
+                        self.collector,
+                        self.bridge,
                         command_runner=runner,
                     )
                 self.assertEqual(
@@ -164,10 +173,10 @@ class PluginPackagedSmokeTests(unittest.TestCase):
     def test_rejects_relative_or_control_character_binary_paths(self) -> None:
         module = smoke_plugin_api()
         invalid_pairs = (
-            ("openusage-collector", "/private/bridge"),
-            ("/private/collector", "./openusage-plugin-bridge"),
-            ("/private/collector\nCANARY", "/private/bridge"),
-            ("/private/collector", "/private/bridge\x7fCANARY"),
+            ("openusage-collector", self.bridge),
+            (self.collector, "./openusage-plugin-bridge"),
+            (self.collector + "\nCANARY", self.bridge),
+            (self.collector, self.bridge + "\x7fCANARY"),
         )
 
         for collector, bridge in invalid_pairs:
@@ -217,14 +226,14 @@ class PluginPackagedSmokeTests(unittest.TestCase):
             status = module.main(
                 [
                     "--collector",
-                    "/private/collector",
+                    self.collector,
                     "--bridge",
-                    "/private/bridge",
+                    self.bridge,
                 ]
             )
 
         self.assertEqual(status, 0)
-        self.assertEqual(run.call_args.args, ("/private/collector", "/private/bridge"))
+        self.assertEqual(run.call_args.args, (self.collector, self.bridge))
         self.assertEqual(json.loads(output.getvalue()), EXPECTED_REPORT)
         self.assertEqual(error.getvalue(), "")
 
@@ -244,9 +253,9 @@ class PluginPackagedSmokeTests(unittest.TestCase):
             status = module.main(
                 [
                     "--collector",
-                    "/Users/private/collector",
+                    self.collector,
                     "--bridge",
-                    "/Users/private/bridge",
+                    self.bridge,
                 ]
             )
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -83,7 +84,13 @@ class PluginServerTests(unittest.TestCase):
                 command = platform_services._plugin_command()
                 unit = platform_services.plugin_systemd_unit(command=command)
             self.assertEqual(command, str(executable.resolve()))
-            self.assertIn(str(executable.resolve()), unit)
+            rendered_command = (
+                command.replace("\\", "\\\\") if os.name == "nt" else command
+            )
+            self.assertIn(
+                f'ExecStart="{rendered_command}" plugin start',
+                unit.splitlines(),
+            )
             self.assertNotIn("ExecStart=openusage-bar ", unit)
 
     def test_listener_authenticates_principal_from_token_and_rejects_assertion_header(self) -> None:
