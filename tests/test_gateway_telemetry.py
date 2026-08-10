@@ -5,7 +5,6 @@ import sqlite3
 import stat
 import tempfile
 import threading
-import time
 import unittest
 from contextlib import closing, contextmanager
 from concurrent.futures import ThreadPoolExecutor
@@ -510,10 +509,13 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
             writer_lock = threading.Lock()
             active_writers = 0
             maximum_active_writers = 0
+            entered_handles: list[int] = []
             original_write_connection = GatewayTelemetryStore._write_connection
+            shared_states = {id(store._incomplete_state) for store in stores}
+            self.assertEqual(len(shared_states), 1)
 
             @contextmanager
-            def slow_write_connection(
+            def traced_write_connection(
                 store: GatewayTelemetryStore,
                 *,
                 busy_timeout_ms: int = 5_000,
@@ -530,8 +532,8 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
                         raise sqlite3.OperationalError(
                             "concurrent telemetry writers"
                         )
+                    entered_handles.append(id(store))
                 try:
-                    time.sleep(0.05)
                     with original_write_connection(
                         store,
                         busy_timeout_ms=busy_timeout_ms,
@@ -553,7 +555,7 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
                 with patch.object(
                     GatewayTelemetryStore,
                     "_write_connection",
-                    slow_write_connection,
+                    traced_write_connection,
                 ), ThreadPoolExecutor(max_workers=len(stores)) as pool:
                     futures = [
                         pool.submit(write, index)
@@ -570,6 +572,7 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
                     "SELECT COUNT(*) FROM request_aggregates"
                 ).fetchone()[0]
             self.assertEqual(count, len(stores))
+            self.assertEqual(len(set(entered_handles)), len(stores))
             self.assertEqual(maximum_active_writers, 1)
 
 

@@ -32,7 +32,9 @@ def chdir(path: Path):
         os.chdir(previous)
 
 
-def make_executable(path: Path) -> Path:
+def make_executable(path: Path, *, os_name: str = os.name) -> Path:
+    if os_name == "nt" and path.suffix.casefold() != ".exe":
+        path = path.with_name(f"{path.name}.exe")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     path.chmod(0o700)
@@ -56,6 +58,16 @@ class FakeKeychain:
 
 
 class GatewayAccountCredentialSmokeTests(unittest.TestCase):
+    def test_packaged_helper_fixture_uses_native_windows_exe_suffix(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            helper = make_executable(
+                Path(directory) / "dist-settings" / "openusage-settings",
+                os_name="nt",
+            )
+
+            self.assertEqual(helper.name, "openusage-settings.exe")
+            self.assertTrue(helper.is_file())
+
     def test_script_entrypoint_runs_from_repository_root_with_safe_protocol_output(self) -> None:
         repository_root = Path(__file__).resolve().parents[1]
         completed = subprocess.run(
@@ -258,9 +270,10 @@ class GatewayAccountCredentialSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             root = Path(directory)
             helper = make_executable(root / "dist-settings" / "openusage-settings")
+            relative_helper = helper.relative_to(root).as_posix()
             with chdir(root):
                 self.assertEqual(
-                    module.resolve_settings_helper("dist-settings/openusage-settings"),
+                    module.resolve_settings_helper(relative_helper),
                     helper.resolve(),
                 )
             self.assertEqual(module.resolve_settings_helper(str(helper)), helper.resolve())
