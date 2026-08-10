@@ -1,4 +1,5 @@
 import builtins
+import ctypes
 import io
 import json
 import subprocess
@@ -10,6 +11,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from openusage_bar.bounded_process import BoundedProcessError
+import openusage_bar.keychain as keychain_module
 from openusage_bar.keychain import (
     BoundedMacOSKeychain,
     HeadlessKeychain,
@@ -443,6 +445,17 @@ class CrossPlatformKeychainTests(unittest.TestCase):
         api.add(query, b"value")
         api.delete(query)
         native.delete.assert_called_once_with("com.lune.openusage-menubar\\demo")
+
+    def test_windows_native_read_uses_its_bound_ctypes_runtime(self):
+        native_type = keychain_module._WinCredentialNative
+        native = native_type.__new__(native_type)
+        native._ctypes = Mock(wraps=ctypes)
+        native._cred_read = Mock(return_value=False)
+        native._get_last_error = Mock(return_value=native.ERROR_NOT_FOUND)
+        native._cred_free = Mock()
+
+        self.assertIsNone(native.read("com.lune.openusage-menubar\\missing"))
+        native._ctypes.byref.assert_called_once()
 
     @unittest.skipIf(sys.platform.startswith("linux"), "Linux backend is native on Linux")
     def test_linux_backend_requires_linux(self):

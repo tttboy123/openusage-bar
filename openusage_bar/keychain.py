@@ -613,7 +613,12 @@ class _WinCredentialNative:
 
     def read(self, target: str) -> bytes | None:
         credential = self._ctypes.POINTER(_WinCredential)()
-        if not self._cred_read(target, self.CRED_TYPE_GENERIC, 0, _ctypes.byref(credential)):
+        if not self._cred_read(
+            target,
+            self.CRED_TYPE_GENERIC,
+            0,
+            self._ctypes.byref(credential),
+        ):
             if self._get_last_error() == self.ERROR_NOT_FOUND:
                 return None
             raise KeychainError("Credential Manager read failed")
@@ -622,7 +627,7 @@ class _WinCredentialNative:
             if size <= 0 or credential.contents.CredentialBlob is None:
                 return b""
             return bytes(
-                _ctypes.string_at(credential.contents.CredentialBlob, size)
+                self._ctypes.string_at(credential.contents.CredentialBlob, size)
             )
         finally:
             self._cred_free(credential)

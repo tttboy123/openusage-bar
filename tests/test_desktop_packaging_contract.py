@@ -765,7 +765,7 @@ class DesktopPackagingContractTests(unittest.TestCase):
             'cat "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr"',
             smoke,
         )
-        self.assertEqual(source.count("find -ignore_readdir_race"), 2)
+        self.assertEqual(source.count("-ignore_readdir_race -depth -delete"), 2)
 
     def test_linux_native_gateway_account_credential_smoke_uses_pinned_private_secret_service_session(self):
         source = WORKFLOW.read_text(encoding="utf-8")
