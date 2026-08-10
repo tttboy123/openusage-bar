@@ -488,6 +488,10 @@ jobs:
           mkdir -p "$settings_smoke_home"
           export HOME="$settings_smoke_home"
           export USERPROFILE="$settings_smoke_home"
+          editor_expected=$'{"version":1,"event":"ready"}\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}'
+          if [[ "${{ matrix.platform }}" == "win" ]]; then
+            editor_expected=$'{"version":1,"event":"ready"}\r\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}'
+          fi
           set +e
           settings_output="$(printf '%s' '{"version":1,"action":"remove_pool","pool":{"poolId":"ci-smoke"},"expectedRevision":1}' | "./dist-settings/${{ matrix.settings }}" gateway-account-mutate 2>"$RUNNER_TEMP/openusage-settings-smoke.stderr")"
           settings_status=$?
@@ -500,11 +504,11 @@ jobs:
           editor_output="$("./dist-settings/${{ matrix.settings }}" gateway-account-editor --ui-self-test 2>"$RUNNER_TEMP/openusage-settings-editor-smoke.stderr")"
           editor_status=$?
           set -e
-          if [[ "$editor_status" -ne 0 || "$editor_output" != $'{"version":1,"event":"ready"}\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}' || -s "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr" ]]; then
+          if [[ "$editor_status" -ne 0 || "$editor_output" != "$editor_expected" || -s "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr" ]]; then
             printf 'gateway_settings_editor_smoke=%s\n' "$editor_output"
             printf 'gateway_settings_editor_stderr_bytes=%s\n' "$(wc -c < "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr")"
             test "$editor_status" -eq 0
-            test "$editor_output" = $'{"version":1,"event":"ready"}\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}'
+            test "$editor_output" = "$editor_expected"
             test ! -s "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr"
           fi
           printf '%s\n' 'gateway_settings_editor_smoke_ok'

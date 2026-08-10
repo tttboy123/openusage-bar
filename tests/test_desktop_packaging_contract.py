@@ -749,6 +749,11 @@ class DesktopPackagingContractTests(unittest.TestCase):
         self.assertIn("gateway_settings_editor_smoke_ok", smoke)
         self.assertIn("gateway_settings_editor_smoke=%s", smoke)
         self.assertIn("gateway_settings_editor_stderr_bytes=%s", smoke)
+        self.assertIn('if [[ "${{ matrix.platform }}" == "win" ]]; then', smoke)
+        self.assertIn("editor_expected=$'", smoke)
+        self.assertIn("\\r\\n", smoke)
+        self.assertNotIn("settings_expected+=$'\\r'", smoke)
+        self.assertNotIn("account_smoke_expected+=$'\\r'", smoke)
         self.assertEqual(smoke.count("gateway_account_credential_smoke=%s"), 2)
         self.assertEqual(
             smoke.count("gateway_account_credential_stderr_bytes=%s"),
