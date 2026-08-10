@@ -7,6 +7,7 @@ import path from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
+const approveFixtureWindowsAcl = () => true;
 
 function listenTcp(server) {
   return new Promise((resolve, reject) => {
@@ -308,6 +309,7 @@ test("bridges only sanitized Decision Traces through the authenticated loopback"
       },
     },
     platform: process.platform,
+    verifyWindowsAcl: approveFixtureWindowsAcl,
   });
   const renderer = http.createServer((request, response) => {
     if (!isRendererApiTarget(request.url)) {
@@ -373,6 +375,7 @@ test("collapses invalid upstream traces into one path-free 502", async (context)
       },
     },
     platform: process.platform,
+    verifyWindowsAcl: approveFixtureWindowsAcl,
   });
   const renderer = http.createServer((request, response) => {
     if (!isRendererApiTarget(request.url)) {
