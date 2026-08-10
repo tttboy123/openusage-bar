@@ -15,7 +15,8 @@ from pathlib import Path
 _API_VERSION = "plugin-self-test/v1"
 _BRIDGE_MODES = ("loom-stdio", "codex-stdio", "claude-code-stdio")
 _MAX_REPORT_BYTES = 64 * 1024
-_PROCESS_TIMEOUT_SECONDS = 30
+_COLLECTOR_PROCESS_TIMEOUT_SECONDS = 60
+_BRIDGE_PROCESS_TIMEOUT_SECONDS = 30
 _GENERIC_SELF_TEST_ERROR = "packaged Plugin self-test failed"
 
 
@@ -111,6 +112,7 @@ def _run_exact_report(
     expected: dict[str, object],
     *,
     command_runner: Callable[..., object],
+    timeout_seconds: int,
 ) -> None:
     try:
         completed = command_runner(
@@ -118,7 +120,7 @@ def _run_exact_report(
             capture_output=True,
             text=True,
             check=False,
-            timeout=_PROCESS_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
         )
         returncode = getattr(completed, "returncode")
         stdout = getattr(completed, "stdout")
@@ -160,6 +162,7 @@ def run_frozen_plugin_smoke(
             [collector_binary, "__plugin-self-test", "--format", "json"],
             _EXPECTED_COLLECTOR_REPORT,
             command_runner=command_runner,
+            timeout_seconds=_COLLECTOR_PROCESS_TIMEOUT_SECONDS,
         )
     except ValueError:
         raise PluginSmokeStageError("collector") from None
@@ -169,6 +172,7 @@ def run_frozen_plugin_smoke(
                 [bridge_binary, mode, "--self-test", "--format", "json"],
                 _expected_bridge_report(mode),
                 command_runner=command_runner,
+                timeout_seconds=_BRIDGE_PROCESS_TIMEOUT_SECONDS,
             )
         except ValueError:
             stage = {

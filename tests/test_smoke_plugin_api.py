@@ -103,6 +103,35 @@ class PluginPackagedSmokeTests(unittest.TestCase):
             ],
         )
 
+    def test_uses_a_longer_bounded_deadline_for_the_frozen_collector(self) -> None:
+        module = smoke_plugin_api()
+        observed: list[tuple[list[str], int]] = []
+
+        def successful_runner(command, **kwargs):
+            observed.append((command, kwargs["timeout"]))
+            payload = (
+                COLLECTOR_REPORT
+                if command[1] == "__plugin-self-test"
+                else bridge_report(command[1])
+            )
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(payload),
+                stderr="",
+            )
+
+        module.run_frozen_plugin_smoke(
+            self.collector,
+            self.bridge,
+            command_runner=successful_runner,
+        )
+
+        self.assertEqual(
+            [timeout for _command, timeout in observed],
+            [60, 30, 30, 30],
+        )
+
     def test_rejects_non_exact_or_ambiguous_reports_without_disclosure(self) -> None:
         module = smoke_plugin_api()
         collector = self.collector
