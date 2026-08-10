@@ -709,6 +709,29 @@ class DesktopPackagingContractTests(unittest.TestCase):
             "packaged native smoke must not fake the platform credential backend",
         )
 
+    def test_native_gateway_account_credential_smoke_captures_safe_failure_output(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        steps = _mapping_list(source, section="steps", item_indent=6)
+        smoke = next(
+            step for step in steps if step.get("name") == "Smoke bundled settings helper"
+        )["run"]
+
+        self.assertEqual(smoke.count("account_smoke_status=$?"), 2)
+        self.assertEqual(
+            smoke.count('test "$account_smoke_status" -eq 0'),
+            2,
+            "native credential smoke must record exit status before asserting",
+        )
+        self.assertEqual(smoke.count("set +e"), 4)
+        self.assertEqual(smoke.count("set -e"), 4)
+        self.assertIn('printf \'%s\\n\' "$account_smoke_output"', smoke)
+        self.assertNotRegex(
+            smoke,
+            r'account_smoke_output="\$\(\s*python scripts/smoke_gateway_account_credentials.py'
+            r'(?:(?!account_smoke_status=\$\?).)*test "\$account_smoke_output"',
+            "set -e command substitution must not hide the safe stdout envelope",
+        )
+
     def test_linux_native_gateway_account_credential_smoke_uses_pinned_private_secret_service_session(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         steps = _mapping_list(source, section="steps", item_indent=6)

@@ -12,6 +12,10 @@ import sys
 from pathlib import Path
 from typing import Callable, TextIO
 
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from openusage_bar.gateway.config import GatewayConfigStore
 from openusage_bar.keychain import default_keychain
 
@@ -39,11 +43,14 @@ class SmokeFailure(RuntimeError):
 def resolve_settings_helper(value: object) -> Path:
     if type(value) is not str:
         raise SmokeFailure("invalid_settings_helper")
+    active_platform = sys.platform
     if (
         not value
         or len(value) > 4096
         or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
     ):
+        raise SmokeFailure("invalid_settings_helper")
+    if active_platform == "win32" and (value.startswith("\\\\") or value.startswith("//")):
         raise SmokeFailure("invalid_settings_helper")
     path = Path(value)
     if not path.is_absolute() and (len(path.parts) < 2 or any(part == ".." for part in path.parts)):
@@ -59,7 +66,7 @@ def resolve_settings_helper(value: object) -> Path:
     if (
         stat.S_ISLNK(metadata.st_mode)
         or not stat.S_ISREG(metadata.st_mode)
-        or not os.access(resolved, os.X_OK)
+        or not _is_native_executable(resolved, active_platform)
     ):
         raise SmokeFailure("invalid_settings_helper")
     try:
@@ -75,6 +82,12 @@ def _reject_symlink_components(path: Path) -> None:
         current = current / part
         if stat.S_ISLNK(current.lstat().st_mode):
             raise SmokeFailure("invalid_settings_helper")
+
+
+def _is_native_executable(path: Path, platform: str) -> bool:
+    if platform == "win32":
+        return path.suffix.casefold() == ".exe"
+    return os.access(path, os.X_OK)
 
 
 def run_smoke(

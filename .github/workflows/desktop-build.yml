@@ -542,24 +542,39 @@ jobs:
                 echo "gateway_account_credentials_invalid" >&2
                 exit 1
               fi
+              set +e
               account_smoke_output="$(
                 python scripts/smoke_gateway_account_credentials.py \
                   --settings-helper "$ACCOUNT_SETTINGS_HELPER" \
                   2>"$ACCOUNT_SMOKE_STDERR"
               )"
-              test "$account_smoke_output" = '{"version":1,"ok":true,"code":"ok"}'
-              test ! -s "$ACCOUNT_SMOKE_STDERR"
+              account_smoke_status=$?
+              set -e
+              if [[ "$account_smoke_status" -ne 0 || "$account_smoke_output" != '{"version":1,"ok":true,"code":"ok"}' || -s "$ACCOUNT_SMOKE_STDERR" ]]; then
+                printf '%s\n' "$account_smoke_output"
+                test "$account_smoke_status" -eq 0
+                test "$account_smoke_output" = '{"version":1,"ok":true,"code":"ok"}'
+                test ! -s "$ACCOUNT_SMOKE_STDERR"
+              fi
           ACCOUNT_CREDENTIAL_SESSION
             trap - EXIT
             cleanup_account_keyring
           else
+            account_smoke_stderr="$RUNNER_TEMP/openusage-account-credential-smoke.stderr"
+            set +e
             account_smoke_output="$(
               python scripts/smoke_gateway_account_credentials.py \
                 --settings-helper "./dist-settings/${{ matrix.settings }}" \
-                2>"$RUNNER_TEMP/openusage-account-credential-smoke.stderr"
+                2>"$account_smoke_stderr"
             )"
-            test "$account_smoke_output" = '{"version":1,"ok":true,"code":"ok"}'
-            test ! -s "$RUNNER_TEMP/openusage-account-credential-smoke.stderr"
+            account_smoke_status=$?
+            set -e
+            if [[ "$account_smoke_status" -ne 0 || "$account_smoke_output" != '{"version":1,"ok":true,"code":"ok"}' || -s "$account_smoke_stderr" ]]; then
+              printf '%s\n' "$account_smoke_output"
+              test "$account_smoke_status" -eq 0
+              test "$account_smoke_output" = '{"version":1,"ok":true,"code":"ok"}'
+              test ! -s "$account_smoke_stderr"
+            fi
           fi
       - name: Smoke desktop runtime capability
         id: desktop_runtime_capability_smoke

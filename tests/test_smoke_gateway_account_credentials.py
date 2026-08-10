@@ -3,10 +3,12 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 from openusage_bar.gateway.accounts import AccountState, ProviderAccountRef
 from openusage_bar.gateway.config import GatewayConfig, GatewayConfigStore
@@ -54,6 +56,29 @@ class FakeKeychain:
 
 
 class GatewayAccountCredentialSmokeTests(unittest.TestCase):
+    def test_script_entrypoint_runs_from_repository_root_with_safe_protocol_output(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "scripts/smoke_gateway_account_credentials.py",
+                "--settings-helper",
+            ],
+            cwd=repository_root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            shell=False,
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(
+            completed.stdout,
+            '{"version":1,"ok":false,"code":"invalid_settings_helper"}\n',
+        )
+        self.assertEqual(completed.stderr, "")
+
     def test_packaged_helper_roundtrip_verifies_native_keychain_and_config(self) -> None:
         module = smoke_credentials()
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
@@ -252,7 +277,7 @@ class GatewayAccountCredentialSmokeTests(unittest.TestCase):
         self.assertEqual(stderr.getvalue(), "")
         self.assertNotIn("../private", stdout.getvalue())
 
-    def test_helper_path_rejects_bare_relative_symlink_missing_and_non_executable(self) -> None:
+    def test_helper_path_rejects_bare_relative_symlink_missing_and_posix_non_executable(self) -> None:
         module = smoke_credentials()
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             root = Path(directory)
@@ -263,13 +288,48 @@ class GatewayAccountCredentialSmokeTests(unittest.TestCase):
             linked_parent.symlink_to(root / "dist-settings")
             non_executable = root / "dist-settings" / "not-executable"
             non_executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            candidates = [
+                "openusage-settings",
+                "dist-settings/missing-helper",
+                "dist-settings/symlink-helper",
+                "linked-settings/real-helper",
+            ]
+            if os.name != "nt":
+                candidates.append("dist-settings/not-executable")
             with chdir(root):
+                for candidate in candidates:
+                    with self.subTest(candidate=candidate):
+                        with self.assertRaises(module.SmokeFailure) as raised:
+                            module.resolve_settings_helper(candidate)
+                        self.assertEqual(raised.exception.code, "invalid_settings_helper")
+
+    def test_helper_path_uses_windows_native_executable_contract(self) -> None:
+        module = smoke_credentials()
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            helper = root / "dist-settings" / "openusage-settings.exe"
+            helper.parent.mkdir(parents=True, exist_ok=True)
+            helper.write_text("packaged helper", encoding="utf-8")
+            no_extension = root / "dist-settings" / "openusage-settings"
+            no_extension.write_text("not native", encoding="utf-8")
+            symlink = root / "dist-settings" / "linked-helper.exe"
+            symlink.symlink_to(helper)
+            linked_parent = root / "linked-settings"
+            linked_parent.symlink_to(root / "dist-settings")
+
+            with patch.object(module.sys, "platform", "win32"), chdir(root):
+                self.assertEqual(
+                    module.resolve_settings_helper("dist-settings/openusage-settings.exe"),
+                    helper.resolve(),
+                )
                 for candidate in (
-                    "openusage-settings",
-                    "dist-settings/missing-helper",
-                    "dist-settings/symlink-helper",
-                    "linked-settings/real-helper",
-                    "dist-settings/not-executable",
+                    "openusage-settings.exe",
+                    "dist-settings/openusage-settings",
+                    "dist-settings/linked-helper.exe",
+                    "linked-settings/openusage-settings.exe",
+                    "dist-settings/missing-helper.exe",
+                    "//server/share/openusage-settings.exe",
+                    "dist-settings/bad\nhelper.exe",
                 ):
                     with self.subTest(candidate=candidate):
                         with self.assertRaises(module.SmokeFailure) as raised:
