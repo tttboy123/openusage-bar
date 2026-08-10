@@ -1358,6 +1358,7 @@ def build_performance_report(
         "schemaVersion": 1,
         "reportKind": "openusage.gatewayPerformance",
         "measurementVersion": "gateway-performance-v1",
+        "evidenceClass": "diagnostic",
         "capturedAt": captured_at,
         "sourceCommit": source_commit,
         "sourceTreeState": source_tree_state,
@@ -1689,7 +1690,12 @@ def _throughput_report_valid(value: object) -> bool:
                 or item["timeoutCount"] + item["rateLimitCount"]
                 > item["errorCount"]
                 or item["totalCompleted"]
-                < item["totalSuccessfulInWindow"] + item["errorCount"]
+                != (
+                    item["totalSuccessfulInWindow"]
+                    + item["lateCompletionCount"]
+                    + item["clockRegressionCount"]
+                    + item["errorCount"]
+                )
             ):
                 return False
             contract_valid = (
@@ -1738,6 +1744,7 @@ def validate_performance_report(payload: object) -> dict[str, object]:
             frozenset(
                 {
                     "capturedAt",
+                    "evidenceClass",
                     "measurementVersion",
                     "overallStatus",
                     "plan",
@@ -1768,6 +1775,7 @@ def validate_performance_report(payload: object) -> dict[str, object]:
             or type(report["schemaVersion"]) is not int
             or report["reportKind"] != "openusage.gatewayPerformance"
             or report["measurementVersion"] != "gateway-performance-v1"
+            or report["evidenceClass"] != "diagnostic"
             or type(captured_at) is not str
             or not captured_at.endswith("Z")
             or captured.utcoffset() != timezone.utc.utcoffset(captured)
@@ -2855,27 +2863,48 @@ def detect_reference_machine(
     )
 
 
-def _source_tree_state() -> str:
-    commands = (
-        ("git", "diff", "--quiet", "--ignore-submodules", "--"),
-        ("git", "diff", "--cached", "--quiet", "--ignore-submodules", "--"),
-    )
-    for command in commands:
-        try:
-            result = subprocess.run(
-                command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=5,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return "unknown"
-        if result.returncode == 1:
-            return "dirty"
-        if result.returncode != 0:
-            return "unknown"
-    return "clean"
+def detect_source_provenance(repo_root: Path) -> dict[str, str]:
+    """Bind performance evidence to the repository's real HEAD and worktree."""
+
+    if not isinstance(repo_root, Path):
+        raise ValueError("source repository unavailable")
+    try:
+        resolved_root = repo_root.resolve(strict=True)
+        if not resolved_root.is_dir():
+            raise OSError
+        head = subprocess.run(
+            ("git", "-C", str(resolved_root), "rev-parse", "--verify", "HEAD"),
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+        status = subprocess.run(
+            (
+                "git",
+                "-C",
+                str(resolved_root),
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--ignore-submodules=none",
+            ),
+            capture_output=True,
+            check=False,
+            text=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        raise ValueError("source repository unavailable") from None
+    source_commit = head.stdout.strip()
+    if head.returncode != 0 or _SOURCE_COMMIT.fullmatch(source_commit) is None:
+        raise ValueError("source repository unavailable")
+    if status.returncode != 0:
+        raise ValueError("source repository unavailable")
+    return {
+        "sourceCommit": source_commit,
+        "sourceTreeState": "dirty" if status.stdout else "clean",
+    }
 
 
 def run_performance_report(
@@ -3027,16 +3056,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = _read_report(arguments.report)
             print(
                 "gateway_performance_report_ok "
-                f"status={report['overallStatus']}"
+                f"status={report['overallStatus']} "
+                f"evidence_class={report['evidenceClass']}"
             )
             return 0
 
         fixture = load_performance_fixture(arguments.fixture)
-        state = (
-            _source_tree_state()
-            if arguments.source_tree_state == "auto"
-            else arguments.source_tree_state
-        )
+        provenance = detect_source_provenance(Path(__file__).resolve().parents[1])
+        if arguments.source_commit != provenance["sourceCommit"]:
+            raise ValueError("source provenance mismatch")
+        if (
+            arguments.source_tree_state != "auto"
+            and arguments.source_tree_state != provenance["sourceTreeState"]
+        ):
+            raise ValueError("source provenance mismatch")
         machine = detect_reference_machine(
             storage_class=arguments.storage_class,
             filesystem=arguments.filesystem,
@@ -3045,7 +3078,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = run_performance_report(
             fixture=fixture,
             source_commit=arguments.source_commit,
-            source_tree_state=state,
+            source_tree_state=provenance["sourceTreeState"],
             reference_machine=machine,
             progress=lambda stage: print(
                 f"gateway_performance_progress stage={stage}",
@@ -3056,7 +3089,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_report(arguments.output, report)
         print(
             "gateway_performance_report_ok "
-            f"status={report['overallStatus']}"
+            f"status={report['overallStatus']} "
+            f"evidence_class={report['evidenceClass']}"
         )
         return 2 if arguments.enforce and report["overallStatus"] != "pass" else 0
     except (RuntimeError, ValueError):
@@ -3077,6 +3111,7 @@ __all__ = [
     "ThroughputRound",
     "build_performance_report",
     "detect_reference_machine",
+    "detect_source_provenance",
     "load_performance_fixture",
     "measure_latency_round",
     "measure_paired_latency_round",

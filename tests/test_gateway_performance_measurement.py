@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from openusage_bar.gateway.ingress import parse_gateway_request
+from openusage_bar.gateway.server import create_gateway_server
 
 from scripts.measure_gateway_performance import (
     LatencyRound,
@@ -16,6 +18,7 @@ from scripts.measure_gateway_performance import (
     _filesystem,
     build_performance_report,
     load_performance_fixture,
+    main as performance_main,
     measure_latency_round,
     measure_paired_latency_round,
     run_authenticated_loopback_smoke,
@@ -259,6 +262,31 @@ class GatewayPerformanceStatisticsTests(unittest.TestCase):
 
 
 class GatewayPerformanceFixtureTests(unittest.TestCase):
+    def test_gateway_server_queue_tracks_validated_max_threads(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            server = create_gateway_server(
+                object(),
+                port=0,
+                token_path=root / "gateway.token",
+                max_threads=32,
+            )
+            try:
+                self.assertEqual(server.request_queue_size, 32)
+            finally:
+                server.server_close()
+
+            for index, invalid in enumerate((0, -1, False, True)):
+                token_path = root / f"invalid-{index}.token"
+                with self.subTest(max_threads=invalid), self.assertRaises(ValueError):
+                    create_gateway_server(
+                        object(),
+                        port=0,
+                        token_path=token_path,
+                        max_threads=invalid,
+                    )
+                self.assertFalse(token_path.exists())
+
     def test_darwin_filesystem_uses_the_target_mounts_diskutil_metadata(self):
         df_output = (
             "Filesystem 512-blocks Used Available Capacity Mounted on\n"
@@ -344,6 +372,176 @@ class GatewayPerformanceFixtureTests(unittest.TestCase):
 
 
 class GatewayPerformanceReportTests(unittest.TestCase):
+    def test_enforce_changes_only_failed_threshold_exit_not_evidence_class(self):
+        source_commit = "a" * 40
+        diagnostic_report = {
+            "evidenceClass": "diagnostic",
+            "overallStatus": "fail",
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            for enforce, expected_exit in ((False, 0), (True, 2)):
+                with self.subTest(enforce=enforce):
+                    output = root / f"enforce-{enforce}.json"
+                    arguments = [
+                        "run",
+                        "--output",
+                        str(output),
+                        "--source-commit",
+                        source_commit,
+                        "--source-tree-state",
+                        "clean",
+                    ]
+                    if enforce:
+                        arguments.append("--enforce")
+                    with (
+                        patch(
+                            "scripts.measure_gateway_performance.detect_source_provenance",
+                            return_value={
+                                "sourceCommit": source_commit,
+                                "sourceTreeState": "clean",
+                            },
+                        ),
+                        patch(
+                            "scripts.measure_gateway_performance.detect_reference_machine",
+                            return_value=object(),
+                        ),
+                        patch(
+                            "scripts.measure_gateway_performance.run_performance_report",
+                            return_value=diagnostic_report,
+                        ),
+                    ):
+                        result = performance_main(arguments)
+
+                    self.assertEqual(result, expected_exit)
+                    self.assertEqual(
+                        json.loads(output.read_text(encoding="utf-8"))[
+                            "evidenceClass"
+                        ],
+                        "diagnostic",
+                    )
+
+    def test_report_and_schema_lock_evidence_class_to_diagnostic(self):
+        fixture = load_performance_fixture(FIXTURE)
+        latency_rounds = (
+            LatencyRound((1_000_000,) * 2_000, warmup_count=100),
+        ) * 3
+        paired_rounds = (
+            PairedLatencyRound(
+                direct_ns=(100,) * 2_000,
+                gateway_ns=(110,) * 2_000,
+                attempt_direct_first=tuple(
+                    index % 2 == 0 for index in range(2_000)
+                ),
+                warmup_count=100,
+            ),
+        ) * 3
+        completions = tuple(
+            second * 1_000_000_000 + offset
+            for second in range(30)
+            for offset in range(100)
+        )
+        throughput_rounds = (
+            ThroughputRound(
+                window_start_ns=0,
+                duration_seconds=30,
+                successful_completion_ns=completions,
+                warmup_count=100,
+            ),
+        ) * 3
+        report = build_performance_report(
+            fixture=fixture,
+            captured_at="2026-08-09T12:30:00Z",
+            source_commit="a" * 40,
+            source_tree_state="clean",
+            reference_machine=ReferenceMachine(
+                os_name="macos",
+                os_version="15.6",
+                os_build="24G84",
+                architecture="arm64",
+                cpu_model="Apple M4 Pro",
+                logical_cpu_count=12,
+                memory_bytes=25_769_803_776,
+                storage_class="ssd",
+                filesystem="apfs",
+                power_state="ac",
+                python_version="3.13.7",
+            ),
+            should_send_rounds=latency_rounds,
+            proxy_overhead_rounds=paired_rounds,
+            cache_e2e_rounds=latency_rounds,
+            cache_core_rounds=latency_rounds,
+            throughput_rounds=throughput_rounds,
+        )
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+
+        self.assertEqual(report.get("evidenceClass"), "diagnostic")
+        self.assertIn("evidenceClass", schema["required"])
+        self.assertEqual(
+            schema["properties"]["evidenceClass"],
+            {"const": "diagnostic", "type": "string"},
+        )
+
+    def test_throughput_total_completed_must_exactly_account_for_every_completion(self):
+        fixture = load_performance_fixture(FIXTURE)
+        latency_rounds = (
+            LatencyRound((1_000_000,) * 2_000, warmup_count=100),
+        ) * 3
+        paired_rounds = (
+            PairedLatencyRound(
+                direct_ns=(100,) * 2_000,
+                gateway_ns=(110,) * 2_000,
+                attempt_direct_first=tuple(
+                    index % 2 == 0 for index in range(2_000)
+                ),
+                warmup_count=100,
+            ),
+        ) * 3
+        completions = tuple(
+            second * 1_000_000_000 + offset
+            for second in range(30)
+            for offset in range(100)
+        )
+        throughput_rounds = (
+            ThroughputRound(
+                window_start_ns=0,
+                duration_seconds=30,
+                successful_completion_ns=completions,
+                warmup_count=100,
+            ),
+        ) * 3
+        report = build_performance_report(
+            fixture=fixture,
+            captured_at="2026-08-09T12:30:00Z",
+            source_commit="a" * 40,
+            source_tree_state="clean",
+            reference_machine=ReferenceMachine(
+                os_name="macos",
+                os_version="15.6",
+                os_build="24G84",
+                architecture="arm64",
+                cpu_model="Apple M4 Pro",
+                logical_cpu_count=12,
+                memory_bytes=25_769_803_776,
+                storage_class="ssd",
+                filesystem="apfs",
+                power_state="ac",
+                python_version="3.13.7",
+            ),
+            should_send_rounds=latency_rounds,
+            proxy_overhead_rounds=paired_rounds,
+            cache_e2e_rounds=latency_rounds,
+            cache_core_rounds=latency_rounds,
+            throughput_rounds=throughput_rounds,
+        )
+        self.assertEqual(validate_performance_report(report), report)
+
+        throughput_round = report["scenarios"]["responsesThroughput"]["rounds"][0]
+        throughput_round["totalCompleted"] += 1
+
+        with self.assertRaisesRegex(ValueError, "invalid performance report"):
+            validate_performance_report(report)
+
     def test_report_is_allowlist_only_and_uses_only_aggregate_measurements(self):
         fixture = load_performance_fixture(FIXTURE)
         latency_rounds = tuple(
@@ -407,6 +605,7 @@ class GatewayPerformanceReportTests(unittest.TestCase):
             set(report),
             {
                 "capturedAt",
+                "evidenceClass",
                 "measurementVersion",
                 "overallStatus",
                 "plan",

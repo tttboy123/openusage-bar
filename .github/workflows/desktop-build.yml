@@ -324,6 +324,7 @@ jobs:
             tests.test_gateway_fallback \
             tests.test_gateway_pipeline \
             tests.test_gateway_performance_measurement \
+            tests.test_gateway_performance_evidence_contract \
             tests.test_gateway_pii \
             tests.test_gateway_response_contract \
             tests.test_gateway_runtime \
@@ -1090,7 +1091,7 @@ jobs:
           retention-days: 30
 
   gateway-performance:
-    name: gateway performance evidence (manual/non-blocking)
+    name: gateway performance diagnostic (manual/non-blocking)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -1106,7 +1107,9 @@ jobs:
         run: python scripts/verify_action_pins.py
       - name: Verify performance evidence contracts
         run: |
-          python -m unittest tests.test_gateway_performance_measurement
+          python -m unittest \
+            tests.test_gateway_performance_measurement \
+            tests.test_gateway_performance_evidence_contract
           python scripts/measure_gateway_performance.py smoke
       - name: Measure Gateway performance
         env:

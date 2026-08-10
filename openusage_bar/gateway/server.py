@@ -991,6 +991,11 @@ class GatewayHTTPServer(_BoundedThreads, ThreadingHTTPServer):
         self.router = router
         self.bearer_token = bearer_token
         self.rate_limiter = rate_limiter
+        # Match the bounded listener backlog to the already-validated worker
+        # capacity before ``TCPServer`` binds and calls ``listen``.  The
+        # inherited default of five can otherwise drop short loopback bursts
+        # even though worker capacity remains available.
+        self.request_queue_size = max_threads
         super().__init__((host, port), _GatewayHandler)
         self._configure_threads(max_threads, client_timeout, request_deadline)
 

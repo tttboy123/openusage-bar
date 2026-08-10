@@ -350,6 +350,7 @@
   "additionalProperties": false,
   "properties": {
     "capturedAt": { "format": "date-time", "type": "string" },
+    "evidenceClass": { "const": "diagnostic", "type": "string" },
     "measurementVersion": { "const": "gateway-performance-v1" },
     "overallStatus": { "$ref": "#/$defs/status" },
     "plan": { "$ref": "#/$defs/plan" },
@@ -365,6 +366,7 @@
     "schemaVersion",
     "reportKind",
     "measurementVersion",
+    "evidenceClass",
     "capturedAt",
     "sourceCommit",
     "sourceTreeState",

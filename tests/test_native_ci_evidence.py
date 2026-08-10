@@ -1986,6 +1986,37 @@ class NativeCiEvidenceTests(unittest.TestCase):
         }
         self.assertEqual(expected - modules, set())
 
+    def test_gateway_performance_provenance_contract_stays_manual_diagnostic(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        contracts = source[
+            source.index("- name: Run portable Observer and Gateway contracts"):
+            source.index("- name: Run native Windows Job contracts")
+        ]
+        performance = source[source.index("\n  gateway-performance:"):]
+
+        self.assertIn(
+            "tests.test_gateway_performance_evidence_contract",
+            contracts,
+        )
+        self.assertIn(
+            "tests.test_gateway_performance_evidence_contract",
+            performance,
+        )
+        self.assertIn(
+            "name: gateway performance diagnostic (manual/non-blocking)",
+            performance,
+        )
+        self.assertIn("if: github.event_name == 'workflow_dispatch'", performance)
+        for promotion_marker in (
+            "--enforce",
+            "require-release",
+            "release-evidence",
+            "promotioneligible",
+            "releaseeligible",
+        ):
+            with self.subTest(promotion_marker=promotion_marker):
+                self.assertNotIn(promotion_marker, performance.casefold())
+
     def test_workflow_path_filters_cover_every_portable_contract_module(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         push = source[source.index("  push:\n"):source.index("  pull_request:\n")]

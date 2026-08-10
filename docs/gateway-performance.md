@@ -11,20 +11,22 @@ The current evidence fixture is
 `docs/schemas/gateway-performance-v1.schema.json`, and the local runner is
 `scripts/measure_gateway_performance.py`.
 
-No final release performance report is committed in this round. Any local
-command output from unit tests or smoke tests is diagnostic only unless it is
-captured by the performance runner on a clean, idle reference machine and
-published as a schema-valid report.
+No final release performance report is committed in this round. Every v1
+report now carries the exact top-level field `"evidenceClass":"diagnostic"`.
+Schema verification proves only the closed report shape and internal
+accounting; neither `verify` nor `run --enforce` promotes a report to release
+evidence. A later release-evidence format must add independently controlled
+reference-machine admission instead of trusting a caller-supplied label.
 
 ## Release Gates
 
 | Scenario | Release gate | Current result |
 | --- | --- | --- |
-| Should-Send authenticated loopback | p99 < 50 ms | Placeholder: run `scripts/measure_gateway_performance.py run` on a clean idle reference machine. |
-| Responses proxy overhead, paired | signed p99 delta < 200 ms | Placeholder: run the release evidence command. |
-| Exact cache core lookup | p99 < 5 ms | Placeholder: authoritative cache gate; run the release evidence command. |
-| Exact cache authenticated loopback | informational only | Placeholder: diagnostic context only; failure does not decide the cache scenario while core lookup passes. |
-| Responses throughput | every complete one-second bucket >= 100 successes | Placeholder: run the release evidence command. |
+| Should-Send authenticated loopback | p99 < 50 ms | Pre-optimization clean local diagnostic: 16.247 ms worst p99, pass. |
+| Responses proxy overhead, paired | signed p99 delta < 200 ms | Pre-optimization clean local diagnostic: 86.057 ms worst signed p99, pass. |
+| Exact cache core lookup | p99 < 5 ms | Pre-optimization clean local diagnostic: 18.899 ms worst p99, fail. |
+| Exact cache authenticated loopback | informational only | Pre-optimization clean local diagnostic: 148.199 ms worst p99; informational only. |
+| Responses throughput | every complete one-second bucket >= 100 successes | Pre-optimization clean local diagnostic: 9/s worst complete bucket with client timeouts, fail. |
 
 The cache scenario status is derived from `responsesExactCacheHit.coreLookup`.
 `responsesExactCacheHit.e2eAuthenticatedLoopback` is nested with
@@ -77,8 +79,8 @@ timeouts, or HTTP 429 responses fail the round. Completions before
 
 ## Reference Machine Rules
 
-A report may be treated as release evidence only when all of the following are
-true:
+A future report may be considered a release candidate only when all of the
+following are independently established:
 
 - The source tree state in the report is `clean`.
 - The run happens on the intended reference class of machine, on AC power where
@@ -90,10 +92,16 @@ true:
   JSON; local databases, prompts, responses, credentials, process IDs, and local
   paths are never attached.
 
-The script records bounded machine facts such as OS, architecture, CPU model,
-memory, storage class, filesystem, power state, Python version, source commit,
-and source tree state. Those fields help interpret the run; they do not by
-themselves prove that the machine was idle.
+The current v1 format intentionally remains `diagnostic` even when all of
+those prerequisites appear true. This prevents a local flag or shared hosted
+runner from self-authorizing release evidence.
+
+The runner resolves the real Git `HEAD` and full tracked, staged, untracked,
+and submodule worktree state. A mismatched `--source-commit` or explicit
+`--source-tree-state` fails before measurement. The script also records bounded
+machine facts such as OS, architecture, CPU model, memory, storage class,
+filesystem, power state, and Python version. Those fields help interpret the
+run; they do not by themselves prove that the machine was idle.
 
 ## Manual CI
 
@@ -102,8 +110,7 @@ runs the unit contract and smoke checks, invokes the performance runner,
 verifies the report, and uploads `gateway-performance-v1.json`. Absolute budgets
 remain non-blocking because the shared runner job deliberately omits
 `--enforce`; the artifact is diagnostic CI evidence, not a reference-machine
-release claim. A manually generated or CI report must not be described as
-release evidence unless it satisfies the reference-machine rules above.
+release claim. Its closed `evidenceClass` makes that boundary machine-readable.
 
 ## Commands
 
@@ -113,20 +120,20 @@ Run the credential/network isolation smoke first:
 python scripts/measure_gateway_performance.py smoke
 ```
 
-Create and verify a report with an explicit 40-character source revision:
+Create and verify a report bound to the current repository revision:
 
 ```sh
 python scripts/measure_gateway_performance.py run \
-  --source-commit <source-commit> \
+  --source-commit "$(git rev-parse HEAD)" \
   --source-tree-state auto \
   --output <gateway-performance-v1.json>
 python scripts/measure_gateway_performance.py verify \
   --report <gateway-performance-v1.json>
 ```
 
-Use `--enforce` only for an intentionally idle, named reference-machine run.
-Do not use it to turn a shared CI runner or a foreground-loaded developer
-machine into a release gate.
+Use `--enforce` only when the diagnostic command should exit nonzero for failed
+thresholds. It never changes `evidenceClass`, and must not be used to describe a
+shared CI runner or foreground-loaded developer machine as a release gate.
 
 ## Privacy and Unit Compatibility
 
@@ -149,4 +156,6 @@ performance evidence:
 | --- | --- |
 | `python -m unittest tests.test_gateway_performance_measurement tests.test_gateway_should_send tests.test_gateway_cache` | Local diagnostic PASS observed during documentation update. |
 | `python scripts/measure_gateway_performance.py smoke` | Local diagnostic PASS observed during documentation update: fixture egress only, no real credentials or Provider network. |
+| Clean local three-round report at `b8c917c`, 2026-08-10 | Pre-optimization diagnostic, Apple M3 on battery with load approximately 4.7/8 cores: Should-Send worst p99 16.247 ms; paired proxy worst signed p99 86.057 ms; cache core worst p99 18.899 ms; informational authenticated cache loopback 148.199 ms; throughput worst complete bucket 9 successes/s with 16 total client timeouts across three rounds. Overall fail; not release evidence. |
+| Evidence-led listener change | The 16-client workload used a 32-thread cap while the inherited TCP listen backlog was only 5. The listener backlog now follows the already validated `max_threads`; authentication, worker capacity, deadlines, connection-close behavior, and telemetry semantics are unchanged. Cache security checks remain unchanged because isolated hot lookup p99 was approximately 0.065 ms and did not justify weakening per-lookup file identity or permission validation. |
 | Dirty local three-round report, 2026-08-09 | Schema-valid diagnostic with overall `fail`: Should-Send worst p99 66.165 ms; paired proxy worst p99 delta 199.710 ms; cache core worst p99 6.250 ms; informational authenticated cache loopback 155.764 ms; throughput worst complete bucket 13 successes/s with real client timeouts. The source tree was dirty and the machine was under severe foreground load, so this is not release evidence. |
