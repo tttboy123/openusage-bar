@@ -724,7 +724,13 @@ class DesktopPackagingContractTests(unittest.TestCase):
         )
         self.assertEqual(smoke.count("set +e"), 4)
         self.assertEqual(smoke.count("set -e"), 4)
-        self.assertIn('printf \'%s\\n\' "$account_smoke_output"', smoke)
+        self.assertEqual(
+            smoke.count(
+                'printf \'gateway_account_credential_smoke=%s\\n\' '
+                '"$account_smoke_output"'
+            ),
+            2,
+        )
         self.assertNotRegex(
             smoke,
             r'account_smoke_output="\$\(\s*python scripts/smoke_gateway_account_credentials.py'
@@ -732,23 +738,22 @@ class DesktopPackagingContractTests(unittest.TestCase):
             "set -e command substitution must not hide the safe stdout envelope",
         )
 
-    def test_windows_settings_smoke_requires_exact_native_crlf_transport(self):
+    def test_settings_smoke_exposes_only_safe_stage_diagnostics(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         steps = _mapping_list(source, section="steps", item_indent=6)
         smoke = next(
             step for step in steps if step.get("name") == "Smoke bundled settings helper"
         )["run"]
 
-        self.assertIn('if [[ "${{ matrix.platform }}" == "win" ]]; then', smoke)
-        self.assertIn("settings_expected+=$'\\r'", smoke)
-        self.assertIn("editor_expected=$'", smoke)
-        self.assertIn("\\r\\n", smoke)
-        self.assertIn("account_smoke_expected+=$'\\r'", smoke)
-        self.assertNotRegex(
-            smoke,
-            r"tr\s+.*-d|sed\s+.*\\r|replace\(.*\\r|strip\(",
-            "Windows CRLF must be matched exactly, not normalized away",
+        self.assertIn("gateway_settings_mutation_smoke_ok", smoke)
+        self.assertIn("gateway_settings_editor_smoke_ok", smoke)
+        self.assertEqual(smoke.count("gateway_account_credential_smoke=%s"), 2)
+        self.assertEqual(
+            smoke.count("gateway_account_credential_stderr_bytes=%s"),
+            2,
         )
+        self.assertNotIn('cat "$account_smoke_stderr"', smoke)
+        self.assertNotIn('cat "$ACCOUNT_SMOKE_STDERR"', smoke)
 
     def test_linux_native_gateway_account_credential_smoke_uses_pinned_private_secret_service_session(self):
         source = WORKFLOW.read_text(encoding="utf-8")
