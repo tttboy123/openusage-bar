@@ -18,6 +18,7 @@ class GatewayAPISchemaTests(unittest.TestCase):
             sorted(payload["routes"]),
             [
                 "GET /gateway/v1/account-pools",
+                "GET /gateway/v1/decision-traces",
                 "GET /gateway/v1/health",
                 "GET /gateway/v1/schema",
                 "POST /gateway/v1/responses",

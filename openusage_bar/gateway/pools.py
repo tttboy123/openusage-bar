@@ -10,6 +10,7 @@ from enum import StrEnum
 
 from ..config import ID_PATTERN
 from .accounts import AccountState, ProviderAccountRef
+from .decision_trace import DecisionTraceRecorder
 
 
 _MAX_POOL_MEMBERS = 64
@@ -216,9 +217,19 @@ class PoolSelection:
 class PoolSelector:
     """Select from closed local facts; never reads credentials or Providers."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        decision_traces: DecisionTraceRecorder | None = None,
+    ) -> None:
+        if (
+            decision_traces is not None
+            and type(decision_traces) is not DecisionTraceRecorder
+        ):
+            raise ValueError("pool Decision Trace recorder is invalid")
         self._lock = threading.Lock()
         self._round_robin_offsets: dict[tuple[str, int], int] = {}
+        self._decision_traces = decision_traces
 
     def select(
         self,
@@ -273,13 +284,40 @@ class PoolSelector:
             eligible,
             sticky_account_id=sticky_account_id,
         )
-        return PoolSelection(
+        selection = PoolSelection(
             pool_id=pool.pool_id,
             pool_revision=pool.revision,
             strategy=pool.strategy,
             selected_account=selected.account if selected is not None else None,
             exclusions=tuple(exclusions),
         )
+        self._record_selection(selection)
+        return selection
+
+    def _record_selection(self, selection: PoolSelection) -> None:
+        recorder = self._decision_traces
+        if recorder is None:
+            return
+        selected = selection.selected_account
+        try:
+            recorder.record_pool_selection(
+                pool_id=selection.pool_id,
+                revision=selection.pool_revision,
+                strategy=selection.strategy.value,
+                selected_provider_id=(
+                    selected.provider_id if selected is not None else None
+                ),
+                selected_account_display_id=(
+                    selected.display_id if selected is not None else None
+                ),
+                exclusions=[
+                    item.to_public_dict() for item in selection.exclusions
+                ],
+            )
+        except Exception:
+            # Decision Trace is optional process-lifetime observability.  It
+            # must never change an actual pool selection.
+            pass
 
     @staticmethod
     def _exclusion_reason(

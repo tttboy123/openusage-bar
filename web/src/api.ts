@@ -8,6 +8,7 @@ import {
   type ShouldSendAdvice,
 } from "./shouldSendAdvice";
 import type { ObserverPlatformCapability } from "./observerPlatformCapability";
+import type { DecisionTraces } from "./decisionTraces";
 
 export interface SnapshotSummary {
   todayTokens?: number;
@@ -267,6 +268,15 @@ export async function fetchShouldSendAdvice(
     body,
   });
   return normalizeShouldSendAdvice(payload);
+}
+
+export async function fetchDecisionTraces(): Promise<DecisionTraces | null> {
+  const { normalizeDecisionTraces } = await import("./decisionTraces");
+  const payload = await getJson<unknown>("/gateway/v1/decision-traces", {
+    method: "GET",
+    credentials: "omit",
+  });
+  return normalizeDecisionTraces(payload);
 }
 
 export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {

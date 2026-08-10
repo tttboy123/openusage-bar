@@ -53,6 +53,7 @@ on:
       - "tests/test_gateway_account_editor_model.py"
       - "tests/test_gateway_account_editor_tk.py"
       - "tests/test_gateway_*.py"
+      - "tests/test_decision_trace_cross_layer_contract.py"
       - "tests/test_keychain.py"
       - "tests/fixtures/gateway/performance-v1.json"
       - "tests/test_local_api.py"
@@ -124,6 +125,7 @@ on:
       - "tests/test_gateway_account_editor_model.py"
       - "tests/test_gateway_account_editor_tk.py"
       - "tests/test_gateway_*.py"
+      - "tests/test_decision_trace_cross_layer_contract.py"
       - "tests/test_keychain.py"
       - "tests/fixtures/gateway/performance-v1.json"
       - "tests/test_local_api.py"
@@ -300,6 +302,8 @@ jobs:
             tests.test_gateway_account_mutation_commands \
             tests.test_gateway_api \
             tests.test_gateway_api_schema \
+            tests.test_gateway_decision_trace \
+            tests.test_decision_trace_cross_layer_contract \
             tests.test_gateway_cache \
             tests.test_gateway_config \
             tests.test_gateway_event_stream_validation \
@@ -352,6 +356,11 @@ jobs:
         if: matrix.platform == 'linux' && matrix.arch == 'x64'
         working-directory: web
         run: npm run test:e2e:gateway-account
+      - name: Run Decision Trace browser E2E
+        id: decision_trace_e2e
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        working-directory: web
+        run: npm run test:e2e:decision-traces
       - name: Audit web dependencies
         id: web_audit
         working-directory: web

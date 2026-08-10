@@ -833,6 +833,7 @@ def _build_default_gateway_server(
     """Build the optional Gateway without importing it for read-only commands."""
     from .gateway.api import GatewayRouter
     from .gateway.cache import SQLiteGatewayCache
+    from .gateway.decision_trace import DecisionTraceRecorder
     from .gateway.policy import SnapshottingShouldSendEvaluator
     from .gateway.pools import account_pools_public_payload
     from .gateway.runtime import GatewayRuntime
@@ -861,6 +862,7 @@ def _build_default_gateway_server(
         burn_rate=burn_rate,
         ttl_seconds=10.0,
     )
+    decision_traces = DecisionTraceRecorder()
 
     proxy = None
     if config.mode.value == "gateway" and config.proxy_enabled:
@@ -883,6 +885,7 @@ def _build_default_gateway_server(
             accounts=config.accounts,
             pools=config.account_pools,
         ),
+        decision_traces=decision_traces,
     )
     return create_gateway_server(
         router,

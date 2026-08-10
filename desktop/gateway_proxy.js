@@ -4,7 +4,7 @@ const childProcess = require("child_process");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
-const { TextDecoder } = require("util");
+const { TextDecoder, types } = require("util");
 const { composeRendererCapability } = require("./runtime_capability");
 const {
   createGatewayAccountOperationHost,
@@ -23,6 +23,7 @@ const MAX_RESPONSE_HEADER_COUNT = 64;
 const MAX_LOCAL_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_CAPABILITY_RESPONSE_BYTES = 64 * 1024;
 const MAX_ACCOUNT_POOLS_RESPONSE_BYTES = 64 * 1024;
+const MAX_DECISION_TRACES_RESPONSE_BYTES = 1024 * 1024;
 const MAX_SHOULD_SEND_REQUEST_BYTES = 8 * 1024;
 const MAX_SHOULD_SEND_RESPONSE_BYTES = 8 * 1024;
 const MAX_HOST_ACTION_REQUEST_BYTES = 16 * 1024;
@@ -92,6 +93,50 @@ const ACCOUNT_POOL_STRATEGIES = new Set([
 ]);
 const MAX_ACCOUNT_POOL_ID_LENGTH = 128;
 const MAX_ACCOUNT_POOL_MEMBERS = 64;
+const MAX_DECISION_TRACES = 128;
+const MAX_DECISION_TRACE_EXCLUSIONS = 64;
+const MAX_DECISION_TRACE_FACTS_WINDOW_SECONDS = 2_678_400;
+
+const DECISION_TRACE_API_VERSION = "gateway-decision-trace.openusage/v1";
+const DECISION_TRACE_KINDS = new Set([
+  "route_advice",
+  "gateway_execution",
+  "pool_selection",
+]);
+const DECISION_TRACE_OUTCOMES = new Set([
+  "yes",
+  "no",
+  "defer",
+  "selected",
+  "unavailable",
+  "succeeded",
+  "failed",
+]);
+const DECISION_TRACE_PROVIDERS = new Set([
+  "anthropic",
+  "deepseek",
+  "ollama",
+  "openai",
+  "openrouter",
+]);
+const DECISION_TRACE_EXCLUSION_REASONS = new Set([
+  "cooldown",
+  "credential_backend_unavailable",
+  "cross_model_unconfirmed",
+  "cross_provider_unconfirmed",
+  "cross_region_unconfirmed",
+  "disabled",
+  "health_unknown",
+  "metric_unknown",
+  "quota_unknown",
+  "unhealthy",
+]);
+const DECISION_TRACE_FALLBACK_ACTIONS = new Set([
+  "none",
+  "retry",
+  "fail",
+  "degrade_to_cheap",
+]);
 
 const WINDOWS_ACL_SCRIPT = String.raw`
 & {
@@ -324,6 +369,15 @@ function classifyRendererRequest({ method, target, headers = {} }) {
     };
   }
   if (target === "/gateway/v1/account-pools") {
+    if (method !== "GET") return null;
+    return {
+      service: "gateway",
+      method,
+      target,
+      headers: { Accept: "application/json" },
+    };
+  }
+  if (target === "/gateway/v1/decision-traces") {
     if (method !== "GET") return null;
     return {
       service: "gateway",
@@ -1141,6 +1195,24 @@ async function fetchRendererResponse(
       body,
     };
   }
+  if (
+    classified.service === "gateway" &&
+    classified.method === "GET" &&
+    classified.target === "/gateway/v1/decision-traces"
+  ) {
+    const gatewayResult = await privateRequest(
+      runtime.gateway,
+      classified,
+      MAX_DECISION_TRACES_RESPONSE_BYTES,
+      requestOptions,
+    );
+    if (gatewayResult.statusCode !== 200) {
+      throw requestFailure("unavailable");
+    }
+    const decisionTraces = sanitizeDecisionTracesPayload(gatewayResult.body);
+    if (decisionTraces === null) throw requestFailure("invalid");
+    return rendererJsonResponse(decisionTraces);
+  }
   if (classified.service === "localApi") {
     return privateRequest(
       runtime.localApi,
@@ -1565,6 +1637,307 @@ function sanitizeAccountPoolsPayload(body) {
     pools.push(pool);
   }
   return { accounts, pools };
+}
+
+function sanitizeDecisionTracesPayload(body) {
+  if (!isBoundedDecisionTraceBuffer(
+    body,
+    MAX_DECISION_TRACES_RESPONSE_BYTES,
+  )) return null;
+  const value = parseStrictJsonObject(
+    body,
+    MAX_DECISION_TRACES_RESPONSE_BYTES,
+  );
+  return sanitizeDecisionTracesValue(value);
+}
+
+function sanitizeDecisionTracesValue(value) {
+  const root = ownDataRecord(value, ["apiVersion", "traces"]);
+  if (
+    root === null ||
+    root.apiVersion !== DECISION_TRACE_API_VERSION
+  ) {
+    return null;
+  }
+  const items = ownDataArray(root.traces, MAX_DECISION_TRACES);
+  if (items === null) return null;
+
+  const traces = [];
+  const traceIds = new Set();
+  let previousOccurredAt = null;
+  for (const item of items) {
+    const trace = sanitizeDecisionTrace(item);
+    if (
+      trace === null ||
+      traceIds.has(trace.traceId) ||
+      (previousOccurredAt !== null &&
+        previousOccurredAt < trace.occurredAt)
+    ) {
+      return null;
+    }
+    traceIds.add(trace.traceId);
+    previousOccurredAt = trace.occurredAt;
+    traces.push(trace);
+  }
+  return { apiVersion: DECISION_TRACE_API_VERSION, traces };
+}
+
+function isBoundedDecisionTraceBuffer(value, maximumBytes) {
+  try {
+    return (
+      Buffer.isBuffer(value) &&
+      Object.getPrototypeOf(value) === Buffer.prototype &&
+      Number.isInteger(value.length) &&
+      value.length >= 1 &&
+      value.length <= maximumBytes
+    );
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeDecisionTrace(value) {
+  const trace = ownDataRecord(value, [
+    "traceId",
+    "occurredAt",
+    "kind",
+    "execution",
+    "outcome",
+    "reason",
+    "pool",
+    "selected",
+    "exclusions",
+    "fallback",
+    "factsWindow",
+  ]);
+  if (
+    trace === null ||
+    typeof trace.traceId !== "string" ||
+    !/^trace_[0-9a-f]{32}$/u.test(trace.traceId) ||
+    !isCanonicalDecisionTraceTimestamp(trace.occurredAt) ||
+    !DECISION_TRACE_KINDS.has(trace.kind) ||
+    !DECISION_TRACE_OUTCOMES.has(trace.outcome)
+  ) {
+    return null;
+  }
+
+  const pool = sanitizeDecisionTracePool(trace.pool);
+  const selected = sanitizeDecisionTraceSelected(trace.selected);
+  const exclusions = sanitizeDecisionTraceExclusions(trace.exclusions);
+  const fallback = sanitizeDecisionTraceFallback(trace.fallback);
+  const factsWindow = sanitizeDecisionTraceFactsWindow(trace.factsWindow);
+  if (
+    pool === undefined ||
+    selected === undefined ||
+    exclusions === null ||
+    fallback === undefined ||
+    factsWindow === undefined
+  ) {
+    return null;
+  }
+
+  if (trace.kind === "route_advice") {
+    if (
+      trace.execution !== "advice_only" ||
+      !SHOULD_SEND_DECISIONS.has(trace.outcome) ||
+      !SHOULD_SEND_REASONS.has(trace.reason) ||
+      pool !== null ||
+      selected !== null ||
+      exclusions.length !== 0 ||
+      fallback !== null
+    ) {
+      return null;
+    }
+  } else if (trace.kind === "gateway_execution") {
+    if (
+      trace.execution !== "executed" ||
+      (trace.outcome !== "succeeded" && trace.outcome !== "failed") ||
+      trace.reason !== null ||
+      pool !== null ||
+      selected === null ||
+      selected.providerId === null ||
+      selected.accountDisplayId !== null ||
+      exclusions.length !== 0 ||
+      fallback === null ||
+      factsWindow !== null
+    ) {
+      return null;
+    }
+  } else if (
+    trace.execution !== "executed" ||
+    (trace.outcome !== "selected" && trace.outcome !== "unavailable") ||
+    trace.reason !== null ||
+    pool === null ||
+    fallback !== null ||
+    factsWindow !== null ||
+    (trace.outcome === "selected" &&
+      (selected === null ||
+        selected.providerId === null ||
+        selected.accountDisplayId === null)) ||
+    (trace.outcome === "unavailable" && selected !== null)
+  ) {
+    return null;
+  }
+
+  return {
+    traceId: trace.traceId,
+    occurredAt: trace.occurredAt,
+    kind: trace.kind,
+    execution: trace.execution,
+    outcome: trace.outcome,
+    reason: trace.reason,
+    pool,
+    selected,
+    exclusions,
+    fallback,
+    factsWindow,
+  };
+}
+
+function sanitizeDecisionTracePool(value) {
+  if (value === null) return null;
+  const pool = ownDataRecord(value, ["poolId", "revision", "strategy"]);
+  if (
+    pool === null ||
+    !isPublicPoolId(pool.poolId) ||
+    !Number.isSafeInteger(pool.revision) ||
+    pool.revision < 1 ||
+    !ACCOUNT_POOL_STRATEGIES.has(pool.strategy)
+  ) {
+    return undefined;
+  }
+  return {
+    poolId: pool.poolId,
+    revision: pool.revision,
+    strategy: pool.strategy,
+  };
+}
+
+function sanitizeDecisionTraceSelected(value) {
+  if (value === null) return null;
+  const selected = ownDataRecord(value, ["providerId", "accountDisplayId"]);
+  if (
+    selected === null ||
+    (selected.providerId !== null &&
+      !DECISION_TRACE_PROVIDERS.has(selected.providerId)) ||
+    (selected.accountDisplayId !== null &&
+      (typeof selected.accountDisplayId !== "string" ||
+        !/^acct_[0-9a-f]{12}$/u.test(selected.accountDisplayId)))
+  ) {
+    return undefined;
+  }
+  return {
+    providerId: selected.providerId,
+    accountDisplayId: selected.accountDisplayId,
+  };
+}
+
+function sanitizeDecisionTraceExclusions(value) {
+  const items = ownDataArray(value, MAX_DECISION_TRACE_EXCLUSIONS);
+  if (items === null) return null;
+  const exclusions = [];
+  for (const item of items) {
+    const exclusion = ownDataRecord(item, ["accountDisplayId", "reason"]);
+    if (
+      exclusion === null ||
+      typeof exclusion.accountDisplayId !== "string" ||
+      !/^acct_[0-9a-f]{12}$/u.test(exclusion.accountDisplayId) ||
+      !DECISION_TRACE_EXCLUSION_REASONS.has(exclusion.reason)
+    ) {
+      return null;
+    }
+    exclusions.push({
+      accountDisplayId: exclusion.accountDisplayId,
+      reason: exclusion.reason,
+    });
+  }
+  return exclusions;
+}
+
+function sanitizeDecisionTraceFallback(value) {
+  if (value === null) return null;
+  const fallback = ownDataRecord(value, [
+    "attempted",
+    "attemptCount",
+    "finalAction",
+  ]);
+  if (
+    fallback === null ||
+    typeof fallback.attempted !== "boolean" ||
+    !Number.isInteger(fallback.attemptCount) ||
+    fallback.attemptCount < 0 ||
+    fallback.attemptCount > 2 ||
+    !DECISION_TRACE_FALLBACK_ACTIONS.has(fallback.finalAction) ||
+    (!fallback.attempted &&
+      (fallback.attemptCount > 1 || fallback.finalAction !== "none")) ||
+    (fallback.attempted &&
+      (fallback.attemptCount < 1 || fallback.finalAction === "none")) ||
+    ((fallback.finalAction === "retry" ||
+      fallback.finalAction === "degrade_to_cheap") &&
+      fallback.attemptCount !== 2)
+  ) {
+    return undefined;
+  }
+  return {
+    attempted: fallback.attempted,
+    attemptCount: fallback.attemptCount,
+    finalAction: fallback.finalAction,
+  };
+}
+
+function sanitizeDecisionTraceFactsWindow(value) {
+  if (value === null) return null;
+  const factsWindow = ownDataRecord(value, ["durationSeconds"]);
+  if (
+    factsWindow === null ||
+    !Number.isInteger(factsWindow.durationSeconds) ||
+    factsWindow.durationSeconds < 1 ||
+    factsWindow.durationSeconds > MAX_DECISION_TRACE_FACTS_WINDOW_SECONDS
+  ) {
+    return undefined;
+  }
+  return { durationSeconds: factsWindow.durationSeconds };
+}
+
+function isCanonicalDecisionTraceTimestamp(value) {
+  if (typeof value !== "string") return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{6})Z$/u.exec(
+    value,
+  );
+  if (match === null) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [
+    0,
+    31,
+    leapYear ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return (
+    year >= 1 &&
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= daysInMonth[month] &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59 &&
+    Number.isFinite(Date.parse(value))
+  );
 }
 
 function sanitizeAccountPoolAccount(value) {
@@ -2116,7 +2489,8 @@ function ownDataRecord(value, expectedKeys) {
   if (
     typeof value !== "object" ||
     value === null ||
-    Array.isArray(value)
+    Array.isArray(value) ||
+    types.isProxy(value)
   ) {
     return null;
   }
@@ -2155,6 +2529,7 @@ function ownDataRecord(value, expectedKeys) {
 function ownDataArray(value, maximumLength) {
   if (
     !Array.isArray(value) ||
+    types.isProxy(value) ||
     !Number.isInteger(value.length) ||
     value.length < 0 ||
     value.length > maximumLength
@@ -3086,6 +3461,8 @@ module.exports = {
   probePrivateObserver,
   readPrivateToken,
   sanitizeAccountPoolsPayload,
+  sanitizeDecisionTracesPayload,
+  sanitizeDecisionTracesValue,
   sanitizeHostActionRequest,
   sanitizeGatewayAccountOperationRequest,
   startOrProbeLegacyDashboard,

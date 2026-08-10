@@ -18,6 +18,12 @@ from ..runtime_capabilities import (
     validate_runtime_capability,
 )
 from .contracts import Decision, GatewayMode, ShouldSendDecision, ShouldSendRequest
+from .decision_trace import (
+    DECISION_TRACE_API_VERSION,
+    DecisionTraceRecorder,
+    facts_window_duration_seconds,
+    validate_decision_traces_payload,
+)
 from .ingress import parse_gateway_request
 from .pools import validate_account_pools_public_payload
 from .response import (
@@ -52,6 +58,7 @@ _ROUTES = frozenset(
     {
         ("GET", "/gateway/v1/health"),
         ("GET", "/gateway/v1/account-pools"),
+        ("GET", "/gateway/v1/decision-traces"),
         ("GET", "/gateway/v1/schema"),
         ("POST", "/gateway/v1/should-send"),
         ("POST", "/gateway/v1/responses"),
@@ -304,6 +311,7 @@ class GatewayRouter:
         policy: Policy | None,
         proxy: Proxy | None,
         account_pools: AccountPools | None = None,
+        decision_traces: DecisionTraceRecorder | None = None,
     ) -> None:
         if not isinstance(mode, GatewayMode):
             raise ValueError("Gateway mode is invalid.")
@@ -313,10 +321,16 @@ class GatewayRouter:
             raise ValueError("Gateway proxy is invalid.")
         if account_pools is not None and not callable(account_pools):
             raise ValueError("Gateway account pools are invalid.")
+        if (
+            decision_traces is not None
+            and type(decision_traces) is not DecisionTraceRecorder
+        ):
+            raise ValueError("Gateway Decision Trace recorder is invalid.")
         self._mode = mode
         self._policy = policy
         self._proxy = proxy
         self._account_pools = account_pools
+        self._decision_traces = decision_traces
 
     def close(self) -> None:
         """Release proxy-owned resources once the listener is no longer active."""
@@ -350,6 +364,21 @@ class GatewayRouter:
                 )
             if path == "/gateway/v1/schema":
                 return 200, copy.deepcopy(_SCHEMA)
+            if path == "/gateway/v1/decision-traces":
+                if (
+                    self._mode is GatewayMode.OBSERVE
+                    or self._decision_traces is None
+                ):
+                    return 200, {
+                        "apiVersion": DECISION_TRACE_API_VERSION,
+                        "traces": [],
+                    }
+                try:
+                    candidate = self._decision_traces.snapshot()
+                    payload = validate_decision_traces_payload(candidate)
+                except Exception:
+                    return _internal_error()
+                return (200, payload) if payload is not None else _internal_error()
             if path == "/gateway/v1/account-pools":
                 if self._mode is GatewayMode.OBSERVE or self._account_pools is None:
                     return 200, {"accounts": [], "pools": []}
@@ -387,16 +416,30 @@ class GatewayRouter:
                     "proxy_disabled", "Gateway proxy is disabled.", False
                 )
             try:
-                parse_gateway_request(payload)
+                gateway_request = parse_gateway_request(payload)
             except ValueError:
                 return _invalid_request()
             try:
                 response = self._proxy(payload)
             except Exception:
-                return _versioned_internal_error()
+                status, safe_response = _versioned_internal_error()
+                self._record_gateway_execution(
+                    gateway_request.provider_id,
+                    safe_response,
+                )
+                return status, safe_response
             safe_response = validate_gateway_payload(response)
             if safe_response is None:
-                return _versioned_internal_error()
+                status, safe_response = _versioned_internal_error()
+                self._record_gateway_execution(
+                    gateway_request.provider_id,
+                    safe_response,
+                )
+                return status, safe_response
+            self._record_gateway_execution(
+                gateway_request.provider_id,
+                safe_response,
+            )
             return 200, safe_response
 
         if set(payload) != {"provider", "model", "estimated_tokens", "window"}:
@@ -424,7 +467,57 @@ class GatewayRouter:
             serialized = _decision_payload(decision)
         except Exception:
             return _internal_error()
-        return (200, serialized) if serialized is not None else _internal_error()
+        if serialized is None:
+            return _internal_error()
+        recorder = self._decision_traces
+        if recorder is not None:
+            try:
+                recorder.record_route_advice(
+                    outcome=serialized["decision"],
+                    reason=serialized["reason"],
+                    facts_window_duration_seconds=(
+                        facts_window_duration_seconds(window)
+                    ),
+                )
+            except Exception:
+                pass
+        return 200, serialized
+
+    def _record_gateway_execution(
+        self,
+        provider_id: str,
+        response: dict[str, object],
+    ) -> None:
+        recorder = self._decision_traces
+        if recorder is None:
+            return
+        fallback = response.get("fallback")
+        if type(fallback) is dict:
+            fallback = {
+                "attempted": fallback.get("attempted"),
+                "attemptCount": fallback.get("attemptCount"),
+                "finalAction": fallback.get("finalAction"),
+            }
+        else:
+            fallback = {
+                "attempted": False,
+                "attemptCount": 1,
+                "finalAction": "none",
+            }
+        outcome = "failed"
+        if (
+            response.get("object") == "gateway.response"
+            and response.get("status") == "complete"
+        ):
+            outcome = "succeeded"
+        try:
+            recorder.record_gateway_execution(
+                provider_id=provider_id,
+                outcome=outcome,
+                fallback=fallback,
+            )
+        except Exception:
+            pass
 
     def dispatch_runtime_capability(
         self,

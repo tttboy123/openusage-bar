@@ -13,6 +13,7 @@ import {
 } from "@phosphor-icons/react";
 import {
   fetchChanges,
+  fetchDecisionTraces,
   fetchRuntimeCapability,
   fetchShouldSendAdvice,
   type ChangeItem,
@@ -31,8 +32,18 @@ import {
   type ShouldSendDeferTimingViewModel,
   type ShouldSendRequest,
 } from "../shouldSendAdvice";
+import type {
+  DecisionTrace,
+  DecisionTraceExclusionReason,
+  DecisionTraceFallbackAction,
+  DecisionTraceKind,
+  DecisionTraceOutcome,
+  DecisionTraceReason,
+  DecisionTraceStrategy,
+} from "../decisionTraces";
 
 type AdvicePhase = "idle" | "loading" | "result" | "error";
+type TracePhase = "loading" | "ready" | "empty" | "unavailable" | "unknown";
 type AdviceField = "provider" | "model" | "estimatedTokens" | "window";
 type AdviceErrorKey =
   | "shouldSendRequired"
@@ -230,6 +241,113 @@ function pillClass(tone: CapabilityTone): string {
   return "";
 }
 
+type TranslationKey = keyof Messages;
+
+const DECISION_TRACE_OUTCOME_KEYS: Record<
+  DecisionTraceOutcome,
+  TranslationKey
+> = {
+  yes: "decisionTraceOutcomeYes",
+  no: "decisionTraceOutcomeNo",
+  defer: "decisionTraceOutcomeDefer",
+  selected: "decisionTraceOutcomeSelected",
+  unavailable: "decisionTraceOutcomeUnavailable",
+  succeeded: "decisionTraceOutcomeSucceeded",
+  failed: "decisionTraceOutcomeFailed",
+};
+const DECISION_TRACE_REASON_KEYS: Record<DecisionTraceReason, TranslationKey> = {
+  approaching_limit: "shouldSendReasonApproachingLimit",
+  burn_rate_too_high: "shouldSendReasonBurnRateTooHigh",
+  quota_healthy: "shouldSendReasonQuotaHealthy",
+  quota_low: "shouldSendReasonQuotaLow",
+  quota_unknown: "shouldSendReasonQuotaUnknown",
+};
+const DECISION_TRACE_STRATEGY_KEYS: Record<
+  DecisionTraceStrategy,
+  TranslationKey
+> = {
+  "fixed-first": "decisionTraceStrategyFixedFirst",
+  "round-robin": "decisionTraceStrategyRoundRobin",
+  sticky: "decisionTraceStrategySticky",
+  "quota-aware": "decisionTraceStrategyQuotaAware",
+  cost: "decisionTraceStrategyCost",
+  latency: "decisionTraceStrategyLatency",
+  reliability: "decisionTraceStrategyReliability",
+};
+const DECISION_TRACE_EXCLUSION_KEYS: Record<
+  DecisionTraceExclusionReason,
+  TranslationKey
+> = {
+  cooldown: "decisionTraceExclusionCooldown",
+  credential_backend_unavailable:
+    "decisionTraceExclusionCredentialBackendUnavailable",
+  cross_model_unconfirmed: "decisionTraceExclusionCrossModelUnconfirmed",
+  cross_provider_unconfirmed:
+    "decisionTraceExclusionCrossProviderUnconfirmed",
+  cross_region_unconfirmed: "decisionTraceExclusionCrossRegionUnconfirmed",
+  disabled: "decisionTraceExclusionDisabled",
+  health_unknown: "decisionTraceExclusionHealthUnknown",
+  metric_unknown: "decisionTraceExclusionMetricUnknown",
+  quota_unknown: "decisionTraceExclusionQuotaUnknown",
+  unhealthy: "decisionTraceExclusionUnhealthy",
+};
+const DECISION_TRACE_FALLBACK_KEYS: Record<
+  DecisionTraceFallbackAction,
+  TranslationKey
+> = {
+  none: "decisionTraceFallbackNone",
+  retry: "decisionTraceFallbackRetry",
+  fail: "decisionTraceFallbackFail",
+  degrade_to_cheap: "decisionTraceFallbackDegradeToCheap",
+};
+
+function decisionTraceKindKey(kind: DecisionTraceKind): TranslationKey {
+  if (kind === "route_advice") return "decisionTraceRouteAdvice";
+  if (kind === "gateway_execution") return "decisionTraceGatewayExecution";
+  return "decisionTracePoolSelection";
+}
+
+function decisionTraceOutcomeKey(outcome: DecisionTraceOutcome): TranslationKey {
+  return DECISION_TRACE_OUTCOME_KEYS[outcome];
+}
+
+function decisionTraceReasonKey(reason: DecisionTraceReason): TranslationKey {
+  return DECISION_TRACE_REASON_KEYS[reason];
+}
+
+function decisionTraceStrategyKey(strategy: DecisionTraceStrategy): TranslationKey {
+  return DECISION_TRACE_STRATEGY_KEYS[strategy];
+}
+
+function decisionTraceExclusionKey(
+  reason: DecisionTraceExclusionReason,
+): TranslationKey {
+  return DECISION_TRACE_EXCLUSION_KEYS[reason];
+}
+
+function decisionTraceFallbackKey(
+  action: DecisionTraceFallbackAction,
+): TranslationKey {
+  return DECISION_TRACE_FALLBACK_KEYS[action];
+}
+
+function formatDecisionTraceTime(value: string, t: Messages): string {
+  try {
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) return "—";
+    return new Intl.DateTimeFormat(t === messages.zh ? "zh-CN" : "en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(new Date(timestamp));
+  } catch {
+    return "—";
+  }
+}
+
 export default function AutomationPage({ t }: { t: Messages }) {
   const [changes, setChanges] = useState<ChangeItem[]>([]);
   const [changesError, setChangesError] = useState(false);
@@ -248,6 +366,9 @@ export default function AutomationPage({ t }: { t: Messages }) {
   const [advicePhase, setAdvicePhase] = useState<AdvicePhase>("idle");
   const [advice, setAdvice] = useState<ShouldSendAdviceViewModel | null>(null);
   const adviceRequestGeneration = useRef(0);
+  const [decisionTraces, setDecisionTraces] = useState<DecisionTrace[]>([]);
+  const [tracePhase, setTracePhase] = useState<TracePhase>("loading");
+  const traceRequestGeneration = useRef(0);
 
   const loadCapability = useCallback(async () => {
     setCapabilityRefreshing(true);
@@ -270,6 +391,34 @@ export default function AutomationPage({ t }: { t: Messages }) {
   useEffect(() => {
     void loadCapability();
   }, [loadCapability]);
+
+  const loadDecisionTraces = useCallback(async () => {
+    const generation = traceRequestGeneration.current + 1;
+    traceRequestGeneration.current = generation;
+    setTracePhase("loading");
+    try {
+      const result = await fetchDecisionTraces();
+      if (generation !== traceRequestGeneration.current) return;
+      if (result === null) {
+        setDecisionTraces([]);
+        setTracePhase("unknown");
+      } else {
+        setDecisionTraces(result.traces);
+        setTracePhase(result.traces.length === 0 ? "empty" : "ready");
+      }
+    } catch {
+      if (generation !== traceRequestGeneration.current) return;
+      setDecisionTraces([]);
+      setTracePhase("unavailable");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDecisionTraces();
+    return () => {
+      traceRequestGeneration.current += 1;
+    };
+  }, [loadDecisionTraces]);
 
   useEffect(() => {
     setChangesLoading(true);
@@ -367,6 +516,16 @@ export default function AutomationPage({ t }: { t: Messages }) {
             ? deferTimingAnnouncement(t, advice.deferTiming)
             : t[advice.statusKey]
           : null;
+  const decisionTraceAnnouncement =
+    tracePhase === "loading"
+      ? t.decisionTraceLoading
+      : tracePhase === "empty"
+        ? t.decisionTraceEmpty
+        : tracePhase === "unavailable"
+          ? t.decisionTraceUnavailable
+          : tracePhase === "unknown"
+            ? t.decisionTraceUnknown
+            : tpl(t.decisionTraceLoaded, { count: decisionTraces.length });
   return (
     <>
       <div className="service-status-strip">
@@ -381,7 +540,13 @@ export default function AutomationPage({ t }: { t: Messages }) {
           aria-live="polite"
           aria-atomic="true"
         >
-          {adviceAnnouncement ?? t[serviceStatus.announcementKey]}
+          {[
+            t[serviceStatus.announcementKey],
+            decisionTraceAnnouncement,
+            adviceAnnouncement,
+          ]
+            .filter((value): value is string => value !== null)
+            .join(" ")}
         </p>
         <button
           type="button"
@@ -898,6 +1063,222 @@ export default function AutomationPage({ t }: { t: Messages }) {
           </section>
         </>
       ) : null}
+
+      <section
+        className="panel decision-trace-card"
+        aria-labelledby="decision-trace-title"
+        aria-busy={tracePhase === "loading"}
+      >
+        <div className="panel-head">
+          <h3 id="decision-trace-title">{t.decisionTraceTitle}</h3>
+          <span>{t.gatewayOptional}</span>
+        </div>
+        <div className="panel-body">
+          <div className="decision-trace-toolbar">
+            <p className="decision-trace-runtime-note">
+              {t.decisionTraceRuntimeOnly}
+            </p>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => void loadDecisionTraces()}
+              disabled={tracePhase === "loading"}
+              aria-busy={tracePhase === "loading"}
+            >
+              <ArrowClockwise
+                size={16}
+                className={tracePhase === "loading" ? "spinning" : ""}
+                aria-hidden="true"
+              />
+              {t.decisionTraceRefresh}
+            </button>
+          </div>
+          {tracePhase === "loading" ? (
+            <div className="decision-trace-state">
+              <Skeleton lines={3} />
+              <p>{t.decisionTraceLoading}</p>
+            </div>
+          ) : tracePhase === "ready" ? (
+            <ol className="decision-trace-list">
+              {decisionTraces.map((trace) => (
+                <li key={trace.traceId} className="decision-trace-item">
+                  <article>
+                    <div className="decision-trace-head">
+                      <h4>{t[decisionTraceKindKey(trace.kind)]}</h4>
+                      <time dateTime={trace.occurredAt}>
+                        <Clock size={13} aria-hidden="true" />
+                        {formatDecisionTraceTime(trace.occurredAt, t)}
+                      </time>
+                    </div>
+                    <p className="decision-trace-execution">
+                      <span
+                        className={`pill ${
+                          trace.execution === "advice_only"
+                            ? "pill-neutral"
+                            : "pill-ok"
+                        }`}
+                      >
+                        {trace.execution === "advice_only"
+                          ? t.decisionTraceAdviceOnly
+                          : t.decisionTraceExecuted}
+                      </span>
+                    </p>
+
+                    <dl className="decision-trace-facts">
+                      <div>
+                        <dt>{t.decisionTraceOutcome}</dt>
+                        <dd className="decision-trace-value">
+                          {t[decisionTraceOutcomeKey(trace.outcome)]}
+                        </dd>
+                      </div>
+                      {trace.reason !== null ? (
+                        <div>
+                          <dt>{t.shouldSendReasonLabel}</dt>
+                          <dd className="decision-trace-value">
+                            {t[decisionTraceReasonKey(trace.reason)]}
+                          </dd>
+                        </div>
+                      ) : null}
+                    </dl>
+
+                    {trace.pool !== null ? (
+                      <section
+                        className="decision-trace-section"
+                        aria-label={t.decisionTracePool}
+                      >
+                        <h5>{t.decisionTracePool}</h5>
+                        <dl className="decision-trace-facts">
+                          <div>
+                            <dt>{t.decisionTracePool}</dt>
+                            <dd className="decision-trace-value mono">
+                              {trace.pool.poolId}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{t.decisionTraceRevision}</dt>
+                            <dd className="decision-trace-value mono">
+                              {trace.pool.revision.toLocaleString()}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{t.decisionTraceStrategy}</dt>
+                            <dd className="decision-trace-value">
+                              {t[decisionTraceStrategyKey(trace.pool.strategy)]}
+                            </dd>
+                          </div>
+                        </dl>
+                      </section>
+                    ) : null}
+
+                    {trace.selected !== null ? (
+                      <section
+                        className="decision-trace-section"
+                        aria-label={t.decisionTraceSelectedTarget}
+                      >
+                        <h5>{t.decisionTraceSelectedTarget}</h5>
+                        <dl className="decision-trace-facts">
+                          {trace.selected.providerId !== null ? (
+                            <div>
+                              <dt>{t.decisionTraceSelectedProvider}</dt>
+                              <dd className="decision-trace-value mono">
+                                {trace.selected.providerId}
+                              </dd>
+                            </div>
+                          ) : null}
+                          {trace.selected.accountDisplayId !== null ? (
+                            <div>
+                              <dt>{t.decisionTraceSelectedAccount}</dt>
+                              <dd className="decision-trace-value mono">
+                                {trace.selected.accountDisplayId}
+                              </dd>
+                            </div>
+                          ) : null}
+                        </dl>
+                      </section>
+                    ) : null}
+
+                    {trace.exclusions.length > 0 ? (
+                      <section
+                        className="decision-trace-section"
+                        aria-label={t.decisionTraceExclusions}
+                      >
+                        <h5>{t.decisionTraceExclusions}</h5>
+                        <ul className="decision-trace-exclusions">
+                          {trace.exclusions.map((exclusion, index) => (
+                            <li key={`${exclusion.accountDisplayId}-${index}`}>
+                              <span className="decision-trace-value mono">
+                                {exclusion.accountDisplayId}
+                              </span>
+                              <span>
+                                {t[decisionTraceExclusionKey(exclusion.reason)]}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    ) : null}
+
+                    {trace.fallback !== null ? (
+                      <section
+                        className="decision-trace-section"
+                        aria-label={t.decisionTraceFallback}
+                      >
+                        <h5>{t.decisionTraceFallback}</h5>
+                        <dl className="decision-trace-facts">
+                          <div>
+                            <dt>{t.decisionTraceFallbackAttempted}</dt>
+                            <dd className="decision-trace-value">
+                              {trace.fallback.attempted ? t.valueYes : t.valueNo}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{t.decisionTraceFallbackAttempts}</dt>
+                            <dd className="decision-trace-value mono">
+                              {trace.fallback.attemptCount}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{t.decisionTraceFallbackFinalAction}</dt>
+                            <dd className="decision-trace-value">
+                              {t[
+                                decisionTraceFallbackKey(
+                                  trace.fallback.finalAction,
+                                )
+                              ]}
+                            </dd>
+                          </div>
+                        </dl>
+                      </section>
+                    ) : null}
+
+                    {trace.factsWindow !== null ? (
+                      <section
+                        className="decision-trace-section"
+                        aria-label={t.decisionTraceFactsWindow}
+                      >
+                        <h5>{t.decisionTraceFactsWindow}</h5>
+                        <p className="decision-trace-value mono">
+                          {tpl(t.decisionTraceSeconds, {
+                            count: trace.factsWindow.durationSeconds,
+                          })}
+                        </p>
+                      </section>
+                    ) : null}
+                  </article>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className={`decision-trace-state decision-trace-${tracePhase}`}>
+              {tracePhase === "empty"
+                ? t.decisionTraceEmpty
+                : tracePhase === "unavailable"
+                  ? t.decisionTraceUnavailable
+                  : t.decisionTraceUnknown}
+            </p>
+          )}
+        </div>
+      </section>
 
       <section className="panel">
         <div className="panel-head">

@@ -248,7 +248,7 @@ class GatewayRouterTests(unittest.TestCase):
             all(route.split(" ", 1)[1].startswith("/gateway/v1/") for route in payload["routes"])
         )
 
-    def test_only_the_five_additive_method_and_path_pairs_dispatch(self) -> None:
+    def test_only_the_six_additive_method_and_path_pairs_dispatch(self) -> None:
         router = GatewayRouter(
             mode=GatewayMode.GATEWAY,
             policy=policy,
@@ -257,6 +257,7 @@ class GatewayRouterTests(unittest.TestCase):
         )
         accepted = (
             ("GET", "/gateway/v1/account-pools", b""),
+            ("GET", "/gateway/v1/decision-traces", b""),
             ("GET", "/gateway/v1/health", b""),
             ("GET", "/gateway/v1/schema", b""),
             ("POST", "/gateway/v1/should-send", body()),

@@ -3,6 +3,7 @@
   "apiVersion": "gateway.openusage/v1",
   "routes": [
     "GET /gateway/v1/account-pools",
+    "GET /gateway/v1/decision-traces",
     "GET /gateway/v1/health",
     "GET /gateway/v1/schema",
     "POST /gateway/v1/should-send",
