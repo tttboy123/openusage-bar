@@ -28,6 +28,7 @@
       "collector_runtime.js",
       "gateway_proxy.js",
       "main.js",
+      "plugin_connection_proxy.js",
       "package.json",
       "product_version_truth.js",
       "gateway_account_operations.js",
@@ -64,6 +65,10 @@
         {
           "from": "../dist-settings/openusage-settings",
           "to": "settings/openusage-settings"
+        },
+        {
+          "from": "../dist-bridge/openusage-plugin-bridge",
+          "to": "bridge/openusage-plugin-bridge"
         }
       ]
     },
@@ -79,6 +84,10 @@
         {
           "from": "../dist-settings/openusage-settings.exe",
           "to": "settings/openusage-settings.exe"
+        },
+        {
+          "from": "../dist-bridge/openusage-plugin-bridge.exe",
+          "to": "bridge/openusage-plugin-bridge.exe"
         }
       ]
     },
@@ -100,6 +109,10 @@
         {
           "from": "../dist-settings/openusage-settings",
           "to": "settings/openusage-settings"
+        },
+        {
+          "from": "../dist-bridge/openusage-plugin-bridge",
+          "to": "bridge/openusage-plugin-bridge"
         }
       ]
     }

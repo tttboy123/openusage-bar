@@ -13,6 +13,7 @@ common = {
     "packages": [
         "openusage_bar",
         "openusage_bar.gateway",
+        "openusage_bar.plugin",
         "openusage_bar.providers",
     ],
     "package_data": {"openusage_bar": ["resources/*.json"]},
@@ -29,6 +30,7 @@ common = {
     "entry_points": {
         "console_scripts": [
             "openusage-bar = openusage_bar.collector_cli:main",
+            "openusage-plugin-bridge = openusage_bar.plugin_bridge:main",
         ],
     },
 }

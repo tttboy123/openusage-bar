@@ -7,6 +7,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -43,6 +44,7 @@ DEFAULT_FRESH_TIMEOUT_SECONDS = 160
 MIN_DAEMON_INTERVAL_SECONDS = 60
 INTERNAL_REFRESH_COMMAND = "__refresh-once"
 INTERNAL_GATEWAY_SELF_TEST_COMMAND = "__gateway-self-test"
+INTERNAL_PLUGIN_SELF_TEST_COMMAND = "__plugin-self-test"
 
 
 class CLIError(ValueError):
@@ -193,6 +195,93 @@ def _internal_gateway_self_test(
     return 0 if report.get("ok") is True else 1
 
 
+def _internal_plugin_self_test(
+    argv: list[str], *, stdout: TextIO, stderr: TextIO,
+) -> int:
+    if argv != [INTERNAL_PLUGIN_SELF_TEST_COMMAND, "--format", "json"]:
+        stderr.write("invalid command input\n")
+        return 2
+    checks = {
+        "principalIsolation": False,
+        "samePayloadReplay": False,
+        "differentPayloadConflict": False,
+        "restartReplay": False,
+    }
+    try:
+        from .plugin.config import PluginPrincipalRegistry
+        from .plugin.store import IdempotencyConflict, PluginStore
+
+        with tempfile.TemporaryDirectory(prefix="openusage-plugin-self-test-") as temporary:
+            registry = PluginPrincipalRegistry.load_or_create(
+                Path(temporary) / "tokens"
+            )
+            token_values = {
+                principal: registry.token_path(principal)
+                .read_text(encoding="ascii")
+                .strip()
+                for principal in ("loom", "codex", "claude_code", "desktop")
+            }
+            tokens_isolated = (
+                len(set(token_values.values())) == 4
+                and all(
+                    registry.authenticate(token) == principal
+                    for principal, token in token_values.items()
+                )
+            )
+            path = Path(temporary) / "plugin.sqlite3"
+            key = "idem_0123456789abcdef0123456789abcdef"
+            projection = {"synthetic": True}
+            calls = 0
+
+            def operation() -> tuple[int, dict[str, object]]:
+                nonlocal calls
+                calls += 1
+                return 200, {"syntheticReceipt": "loom"}
+
+            first_store = PluginStore(path)
+            first = first_store.execute_idempotent(
+                principal="loom", route="/plugin/v1/route-advice", key=key,
+                projection=projection, operation=operation,
+            )
+            second = first_store.execute_idempotent(
+                principal="loom", route="/plugin/v1/route-advice", key=key,
+                projection=projection, operation=operation,
+            )
+            checks["samePayloadReplay"] = first == second and calls == 1
+            try:
+                first_store.execute_idempotent(
+                    principal="loom", route="/plugin/v1/route-advice", key=key,
+                    projection={"synthetic": False}, operation=operation,
+                )
+            except IdempotencyConflict:
+                checks["differentPayloadConflict"] = True
+            codex = first_store.execute_idempotent(
+                principal="codex", route="/plugin/v1/route-advice", key=key,
+                projection=projection,
+                operation=lambda: (200, {"syntheticReceipt": "codex"}),
+            )
+            checks["principalIsolation"] = tokens_isolated and codex != first
+            first_store.close()
+            reopened = PluginStore(path)
+            replay = reopened.execute_idempotent(
+                principal="loom", route="/plugin/v1/route-advice", key=key,
+                projection=projection, operation=operation,
+            )
+            reopened.close()
+            checks["restartReplay"] = replay == first and calls == 1
+    except Exception:
+        pass
+    ok = all(checks.values())
+    _write_json(stdout, {
+        "apiVersion": "plugin-self-test/v1",
+        "object": "plugin.server_self_test",
+        "ok": ok,
+        "synthetic": True,
+        "checks": checks,
+    })
+    return 0 if ok else 1
+
+
 def _parser() -> SafeArgumentParser:
     parser = SafeArgumentParser(prog="openusage-bar")
     parser.add_argument("--offline", action="store_true")
@@ -278,6 +367,15 @@ def _parser() -> SafeArgumentParser:
     gateway_start.add_argument(
         "--token-path",
     )
+    plugin = commands.add_parser("plugin")
+    plugin_commands = plugin.add_subparsers(
+        dest="plugin_action", required=True,
+    )
+    plugin_commands.add_parser("status")
+    plugin_start = plugin_commands.add_parser("start")
+    plugin_start.add_argument("--state-dir")
+    for action in ("install-service", "uninstall-service", "print-service"):
+        plugin_commands.add_parser(action)
     return parser
 
 
@@ -346,6 +444,19 @@ def _default_gateway_token_path() -> str:
             PureWindowsPath(local_app_data) / "openusage-bar" / "gateway.token"
         )
     return str(DEFAULT_GATEWAY_TOKEN_PATH)
+
+
+def _runtime_descriptor() -> Any:
+    from .runtime_descriptor import RuntimeDescriptor
+
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            raise CLIError("missing local application data directory")
+        state_dir: os.PathLike[str] = PureWindowsPath(local_app_data) / "openusage-bar"
+    else:
+        state_dir = Path.home() / ".local" / "state" / "openusage-bar"
+    return RuntimeDescriptor.for_platform(sys.platform, state_dir=state_dir)
 
 
 def _fresh_timeout(value: int) -> int:
@@ -972,6 +1083,148 @@ def _run_gateway_server(
     return 0
 
 
+class _UnavailablePluginDependency:
+    def request(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("dependency unavailable")
+
+    def query_usage(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("dependency unavailable")
+
+    def query_quotas(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("dependency unavailable")
+
+    def should_send(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("dependency unavailable")
+
+    def health(self) -> str:
+        raise RuntimeError("dependency unavailable")
+
+
+class _LazyPluginFacts:
+    def __init__(self, descriptor: Any) -> None:
+        self._descriptor = descriptor
+
+    def _client(self) -> Any:
+        from .plugin.clients import BoundedJSONTransport, LocalFactsClient
+        from .plugin.config import read_private_token
+
+        if self._descriptor.local_api_transport == "unix":
+            transport = BoundedJSONTransport(
+                unix_socket_path=Path(str(self._descriptor.local_api_socket_path)),
+            )
+        else:
+            transport = BoundedJSONTransport(
+                host="127.0.0.1", port=self._descriptor.local_api_port,
+                bearer_token=read_private_token(
+                    Path(str(self._descriptor.local_api_token_path))
+                ),
+            )
+        return LocalFactsClient(transport)
+
+    def request(self, route: str, query: dict[str, object]) -> dict[str, object]:
+        return self._client().request(route, query)
+
+    def query_usage(self, request: dict[str, object]) -> dict[str, object]:
+        return self._client().query_usage(request)
+
+    def query_quotas(self, request: dict[str, object]) -> dict[str, object]:
+        return self._client().query_quotas(request)
+
+
+class _LazyPluginAdvice:
+    def __init__(self, descriptor: Any) -> None:
+        self._descriptor = descriptor
+
+    def _client(self) -> Any:
+        from .plugin.clients import BoundedJSONTransport, GatewayAdviceClient
+        from .plugin.config import read_private_token
+
+        transport = BoundedJSONTransport(
+            host=self._descriptor.gateway_host, port=self._descriptor.gateway_port,
+            bearer_token=read_private_token(
+                Path(str(self._descriptor.gateway_token_path))
+            ),
+        )
+        return GatewayAdviceClient(transport)
+
+    def should_send(self, request: dict[str, object]) -> dict[str, object]:
+        return self._client().should_send(request)
+
+    def health(self) -> str:
+        return self._client().health()
+
+
+def _build_default_plugin_server(*, descriptor: Any, state_dir: Path) -> Any:
+    from .plugin.api import PluginRouter
+    from .plugin.config import PluginPrincipalRegistry
+    from .plugin.server import create_plugin_server
+    from .plugin.store import PluginStore
+
+    registry = PluginPrincipalRegistry.load_or_create(state_dir)
+    plugin_store = PluginStore(state_dir / "plugin.sqlite3")
+    facts: object = _LazyPluginFacts(descriptor)
+    advice: object = _LazyPluginAdvice(descriptor)
+    router = PluginRouter(
+        store=plugin_store, facts_client=facts, advice_client=advice,
+        configured_principals=(),
+    )
+    try:
+        return create_plugin_server(
+            router, registry=registry, host="127.0.0.1", port=17824,
+        )
+    except Exception:
+        router.close()
+        raise
+
+
+def _run_plugin_server(
+    *, descriptor: Any, state_dir: Path,
+    stop_event: threading.Event | None,
+    server_factory: Callable[..., Any] | None,
+    stderr: TextIO,
+) -> int:
+    active_stop = stop_event or threading.Event()
+    if stop_event is None and threading.current_thread() is threading.main_thread():
+        def stop(*_: object) -> None:
+            active_stop.set()
+        signal.signal(signal.SIGTERM, stop)
+        signal.signal(signal.SIGINT, stop)
+    try:
+        server = (server_factory or _build_default_plugin_server)(
+            descriptor=descriptor, state_dir=state_dir,
+        )
+    except Exception:
+        stderr.write("plugin API unavailable\n")
+        return 1
+    failed = threading.Event()
+
+    def serve() -> None:
+        try:
+            server.serve_forever()
+        except Exception:
+            failed.set()
+            active_stop.set()
+
+    thread = threading.Thread(target=serve, name="openusage-plugin", daemon=True)
+    cleanup_failed = False
+    thread.start()
+    try:
+        active_stop.wait()
+    except KeyboardInterrupt:
+        active_stop.set()
+    finally:
+        try:
+            server.shutdown()
+            server.server_close()
+        except Exception:
+            cleanup_failed = True
+        thread.join(5)
+    if failed.is_set() or cleanup_failed or thread.is_alive():
+        stderr.write("plugin API unavailable\n")
+        return 1
+    return 0
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -993,10 +1246,15 @@ def main(
     child_environment: dict[str, str] | None = None,
     catalog_monitor: Any | None = None,
     gateway_server_factory: Callable[..., Any] | None = None,
+    plugin_server_factory: Callable[..., Any] | None = None,
 ) -> int:
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == INTERNAL_PLUGIN_SELF_TEST_COMMAND:
+        return _internal_plugin_self_test(
+            arguments, stdout=stdout, stderr=stderr,
+        )
     if arguments and arguments[0] == INTERNAL_GATEWAY_SELF_TEST_COMMAND:
         return _internal_gateway_self_test(
             arguments,
@@ -1021,6 +1279,44 @@ def main(
     except CLIError:
         stderr.write("invalid command input\n")
         return 2
+
+    if args.command == "plugin":
+        try:
+            descriptor = _runtime_descriptor()
+            state_dir = (
+                Path(args.state_dir)
+                if args.plugin_action == "start" and args.state_dir is not None
+                else Path(str(descriptor.plugin_state_dir))
+            )
+            if args.plugin_action == "status":
+                _write_json(stdout, {
+                    "apiVersion": "plugin-runtime/v1", "object": "plugin.runtime",
+                    "host": descriptor.plugin_host, "port": descriptor.plugin_port,
+                    "configured": state_dir.is_dir(),
+                })
+                return 0
+            if args.plugin_action in {"install-service", "uninstall-service", "print-service"}:
+                from . import platform_services
+                if args.plugin_action == "print-service":
+                    stdout.write(platform_services.render_plugin_current_platform() + "\n")
+                elif args.plugin_action == "install-service":
+                    platform_services.install_plugin_service()
+                else:
+                    platform_services.uninstall_plugin_service()
+                return 0
+            if not state_dir.is_absolute() or ".." in state_dir.parts:
+                raise CLIError("invalid Plugin state directory")
+            return _run_plugin_server(
+                descriptor=descriptor, state_dir=state_dir,
+                stop_event=stop_event, server_factory=plugin_server_factory,
+                stderr=stderr,
+            )
+        except CLIError:
+            stderr.write("invalid command input\n")
+            return 2
+        except Exception:
+            stderr.write("plugin API unavailable\n")
+            return 1
 
     gateway_config: Any | None = None
     gateway_token_path: str | None = None

@@ -741,6 +741,7 @@ def inspect_desktop_package(
     *,
     built_collector: Path | None = None,
     built_settings: Path | None = None,
+    built_bridge: Path | None = None,
     canonical_identity: Path | None = None,
     product_truth: Path | None = None,
     require_final_native_metadata: bool = False,
@@ -839,6 +840,39 @@ def inspect_desktop_package(
         if not _native_collector(packaged_settings, platform):
             raise ArtifactError("binary")
         _verify_built_collector(packaged_settings, built_settings, platform)
+    if built_bridge is not None:
+        bridge_name = (
+            "openusage-plugin-bridge.exe" if platform == "win32"
+            else "openusage-plugin-bridge"
+        )
+        bridge_directory = resource_root / "bridge"
+        try:
+            directory_stat = bridge_directory.lstat()
+            if not stat.S_ISDIR(directory_stat.st_mode):
+                raise ArtifactError("collector")
+            with os.scandir(bridge_directory) as entries:
+                first = next(entries, None)
+                second = next(entries, None)
+            if first is None or second is not None or first.name != bridge_name:
+                raise ArtifactError("collector")
+            bridge_stat = first.stat(follow_symlinks=False)
+        except OSError as error:
+            raise ArtifactError("collector") from error
+        if (
+            not stat.S_ISREG(bridge_stat.st_mode)
+            or bridge_stat.st_size > MAX_DESKTOP_MEMBER_BYTES
+            or (
+                platform != "win32"
+                and bridge_stat.st_mode
+                & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                == 0
+            )
+        ):
+            raise ArtifactError("collector")
+        packaged_bridge = Path(first.path)
+        if not _native_collector(packaged_bridge, platform):
+            raise ArtifactError("binary")
+        _verify_built_collector(packaged_bridge, built_bridge, platform)
 
     desktop_entries: list[Path] = []
     for member, _size in _desktop_files(package_root):
@@ -978,12 +1012,18 @@ def main(arguments: list[str]) -> int:
     )
     desktop_core = arguments[:-1] if require_final_native_metadata else arguments
     desktop_arguments = (
-        len(desktop_core) in {5, 7}
+        len(desktop_core) in {5, 7, 9}
         and desktop_core[0] == "--desktop-package"
         and desktop_core[3] == "--built-collector"
         and (
             len(desktop_core) == 5
-            or desktop_core[5] == "--built-settings"
+            or (
+                desktop_core[5] == "--built-settings"
+                and (
+                    len(desktop_core) == 7
+                    or desktop_core[7] == "--built-bridge"
+                )
+            )
         )
     )
     if len(arguments) != 1 and not desktop_arguments:
@@ -997,7 +1037,10 @@ def main(arguments: list[str]) -> int:
                 _desktop_platform(root, arguments[2]),
                 built_collector=Path(arguments[4]),
                 built_settings=(
-                    Path(desktop_core[6]) if len(desktop_core) == 7 else None
+                    Path(desktop_core[6]) if len(desktop_core) >= 7 else None
+                ),
+                built_bridge=(
+                    Path(desktop_core[8]) if len(desktop_core) == 9 else None
                 ),
                 require_final_native_metadata=require_final_native_metadata,
             )

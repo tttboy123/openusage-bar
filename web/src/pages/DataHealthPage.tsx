@@ -3,6 +3,7 @@
  import { ArrowClockwise, CaretDown } from "@phosphor-icons/react";
  import {
    fetchObserverPlatformCapability,
+   fetchPluginConnections,
    fetchProviders,
    fetchQuickConnect,
    fetchRuntimeCapability,
@@ -31,6 +32,17 @@
    type ObserverPlatformTone,
  } from "../observerPlatformCapability";
  import type { RuntimeCapability } from "../runtimeCapability";
+ import {
+   type PluginCapability,
+   type PluginCapabilityState,
+   type PluginConfiguration,
+   type PluginConnection,
+   type PluginConnections,
+   type PluginConnectionState,
+   type PluginId,
+   type PluginSyncOutcome,
+ } from "../pluginConnections";
+ import { pluginHealthViewState } from "../pluginHealthViewState";
  import { serviceStatusViewModel } from "../serviceStatusViewModel";
 
  function formatTime(iso: string | null | undefined, t: Messages): string {
@@ -59,6 +71,138 @@
    causeKey: DataHealthCauseKey;
    presentation: DataHealthStatePresentation;
  };
+
+ const PLUGIN_NAMES: Record<PluginId, string> = {
+   loom: "Loom",
+   codex: "Codex",
+   claude_code: "Claude Code",
+ };
+ const PLUGIN_CONFIGURATION_KEYS: Record<PluginConfiguration, keyof Messages> = {
+   configured: "pluginConfigurationConfigured",
+   not_configured: "pluginConfigurationNotConfigured",
+   unknown: "pluginConfigurationUnknown",
+ };
+ const PLUGIN_CONNECTION_KEYS: Record<PluginConnectionState, keyof Messages> = {
+   never_seen: "pluginConnectionNeverSeen",
+   connected: "pluginConnectionConnected",
+   stale: "pluginConnectionStale",
+   unknown: "pluginConnectionUnknown",
+ };
+ const PLUGIN_CAPABILITY_STATE_KEYS: Record<PluginCapabilityState, keyof Messages> = {
+   not_negotiated: "pluginCapabilityNotNegotiated",
+   negotiated: "pluginCapabilityNegotiated",
+   incompatible: "pluginCapabilityIncompatible",
+   unknown: "pluginCapabilityUnknown",
+ };
+ const PLUGIN_CAPABILITY_KEYS: Record<PluginCapability, keyof Messages> = {
+   "usage.query": "pluginCapabilityUsageQuery",
+   "quotas.query": "pluginCapabilityQuotasQuery",
+   "health.query": "pluginCapabilityHealthQuery",
+   "route.advice": "pluginCapabilityRouteAdvice",
+   "outcome.record": "pluginCapabilityOutcomeRecord",
+   "decision.lookup": "pluginCapabilityDecisionLookup",
+ };
+ const PLUGIN_SYNC_KEYS: Record<PluginSyncOutcome, keyof Messages> = {
+   never: "pluginSyncNever",
+   succeeded: "pluginSyncSucceeded",
+   failed: "pluginSyncFailed",
+   unknown: "pluginSyncUnknown",
+ };
+
+ function pluginConfigurationTone(value: PluginConfiguration): string {
+   return value === "unknown" ? "pill-unknown" : "pill-neutral";
+ }
+
+ function pluginConnectionTone(value: PluginConnectionState): string {
+   if (value === "connected") return "pill-ok";
+   if (value === "stale") return "pill-warn";
+   if (value === "unknown") return "pill-unknown";
+   return "pill-neutral";
+ }
+
+ function pluginCapabilityTone(value: PluginCapabilityState): string {
+   if (value === "incompatible") return "pill-bad";
+   if (value === "unknown") return "pill-unknown";
+   return "pill-neutral";
+ }
+
+ function pluginSyncTone(value: PluginSyncOutcome): string {
+   if (value === "succeeded") return "pill-ok";
+   if (value === "failed") return "pill-bad";
+   if (value === "unknown") return "pill-unknown";
+   return "pill-neutral";
+ }
+
+ function PluginConnectionRow({
+   connection,
+   t,
+ }: {
+   connection: PluginConnection;
+   t: Messages;
+ }) {
+   return (
+     <li className="plugin-connection-item">
+       <h4>{PLUGIN_NAMES[connection.pluginId]}</h4>
+       <dl className="plugin-connection-facts">
+         <div>
+           <dt>{t.pluginConfiguration}</dt>
+           <dd className="plugin-connection-value">
+             <span className={`pill ${pluginConfigurationTone(connection.configuration)}`}>
+               {t[PLUGIN_CONFIGURATION_KEYS[connection.configuration]]}
+             </span>
+           </dd>
+         </div>
+         <div>
+           <dt>{t.pluginConnection}</dt>
+           <dd className="plugin-connection-value">
+             <span className={`pill ${pluginConnectionTone(connection.connection)}`}>
+               {t[PLUGIN_CONNECTION_KEYS[connection.connection]]}
+             </span>
+             {connection.lastSeenAt !== null ? (
+               <span className="plugin-connection-time">
+                 {t.pluginLastSeen}{" "}
+                 <time dateTime={connection.lastSeenAt}>
+                   {formatTime(connection.lastSeenAt, t)}
+                 </time>
+               </span>
+             ) : null}
+           </dd>
+         </div>
+         <div>
+           <dt>{t.pluginCapabilities}</dt>
+           <dd className="plugin-connection-value">
+             <span className={`pill ${pluginCapabilityTone(connection.capabilityState)}`}>
+               {t[PLUGIN_CAPABILITY_STATE_KEYS[connection.capabilityState]]}
+             </span>
+             {connection.capabilities.length > 0 ? (
+               <ul className="plugin-capability-list" aria-label={t.pluginCapabilities}>
+                 {connection.capabilities.map((capability) => (
+                   <li key={capability}>{t[PLUGIN_CAPABILITY_KEYS[capability]]}</li>
+                 ))}
+               </ul>
+             ) : null}
+           </dd>
+         </div>
+         <div>
+           <dt>{t.pluginRecentSync}</dt>
+           <dd className="plugin-connection-value">
+             <span className={`pill ${pluginSyncTone(connection.lastSyncOutcome)}`}>
+               {t[PLUGIN_SYNC_KEYS[connection.lastSyncOutcome]]}
+             </span>
+             {connection.lastSyncAt !== null ? (
+               <time
+                 className="plugin-connection-time"
+                 dateTime={connection.lastSyncAt}
+               >
+                 {formatTime(connection.lastSyncAt, t)}
+               </time>
+             ) : null}
+           </dd>
+         </div>
+       </dl>
+     </li>
+   );
+ }
 
  function DataHealthRow({
    row,
@@ -152,6 +296,11 @@
    const [capabilityLoaded, setCapabilityLoaded] = useState(false);
    const [capabilityRefreshing, setCapabilityRefreshing] = useState(false);
    const [capabilityError, setCapabilityError] = useState(false);
+   const [pluginConnections, setPluginConnections] =
+     useState<PluginConnections | null>(null);
+   const [pluginLoaded, setPluginLoaded] = useState(false);
+   const [pluginRefreshing, setPluginRefreshing] = useState(false);
+   const [pluginError, setPluginError] = useState(false);
    const [sources, setSources] = useState<SourceItem[]>([]);
    const [providers, setProviders] = useState<ProviderItem[]>([]);
    const [quick, setQuick] = useState<QuickConnectItem[]>([]);
@@ -162,6 +311,7 @@
    const [error, setError] = useState(false);
    const [searchParams, setSearchParams] = useSearchParams();
    const allSourcesButtonRef = useRef<HTMLButtonElement>(null);
+   const pluginActionRef = useRef<HTMLButtonElement>(null);
 
    const load = useCallback(async () => {
      try {
@@ -214,12 +364,37 @@
      }
    }
 
+   async function refreshPluginStatus(restoreFocus = false) {
+     setPluginRefreshing(true);
+     try {
+       const next = await fetchPluginConnections();
+       if (next === null) {
+         setPluginError(true);
+       } else {
+         setPluginConnections(next);
+         setPluginError(false);
+       }
+     } catch {
+       setPluginError(true);
+     } finally {
+       setPluginLoaded(true);
+       setPluginRefreshing(false);
+       if (restoreFocus) {
+         requestAnimationFrame(() => pluginActionRef.current?.focus());
+       }
+     }
+   }
+
    useEffect(() => {
      void load();
    }, [load]);
 
    useEffect(() => {
      void refreshCapability();
+   }, []);
+
+   useEffect(() => {
+     void refreshPluginStatus();
    }, []);
 
    const providerByFamily = useMemo(
@@ -324,6 +499,11 @@
      failed: capabilityError,
      hasSnapshot:
        capabilityLoading || capability !== null || observerPlatform !== null,
+   });
+   const pluginStatus = pluginHealthViewState({
+     checking: !pluginLoaded || pluginRefreshing,
+     failed: pluginError,
+     hasSnapshot: pluginConnections !== null,
    });
 
    const serviceSnapshot = serviceStatus.showSnapshot ? (
@@ -503,7 +683,8 @@
            aria-live="polite"
            aria-atomic="true"
          >
-           {t[serviceStatus.announcementKey]}
+           <span>{t[serviceStatus.announcementKey]}</span>{" "}
+           <span>{t[pluginStatus.announcementKey]}</span>
          </p>
          <button
            type="button"
@@ -524,6 +705,66 @@
        </div>
 
        {serviceSnapshot}
+
+       <section
+         className="panel plugin-connections-panel"
+         aria-labelledby="plugin-connections-title"
+         aria-describedby="plugin-connections-hint"
+         aria-busy={pluginStatus.actionBusy}
+       >
+         <div className="panel-head">
+           <h3 id="plugin-connections-title">{t.pluginConnectionsTitle}</h3>
+           <span>{t.gatewayOptional}</span>
+         </div>
+         <div className="panel-body">
+           <p id="plugin-connections-hint" className="plugin-connections-hint">
+             {t.pluginConnectionsHint}
+           </p>
+           <div className="plugin-connections-toolbar">
+             <p className="plugin-connections-message">
+               {pluginStatus.messageKey
+                 ? t[pluginStatus.messageKey]
+                 : pluginConnections !== null
+                   ? tpl(t.pluginConnectionsObservedAt, {
+                       time: formatTime(pluginConnections.observedAt, t),
+                     })
+                   : t.pluginConnectionsUnavailable}
+             </p>
+             <button
+               ref={pluginActionRef}
+               type="button"
+               className="icon-btn plugin-connections-action"
+               onClick={() => void refreshPluginStatus(true)}
+               disabled={pluginStatus.actionDisabled}
+               aria-busy={pluginStatus.actionBusy}
+             >
+               <ArrowClockwise
+                 size={16}
+                 className={`plugin-connections-spinner${
+                   pluginStatus.actionBusy ? " spinning" : ""
+                 }`}
+                 aria-hidden="true"
+               />
+               {t[pluginStatus.actionKey]}
+             </button>
+           </div>
+         </div>
+         {!pluginLoaded && pluginConnections === null ? (
+           <div className="panel-body plugin-connections-loading">
+             <Skeleton lines={5} />
+           </div>
+         ) : pluginStatus.showSnapshot && pluginConnections !== null ? (
+           <ul className="plugin-connection-list">
+             {pluginConnections.connections.map((connection) => (
+               <PluginConnectionRow
+                 key={connection.pluginId}
+                 connection={connection}
+                 t={t}
+               />
+             ))}
+           </ul>
+         ) : null}
+       </section>
 
        <section className="panel" aria-labelledby="observer-sources-title">
        <div className="panel-head">

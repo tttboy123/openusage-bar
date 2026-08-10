@@ -47,6 +47,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "x64",
         "artifact_ext": "dmg",
         "collector": "openusage-collector",
+        "bridge": "openusage-plugin-bridge",
         "settings": "openusage-settings",
     },
     {
@@ -61,6 +62,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "arm64",
         "artifact_ext": "dmg",
         "collector": "openusage-collector",
+        "bridge": "openusage-plugin-bridge",
         "settings": "openusage-settings",
     },
     {
@@ -75,6 +77,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "x64",
         "artifact_ext": "exe",
         "collector": "openusage-collector.exe",
+        "bridge": "openusage-plugin-bridge.exe",
         "settings": "openusage-settings.exe",
     },
     {
@@ -89,6 +92,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "arm64",
         "artifact_ext": "exe",
         "collector": "openusage-collector.exe",
+        "bridge": "openusage-plugin-bridge.exe",
         "settings": "openusage-settings.exe",
     },
     {
@@ -103,6 +107,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "x86_64",
         "artifact_ext": "AppImage",
         "collector": "openusage-collector",
+        "bridge": "openusage-plugin-bridge",
         "settings": "openusage-settings",
     },
     {
@@ -117,6 +122,7 @@ DESKTOP_MATRIX = [
         "artifact_arch": "arm64",
         "artifact_ext": "AppImage",
         "collector": "openusage-collector",
+        "bridge": "openusage-plugin-bridge",
         "settings": "openusage-settings",
     },
 ]
@@ -333,6 +339,30 @@ class DesktopPackagingContractTests(unittest.TestCase):
                     [{
                         "from": f"../dist-collector/{expected['collector']}",
                         "to": f"collector/{expected['collector']}",
+                    }],
+                )
+
+    def test_each_target_copies_exactly_one_native_plugin_bridge_to_the_fixed_resource_path(self):
+        package = json.loads((DESKTOP / "package.json").read_text(encoding="utf-8"))
+        bridge_names = {
+            "mac": "openusage-plugin-bridge",
+            "win": "openusage-plugin-bridge.exe",
+            "linux": "openusage-plugin-bridge",
+        }
+        for platform, executable_name in bridge_names.items():
+            with self.subTest(platform=platform):
+                resources = package["build"][platform]["extraResources"]
+                bridge_resources = [
+                    item
+                    for item in resources
+                    if isinstance(item, dict)
+                    and str(item.get("to", "")).startswith("bridge/")
+                ]
+                self.assertEqual(
+                    bridge_resources,
+                    [{
+                        "from": f"../dist-bridge/{executable_name}",
+                        "to": f"bridge/{executable_name}",
                     }],
                 )
 
@@ -856,6 +886,8 @@ class DesktopPackagingContractTests(unittest.TestCase):
                 collector,
                 "--built-settings",
                 "./dist-settings/${{matrix.settings}}",
+                "--built-bridge",
+                "./dist-bridge/${{matrix.bridge}}",
             ]],
             "CI must pass one exact desktop audit command in the CLI contract order",
         )
@@ -977,6 +1009,92 @@ class DesktopPackagingContractTests(unittest.TestCase):
             paths = _event_paths(source, event)
             self.assertIn("web/e2e/**", paths)
             self.assertIn("web/playwright.config.ts", paths)
+
+    def test_plugin_bridge_is_built_smoked_and_browser_checked_before_packaging(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        steps = _mapping_list(source, section="steps", item_indent=6)
+        by_name = {step.get("name"): step for step in steps}
+        collector_build = by_name["Build bundled collector"]
+        bridge_build = by_name["Build bundled Plugin bridge"]
+        plugin_smoke = by_name["Smoke bundled Plugin API"]
+        package = by_name["Package desktop app"]
+
+        self.assertLess(steps.index(collector_build), steps.index(bridge_build))
+        self.assertLess(steps.index(bridge_build), steps.index(plugin_smoke))
+        self.assertLess(steps.index(plugin_smoke), steps.index(package))
+        self.assertIn("openusage_plugin_bridge.py", bridge_build["run"])
+        self.assertIn("dist-bridge", bridge_build["run"])
+        self.assertIn("matrix.bridge", bridge_build["run"])
+        self.assertNotIn("--collect-submodules openusage_bar", bridge_build["run"])
+        self.assertNotIn("--collect-data openusage_bar", bridge_build["run"])
+        self.assertNotIn("secretstorage", bridge_build["run"])
+        self.assertNotIn("jeepney", bridge_build["run"])
+        self.assertNotIn("--hidden-import Security", bridge_build["run"])
+        self.assertEqual(bridge_build["run"].count("--add-data"), 1)
+        self.assertIn('data_sep=":"', bridge_build["run"])
+        self.assertIn(
+            'if [[ "$RUNNER_OS" == "Windows" ]]; then\ndata_sep=";"\nfi',
+            bridge_build["run"],
+        )
+        self.assertIn(
+            "--add-data "
+            '"openusage_bar/resources/plugin-api-v1.schema.json'
+            '${data_sep}openusage_bar/resources"',
+            bridge_build["run"],
+        )
+        self.assertNotIn("openusage_bar/resources/*.json", bridge_build["run"])
+        self.assertEqual(
+            _active_shell_commands(plugin_smoke["run"]),
+            [[
+                "python",
+                "scripts/smoke_plugin_api.py",
+                "--collector",
+                "./dist-collector/${{matrix.collector}}",
+                "--bridge",
+                "./dist-bridge/${{matrix.bridge}}",
+            ]],
+        )
+
+        browser_install = by_name["Install Gateway Account Playwright browser"]
+        plugin_e2e = by_name["Run Plugin Connections browser E2E"]
+        self.assertLess(steps.index(browser_install), steps.index(plugin_e2e))
+        self.assertEqual(plugin_e2e.get("working-directory"), "web")
+        self.assertEqual(
+            plugin_e2e.get("if"),
+            "matrix.platform == 'linux' && matrix.arch == 'x64'",
+        )
+        self.assertEqual(
+            _active_shell_commands(plugin_e2e["run"]),
+            [["npm", "run", "test:e2e:plugin-health"]],
+        )
+
+        for audit_name in (
+            "Audit packaged collector",
+            "Audit final macOS DMG",
+            "Audit final Windows NSIS payload",
+            "Audit final Linux AppImage payload",
+        ):
+            with self.subTest(audit_name=audit_name):
+                audit = by_name[audit_name]["run"]
+                self.assertIn("--built-bridge", audit)
+                self.assertIn("./dist-bridge/${{ matrix.bridge }}", audit)
+
+        upload_steps = [
+            step
+            for step in steps
+            if step.get("uses", "").startswith("actions/upload-artifact@")
+        ]
+        self.assertEqual(
+            [step.get("name") for step in upload_steps],
+            ["${{ matrix.upload_name }}"],
+            "Plugin gates must stay inside the existing retained handoff upload",
+        )
+        self.assertEqual(
+            [step.get("path") for step in upload_steps],
+            ["${{ steps.release_handoff.outputs.path }}"],
+        )
+        self.assertNotIn("playwright-report", source)
+        self.assertNotIn("test-results", source)
 
     def test_ci_fails_closed_on_high_or_critical_desktop_dependency_audit(self):
         source = WORKFLOW.read_text(encoding="utf-8")

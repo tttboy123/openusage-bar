@@ -9,6 +9,7 @@ import {
 } from "./shouldSendAdvice";
 import type { ObserverPlatformCapability } from "./observerPlatformCapability";
 import type { DecisionTraces } from "./decisionTraces";
+import type { PluginConnections } from "./pluginConnections";
 
 export interface SnapshotSummary {
   todayTokens?: number;
@@ -277,6 +278,15 @@ export async function fetchDecisionTraces(): Promise<DecisionTraces | null> {
     credentials: "omit",
   });
   return normalizeDecisionTraces(payload);
+}
+
+export async function fetchPluginConnections(): Promise<PluginConnections | null> {
+  const { normalizePluginConnections } = await import("./pluginConnections");
+  const payload = await getJson<unknown>("/host/v1/plugin-connections", {
+    method: "GET",
+    credentials: "omit",
+  });
+  return normalizePluginConnections(payload);
 }
 
 export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {

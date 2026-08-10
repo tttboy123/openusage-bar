@@ -22,6 +22,10 @@ class RuntimeDescriptor:
     gateway_host: str
     gateway_port: int
     gateway_token_path: _RuntimePath
+    plugin_host: str
+    plugin_port: int
+    plugin_state_dir: _RuntimePath
+    plugin_database_path: _RuntimePath
 
     @classmethod
     def for_platform(
@@ -41,6 +45,7 @@ class RuntimeDescriptor:
 
         directory = _validated_state_dir(state_dir, path_type=path_type)
         gateway_token_path = directory / "gateway.token"
+        plugin_state_dir = directory / "plugin"
 
         if platform == "win32":
             return cls(
@@ -52,6 +57,10 @@ class RuntimeDescriptor:
                 gateway_host="127.0.0.1",
                 gateway_port=17823,
                 gateway_token_path=gateway_token_path,
+                plugin_host="127.0.0.1",
+                plugin_port=17824,
+                plugin_state_dir=plugin_state_dir,
+                plugin_database_path=plugin_state_dir / "plugin.sqlite3",
             )
 
         return cls(
@@ -63,6 +72,10 @@ class RuntimeDescriptor:
             gateway_host="127.0.0.1",
             gateway_port=17823,
             gateway_token_path=gateway_token_path,
+            plugin_host="127.0.0.1",
+            plugin_port=17824,
+            plugin_state_dir=plugin_state_dir,
+            plugin_database_path=plugin_state_dir / "plugin.sqlite3",
         )
 
 

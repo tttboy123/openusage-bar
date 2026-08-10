@@ -20,6 +20,11 @@ const {
   isRendererApiTarget,
   startOrProbePrivateObserver,
 } = require("./gateway_proxy");
+const {
+  createPluginConnectionHandler,
+  discoverPrivatePluginRuntime,
+  isPluginConnectionRendererTarget,
+} = require("./plugin_connection_proxy");
 
 const WEB_ROOT = app.isPackaged
   ? path.join(process.resourcesPath, "web", "dist")
@@ -33,7 +38,9 @@ let isQuitting = false;
 let trayUpdateTimer = null;
 let lastTraySnapshot = null;
 let rendererApiHandler = null;
+let pluginConnectionHandler = null;
 let privateRuntime = null;
+let privatePluginRuntime = null;
 let verifyWindowsAcl = null;
 
 const MIME = {
@@ -67,18 +74,34 @@ function createPrivateApiHandler() {
   });
 }
 
+function createPrivatePluginConnectionHandler() {
+  return createPluginConnectionHandler({
+    runtime: privatePluginRuntime,
+    platform: process.platform,
+    verifyWindowsAcl,
+  });
+}
+
 function configurePrivateRuntime() {
+  verifyWindowsAcl =
+    process.platform === "win32" ? createWindowsAclVerifier() : undefined;
   try {
     privateRuntime = discoverPrivateRuntime({
       platform: process.platform,
       homeDir: os.homedir(),
       localAppData: process.env.LOCALAPPDATA,
     });
-    verifyWindowsAcl =
-      process.platform === "win32" ? createWindowsAclVerifier() : undefined;
   } catch {
     privateRuntime = null;
-    verifyWindowsAcl = null;
+  }
+  try {
+    privatePluginRuntime = discoverPrivatePluginRuntime({
+      platform: process.platform,
+      homeDir: os.homedir(),
+      localAppData: process.env.LOCALAPPDATA,
+    });
+  } catch {
+    privatePluginRuntime = null;
   }
 }
 
@@ -106,8 +129,11 @@ async function ensurePrivateObserver() {
 function startStaticServer() {
   return new Promise((resolve) => {
     rendererApiHandler = createPrivateApiHandler();
+    pluginConnectionHandler = createPrivatePluginConnectionHandler();
     staticServer = http.createServer((req, res) => {
-      if (isRendererApiTarget(req.url)) {
+      if (isPluginConnectionRendererTarget(req.url)) {
+        pluginConnectionHandler(req, res);
+      } else if (isRendererApiTarget(req.url)) {
         rendererApiHandler(req, res);
       } else {
         serveStatic(req, res);

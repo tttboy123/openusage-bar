@@ -13,6 +13,7 @@ on:
       - "build_support.py"
       - "openusage_bar/**"
       - "openusage_collector.py"
+      - "openusage_plugin_bridge.py"
       - "openusage_settings.py"
       - "requirements-build.txt"
       - "requirements-linux.txt"
@@ -41,6 +42,7 @@ on:
       - "scripts/release_artifact_audit.py"
       - "scripts/smoke_gateway_account_credentials.py"
       - "scripts/smoke_gateway.py"
+      - "scripts/smoke_plugin_api.py"
       - "scripts/verify_action_pins.py"
       - "scripts/verify_product_version_truth.py"
       - "scripts/verify_artifact_build_identity.py"
@@ -54,6 +56,8 @@ on:
       - "tests/test_gateway_account_editor_tk.py"
       - "tests/test_gateway_*.py"
       - "tests/test_decision_trace_cross_layer_contract.py"
+      - "tests/test_plugin_*.py"
+      - "tests/test_smoke_plugin_api.py"
       - "tests/test_keychain.py"
       - "tests/fixtures/gateway/performance-v1.json"
       - "tests/test_local_api.py"
@@ -85,6 +89,7 @@ on:
       - "build_support.py"
       - "openusage_bar/**"
       - "openusage_collector.py"
+      - "openusage_plugin_bridge.py"
       - "openusage_settings.py"
       - "requirements-build.txt"
       - "requirements-linux.txt"
@@ -113,6 +118,7 @@ on:
       - "scripts/release_artifact_audit.py"
       - "scripts/smoke_gateway_account_credentials.py"
       - "scripts/smoke_gateway.py"
+      - "scripts/smoke_plugin_api.py"
       - "scripts/verify_action_pins.py"
       - "scripts/verify_product_version_truth.py"
       - "scripts/verify_artifact_build_identity.py"
@@ -126,6 +132,8 @@ on:
       - "tests/test_gateway_account_editor_tk.py"
       - "tests/test_gateway_*.py"
       - "tests/test_decision_trace_cross_layer_contract.py"
+      - "tests/test_plugin_*.py"
+      - "tests/test_smoke_plugin_api.py"
       - "tests/test_keychain.py"
       - "tests/fixtures/gateway/performance-v1.json"
       - "tests/test_local_api.py"
@@ -168,6 +176,7 @@ jobs:
             artifact_arch: x64
             artifact_ext: dmg
             collector: openusage-collector
+            bridge: openusage-plugin-bridge
             settings: openusage-settings
           - platform: mac
             arch: arm64
@@ -180,6 +189,7 @@ jobs:
             artifact_arch: arm64
             artifact_ext: dmg
             collector: openusage-collector
+            bridge: openusage-plugin-bridge
             settings: openusage-settings
           - platform: win
             arch: x64
@@ -192,6 +202,7 @@ jobs:
             artifact_arch: x64
             artifact_ext: exe
             collector: openusage-collector.exe
+            bridge: openusage-plugin-bridge.exe
             settings: openusage-settings.exe
           - platform: win
             arch: arm64
@@ -204,6 +215,7 @@ jobs:
             artifact_arch: arm64
             artifact_ext: exe
             collector: openusage-collector.exe
+            bridge: openusage-plugin-bridge.exe
             settings: openusage-settings.exe
           - platform: linux
             arch: x64
@@ -216,6 +228,7 @@ jobs:
             artifact_arch: x86_64
             artifact_ext: AppImage
             collector: openusage-collector
+            bridge: openusage-plugin-bridge
             settings: openusage-settings
           - platform: linux
             arch: arm64
@@ -228,6 +241,7 @@ jobs:
             artifact_arch: arm64
             artifact_ext: AppImage
             collector: openusage-collector
+            bridge: openusage-plugin-bridge
             settings: openusage-settings
     runs-on: ${{ matrix.os }}
     steps:
@@ -322,6 +336,13 @@ jobs:
             tests.test_gateway_telemetry_composition \
             tests.test_gateway_telemetry_hardening \
             tests.test_gateway_upstream_streaming \
+            tests.test_plugin_api \
+            tests.test_plugin_store \
+            tests.test_plugin_clients \
+            tests.test_plugin_config \
+            tests.test_plugin_server \
+            tests.test_plugin_bridge \
+            tests.test_plugin_cross_layer_contract \
             tests.test_keychain \
             tests.test_local_api \
             tests.test_native_ci_evidence \
@@ -336,6 +357,7 @@ jobs:
             tests.test_release_artifact_audit_url_paths \
             tests.test_runtime_capabilities \
             tests.test_smoke_gateway_account_credentials \
+            tests.test_smoke_plugin_api \
             tests.test_smoke_gateway
       - name: Run native Windows Job contracts
         id: windows_native
@@ -361,6 +383,11 @@ jobs:
         if: matrix.platform == 'linux' && matrix.arch == 'x64'
         working-directory: web
         run: npm run test:e2e:decision-traces
+      - name: Run Plugin Connections browser E2E
+        id: plugin_connections_e2e
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        working-directory: web
+        run: npm run test:e2e:plugin-health
       - name: Audit web dependencies
         id: web_audit
         working-directory: web
@@ -442,6 +469,36 @@ jobs:
         id: gateway_smoke
         shell: bash
         run: python scripts/smoke_gateway.py --all --collector "./dist-collector/${{ matrix.collector }}"
+      - name: Build bundled Plugin bridge
+        id: plugin_bridge_build
+        shell: bash
+        run: |
+          bridge_name="${{ matrix.bridge }}"
+          bridge_name="${bridge_name%.exe}"
+          data_sep=":"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            data_sep=";"
+          fi
+          pyinstaller_args=(
+            --clean
+            --noconfirm
+            --onefile
+            --name "$bridge_name"
+            --distpath dist-bridge
+            --workpath build-bridge/work
+            --specpath build-bridge
+            --paths .
+            --add-data "openusage_bar/resources/plugin-api-v1.schema.json${data_sep}openusage_bar/resources"
+          )
+          python -m PyInstaller "${pyinstaller_args[@]}" openusage_plugin_bridge.py
+          test -f "./dist-bridge/${{ matrix.bridge }}"
+      - name: Smoke bundled Plugin API
+        id: plugin_smoke
+        shell: bash
+        run: |
+          python scripts/smoke_plugin_api.py \
+            --collector "./dist-collector/${{ matrix.collector }}" \
+            --bridge "./dist-bridge/${{ matrix.bridge }}"
       - name: Build bundled settings helper
         id: settings_build
         shell: bash
@@ -617,7 +674,8 @@ jobs:
             --desktop-package "$package_root" \
             "${{ matrix.collector }}" \
             --built-collector "./dist-collector/${{ matrix.collector }}" \
-            --built-settings "./dist-settings/${{ matrix.settings }}"
+            --built-settings "./dist-settings/${{ matrix.settings }}" \
+            --built-bridge "./dist-bridge/${{ matrix.bridge }}"
       - name: Resolve final artifact
         id: artifact
         shell: bash
@@ -669,6 +727,7 @@ jobs:
             "${{ matrix.collector }}" \
             --built-collector "./dist-collector/${{ matrix.collector }}" \
             --built-settings "./dist-settings/${{ matrix.settings }}" \
+            --built-bridge "./dist-bridge/${{ matrix.bridge }}" \
             --require-final-native-metadata
           python scripts/smoke_gateway.py --all \
             --collector "$package_root/Contents/Resources/collector/${{ matrix.collector }}"
@@ -730,6 +789,7 @@ jobs:
             "${{ matrix.collector }}" `
             --built-collector "./dist-collector/${{ matrix.collector }}" `
             --built-settings "./dist-settings/${{ matrix.settings }}" `
+            --built-bridge "./dist-bridge/${{ matrix.bridge }}" `
             --require-final-native-metadata
           if ($LASTEXITCODE -ne 0) {
             throw "Final Windows app audit failed"
@@ -787,6 +847,7 @@ jobs:
             "${{ matrix.collector }}" \
             --built-collector "./dist-collector/${{ matrix.collector }}" \
             --built-settings "./dist-settings/${{ matrix.settings }}" \
+            --built-bridge "./dist-bridge/${{ matrix.bridge }}" \
             --require-final-native-metadata
           mkdir -p dist-evidence
           python scripts/distribution_trust_posture.py inspect \

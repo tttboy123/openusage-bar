@@ -23,6 +23,16 @@ class RuntimeDescriptorTests(unittest.TestCase):
         )
         self.assertEqual(descriptor.gateway_host, "127.0.0.1")
         self.assertEqual(descriptor.gateway_port, 17823)
+        self.assertEqual(descriptor.plugin_host, "127.0.0.1")
+        self.assertEqual(descriptor.plugin_port, 17824)
+        self.assertEqual(
+            descriptor.plugin_state_dir,
+            PureWindowsPath("C:/state/openusage-bar/plugin"),
+        )
+        self.assertEqual(
+            descriptor.plugin_database_path,
+            PureWindowsPath("C:/state/openusage-bar/plugin/plugin.sqlite3"),
+        )
         self.assertEqual(
             descriptor.gateway_token_path,
             PureWindowsPath("C:/state/openusage-bar/gateway.token"),
@@ -52,6 +62,12 @@ class RuntimeDescriptorTests(unittest.TestCase):
                 self.assertIsNone(descriptor.local_api_token_path)
                 self.assertEqual(descriptor.gateway_host, "127.0.0.1")
                 self.assertEqual(descriptor.gateway_port, 17823)
+                self.assertEqual(descriptor.plugin_host, "127.0.0.1")
+                self.assertEqual(descriptor.plugin_port, 17824)
+                self.assertEqual(
+                    descriptor.plugin_state_dir,
+                    PurePosixPath("/state/openusage-bar/plugin"),
+                )
                 self.assertEqual(
                     descriptor.gateway_token_path,
                     PurePosixPath("/state/openusage-bar/gateway.token"),

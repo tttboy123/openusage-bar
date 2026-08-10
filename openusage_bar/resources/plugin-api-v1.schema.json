@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenUsage Plugin API v1",
+  "apiVersion": "plugin.openusage/v1",
+  "namespace": "/plugin/v1",
+  "listener": {
+    "host": "127.0.0.1",
+    "port": 17824
+  },
+  "routes": [
+    "GET /plugin/v1/capabilities",
+    "GET /plugin/v1/connections",
+    "GET /plugin/v1/decisions/{decisionId}",
+    "GET /plugin/v1/schema",
+    "POST /plugin/v1/health/query",
+    "POST /plugin/v1/outcomes",
+    "POST /plugin/v1/quotas/query",
+    "POST /plugin/v1/route-advice",
+    "POST /plugin/v1/usage/query"
+  ],
+  "principals": [
+    "loom",
+    "codex",
+    "claude_code",
+    "desktop"
+  ],
+  "requestBodyMaxBytes": 65536,
+  "decisionIdPattern": "^decision_[0-9a-f]{32}$",
+  "idempotency": {
+    "requiredFor": [
+      "POST /plugin/v1/outcomes",
+      "POST /plugin/v1/route-advice"
+    ],
+    "keyPattern": "^idem_[0-9a-f]{32}$",
+    "retentionSeconds": 604800,
+    "maxEntriesPerPrincipal": 10000
+  },
+  "capabilityIds": [
+    "decision.lookup",
+    "health.query",
+    "outcome.record",
+    "quotas.query",
+    "route.advice",
+    "usage.query"
+  ]
+}

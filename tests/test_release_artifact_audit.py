@@ -498,6 +498,123 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
                     )
                 self.assertEqual(raised.exception.reason, "collector")
 
+    def test_desktop_package_requires_exact_bundled_plugin_bridge(self):
+        signature = inspect.signature(audit_module.inspect_desktop_package)
+        self.assertIn("built_bridge", signature.parameters)
+        cases = (
+            ("darwin", "Contents/Resources", "openusage-plugin-bridge"),
+            ("win32", "resources", "openusage-plugin-bridge.exe"),
+            ("linux", "resources", "openusage-plugin-bridge"),
+        )
+        if os.name == "nt":
+            cases = (cases[1],)
+        for platform, resources, executable_name in cases:
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                root = base / "package"
+                write_desktop_package(root, platform)
+                packaged = root / resources / "bridge" / executable_name
+                packaged.parent.mkdir(parents=True)
+                native = native_collector_bytes(platform, b"bridge-same-build")
+                packaged.write_bytes(native)
+                packaged.chmod(0o755)
+                built = base / "dist-bridge" / executable_name
+                built.parent.mkdir(parents=True)
+                built.write_bytes(native)
+                built.chmod(0o755)
+
+                audit_module.inspect_desktop_package(
+                    root,
+                    platform,
+                    built_bridge=built,
+                )
+
+                packaged.write_bytes(native_collector_bytes(platform, b"different"))
+                with self.assertRaises(ArtifactError):
+                    audit_module.inspect_desktop_package(
+                        root,
+                        platform,
+                        built_bridge=built,
+                    )
+                packaged.write_bytes(native)
+
+                extra = packaged.with_name("unexpected-helper")
+                extra.write_bytes(native)
+                extra.chmod(0o755)
+                with self.assertRaises(ArtifactError):
+                    audit_module.inspect_desktop_package(
+                        root,
+                        platform,
+                        built_bridge=built,
+                    )
+                extra.unlink()
+
+                packaged.rename(packaged.with_name("wrong-bridge-name"))
+                with self.assertRaises(ArtifactError):
+                    audit_module.inspect_desktop_package(
+                        root,
+                        platform,
+                        built_bridge=built,
+                    )
+                packaged = packaged.with_name("wrong-bridge-name")
+                packaged.rename(packaged.with_name(executable_name))
+                packaged = packaged.with_name(executable_name)
+
+                if platform != "win32":
+                    packaged.chmod(0o644)
+                    with self.assertRaises(ArtifactError):
+                        audit_module.inspect_desktop_package(
+                            root,
+                            platform,
+                            built_bridge=built,
+                        )
+
+    def test_desktop_package_cli_accepts_built_bridge_after_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "package"
+            platform = "win32" if os.name == "nt" else "linux"
+            suffix = ".exe" if platform == "win32" else ""
+            collector_name = f"openusage-collector{suffix}"
+            settings_name = f"openusage-settings{suffix}"
+            bridge_name = f"openusage-plugin-bridge{suffix}"
+            collector = write_desktop_package(root, platform, marker=b"cli")
+            resources = root / "resources"
+            packaged_settings = resources / "settings" / settings_name
+            packaged_bridge = resources / "bridge" / bridge_name
+            packaged_settings.parent.mkdir(parents=True)
+            packaged_bridge.parent.mkdir(parents=True)
+            settings_bytes = native_collector_bytes(platform, b"settings-cli")
+            bridge_bytes = native_collector_bytes(platform, b"bridge-cli")
+            packaged_settings.write_bytes(settings_bytes)
+            packaged_bridge.write_bytes(bridge_bytes)
+            packaged_settings.chmod(0o755)
+            packaged_bridge.chmod(0o755)
+            built_collector = base / "dist-collector" / collector_name
+            built_settings = base / "dist-settings" / settings_name
+            built_bridge = base / "dist-bridge" / bridge_name
+            built_collector.parent.mkdir()
+            built_settings.parent.mkdir()
+            built_bridge.parent.mkdir()
+            built_collector.write_bytes(collector.read_bytes())
+            built_settings.write_bytes(settings_bytes)
+            built_bridge.write_bytes(bridge_bytes)
+            for path_value in (built_collector, built_settings, built_bridge):
+                path_value.chmod(0o755)
+
+            output = io.StringIO()
+            error = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(error):
+                result = main([
+                    "--desktop-package", str(root), collector_name,
+                    "--built-collector", str(built_collector),
+                    "--built-settings", str(built_settings),
+                    "--built-bridge", str(built_bridge),
+                ])
+            self.assertEqual(result, 0)
+            self.assertEqual(output.getvalue(), "release_artifact_ok\n")
+            self.assertEqual(error.getvalue(), "")
+
     def test_desktop_package_cli_requires_built_collector_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
