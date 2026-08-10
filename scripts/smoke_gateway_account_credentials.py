@@ -27,6 +27,26 @@ MAX_PROTOCOL_BYTES = 16 * 1024
 HELPER_TIMEOUT_SECONDS = 15
 DISPLAY_ID = re.compile(r"^acct_[0-9a-f]{12}$")
 SAFE_CODES = {
+    "account_id_unavailable",
+    "already_exists",
+    "config_invalid",
+    "config_write_failed",
+    "credential_backend_unavailable",
+    "credential_delete_failed",
+    "credential_rollback_failed",
+    "credential_write_failed",
+    "invalid_settings_helper",
+    "invalid_request",
+    "lock_unavailable",
+    "native_credential_mismatch",
+    "not_found",
+    "pool_references_account",
+    "pool_references_unknown_account",
+    "revision_conflict",
+    "settings_helper_failed",
+    "unsupported_provider",
+}
+HELPER_FAILURE_CODES = SAFE_CODES - {
     "config_invalid",
     "invalid_settings_helper",
     "native_credential_mismatch",
@@ -197,8 +217,7 @@ def _mutate(
     except Exception:
         raise SmokeFailure("settings_helper_failed") from None
     if (
-        completed.returncode != 0
-        or completed.stderr != ""
+        type(completed.stderr) is not str
         or type(completed.stdout) is not str
         or len(completed.stdout.encode("utf-8")) > MAX_PROTOCOL_BYTES
     ):
@@ -208,7 +227,18 @@ def _mutate(
     except Exception:
         raise SmokeFailure("settings_helper_failed") from None
     if (
-        type(payload) is not dict
+        completed.returncode == 1
+        and type(payload) is dict
+        and set(payload) == {"version", "ok", "code"}
+        and payload.get("version") == VERSION
+        and payload.get("ok") is False
+        and payload.get("code") in HELPER_FAILURE_CODES
+    ):
+        raise SmokeFailure(str(payload["code"]))
+    if (
+        completed.returncode != 0
+        or completed.stderr != ""
+        or type(payload) is not dict
         or set(payload) != {"version", "ok", "code", "account"}
         or payload.get("version") != VERSION
         or payload.get("ok") is not True

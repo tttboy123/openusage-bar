@@ -519,7 +519,7 @@ jobs:
               case "$account_keyring_root" in
                 "$RUNNER_TEMP"/openusage-account-keyring.*)
                   if [[ -e "$account_keyring_root" ]]; then
-                    find "$account_keyring_root" -depth -delete
+                    find -ignore_readdir_race "$account_keyring_root" -depth -delete
                   fi
                   ;;
                 *) return 1 ;;
@@ -852,7 +852,7 @@ jobs:
               case "$session_root" in
                 "$RUNNER_TEMP"/openusage-observer-keyring.*)
                   if [[ -e "$session_root" ]]; then
-                    find "$session_root" -depth -delete
+                    find -ignore_readdir_race "$session_root" -depth -delete
                   fi
                   ;;
                 *) return 1 ;;

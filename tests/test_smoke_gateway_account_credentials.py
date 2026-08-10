@@ -250,7 +250,7 @@ class GatewayAccountCredentialSmokeTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(
                 json.loads(stdout.getvalue()),
-                {"version": 1, "ok": False, "code": "settings_helper_failed"},
+                {"version": 1, "ok": False, "code": "credential_write_failed"},
             )
             rendered = (stdout.getvalue() + stderr.getvalue()).casefold()
             for forbidden in (
