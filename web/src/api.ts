@@ -11,6 +11,12 @@ import type { ObserverPlatformCapability } from "./observerPlatformCapability";
 import type { DecisionTraces } from "./decisionTraces";
 import type { PluginConnections } from "./pluginConnections";
 
+const RUNTIME_CAPABILITY_DEADLINE_MS = 7_000;
+const OBSERVER_PLATFORM_CAPABILITY_DEADLINE_MS = 7_000;
+const SHOULD_SEND_DEADLINE_MS = 12_000;
+const DECISION_TRACE_FRESHNESS_CAP_MS = 3_000;
+const PLUGIN_CONNECTIONS_DEADLINE_MS = 5_000;
+
 export interface SnapshotSummary {
   todayTokens?: number;
   modelCount?: number;
@@ -233,10 +239,14 @@ export async function fetchQuickConnect(): Promise<QuickConnectItem[]> {
  }
 
 export async function fetchRuntimeCapability(): Promise<RuntimeCapability | null> {
-  const payload = await getJson<unknown>("/gateway/v1/health", {
-    method: "GET",
-    credentials: "omit",
-  });
+  const payload = await getHostJsonWithin<unknown>(
+    "/gateway/v1/health",
+    RUNTIME_CAPABILITY_DEADLINE_MS,
+    {
+      method: "GET",
+      credentials: "omit",
+    },
+  );
   return normalizeRuntimeCapability(payload);
 }
 
@@ -246,10 +256,14 @@ export async function fetchObserverPlatformCapability(): Promise<
   const { normalizeObserverPlatformCapability } = await import(
     "./observerPlatformCapability"
   );
-  const payload = await getJson<unknown>("/v1/capabilities", {
-    method: "GET",
-    credentials: "omit",
-  });
+  const payload = await getHostJsonWithin<unknown>(
+    "/v1/capabilities",
+    OBSERVER_PLATFORM_CAPABILITY_DEADLINE_MS,
+    {
+      method: "GET",
+      credentials: "omit",
+    },
+  );
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     return null;
   }
@@ -262,19 +276,26 @@ export async function fetchShouldSendAdvice(
   request: unknown,
 ): Promise<ShouldSendAdvice> {
   const body = canonicalShouldSendRequest(request);
-  const payload = await getJson<unknown>("/gateway/v1/should-send", {
-    method: "POST",
-    credentials: "omit",
-    headers: { "Content-Type": "application/json" },
-    body,
-  });
+  const payload = await getHostJsonWithin<unknown>(
+    "/gateway/v1/should-send",
+    SHOULD_SEND_DEADLINE_MS,
+    {
+      method: "POST",
+      credentials: "omit",
+      headers: { "Content-Type": "application/json" },
+      body,
+    },
+  );
   return normalizeShouldSendAdvice(payload);
 }
 
 export async function fetchDecisionTraces(): Promise<DecisionTraces | null> {
   const { normalizeDecisionTraces } = await import("./decisionTraces");
   const controller = new AbortController();
-  const deadline = globalThis.setTimeout(() => controller.abort(), 3_000);
+  const deadline = globalThis.setTimeout(
+    () => controller.abort(),
+    DECISION_TRACE_FRESHNESS_CAP_MS,
+  );
   try {
     const payload = await getJson<unknown>("/gateway/v1/decision-traces", {
       method: "GET",
@@ -289,11 +310,29 @@ export async function fetchDecisionTraces(): Promise<DecisionTraces | null> {
 
 export async function fetchPluginConnections(): Promise<PluginConnections | null> {
   const { normalizePluginConnections } = await import("./pluginConnections");
-  const payload = await getJson<unknown>("/host/v1/plugin-connections", {
-    method: "GET",
-    credentials: "omit",
-  });
+  const payload = await getHostJsonWithin<unknown>(
+    "/host/v1/plugin-connections",
+    PLUGIN_CONNECTIONS_DEADLINE_MS,
+    {
+      method: "GET",
+      credentials: "omit",
+    },
+  );
   return normalizePluginConnections(payload);
+}
+
+async function getHostJsonWithin<T>(
+  path: string,
+  deadlineMs: number,
+  init: RequestInit,
+): Promise<T> {
+  const controller = new AbortController();
+  const deadline = globalThis.setTimeout(() => controller.abort(), deadlineMs);
+  try {
+    return await getJson<T>(path, { ...init, signal: controller.signal });
+  } finally {
+    globalThis.clearTimeout(deadline);
+  }
 }
 
 export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {

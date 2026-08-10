@@ -224,6 +224,75 @@ test("Should-Send uses one bounded relative credential-free POST and validates e
   );
 });
 
+test("Should-Send aborts a stalled credential-free host request after twelve seconds", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const scheduledDelays = [];
+  const clearedHandles = [];
+  const timeoutHandles = [];
+  const observedRequests = [];
+  const request = {
+    provider: "openai",
+    model: "gpt-4o",
+    estimated_tokens: 8000,
+    window: "5m",
+  };
+
+  globalThis.setTimeout = (callback, delay) => {
+    scheduledDelays.push(delay);
+    queueMicrotask(callback);
+    const handle = Object.freeze({
+      kind: "should-send-timeout",
+      index: timeoutHandles.length,
+    });
+    timeoutHandles.push(handle);
+    return handle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    clearedHandles.push(handle);
+  };
+  globalThis.fetch = async (path, init) => {
+    observedRequests.push({ path, init });
+    assert.ok(
+      init?.signal instanceof AbortSignal,
+      "request must own an AbortSignal",
+    );
+    return new Promise((resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(init.signal.reason), {
+        once: true,
+      });
+    });
+  };
+
+  try {
+    const first = apiLoad.module.fetchShouldSendAdvice(request);
+    const second = apiLoad.module.fetchShouldSendAdvice(request);
+    await Promise.all([
+      assert.rejects(first, { name: "AbortError" }),
+      assert.rejects(second, { name: "AbortError" }),
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+
+  assert.equal(observedRequests.length, 2);
+  assert.notEqual(observedRequests[0].init.signal, observedRequests[1].init.signal);
+  for (const observedRequest of observedRequests) {
+    assert.equal(observedRequest.path, "/gateway/v1/should-send");
+    assert.equal(observedRequest.init.credentials, "omit");
+    assert.equal(
+      observedRequest.init.headers?.["Content-Type"],
+      "application/json",
+    );
+    assert.deepEqual(JSON.parse(observedRequest.init.body), request);
+  }
+  assert.deepEqual(scheduledDelays, [12_000, 12_000]);
+  assert.deepEqual(clearedHandles, timeoutHandles);
+});
+
 test("fetchShouldSendAdvice keeps Defer when defer_until is missing or unsafe", async () => {
   const module = adviceModule();
   const canary = "RAW_DEFER_PATH_TOKEN_API_8f3c";
@@ -726,6 +795,13 @@ test("Automation gates advice on capability state and cannot show stale results"
   assert.match(pageSource, /id=["']should-send-availability["']/);
   assert.match(pageSource, /aria-describedby=["']should-send-availability["']/);
   assert.match(pageSource, /adviceRequestGeneration\.current\s*\+=\s*1/);
+  assert.match(
+    pageSource,
+    /adviceRequestPending\.current\s*\|\|\s*advicePhase\s*===\s*["']loading["']/,
+    "a synchronous second submit must not start before React rerenders",
+  );
+  assert.match(pageSource, /adviceRequestPending\.current\s*=\s*true/);
+  assert.match(pageSource, /adviceRequestPending\.current\s*=\s*false/);
   assert.match(
     pageSource,
     /requestGeneration\s*!==\s*adviceRequestGeneration\.current/,

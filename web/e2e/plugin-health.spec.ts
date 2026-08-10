@@ -128,6 +128,79 @@ test("keyboard refresh retains last-known plugin facts without moving focus", as
   await expect(pluginPanel(page).getByRole("button", { name: "Retry integrations" })).toBeFocused();
 });
 
+test("controlled plugin abort retains last-good, settles its live region, and does not steal focus", async ({ page }) => {
+  let refreshing = false;
+  let refreshRequestCount = 0;
+  let signalRefreshStarted!: () => void;
+  const refreshStarted = new Promise<void>((resolve) => {
+    signalRefreshStarted = resolve;
+  });
+  let releaseRefresh!: () => void;
+  const refreshTerminal = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  await installDataHealthRoutes(page, async (route) => {
+    if (!refreshing) return json(route, pluginConnectionsEnvelope());
+    refreshRequestCount += 1;
+    signalRefreshStarted();
+    await refreshTerminal;
+    return route.abort("aborted");
+  });
+  await openPluginHealth(page);
+
+  const panel = pluginPanel(page);
+  const refresh = panel.getByRole("button", { name: "Refresh integrations" });
+  refreshing = true;
+  await refresh.focus();
+  await page.keyboard.press("Enter");
+  await refreshStarted;
+  await expect(panel).toHaveAttribute("aria-busy", "true");
+  await expect(refresh).toBeDisabled();
+  await refresh.evaluate((button: HTMLButtonElement) => button.click());
+  expect(refreshRequestCount).toBe(1);
+  await expect(pluginRow(page, "Loom")).toContainText("Connected");
+  const announcer = page.locator(".service-status-announcement[role=status]");
+  await expect(announcer).toHaveCount(1);
+  await expect(announcer).toHaveAttribute("aria-live", "polite");
+  await expect(announcer).toHaveAttribute("aria-atomic", "true");
+  await expect(announcer).toContainText(
+    "Refreshing integration status…",
+  );
+
+  const allSources = page.getByRole("button", { name: "All sources" });
+  await allSources.focus();
+  await expect(allSources).toBeFocused();
+  releaseRefresh();
+
+  await expect(panel).toHaveAttribute("aria-busy", "false");
+  await expect(panel).toContainText(
+    "Integration status could not be refreshed. Showing the last known status.",
+  );
+  await expect(pluginRow(page, "Loom")).toContainText("Connected");
+  await expect(panel.getByRole("button", { name: "Retry integrations" })).toBeEnabled();
+  await expect(announcer).toContainText(
+    "Integration status could not be refreshed. Showing the last known status.",
+  );
+  await expect(allSources).toBeFocused();
+  expect(refreshRequestCount).toBe(1);
+});
+
+test("Observer Platform HTTP failure cannot expose its private response body", async ({ page }) => {
+  await installDataHealthRoutes(
+    page,
+    async (route) => json(route, pluginConnectionsEnvelope()),
+    async (route) => json(route, { raw_error: PRIVATE_CANARY }, 502),
+  );
+  await openPluginHealth(page);
+  await expect(page.locator(".service-status-strip")).toContainText(
+    "Showing the last known status",
+  );
+  await expect(page.getByRole("region", { name: "Gateway", exact: true })).toContainText(
+    "Ready",
+  );
+  await expect(page.locator("body")).not.toContainText(PRIVATE_CANARY);
+});
+
 test("plugin host failure does not change Observer or Gateway status", async ({ page }) => {
   await installDataHealthRoutes(page, async (route) =>
     json(route, { error: { code: "service_unavailable" } }, 502),
@@ -187,6 +260,7 @@ function pluginRow(page: Page, name: string) {
 async function installDataHealthRoutes(
   page: Page,
   pluginResponse: (route: Route) => Promise<unknown>,
+  observerPlatformResponse?: (route: Route) => Promise<unknown>,
 ) {
   await page.route("**/*", async (route) => {
     const { pathname } = new URL(route.request().url());
@@ -195,6 +269,10 @@ async function installDataHealthRoutes(
     if (pathname === "/v1/quick-connect") return json(route, { providers: [] });
     if (pathname === "/gateway/v1/health") return json(route, runtimeCapability());
     if (pathname === "/v1/capabilities") {
+      if (observerPlatformResponse) {
+        await observerPlatformResponse(route);
+        return;
+      }
       return json(route, {
         observerPlatform: {
           operatingSystem: "linux",

@@ -387,7 +387,13 @@
    useEffect(() => {
      if (pluginRefreshing || !restorePluginActionFocusRef.current) return;
      restorePluginActionFocusRef.current = false;
-     requestAnimationFrame(() => pluginActionRef.current?.focus());
+     const activeElement = document.activeElement;
+     if (
+       activeElement === pluginActionRef.current ||
+       activeElement === document.body
+     ) {
+       pluginActionRef.current?.focus();
+     }
    }, [pluginRefreshing]);
 
    useEffect(() => {

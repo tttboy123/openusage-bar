@@ -373,6 +373,7 @@ export default function AutomationPage({ t }: { t: Messages }) {
   const [advicePhase, setAdvicePhase] = useState<AdvicePhase>("idle");
   const [advice, setAdvice] = useState<ShouldSendAdviceViewModel | null>(null);
   const adviceRequestGeneration = useRef(0);
+  const adviceRequestPending = useRef(false);
   const [decisionTraces, setDecisionTraces] = useState<DecisionTrace[]>([]);
   const [tracePhase, setTracePhase] = useState<TracePhase>("loading");
   const decisionTracesRef = useRef<DecisionTrace[]>([]);
@@ -469,6 +470,7 @@ export default function AutomationPage({ t }: { t: Messages }) {
   useEffect(() => {
     if (!adviceAvailability.available) {
       adviceRequestGeneration.current += 1;
+      adviceRequestPending.current = false;
       setAdvice(null);
       setAdvicePhase("idle");
     }
@@ -488,6 +490,7 @@ export default function AutomationPage({ t }: { t: Messages }) {
 
   function updateAdviceField(field: AdviceField, value: string) {
     adviceRequestGeneration.current += 1;
+    adviceRequestPending.current = false;
     setAdviceDraft((current) => ({ ...current, [field]: value }));
     setAdviceErrors((current) => {
       if (!(field in current)) return current;
@@ -503,7 +506,13 @@ export default function AutomationPage({ t }: { t: Messages }) {
     event: FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
-    if (!adviceAvailability.available || advicePhase === "loading") return;
+    if (
+      !adviceAvailability.available ||
+      adviceRequestPending.current ||
+      advicePhase === "loading"
+    ) {
+      return;
+    }
     const validated = validateAdviceDraft(adviceDraft);
     setAdviceErrors(validated.errors);
     if (validated.request === null) {
@@ -513,6 +522,7 @@ export default function AutomationPage({ t }: { t: Messages }) {
     }
 
     setAdvice(null);
+    adviceRequestPending.current = true;
     setAdvicePhase("loading");
     const requestGeneration = adviceRequestGeneration.current + 1;
     adviceRequestGeneration.current = requestGeneration;
@@ -525,6 +535,10 @@ export default function AutomationPage({ t }: { t: Messages }) {
       if (requestGeneration !== adviceRequestGeneration.current) return;
       setAdvice(null);
       setAdvicePhase("error");
+    } finally {
+      if (requestGeneration === adviceRequestGeneration.current) {
+        adviceRequestPending.current = false;
+      }
     }
   }
 

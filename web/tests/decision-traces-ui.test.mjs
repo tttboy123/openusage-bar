@@ -81,7 +81,7 @@ test("Decision Trace fetch uses one credential-free relative GET and returns onl
   );
 });
 
-test("Decision Trace fetch aborts a stalled credential-free request after three seconds", async () => {
+test("Decision Trace keeps its intentional three-second freshness cap", async () => {
   const api = await loadApiModule();
   const originalFetch = globalThis.fetch;
   const originalSetTimeout = globalThis.setTimeout;

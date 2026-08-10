@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const API_VERSION = "gateway-decision-trace.openusage/v1";
 const PRIVATE_CANARY = "PRIVATE_PROMPT_TOKEN_CANARY_713e";
+const PRIVATE_HOST_ERROR_CANARY = "PRIVATE_HOST_ERROR_CANARY_b921";
 
 const decisionTraceEnvelope = {
   apiVersion: API_VERSION,
@@ -121,6 +122,116 @@ test("invalid hostile projection fails closed without rendering its canary", asy
   await expect(page.getByText(PRIVATE_CANARY)).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText(PRIVATE_CANARY);
 });
+
+test("stalled capability settles unavailable with actions disabled and no private reflection", async ({ page }) => {
+  let signalHealthStarted!: () => void;
+  const healthStarted = new Promise<void>((resolve) => {
+    signalHealthStarted = resolve;
+  });
+  let releaseHealth!: () => void;
+  const healthTerminal = new Promise<void>((resolve) => {
+    releaseHealth = resolve;
+  });
+  await installAutomationRoutes(
+    page,
+    async (route) => json(route, { apiVersion: API_VERSION, traces: [] }),
+    {
+      healthResponse: async (route) => {
+        signalHealthStarted();
+        await healthTerminal;
+        return json(route, { raw_error: PRIVATE_HOST_ERROR_CANARY }, 502);
+      },
+    },
+  );
+  await openAutomation(page);
+  await healthStarted;
+
+  const announcer = page.locator(".service-status-announcement[role=status]");
+  const refresh = page.getByRole("button", { name: "Refresh service status" });
+  const adviceForm = page.locator(".should-send-form");
+  await expect(announcer).toHaveCount(1);
+  await expect(announcer).toHaveAttribute("aria-live", "polite");
+  await expect(announcer).toHaveAttribute("aria-atomic", "true");
+  await expect(announcer).toContainText("Checking service status…");
+  await expect(refresh).toBeDisabled();
+  await expect(refresh).toHaveAttribute("aria-busy", "true");
+  await expect(adviceForm).toHaveCount(0);
+
+  releaseHealth();
+  await expect(announcer).toContainText(
+    "Service status is unavailable. Retry to check Observer and the optional Gateway.",
+  );
+  await expect(page.getByRole("button", { name: "Retry service status" })).toBeEnabled();
+  await expect(adviceForm).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText(PRIVATE_HOST_ERROR_CANARY);
+});
+
+for (const failure of ["aborted", "private_http"] as const) {
+  test(`stalled Should-Send ${failure} settles safely without duplicate requests or focus theft`, async ({ page }) => {
+    let adviceRequestCount = 0;
+    let signalAdviceStarted!: () => void;
+    const adviceStarted = new Promise<void>((resolve) => {
+      signalAdviceStarted = resolve;
+    });
+    let releaseAdvice!: () => void;
+    const adviceTerminal = new Promise<void>((resolve) => {
+      releaseAdvice = resolve;
+    });
+    await installAutomationRoutes(
+      page,
+      async (route) => json(route, { apiVersion: API_VERSION, traces: [] }),
+      {
+        healthResponse: async (route) => json(route, runtimeCapability()),
+        shouldSendResponse: async (route) => {
+          adviceRequestCount += 1;
+          signalAdviceStarted();
+          await adviceTerminal;
+          return failure === "aborted"
+            ? route.abort("timedout")
+            : json(route, { raw_error: PRIVATE_HOST_ERROR_CANARY }, 502);
+        },
+      },
+    );
+    await openAutomation(page);
+
+    await expect(page.getByText(
+      "Should-Send is ready to check recorded local facts.",
+    )).toBeVisible();
+    await page.getByLabel("Provider").fill("openai");
+    await page.getByLabel("Model").fill("gpt-4o");
+    await page.getByLabel("Estimated Tokens").fill("8000");
+    const submit = page.locator('.should-send-form button[type="submit"]');
+    await expect(submit).toHaveAccessibleName("Check advice");
+    await submit.click();
+    await adviceStarted;
+
+    const announcer = page.locator(".service-status-announcement[role=status]");
+    await expect(announcer).toHaveCount(1);
+    await expect(announcer).toHaveAttribute("aria-live", "polite");
+    await expect(announcer).toHaveAttribute("aria-atomic", "true");
+    await expect(announcer).toContainText("Checking advice…");
+    await expect(submit).toBeDisabled();
+    await expect(submit).toHaveAccessibleName("Checking advice…");
+    await expect(submit).toHaveAttribute("aria-busy", "true");
+    await submit.evaluate((button: HTMLButtonElement) => button.click());
+    expect(adviceRequestCount).toBe(1);
+
+    const userChosenControl = page.getByRole("link", { name: "Activity" });
+    await userChosenControl.focus();
+    await expect(userChosenControl).toBeFocused();
+    releaseAdvice();
+
+    const retry = page.getByRole("button", { name: "Retry advice" });
+    await expect(retry).toBeEnabled();
+    await expect(retry).toHaveAttribute("aria-busy", "false");
+    await expect(page.getByText("Advice unavailable", { exact: true })).toBeVisible();
+    await expect(page.getByText("Advice could not be checked.", { exact: true })).toBeVisible();
+    await expect(announcer).toContainText("Advice could not be checked.");
+    await expect(userChosenControl).toBeFocused();
+    await expect(page.locator("body")).not.toContainText(PRIVATE_HOST_ERROR_CANARY);
+    expect(adviceRequestCount).toBe(1);
+  });
+}
 
 test("keyboard refresh replaces an empty runtime with a bounded timeline", async ({ page }) => {
   let showTraces = false;
@@ -366,6 +477,10 @@ function decisionTimeline(page: Page) {
 async function installAutomationRoutes(
   page: Page,
   decisionResponse: (route: Route) => Promise<unknown>,
+  options: {
+    healthResponse?: (route: Route) => Promise<unknown>;
+    shouldSendResponse?: (route: Route) => Promise<unknown>;
+  } = {},
 ) {
   await page.route("**/*", async (route) => {
     const { pathname } = new URL(route.request().url());
@@ -374,6 +489,17 @@ async function installAutomationRoutes(
       return json(route, { records: [], nextCursor: 0, hasMore: false });
     }
     if (pathname === "/gateway/v1/health") {
+      if (options.healthResponse) {
+        await options.healthResponse(route);
+        return;
+      }
+      return json(route, { error: { code: "service_unavailable" } }, 404);
+    }
+    if (pathname === "/gateway/v1/should-send") {
+      if (options.shouldSendResponse) {
+        await options.shouldSendResponse(route);
+        return;
+      }
       return json(route, { error: { code: "service_unavailable" } }, 404);
     }
     if (pathname === "/gateway/v1/decision-traces") {
@@ -382,6 +508,43 @@ async function installAutomationRoutes(
     }
     return route.continue();
   });
+}
+
+function runtimeCapability() {
+  const features = Object.fromEntries([
+    "listener",
+    "should_send",
+    "responses",
+    "cache",
+    "fallback",
+    "pii_redaction",
+    "streaming",
+  ].map((id) => [id, {
+    support: "supported",
+    enabled: true,
+    configured: true,
+    operational: "ready",
+  }]));
+  return {
+    apiVersion: "runtime-capability.openusage/v1",
+    object: "runtime.capability",
+    observer: {
+      operational: "ready",
+      generatedAt: "2026-08-10T03:04:05Z",
+      lastGoodAt: "2026-08-10T03:04:05Z",
+      dataRevision: 42,
+      schemaVersion: "openusage/v1",
+    },
+    gateway: {
+      mode: "advise",
+      operational: "ready",
+      features,
+      configuredProviderCount: 1,
+      healthyProviderCount: 1,
+      actions: ["retry"],
+      lastError: null,
+    },
+  };
 }
 
 function json(route: Route, body: unknown, status = 200) {

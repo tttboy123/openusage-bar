@@ -1017,6 +1017,33 @@ class DesktopPackagingContractTests(unittest.TestCase):
             self.assertIn("web/e2e/**", paths)
             self.assertIn("web/playwright.config.ts", paths)
 
+    def test_automation_browser_e2e_runs_on_linux_x64_before_packaging(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        steps = _mapping_list(source, section="steps", item_indent=6)
+        by_name = {step.get("name"): step for step in steps}
+        browser_install = by_name["Install Gateway Account Playwright browser"]
+        automation_e2e = by_name["Run Decision Trace browser E2E"]
+        package = by_name["Package desktop app"]
+
+        self.assertLess(steps.index(browser_install), steps.index(automation_e2e))
+        self.assertLess(steps.index(automation_e2e), steps.index(package))
+        self.assertEqual(automation_e2e.get("working-directory"), "web")
+        self.assertEqual(
+            automation_e2e.get("if"),
+            "matrix.platform == 'linux' && matrix.arch == 'x64'",
+        )
+        self.assertEqual(
+            _active_shell_commands(automation_e2e["run"]),
+            [["npm", "run", "test:e2e:decision-traces"]],
+        )
+        web_package = json.loads(
+            (ROOT / "web/package.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            web_package["scripts"]["test:e2e:decision-traces"],
+            "playwright test e2e/decision-trace.spec.ts",
+        )
+
     def test_plugin_bridge_is_built_smoked_and_browser_checked_before_packaging(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         steps = _mapping_list(source, section="steps", item_indent=6)

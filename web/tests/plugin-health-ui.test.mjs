@@ -99,11 +99,77 @@ test("plugin connections use the single credential-free host GET and normalize i
   } finally {
     globalThis.fetch = originalFetch;
   }
-  assert.deepEqual(calls, [["/host/v1/plugin-connections", {
+  assert.equal(calls.length, 1);
+  const [path, init] = calls[0];
+  assert.equal(path, "/host/v1/plugin-connections");
+  assert.ok(init.signal instanceof AbortSignal);
+  assert.deepEqual({ ...init, signal: undefined }, {
     method: "GET",
     credentials: "omit",
     cache: "no-store",
-  }]]);
+    signal: undefined,
+  });
+});
+
+test("plugin connections abort a stalled credential-free host request after five seconds", async () => {
+  const api = await loadApiModule();
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const scheduledDelays = [];
+  const clearedHandles = [];
+  const timeoutHandles = [];
+  const observedRequests = [];
+
+  globalThis.setTimeout = (callback, delay) => {
+    scheduledDelays.push(delay);
+    queueMicrotask(callback);
+    const handle = Object.freeze({
+      kind: "plugin-connections-timeout",
+      index: timeoutHandles.length,
+    });
+    timeoutHandles.push(handle);
+    return handle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    clearedHandles.push(handle);
+  };
+  globalThis.fetch = async (path, init) => {
+    observedRequests.push({ path, init });
+    assert.ok(
+      init?.signal instanceof AbortSignal,
+      "request must own an AbortSignal",
+    );
+    return new Promise((resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(init.signal.reason), {
+        once: true,
+      });
+    });
+  };
+
+  try {
+    const first = api.fetchPluginConnections();
+    const second = api.fetchPluginConnections();
+    await Promise.all([
+      assert.rejects(first, { name: "AbortError" }),
+      assert.rejects(second, { name: "AbortError" }),
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+
+  assert.equal(observedRequests.length, 2);
+  assert.notEqual(observedRequests[0].init.signal, observedRequests[1].init.signal);
+  for (const observedRequest of observedRequests) {
+    assert.equal(observedRequest.path, "/host/v1/plugin-connections");
+    assert.equal(observedRequest.init.credentials, "omit");
+    assert.equal(observedRequest.init.headers, undefined);
+    assert.equal(observedRequest.init.body, undefined);
+  }
+  assert.deepEqual(scheduledDelays, [5_000, 5_000]);
+  assert.deepEqual(clearedHandles, timeoutHandles);
 });
 
 test("plugin health owns checking, unavailable, refreshing, last-known, and ready states", () => {
@@ -186,6 +252,11 @@ test("Data Health renders plugin facts in an independent accessible in-page pane
   assert.match(pageSource, /pluginStatus\.announcementKey/u);
   assert.match(pageSource, /pluginStatus\.actionDisabled/u);
   assert.match(pageSource, /pluginStatus\.actionBusy/u);
+  assert.match(pageSource, /const activeElement = document\.activeElement/u);
+  assert.match(
+    pageSource,
+    /activeElement === pluginActionRef\.current[\s\S]*?activeElement === document\.body/u,
+  );
   assert.ok(
     pageSource.indexOf("plugin-connections-title") < pageSource.indexOf("observer-sources-title"),
     "optional integrations precede Observer sources",
