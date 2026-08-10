@@ -500,9 +500,13 @@ jobs:
           editor_output="$("./dist-settings/${{ matrix.settings }}" gateway-account-editor --ui-self-test 2>"$RUNNER_TEMP/openusage-settings-editor-smoke.stderr")"
           editor_status=$?
           set -e
-          test "$editor_status" -eq 0
-          test "$editor_output" = $'{"version":1,"event":"ready"}\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}'
-          test ! -s "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr"
+          if [[ "$editor_status" -ne 0 || "$editor_output" != $'{"version":1,"event":"ready"}\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}' || -s "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr" ]]; then
+            printf 'gateway_settings_editor_smoke=%s\n' "$editor_output"
+            printf 'gateway_settings_editor_stderr_bytes=%s\n' "$(wc -c < "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr")"
+            test "$editor_status" -eq 0
+            test "$editor_output" = $'{"version":1,"event":"ready"}\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}'
+            test ! -s "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr"
+          fi
           printf '%s\n' 'gateway_settings_editor_smoke_ok'
           if [[ "${{ matrix.platform }}" == "linux" ]]; then
             test -n "$RUNNER_TEMP"

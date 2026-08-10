@@ -747,6 +747,8 @@ class DesktopPackagingContractTests(unittest.TestCase):
 
         self.assertIn("gateway_settings_mutation_smoke_ok", smoke)
         self.assertIn("gateway_settings_editor_smoke_ok", smoke)
+        self.assertIn("gateway_settings_editor_smoke=%s", smoke)
+        self.assertIn("gateway_settings_editor_stderr_bytes=%s", smoke)
         self.assertEqual(smoke.count("gateway_account_credential_smoke=%s"), 2)
         self.assertEqual(
             smoke.count("gateway_account_credential_stderr_bytes=%s"),
@@ -754,6 +756,10 @@ class DesktopPackagingContractTests(unittest.TestCase):
         )
         self.assertNotIn('cat "$account_smoke_stderr"', smoke)
         self.assertNotIn('cat "$ACCOUNT_SMOKE_STDERR"', smoke)
+        self.assertNotIn(
+            'cat "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr"',
+            smoke,
+        )
 
     def test_linux_native_gateway_account_credential_smoke_uses_pinned_private_secret_service_session(self):
         source = WORKFLOW.read_text(encoding="utf-8")
