@@ -79,7 +79,9 @@ test("packaged Windows and Linux resolve one observe-only service lifecycle plan
   });
 });
 
-test("Linux invokes the packaged managed-service command and waits for readiness", async (context) => {
+test("Linux invokes the packaged managed-service command and waits for readiness", {
+  skip: process.platform === "win32",
+}, async (context) => {
   const {
     ensurePackagedObserverService,
     resolveCollectorLifecyclePlan,
@@ -130,7 +132,9 @@ test("Linux invokes the packaged managed-service command and waits for readiness
   assert.equal(probes, 3);
 });
 
-test("Linux stable probe path honors XDG data without Desktop filesystem mutation", async (context) => {
+test("Linux stable probe path honors XDG data without Desktop filesystem mutation", {
+  skip: process.platform === "win32",
+}, async (context) => {
   const {
     ensurePackagedObserverService,
     resolveCollectorLifecyclePlan,
@@ -171,7 +175,9 @@ test("Linux stable probe path honors XDG data without Desktop filesystem mutatio
   assert.equal(fs.readFileSync(source, "utf8"), "collector");
 });
 
-test("Linux headless uninstall delegates managed removal and deletes state only on confirmation", async (context) => {
+test("Linux headless uninstall delegates managed removal and deletes state only on confirmation", {
+  skip: process.platform === "win32",
+}, async (context) => {
   const {
     ensurePackagedObserverService,
     parsePackagedLifecycleCommand,
@@ -301,19 +307,36 @@ test("service execution rejects forged plans and kills a non-closing child at th
     ensurePackagedObserverService,
     resolveCollectorLifecyclePlan,
   } = require("../collector_runtime.js");
-  const root = temporaryRoot("usagehub-lifecycle-bound-");
-  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const resources = path.join(root, "resources");
-  const source = path.join(resources, "collector", "openusage-collector");
-  fs.mkdirSync(path.dirname(source), { recursive: true });
-  fs.writeFileSync(source, "collector", { mode: 0o700 });
-  const plan = resolveCollectorLifecyclePlan({
-    isPackaged: true,
-    platform: "linux",
-    resourcesPath: resources,
-    homeDir: path.join(root, "home"),
-    environment: {},
-  });
+  let plan;
+  if (process.platform === "win32") {
+    const resources = "C:\\Program Files\\UsageHub\\resources";
+    const source = path.win32.join(
+      resources,
+      "collector",
+      "openusage-collector.exe",
+    );
+    plan = resolveCollectorLifecyclePlan({
+      isPackaged: true,
+      platform: "win32",
+      resourcesPath: resources,
+      pathExists: (candidate) => candidate === source,
+    });
+  } else {
+    const root = temporaryRoot("usagehub-lifecycle-bound-");
+    context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const resources = path.join(root, "resources");
+    const source = path.join(resources, "collector", "openusage-collector");
+    fs.mkdirSync(path.dirname(source), { recursive: true });
+    fs.writeFileSync(source, "collector", { mode: 0o700 });
+    plan = resolveCollectorLifecyclePlan({
+      isPackaged: true,
+      platform: "linux",
+      resourcesPath: resources,
+      homeDir: path.join(root, "home"),
+      environment: {},
+    });
+  }
+  assert.notEqual(plan, null);
   let spawnCount = 0;
   assert.deepEqual(await ensurePackagedObserverService({
     plan: { ...plan, installArgv: ["gateway", "start"] },
