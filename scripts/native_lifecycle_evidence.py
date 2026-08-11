@@ -1229,12 +1229,14 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         _fail("driver_unavailable")
 
     run_directory: _BoundRunDirectory | None = None
+    profile_home: Path | None = None
 
     def unavailable(*args: object, **kwargs: object) -> object:
         del args, kwargs
         _fail("driver_unavailable")
 
     def profile_paths(platform: object) -> NativeProfilePaths:
+        nonlocal profile_home
         if type(platform) is not str or platform != "linux":
             _driver_fail()
         try:
@@ -1261,7 +1263,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                         _driver_fail()
             else:
                 data_root = authority.home / ".local" / "share"
-            return NativeProfilePaths(
+            profile = NativeProfilePaths(
                 state_root=(
                     authority.home / ".local" / "state" / "openusage-bar"
                 ),
@@ -1275,10 +1277,34 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                     / "openusage-bar.service"
                 ),
             )
+            if profile_home is not None and profile_home != authority.home:
+                _driver_fail()
+            profile_home = authority.home
+            return profile
         except LifecycleEvidenceError:
             raise
         except Exception:
             _driver_fail()
+
+    def inspect_service(platform: object) -> NativeServiceState:
+        if (
+            type(platform) is not str
+            or platform != "linux"
+            or profile_home is None
+        ):
+            _driver_fail()
+        try:
+            from openusage_bar.platform_services import service_is_registered
+
+            registered = service_is_registered(
+                platform="linux",
+                home=profile_home,
+            )
+        except Exception:
+            _fail("driver_unavailable")
+        if registered is not False:
+            _fail("driver_unavailable")
+        return NativeServiceState(False, False, None)
 
     def package_paths(
         platform: object,
@@ -1489,7 +1515,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         read_registry_value=unavailable,
         profile_paths=profile_paths,
         package_paths=package_paths,
-        inspect_service=unavailable,
+        inspect_service=inspect_service,
         inspect_listener=unavailable,
         inspect_ledger=unavailable,
         network_events=unavailable,

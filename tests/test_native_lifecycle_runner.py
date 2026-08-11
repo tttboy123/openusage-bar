@@ -3680,6 +3680,156 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
             self.assertEqual(tree_snapshot(root), before)
 
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_service_probe_proves_only_authoritative_absence(
+        self,
+    ) -> None:
+        import stat
+        from unittest.mock import patch
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from openusage_bar.platform_services import ServiceCommandError
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeServiceState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        def tree_snapshot(root: Path) -> tuple[tuple[object, ...], ...]:
+            paths = (root, *sorted(root.rglob("*")))
+            snapshot: list[tuple[object, ...]] = []
+            for path in paths:
+                metadata = path.lstat()
+                relative = "." if path == root else path.relative_to(root).as_posix()
+                payload: object
+                if stat.S_ISREG(metadata.st_mode):
+                    payload = path.read_bytes()
+                elif stat.S_ISLNK(metadata.st_mode):
+                    payload = os.readlink(path)
+                else:
+                    payload = None
+                snapshot.append(
+                    (
+                        relative,
+                        stat.S_IFMT(metadata.st_mode),
+                        stat.S_IMODE(metadata.st_mode),
+                        metadata.st_dev,
+                        metadata.st_ino,
+                        metadata.st_size,
+                        metadata.st_mtime_ns,
+                        metadata.st_ctime_ns,
+                        metadata.st_nlink,
+                        payload,
+                    )
+                )
+            return tuple(snapshot)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            marker = root / "PRIVATE_SERVICE_PROBE_MARKER"
+            marker.write_bytes(b"service probe is read-only")
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            before = tree_snapshot(root)
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), native_lifecycle_dependencies_for_host() as dependencies, patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch.dict(os.environ, {}, clear=True):
+                dependencies.profile_paths("linux")
+
+                with patch(
+                    "openusage_bar.platform_services.service_is_registered",
+                    return_value=False,
+                ) as service_probe:
+                    self.assertEqual(
+                        dependencies.inspect_service("linux"),
+                        NativeServiceState(False, False, None),
+                    )
+                service_probe.assert_called_once_with(
+                    platform="linux", home=authority.home
+                )
+                self.assertEqual(tree_snapshot(root), before)
+
+                for platform in ("win", True):
+                    with self.subTest(platform=platform), patch(
+                        "openusage_bar.platform_services.service_is_registered",
+                        return_value=False,
+                    ) as service_probe:
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as rejected:
+                            dependencies.inspect_service(platform)
+                        self.assertEqual(str(rejected.exception), "driver_failed")
+                        self.assertNotIn(str(root), str(rejected.exception))
+                        service_probe.assert_not_called()
+
+                for probe_result in (
+                    True,
+                    ServiceCommandError(),
+                    RuntimeError("PRIVATE_SERVICE_PROBE_FAILURE"),
+                ):
+                    with self.subTest(probe=type(probe_result)):
+                        patch_arguments = (
+                            {"return_value": probe_result}
+                            if type(probe_result) is bool
+                            else {"side_effect": probe_result}
+                        )
+                        with patch(
+                            "openusage_bar.platform_services.service_is_registered",
+                            **patch_arguments,
+                        ) as service_probe:
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_unavailable"
+                            ) as unavailable:
+                                dependencies.inspect_service("linux")
+                            self.assertEqual(
+                                str(unavailable.exception), "driver_unavailable"
+                            )
+                            self.assertNotIn("PRIVATE_", str(unavailable.exception))
+                        service_probe.assert_called_once_with(
+                            platform="linux", home=authority.home
+                        )
+
+                for callback, arguments in (
+                    (dependencies.inspect_listener, ("linux", "local")),
+                    (dependencies.inspect_ledger, ("linux",)),
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        callback(*arguments)
+                    self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                self.assertEqual(tree_snapshot(root), before)
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), native_lifecycle_dependencies_for_host() as dependencies, patch(
+                "openusage_bar.platform_services.service_is_registered",
+                return_value=False,
+            ) as service_probe:
+                for platform in ("linux", "win", True):
+                    with self.subTest(uninitialized=platform):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as rejected:
+                            dependencies.inspect_service(platform)
+                        self.assertEqual(str(rejected.exception), "driver_failed")
+                        self.assertNotIn(str(root), str(rejected.exception))
+                service_probe.assert_not_called()
+
+            self.assertEqual(tree_snapshot(root), before)
+
     @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_unimplemented_dependencies_are_driver_unavailable(
         self,
@@ -3700,7 +3850,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 LifecycleEvidenceError, "driver_unavailable"
             ) as unavailable:
-                dependencies.inspect_service("linux")
+                dependencies.inspect_listener("linux", "local")
             self.assertEqual(str(unavailable.exception), "driver_unavailable")
 
     def test_default_generate_fails_closed_without_a_real_platform_backend(self) -> None:
