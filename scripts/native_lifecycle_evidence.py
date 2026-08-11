@@ -1589,6 +1589,12 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         service_absence_confirmed = False
         local_listener_absence_confirmed = False
         try:
+            configured_xdg_home = os.environ.get("XDG_CONFIG_HOME")
+        except Exception:
+            _fail("driver_unavailable")
+        if configured_xdg_home not in {None, ""}:
+            _fail("driver_unavailable")
+        try:
             from openusage_bar.platform_services import service_is_registered
 
             registered = service_is_registered(
@@ -2187,6 +2193,42 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             fact = NativePathState(False, "missing", 0, None, 0, None)
             runtime_install_absence_fact = fact
             return fact
+        if purpose == "fresh_task_definition":
+            if profile_projection is None or package_projection is None:
+                _driver_fail()
+            try:
+                task_path_is_exact = path == profile_projection.task_definition
+            except Exception:
+                _driver_fail()
+            if task_path_is_exact is not True:
+                _driver_fail()
+            try:
+                current_home = Path.home()
+                configured_xdg_home = os.environ.get("XDG_CONFIG_HOME")
+                authority_is_exact = (
+                    isinstance(current_home, Path)
+                    and _valid_native_path(current_home)
+                    and current_home == profile_home
+                )
+            except Exception:
+                _fail("driver_unavailable")
+            if (
+                authority_is_exact is not True
+                or configured_xdg_home not in {None, ""}
+            ):
+                _fail("driver_unavailable")
+            prove_authoritative_path_absence(
+                anchor=profile_home,
+                relative_components=(
+                    ".config",
+                    "systemd",
+                    "user",
+                    "openusage-bar.service",
+                ),
+                root_missing=True,
+                entry_names=(),
+            )
+            return NativePathState(False, "missing", 0, None, 0, None)
         if (
             profile_projection is not None
             and path == profile_projection.state_root

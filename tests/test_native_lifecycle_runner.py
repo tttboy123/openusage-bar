@@ -4933,6 +4933,302 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
             self.assertEqual(marker.read_bytes(), b"final swap remains unchanged")
 
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_inspect_path_proves_only_fresh_authoritative_task_definition_absent(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativePathState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        def prohibit_task_side_effects(stack: ExitStack) -> None:
+            _prohibit_lifecycle_broad_reads_and_mutation(stack)
+            stack.enter_context(
+                patch.object(
+                    Path,
+                    "read_bytes",
+                    side_effect=AssertionError("unit content read forbidden"),
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    Path,
+                    "read_text",
+                    side_effect=AssertionError("unit content read forbidden"),
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "openusage_bar.platform_services.service_is_registered",
+                    side_effect=AssertionError("service manager probe forbidden"),
+                )
+            )
+
+        for xdg_config in (None, ""):
+            with self.subTest(case="missing", xdg_config=xdg_config), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "authoritative-home"
+                (home / ".config" / "systemd" / "user").mkdir(parents=True)
+                authority = LifecycleStatePaths(platform="linux", home=home)
+                with ExitStack() as stack:
+                    dependencies, run_directory, profile, _package = (
+                        _enter_linux_host_dependencies(stack, authority)
+                    )
+                    self.assertEqual(
+                        profile.task_definition,
+                        home
+                        / ".config"
+                        / "systemd"
+                        / "user"
+                        / "openusage-bar.service",
+                    )
+                    environment = (
+                        {} if xdg_config is None else {"XDG_CONFIG_HOME": ""}
+                    )
+                    with ExitStack() as probe_stack:
+                        probe_stack.enter_context(
+                            patch.dict(os.environ, environment, clear=True)
+                        )
+                        home_probe = probe_stack.enter_context(
+                            patch.object(Path, "home", return_value=home)
+                        )
+                        prohibit_task_side_effects(probe_stack)
+                        state = dependencies.inspect_path(
+                            "fresh_task_definition", profile.task_definition
+                        )
+                    home_probe.assert_called_once_with()
+                    self.assertEqual(
+                        state,
+                        NativePathState(False, "missing", 0, None, 0, None),
+                    )
+                    self.assertEqual(list(run_directory.iterdir()), [])
+
+        with self.subTest(case="before initialization"), patch(
+            "scripts.native_lifecycle_evidence.sys.platform", "linux"
+        ), patch(
+            "scripts.native_lifecycle_evidence.host_platform_module.machine",
+            return_value="x86_64",
+        ), native_lifecycle_dependencies_for_host() as dependencies, patch(
+            "scripts.native_lifecycle_evidence.os.open",
+            side_effect=AssertionError("invalid order must not probe"),
+        ) as open_probe, patch(
+            "scripts.native_lifecycle_evidence.os.stat",
+            side_effect=AssertionError("invalid order must not probe"),
+        ) as stat_probe, self.assertRaisesRegex(
+            LifecycleEvidenceError, "driver_failed"
+        ) as rejected:
+            dependencies.inspect_path(
+                "fresh_task_definition",
+                Path(tempfile.gettempdir()).resolve()
+                / "uninitialized"
+                / "openusage-bar.service",
+            )
+        self.assertEqual(str(rejected.exception), "driver_failed")
+        open_probe.assert_not_called()
+        stat_probe.assert_not_called()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            (home / ".config" / "systemd" / "user").mkdir(parents=True)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            with ExitStack() as stack:
+                dependencies, _run_directory, profile, _package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                wrong_inputs = (
+                    (True, profile.task_definition),
+                    ("fresh_task_definition", root / "foreign.service"),
+                    ("fresh_task_definition", object()),
+                )
+                for purpose, path in wrong_inputs:
+                    with self.subTest(case="wrong input", purpose=purpose):
+                        with patch.object(
+                            Path,
+                            "home",
+                            side_effect=AssertionError(
+                                "invalid input must not read authority"
+                            ),
+                        ) as home_probe, patch(
+                            "scripts.native_lifecycle_evidence.os.open",
+                            side_effect=AssertionError("invalid input must not probe"),
+                        ) as open_probe, patch(
+                            "scripts.native_lifecycle_evidence.os.stat",
+                            side_effect=AssertionError("invalid input must not probe"),
+                        ) as stat_probe:
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ) as rejected:
+                                dependencies.inspect_path(purpose, path)
+                        self.assertEqual(str(rejected.exception), "driver_failed")
+                        home_probe.assert_not_called()
+                        open_probe.assert_not_called()
+                        stat_probe.assert_not_called()
+
+        for existing_kind in ("directory", "file", "symlink"):
+            with self.subTest(case="existing", kind=existing_kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "authoritative-home"
+                unit_parent = home / ".config" / "systemd" / "user"
+                unit_parent.mkdir(parents=True)
+                foreign = root / "PRIVATE_FOREIGN_UNIT"
+                foreign.write_bytes(b"foreign unit remains unchanged")
+                authority = LifecycleStatePaths(platform="linux", home=home)
+                with ExitStack() as stack:
+                    dependencies, run_directory, profile, _package = (
+                        _enter_linux_host_dependencies(stack, authority)
+                    )
+                    unit = profile.task_definition
+                    if existing_kind == "directory":
+                        unit.mkdir()
+                        marker = unit / "PRIVATE_MARKER"
+                        marker.write_bytes(b"directory remains unchanged")
+                    elif existing_kind == "file":
+                        unit.write_bytes(b"unit remains unchanged")
+                        marker = unit
+                    else:
+                        unit.symlink_to(foreign)
+                        marker = foreign
+                    before = unit.lstat()
+                    payload = marker.read_bytes()
+                    with ExitStack() as probe_stack:
+                        probe_stack.enter_context(
+                            patch.object(Path, "home", return_value=home)
+                        )
+                        prohibit_task_side_effects(probe_stack)
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_unavailable"
+                        ) as unavailable:
+                            dependencies.inspect_path(
+                                "fresh_task_definition", unit
+                            )
+                    self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                    self.assertNotIn(str(root), str(unavailable.exception))
+                    after = unit.lstat()
+                    self.assertEqual(
+                        (after.st_dev, after.st_ino, after.st_mode),
+                        (before.st_dev, before.st_ino, before.st_mode),
+                    )
+                    self.assertEqual(marker.read_bytes(), payload)
+                    self.assertEqual(list(run_directory.iterdir()), [])
+
+        for uncertainty in ("home mismatch", "home error", "custom config"):
+            with self.subTest(case=uncertainty), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "authoritative-home"
+                (home / ".config" / "systemd" / "user").mkdir(parents=True)
+                authority = LifecycleStatePaths(platform="linux", home=home)
+                with ExitStack() as stack:
+                    dependencies, run_directory, profile, _package = (
+                        _enter_linux_host_dependencies(stack, authority)
+                    )
+                    if uncertainty == "home mismatch":
+                        home_result: object = root / "different-home"
+                        environment = {}
+                    elif uncertainty == "home error":
+                        home_result = RuntimeError("PRIVATE_HOME_FAILURE")
+                        environment = {}
+                    else:
+                        home_result = home
+                        environment = {
+                            "XDG_CONFIG_HOME": str(root / "custom-config")
+                        }
+                    with patch.dict(
+                        os.environ, environment, clear=True
+                    ), patch.object(
+                        Path,
+                        "home",
+                        return_value=home_result
+                        if not isinstance(home_result, Exception)
+                        else None,
+                        side_effect=home_result
+                        if isinstance(home_result, Exception)
+                        else None,
+                    ), patch(
+                        "scripts.native_lifecycle_evidence.os.open",
+                        side_effect=AssertionError("uncertain authority must not probe"),
+                    ) as open_probe, patch(
+                        "scripts.native_lifecycle_evidence.os.stat",
+                        side_effect=AssertionError("uncertain authority must not probe"),
+                    ) as stat_probe, self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        dependencies.inspect_path(
+                            "fresh_task_definition", profile.task_definition
+                        )
+                    self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                    self.assertNotIn("PRIVATE", str(unavailable.exception))
+                    open_probe.assert_not_called()
+                    stat_probe.assert_not_called()
+                    self.assertEqual(list(run_directory.iterdir()), [])
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_task_definition_rejects_final_missing_entry_swap(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            unit_parent = home / ".config" / "systemd" / "user"
+            unit_parent.mkdir(parents=True)
+            parent_before = unit_parent.lstat()
+            foreign = root / "PRIVATE_FOREIGN_UNIT"
+            foreign.write_bytes(b"foreign unit remains unchanged")
+            authority = LifecycleStatePaths(platform="linux", home=home)
+
+            with ExitStack() as stack:
+                dependencies, run_directory, profile, _package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                real_stat = os.stat
+                missing_checks = 0
+
+                def swap_before_final_missing(
+                    path: object, *args: object, **kwargs: object
+                ) -> os.stat_result:
+                    nonlocal missing_checks
+                    if (
+                        path == "openusage-bar.service"
+                        and kwargs.get("dir_fd") is not None
+                        and kwargs.get("follow_symlinks") is False
+                    ):
+                        missing_checks += 1
+                        if missing_checks == 2:
+                            profile.task_definition.symlink_to(foreign)
+                    return real_stat(path, *args, **kwargs)
+
+                with patch.object(Path, "home", return_value=home), patch(
+                    "scripts.native_lifecycle_evidence.os.stat",
+                    side_effect=swap_before_final_missing,
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        dependencies.inspect_path(
+                            "fresh_task_definition", profile.task_definition
+                        )
+                self.assertEqual(missing_checks, 2)
+                self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                self.assertNotIn(str(root), str(unavailable.exception))
+                self.assertNotIn("PRIVATE", str(unavailable.exception))
+                self.assertTrue(profile.task_definition.is_symlink())
+                self.assertEqual(os.readlink(profile.task_definition), str(foreign))
+                self.assertEqual(
+                    foreign.read_bytes(), b"foreign unit remains unchanged"
+                )
+                parent_after = unit_parent.lstat()
+                self.assertEqual(
+                    (parent_after.st_dev, parent_after.st_ino),
+                    (parent_before.st_dev, parent_before.st_ino),
+                )
+                self.assertEqual(list(run_directory.iterdir()), [])
+
     def test_fresh_baseline_consumes_linux_runtime_install_alias_before_task_definition(
         self,
     ) -> None:
@@ -5436,6 +5732,57 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         self.assertEqual(tree_snapshot(root), before)
 
             self.assertEqual(tree_snapshot(root), before)
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_service_probe_rejects_custom_xdg_config_home(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            custom_config = root / "authoritative-xdg-config"
+            unit = custom_config / "systemd" / "user" / "openusage-bar.service"
+            unit.parent.mkdir(parents=True)
+            unit.write_bytes(b"PRIVATE_INACTIVE_CUSTOM_UNIT")
+            authority = LifecycleStatePaths(platform="linux", home=home)
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch.dict(
+                os.environ,
+                {"XDG_CONFIG_HOME": str(custom_config)},
+                clear=True,
+            ), native_lifecycle_dependencies_for_host() as dependencies:
+                dependencies.make_run_directory("linux", "x64")
+                dependencies.profile_paths("linux")
+                with patch(
+                    "openusage_bar.platform_services.service_is_registered",
+                    return_value=False,
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        dependencies.inspect_service("linux")
+                self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                self.assertNotIn(str(root), str(unavailable.exception))
+                self.assertNotIn("PRIVATE", str(unavailable.exception))
+                self.assertEqual(
+                    unit.read_bytes(), b"PRIVATE_INACTIVE_CUSTOM_UNIT"
+                )
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_service_probe_proves_only_authoritative_absence(
