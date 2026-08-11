@@ -308,10 +308,17 @@ def _write_lifecycle_evidence(
             "stateAfterDelete": "removed",
         },
     }
-    path.write_text(
-        json.dumps(payload, allow_nan=False, ensure_ascii=True, indent=2, sort_keys=True)
-        + "\n",
-        encoding="ascii",
+    path.write_bytes(
+        (
+            json.dumps(
+                payload,
+                allow_nan=False,
+                ensure_ascii=True,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("ascii")
     )
     return payload
 
@@ -901,9 +908,10 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 with self.subTest(label=label):
                     payload = json.loads(json.dumps(valid))
                     mutate(payload)
-                    lifecycle_evidence.write_text(
-                        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-                        encoding="ascii",
+                    lifecycle_evidence.write_bytes(
+                        (
+                            json.dumps(payload, indent=2, sort_keys=True) + "\n"
+                        ).encode("ascii")
                     )
                     evidence = root / f"native-{label}.json"
                     generated = subprocess.run(
