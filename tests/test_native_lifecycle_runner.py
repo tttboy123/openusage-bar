@@ -788,6 +788,220 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             )
 
     @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_linux_host_copy_file_creates_one_sentinel_after_completed_execution_copy(
+        self,
+    ) -> None:
+        import stat
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativePathState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        source_bytes = b"audited sentinel payload"
+        source_sha256 = (
+            "8cc73046ae16fe6ba6be49643eb58af168c0f13a59ef48ccb8ad6ef665cc43ee"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source.write_bytes(source_bytes)
+            source.chmod(0o644)
+            source_before = source.lstat()
+            source_signature = (
+                source_before.st_dev,
+                source_before.st_ino,
+                source_before.st_size,
+                source_before.st_mode,
+                source_before.st_mtime_ns,
+                source_before.st_ctime_ns,
+                source_before.st_nlink,
+            )
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ):
+                with native_lifecycle_dependencies_for_host() as dependencies:
+                    premature_root = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    premature_sentinel = (
+                        premature_root / "outside-product-sentinel.bin"
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "fresh_sentinel", premature_sentinel
+                        ),
+                        NativePathState(False, "missing", 0, None, 0, None),
+                    )
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as premature:
+                        dependencies.copy_file(source, premature_sentinel)
+                    self.assertEqual(str(premature.exception), "driver_failed")
+                    self.assertNotIn(
+                        str(premature_root), str(premature.exception)
+                    )
+                    self.assertFalse(premature_sentinel.exists())
+                self.assertFalse(premature_root.exists())
+
+                run_directory: Path | None = None
+                execution_copy: Path | None = None
+                sentinel: Path | None = None
+                with native_lifecycle_dependencies_for_host() as dependencies:
+                    run_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    execution_copy = run_directory / source.name
+                    sentinel = run_directory / "outside-product-sentinel.bin"
+                    dependencies.copy_file(source, execution_copy)
+                    dependencies.set_file_mode(execution_copy, 0o700)
+                    execution_metadata = execution_copy.lstat()
+                    execution_state = NativePathState(
+                        True,
+                        "file",
+                        len(source_bytes),
+                        source_sha256,
+                        0o700,
+                        (
+                            f"{execution_metadata.st_dev}:"
+                            f"{execution_metadata.st_ino}"
+                        ),
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "execution_copy", execution_copy
+                        ),
+                        execution_state,
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path("fresh_sentinel", sentinel),
+                        NativePathState(False, "missing", 0, None, 0, None),
+                    )
+
+                    wrong_name = run_directory / "wrong-sentinel.bin"
+                    relative = Path("outside-product-sentinel.bin")
+                    foreign = root / "outside-product-sentinel.bin"
+                    for invalid_destination in (
+                        wrong_name,
+                        relative,
+                        foreign,
+                    ):
+                        with self.subTest(destination=str(invalid_destination)):
+                            self.assertFalse(invalid_destination.exists())
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ) as rejected:
+                                dependencies.copy_file(
+                                    source, invalid_destination
+                                )
+                            self.assertEqual(
+                                str(rejected.exception), "driver_failed"
+                            )
+                            self.assertNotIn(
+                                str(root), str(rejected.exception)
+                            )
+                            self.assertFalse(invalid_destination.exists())
+
+                    self.assertIsNone(
+                        dependencies.copy_file(source, sentinel)
+                    )
+                    sentinel_metadata = sentinel.lstat()
+                    self.assertTrue(stat.S_ISREG(sentinel_metadata.st_mode))
+                    self.assertFalse(sentinel.is_symlink())
+                    self.assertEqual(
+                        stat.S_IMODE(sentinel_metadata.st_mode), 0o600
+                    )
+                    self.assertEqual(sentinel_metadata.st_nlink, 1)
+                    self.assertNotEqual(
+                        (sentinel_metadata.st_dev, sentinel_metadata.st_ino),
+                        (source_before.st_dev, source_before.st_ino),
+                    )
+                    self.assertNotEqual(
+                        (sentinel_metadata.st_dev, sentinel_metadata.st_ino),
+                        (
+                            execution_metadata.st_dev,
+                            execution_metadata.st_ino,
+                        ),
+                    )
+                    sentinel_state = NativePathState(
+                        True,
+                        "file",
+                        len(source_bytes),
+                        source_sha256,
+                        0o600,
+                        (
+                            f"{sentinel_metadata.st_dev}:"
+                            f"{sentinel_metadata.st_ino}"
+                        ),
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path("sentinel", sentinel),
+                        sentinel_state,
+                    )
+
+                    before_duplicate = sentinel.lstat()
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as duplicate:
+                        dependencies.copy_file(source, sentinel)
+                    self.assertEqual(str(duplicate.exception), "driver_failed")
+                    after_duplicate = sentinel.lstat()
+                    self.assertEqual(
+                        (
+                            after_duplicate.st_dev,
+                            after_duplicate.st_ino,
+                            after_duplicate.st_size,
+                            after_duplicate.st_mode,
+                            after_duplicate.st_mtime_ns,
+                            after_duplicate.st_ctime_ns,
+                            after_duplicate.st_nlink,
+                        ),
+                        (
+                            before_duplicate.st_dev,
+                            before_duplicate.st_ino,
+                            before_duplicate.st_size,
+                            before_duplicate.st_mode,
+                            before_duplicate.st_mtime_ns,
+                            before_duplicate.st_ctime_ns,
+                            before_duplicate.st_nlink,
+                        ),
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "execution_copy", execution_copy
+                        ),
+                        execution_state,
+                    )
+
+                assert run_directory is not None
+                assert execution_copy is not None
+                assert sentinel is not None
+                self.assertFalse(execution_copy.exists())
+                self.assertFalse(sentinel.exists())
+                self.assertFalse(run_directory.exists())
+
+            source_after = source.lstat()
+            self.assertEqual(
+                (
+                    source_after.st_dev,
+                    source_after.st_ino,
+                    source_after.st_size,
+                    source_after.st_mode,
+                    source_after.st_mtime_ns,
+                    source_after.st_ctime_ns,
+                    source_after.st_nlink,
+                ),
+                source_signature,
+            )
+            self.assertEqual(source.read_bytes(), source_bytes)
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_copy_rejects_a_source_inside_the_owned_run_directory(
         self,
     ) -> None:

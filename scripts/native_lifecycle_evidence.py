@@ -697,6 +697,7 @@ class _BoundRunDirectory:
     directory_fd: int
     identity: tuple[int, int]
     execution_copy: _BoundRunFile | None = None
+    sentinel: _BoundRunFile | None = None
 
     def _validate_child_path(self, path: object) -> Path:
         if (
@@ -711,13 +712,24 @@ class _BoundRunDirectory:
     def inspect_path(self, purpose: object, path: object) -> NativePathState:
         if type(purpose) is not str:
             _driver_fail()
-        if purpose not in {"fresh_execution_copy", "execution_copy"}:
+        if purpose not in {
+            "fresh_execution_copy",
+            "execution_copy",
+            "fresh_sentinel",
+            "sentinel",
+        }:
             _fail("driver_unavailable")
         child = self._validate_child_path(path)
-        if ARTIFACT_NAMES["linux"].fullmatch(child.name) is None:
-            _driver_fail()
-        if purpose == "fresh_execution_copy":
-            if self.execution_copy is not None:
+        if purpose in {"fresh_execution_copy", "execution_copy"}:
+            if ARTIFACT_NAMES["linux"].fullmatch(child.name) is None:
+                _driver_fail()
+            bound = self.execution_copy
+        else:
+            if child.name != "outside-product-sentinel.bin":
+                _driver_fail()
+            bound = self.sentinel
+        if purpose in {"fresh_execution_copy", "fresh_sentinel"}:
+            if bound is not None:
                 _driver_fail()
             try:
                 os.stat(
@@ -730,7 +742,6 @@ class _BoundRunDirectory:
             except Exception:
                 _driver_fail()
             _driver_fail()
-        bound = self.execution_copy
         if bound is None or child.name != bound.name:
             _driver_fail()
         try:
@@ -786,10 +797,22 @@ class _BoundRunDirectory:
             _driver_fail()
         child = self._validate_child_path(destination)
         if (
-            self.execution_copy is not None
-            or child.name != source.name
-            or ARTIFACT_NAMES["linux"].fullmatch(child.name) is None
+            child.name == source.name
+            and ARTIFACT_NAMES["linux"].fullmatch(child.name) is not None
         ):
+            if self.execution_copy is not None:
+                _driver_fail()
+            role = "execution_copy"
+        elif child.name == "outside-product-sentinel.bin":
+            if (
+                self.execution_copy is None
+                or self.execution_copy.mode != 0o700
+                or self.sentinel is not None
+            ):
+                _driver_fail()
+            self.inspect_path("execution_copy", self.path / self.execution_copy.name)
+            role = "sentinel"
+        else:
             _driver_fail()
         try:
             public_run_directory = os.stat(
@@ -813,6 +836,14 @@ class _BoundRunDirectory:
         ):
             _driver_fail()
         before_signature, before_sha256 = _snapshot_external_file(source)
+        if role == "sentinel":
+            execution = self.execution_copy
+            if (
+                execution is None
+                or before_signature[2] != execution.size_bytes
+                or before_sha256 != execution.sha256
+            ):
+                _driver_fail()
         source_fd: int | None = None
         destination_fd: int | None = None
         try:
@@ -848,12 +879,20 @@ class _BoundRunDirectory:
                 sha256=hashlib.sha256(b"").hexdigest(),
                 mode=0o600,
             )
-            self.execution_copy = bound
+            if role == "execution_copy":
+                self.execution_copy = bound
+            else:
+                self.sentinel = bound
             destination_fd = None
             if (
                 not stat.S_ISREG(destination_opened.st_mode)
                 or destination_opened.st_nlink != 1
                 or identity == before_signature[:2]
+                or (
+                    role == "sentinel"
+                    and self.execution_copy is not None
+                    and identity == self.execution_copy.identity
+                )
             ):
                 _driver_fail()
             os.fchmod(bound.descriptor, 0o600)
@@ -977,10 +1016,7 @@ class _BoundRunDirectory:
             _driver_fail()
         bound.mode = 0o700
 
-    def _cleanup_execution_copy(self) -> None:
-        bound = self.execution_copy
-        if bound is None:
-            return
+    def _cleanup_bound_file(self, bound: _BoundRunFile) -> None:
         quarantine = f".{bound.name}.quarantine-{secrets.token_hex(16)}"
         cleanup_failed = False
         quarantined = False
@@ -1030,14 +1066,18 @@ class _BoundRunDirectory:
                 cleanup_failed = True
         if cleanup_failed:
             _driver_fail()
-        self.execution_copy = None
 
     def cleanup(self) -> None:
         quarantine = f".{self.path.name}.quarantine-{secrets.token_hex(16)}"
         quarantined = False
         cleanup_failed = False
         try:
-            self._cleanup_execution_copy()
+            if self.sentinel is not None:
+                self._cleanup_bound_file(self.sentinel)
+                self.sentinel = None
+            if self.execution_copy is not None:
+                self._cleanup_bound_file(self.execution_copy)
+                self.execution_copy = None
             os.rename(
                 self.path.name,
                 quarantine,
