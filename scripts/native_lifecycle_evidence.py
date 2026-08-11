@@ -705,40 +705,120 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _driver_fail()
         parent_fd: int | None = None
         directory_fd: int | None = None
+        child_name: str | None = None
+        created_identity: tuple[int, int] | None = None
+        entry_changed = False
         try:
-            candidate = Path(
-                tempfile.mkdtemp(prefix="usagehub-native-lifecycle-")
-            )
+            temp_root = Path(tempfile.gettempdir())
+            if not _valid_native_path(temp_root):
+                _driver_fail()
             flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
             flags |= getattr(os, "O_NOFOLLOW", 0)
-            parent_fd = os.open(candidate.parent, flags)
-            directory_fd = os.open(candidate.name, flags, dir_fd=parent_fd)
-            metadata = os.fstat(directory_fd)
-            entry = os.stat(
-                candidate.name,
+            root_entry = temp_root.lstat()
+            parent_fd = os.open(temp_root, flags)
+            root_opened = os.fstat(parent_fd)
+            root_mode = stat.S_IMODE(root_opened.st_mode)
+            safe_temp_root = (
+                root_opened.st_uid == os.getuid()
+                and root_mode & 0o022 == 0
+            ) or (
+                root_opened.st_uid == 0
+                and root_mode & stat.S_ISVTX != 0
+                and root_mode & 0o002 != 0
+            )
+            if (
+                stat.S_ISLNK(root_entry.st_mode)
+                or not stat.S_ISDIR(root_entry.st_mode)
+                or not stat.S_ISDIR(root_opened.st_mode)
+                or (root_entry.st_dev, root_entry.st_ino)
+                != (root_opened.st_dev, root_opened.st_ino)
+                or not safe_temp_root
+            ):
+                _driver_fail()
+            child_name = (
+                "usagehub-native-lifecycle-" + secrets.token_hex(16)
+            )
+            candidate = temp_root / child_name
+            os.mkdir(child_name, 0o700, dir_fd=parent_fd)
+            created = os.stat(
+                child_name,
                 dir_fd=parent_fd,
                 follow_symlinks=False,
+            )
+            created_identity = (created.st_dev, created.st_ino)
+            if (
+                not stat.S_ISDIR(created.st_mode)
+                or stat.S_ISLNK(created.st_mode)
+                or stat.S_IMODE(created.st_mode) != 0o700
+                or created.st_uid != os.getuid()
+            ):
+                _driver_fail()
+            directory_fd = os.open(child_name, flags, dir_fd=parent_fd)
+            metadata = os.fstat(directory_fd)
+            entry = os.stat(
+                child_name,
+                dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+            entry_changed = (
+                (metadata.st_dev, metadata.st_ino) != created_identity
+                or (entry.st_dev, entry.st_ino) != created_identity
             )
             if (
                 not candidate.is_absolute()
                 or stat.S_ISLNK(metadata.st_mode)
                 or not stat.S_ISDIR(metadata.st_mode)
                 or stat.S_IMODE(metadata.st_mode) != 0o700
-                or (entry.st_dev, entry.st_ino)
-                != (metadata.st_dev, metadata.st_ino)
+                or entry_changed
             ):
                 _driver_fail()
-        except LifecycleEvidenceError:
-            if directory_fd is not None:
-                os.close(directory_fd)
-            if parent_fd is not None:
-                os.close(parent_fd)
-            raise
         except Exception:
             if directory_fd is not None:
-                os.close(directory_fd)
+                try:
+                    os.close(directory_fd)
+                except Exception:
+                    pass
+            if (
+                parent_fd is not None
+                and child_name is not None
+                and created_identity is not None
+                and not entry_changed
+            ):
+                quarantine = (
+                    f".{child_name}.quarantine-{secrets.token_hex(16)}"
+                )
+                try:
+                    os.rename(
+                        child_name,
+                        quarantine,
+                        src_dir_fd=parent_fd,
+                        dst_dir_fd=parent_fd,
+                    )
+                    current = os.stat(
+                        quarantine,
+                        dir_fd=parent_fd,
+                        follow_symlinks=False,
+                    )
+                    if (
+                        stat.S_ISDIR(current.st_mode)
+                        and (current.st_dev, current.st_ino)
+                        == created_identity
+                    ):
+                        os.rmdir(quarantine, dir_fd=parent_fd)
+                    else:
+                        os.rename(
+                            quarantine,
+                            child_name,
+                            src_dir_fd=parent_fd,
+                            dst_dir_fd=parent_fd,
+                        )
+                except Exception:
+                    pass
             if parent_fd is not None:
-                os.close(parent_fd)
+                try:
+                    os.close(parent_fd)
+                except Exception:
+                    pass
             _driver_fail()
         assert parent_fd is not None
         assert directory_fd is not None

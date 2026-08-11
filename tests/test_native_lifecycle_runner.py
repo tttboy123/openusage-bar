@@ -525,6 +525,133 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         self.fail("unsupported host entered lifecycle context")
                 self.assertEqual(str(unavailable.exception), "driver_unavailable")
 
+    def test_linux_host_run_directory_rejects_an_entry_swap_before_identity_binding(
+        self,
+    ) -> None:
+        import os
+        import stat
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        real_mkdir = os.mkdir
+        real_open = os.open
+        real_rename = os.rename
+        real_rmdir = os.rmdir
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            temp_root = root / "authoritative-temp"
+            temp_root.mkdir(mode=0o700)
+            foreign_seed = temp_root / "foreign-seed"
+            foreign_seed.mkdir(mode=0o700)
+            foreign_metadata = foreign_seed.lstat()
+            foreign_identity = (
+                foreign_metadata.st_dev,
+                foreign_metadata.st_ino,
+            )
+            public_entry: Path | None = None
+            original_entry: Path | None = None
+            swapped = False
+
+            def track_run_directory_creation(
+                path: object,
+                mode: int = 0o777,
+                *args: object,
+                **kwargs: object,
+            ) -> None:
+                nonlocal public_entry
+                real_mkdir(path, mode, *args, **kwargs)
+                candidate = Path(path)
+                if not candidate.is_absolute():
+                    candidate = temp_root / candidate
+                if (
+                    candidate.parent == temp_root
+                    and candidate.name.startswith("usagehub-native-lifecycle-")
+                ):
+                    public_entry = candidate
+
+            def swap_before_first_binding_open(
+                path: object,
+                flags: int,
+                *args: object,
+                **kwargs: object,
+            ) -> int:
+                nonlocal original_entry, swapped
+                if (
+                    not swapped
+                    and public_entry is not None
+                    and public_entry.exists()
+                ):
+                    original_entry = public_entry.with_name(
+                        f"{public_entry.name}-owned-original"
+                    )
+                    (public_entry / "owned-marker").write_bytes(b"owned")
+                    real_rename(public_entry, original_entry)
+                    real_rename(foreign_seed, public_entry)
+                    swapped = True
+                return real_open(path, flags, *args, **kwargs)
+
+            context = None
+            make_error: LifecycleEvidenceError | None = None
+            try:
+                with patch(
+                    "scripts.native_lifecycle_evidence.sys.platform", "linux"
+                ), patch(
+                    "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                    return_value="x86_64",
+                ), patch(
+                    "scripts.native_lifecycle_evidence.tempfile.gettempdir",
+                    return_value=str(temp_root),
+                ), patch(
+                    "scripts.native_lifecycle_evidence.os.mkdir",
+                    side_effect=track_run_directory_creation,
+                ), patch(
+                    "scripts.native_lifecycle_evidence.os.open",
+                    side_effect=swap_before_first_binding_open,
+                ):
+                    context = native_lifecycle_dependencies_for_host()
+                    dependencies = context.__enter__()
+                    try:
+                        dependencies.make_run_directory("linux", "x64")
+                    except LifecycleEvidenceError as error:
+                        make_error = error
+                    finally:
+                        context.__exit__(
+                            type(make_error) if make_error is not None else None,
+                            make_error,
+                            make_error.__traceback__ if make_error is not None else None,
+                        )
+                        context = None
+
+                self.assertIsNotNone(make_error)
+                assert make_error is not None
+                self.assertEqual(str(make_error), "driver_failed")
+                self.assertNotIn(str(temp_root), str(make_error))
+                self.assertTrue(swapped)
+                assert public_entry is not None
+                assert original_entry is not None
+                replacement = public_entry.lstat()
+                self.assertTrue(stat.S_ISDIR(replacement.st_mode))
+                self.assertEqual(
+                    (replacement.st_dev, replacement.st_ino), foreign_identity
+                )
+                self.assertEqual(
+                    (original_entry / "owned-marker").read_bytes(), b"owned"
+                )
+            finally:
+                if context is not None:
+                    context.__exit__(None, None, None)
+                for candidate in (public_entry, original_entry, foreign_seed):
+                    if candidate is None or not candidate.exists():
+                        continue
+                    marker = candidate / "owned-marker"
+                    if marker.exists():
+                        marker.unlink()
+                    real_rmdir(candidate)
+
     def test_linux_host_dependency_cleanup_does_not_delete_a_swapped_foreign_directory(
         self,
     ) -> None:
