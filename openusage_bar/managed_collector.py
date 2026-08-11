@@ -289,19 +289,8 @@ def _facts_for_regular_entry(descriptor: int, name: str) -> _FileFacts:
             os.close(opened)
 
 
-def _copy_source_to_temporary(source: int, runtime: int, temporary: str) -> None:
-    output: int | None = None
+def _copy_source_to_temporary(source: int, output: int) -> None:
     try:
-        output = os.open(
-            temporary,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | getattr(os, "O_NOFOLLOW", 0),
-            0o700,
-            dir_fd=runtime,
-        )
-        os.fchmod(output, 0o700)
         os.lseek(source, 0, os.SEEK_SET)
         while True:
             block = os.read(source, 1024 * 1024)
@@ -316,9 +305,6 @@ def _copy_source_to_temporary(source: int, runtime: int, temporary: str) -> None
         os.fsync(output)
     except OSError:
         _fail()
-    finally:
-        if output is not None:
-            os.close(output)
 
 
 def _same_directory_identity(left: int, right: int) -> bool:
@@ -435,14 +421,53 @@ def install_managed_collector(*, interval: int = 300) -> None:
     source_before = _facts_for_open_file(source)
     runtime: int | None = None
     temporary = f".{_STABLE_NAME}.tmp-{os.getpid()}-{secrets.token_hex(8)}"
+    temporary_identity: tuple[int, int] | None = None
+    temporary_present = False
+    temporary_descriptor: int | None = None
     backup: str | None = None
     installed_identity: tuple[int, int] | None = None
     try:
         runtime = _open_runtime(location, create=True)
         if runtime is None:
             _fail()
-        _copy_source_to_temporary(source, runtime, temporary)
         existing = _regular_entry_identity(runtime, _STABLE_NAME)
+        try:
+            temporary_descriptor = os.open(
+                temporary,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o700,
+                dir_fd=runtime,
+            )
+            created = os.fstat(temporary_descriptor)
+            temporary_identity = created.st_dev, created.st_ino
+            temporary_present = True
+            if not stat.S_ISREG(created.st_mode) or created.st_nlink != 1:
+                _fail()
+            os.fchmod(temporary_descriptor, 0o700)
+            secured = os.fstat(temporary_descriptor)
+            if (
+                not stat.S_ISREG(secured.st_mode)
+                or secured.st_nlink != 1
+                or (secured.st_dev, secured.st_ino) != temporary_identity
+                or stat.S_IMODE(secured.st_mode) != 0o700
+            ):
+                _fail()
+            _copy_source_to_temporary(source, temporary_descriptor)
+        except ManagedCollectorError:
+            raise
+        except OSError:
+            _fail()
+        finally:
+            if temporary_descriptor is not None:
+                descriptor = temporary_descriptor
+                temporary_descriptor = None
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    _fail()
         if existing is not None:
             backup = f".{_STABLE_NAME}.previous-{secrets.token_hex(8)}"
             os.rename(
@@ -451,12 +476,34 @@ def install_managed_collector(*, interval: int = 300) -> None:
                 src_dir_fd=runtime,
                 dst_dir_fd=runtime,
             )
-        os.replace(
-            temporary,
-            _STABLE_NAME,
-            src_dir_fd=runtime,
-            dst_dir_fd=runtime,
-        )
+            os.replace(
+                temporary,
+                _STABLE_NAME,
+                src_dir_fd=runtime,
+                dst_dir_fd=runtime,
+            )
+            temporary_present = False
+        else:
+            try:
+                os.link(
+                    temporary,
+                    _STABLE_NAME,
+                    src_dir_fd=runtime,
+                    dst_dir_fd=runtime,
+                    follow_symlinks=False,
+                )
+            except OSError:
+                _fail()
+            installed_identity = temporary_identity
+            if (
+                _regular_entry_identity(runtime, temporary)
+                != temporary_identity
+                or _regular_entry_identity(runtime, _STABLE_NAME)
+                != temporary_identity
+            ):
+                _fail()
+            _unlink_if_identity(runtime, temporary, temporary_identity)
+            temporary_present = False
         installed_identity = _regular_entry_identity(runtime, _STABLE_NAME)
         source_after = _facts_for_open_file(source)
         stable_facts = _facts_for_regular_entry(runtime, _STABLE_NAME)
@@ -485,8 +532,19 @@ def install_managed_collector(*, interval: int = 300) -> None:
     except Exception as error:
         cleanup_failed = False
         if runtime is not None:
+            if temporary_present:
+                try:
+                    if temporary_identity is None:
+                        _remove_temporary(runtime, temporary)
+                    else:
+                        _unlink_if_identity(
+                            runtime,
+                            temporary,
+                            temporary_identity,
+                        )
+                except Exception:
+                    cleanup_failed = True
             try:
-                _remove_temporary(runtime, temporary)
                 _rollback_install(runtime, installed_identity, backup)
             except Exception:
                 cleanup_failed = True

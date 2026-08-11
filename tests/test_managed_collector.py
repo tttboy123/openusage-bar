@@ -151,6 +151,275 @@ class ManagedCollectorTests(unittest.TestCase):
             )
             self.assertFalse(stable.exists())
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_fresh_install_does_not_overwrite_a_concurrently_published_stable(
+        self,
+    ) -> None:
+        from openusage_bar import managed_collector
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            source = root / "openusage-collector"
+            source.write_bytes(b"frozen collector")
+            source.chmod(0o700)
+            runtime = home / ".local" / "share" / "usagehub" / "runtime"
+            stable = runtime / "openusage-collector"
+            self.assertFalse(stable.exists())
+            real_link = managed_collector.os.link
+            concurrent_identity: tuple[int, int] | None = None
+
+            def publish_foreign_at_link(
+                source_name: str,
+                target_name: str,
+                *args,
+                **kwargs,
+            ):
+                nonlocal concurrent_identity
+                runtime_descriptor = kwargs["dst_dir_fd"]
+                foreign = os.open(
+                    target_name,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    0o700,
+                    dir_fd=runtime_descriptor,
+                )
+                try:
+                    os.write(foreign, b"PRIVATE_CONCURRENT_STABLE")
+                    os.fsync(foreign)
+                    metadata = os.fstat(foreign)
+                    concurrent_identity = metadata.st_dev, metadata.st_ino
+                finally:
+                    os.close(foreign)
+                return real_link(source_name, target_name, *args, **kwargs)
+
+            patches = self._frozen_linux(source, home)
+            with patches[0], patches[1], patches[2], patches[3], patch(
+                "openusage_bar.managed_collector.os.link",
+                side_effect=publish_foreign_at_link,
+            ), patch(
+                "openusage_bar.managed_collector.platform_services.install_service"
+            ) as install:
+                with self.assertRaises(
+                    managed_collector.ManagedCollectorError
+                ) as captured:
+                    managed_collector.install_managed_collector()
+
+            self.assertIsNotNone(concurrent_identity)
+            self.assertEqual(
+                str(captured.exception), "managed collector action failed"
+            )
+            self.assertNotIn(str(root), str(captured.exception))
+            self.assertNotIn("PRIVATE", str(captured.exception))
+            current = stable.lstat()
+            self.assertEqual(
+                (current.st_dev, current.st_ino), concurrent_identity
+            )
+            self.assertEqual(
+                stable.read_bytes(), b"PRIVATE_CONCURRENT_STABLE"
+            )
+            self.assertEqual(
+                sorted(path.name for path in runtime.iterdir()),
+                ["openusage-collector"],
+            )
+            self.assertEqual(source.read_bytes(), b"frozen collector")
+            install.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and hardlink semantics")
+    def test_fresh_install_cleanup_preserves_a_swapped_foreign_temporary(
+        self,
+    ) -> None:
+        from openusage_bar import managed_collector
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            source = root / "openusage-collector"
+            source.write_bytes(b"frozen collector")
+            source.chmod(0o700)
+            runtime = home / ".local" / "share" / "usagehub" / "runtime"
+            stable = runtime / "openusage-collector"
+            real_link = managed_collector.os.link
+            temporary_name: str | None = None
+            owned_identity: tuple[int, int] | None = None
+            foreign_identity: tuple[int, int] | None = None
+
+            def swap_temporary_at_publish(
+                source_name: str,
+                target_name: str,
+                *args,
+                **kwargs,
+            ):
+                nonlocal temporary_name, owned_identity, foreign_identity
+                source_dir = kwargs["src_dir_fd"]
+                temporary_name = source_name
+                os.rename(
+                    source_name,
+                    "owned-original",
+                    src_dir_fd=source_dir,
+                    dst_dir_fd=source_dir,
+                )
+                owned = os.stat(
+                    "owned-original",
+                    dir_fd=source_dir,
+                    follow_symlinks=False,
+                )
+                owned_identity = owned.st_dev, owned.st_ino
+                foreign = os.open(
+                    source_name,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    0o700,
+                    dir_fd=source_dir,
+                )
+                try:
+                    os.write(foreign, b"PRIVATE_FOREIGN_TEMPORARY")
+                    os.fsync(foreign)
+                    metadata = os.fstat(foreign)
+                    foreign_identity = metadata.st_dev, metadata.st_ino
+                finally:
+                    os.close(foreign)
+                return real_link(source_name, target_name, *args, **kwargs)
+
+            patches = self._frozen_linux(source, home)
+            with patches[0], patches[1], patches[2], patches[3], patch(
+                "openusage_bar.managed_collector.os.link",
+                side_effect=swap_temporary_at_publish,
+            ), patch(
+                "openusage_bar.managed_collector.platform_services.install_service"
+            ) as install:
+                with self.assertRaises(
+                    managed_collector.ManagedCollectorError
+                ) as captured:
+                    managed_collector.install_managed_collector()
+
+            self.assertIsNotNone(temporary_name)
+            self.assertIsNotNone(owned_identity)
+            self.assertIsNotNone(foreign_identity)
+            assert temporary_name is not None
+            foreign_temporary = runtime / temporary_name
+            owned_original = runtime / "owned-original"
+            self.assertEqual(
+                str(captured.exception), "managed collector action failed"
+            )
+            self.assertNotIn(str(root), str(captured.exception))
+            self.assertNotIn("PRIVATE", str(captured.exception))
+            self.assertTrue(foreign_temporary.exists())
+            foreign_now = foreign_temporary.lstat()
+            self.assertEqual(
+                (foreign_now.st_dev, foreign_now.st_ino), foreign_identity
+            )
+            self.assertEqual(
+                foreign_temporary.read_bytes(), b"PRIVATE_FOREIGN_TEMPORARY"
+            )
+            owned_now = owned_original.lstat()
+            self.assertEqual(
+                (owned_now.st_dev, owned_now.st_ino), owned_identity
+            )
+            self.assertEqual(owned_original.read_bytes(), b"frozen collector")
+            stable_now = stable.lstat()
+            self.assertEqual(
+                (stable_now.st_dev, stable_now.st_ino), foreign_identity
+            )
+            self.assertEqual(stable.read_bytes(), b"PRIVATE_FOREIGN_TEMPORARY")
+            self.assertEqual(source.read_bytes(), b"frozen collector")
+            install.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX open-file rename semantics")
+    def test_copy_failure_cleanup_preserves_a_swapped_foreign_temporary(
+        self,
+    ) -> None:
+        from openusage_bar import managed_collector
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            source = root / "openusage-collector"
+            source.write_bytes(b"frozen collector")
+            source.chmod(0o700)
+            runtime = home / ".local" / "share" / "usagehub" / "runtime"
+            temporary_name = (
+                f".openusage-collector.tmp-{os.getpid()}-{'a' * 16}"
+            )
+            temporary = runtime / temporary_name
+            owned_original = runtime / "owned-original"
+            real_write = managed_collector.os.write
+            swapped = False
+            owned_identity: tuple[int, int] | None = None
+            foreign_identity: tuple[int, int] | None = None
+
+            def swap_at_first_write(descriptor: int, payload: bytes) -> int:
+                nonlocal swapped, owned_identity, foreign_identity
+                if swapped:
+                    return real_write(descriptor, payload)
+                temporary.rename(owned_original)
+                owned = owned_original.lstat()
+                owned_identity = owned.st_dev, owned.st_ino
+                foreign = os.open(
+                    temporary,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    0o700,
+                )
+                try:
+                    real_write(foreign, b"PRIVATE_FOREIGN_TEMPORARY")
+                    os.fsync(foreign)
+                    metadata = os.fstat(foreign)
+                    foreign_identity = metadata.st_dev, metadata.st_ino
+                finally:
+                    os.close(foreign)
+                swapped = True
+                raise OSError("PRIVATE_COPY_FAILURE")
+
+            patches = self._frozen_linux(source, home)
+            with patches[0], patches[1], patches[2], patches[3], patch(
+                "openusage_bar.managed_collector.secrets.token_hex",
+                return_value="a" * 16,
+            ), patch(
+                "openusage_bar.managed_collector.os.write",
+                side_effect=swap_at_first_write,
+            ), patch(
+                "openusage_bar.managed_collector.platform_services.install_service"
+            ) as install:
+                with self.assertRaises(
+                    managed_collector.ManagedCollectorError
+                ) as captured:
+                    managed_collector.install_managed_collector()
+
+            self.assertTrue(swapped)
+            self.assertIsNotNone(owned_identity)
+            self.assertIsNotNone(foreign_identity)
+            self.assertEqual(
+                str(captured.exception), "managed collector action failed"
+            )
+            self.assertNotIn(str(root), str(captured.exception))
+            self.assertNotIn("PRIVATE", str(captured.exception))
+            self.assertTrue(temporary.exists())
+            foreign_now = temporary.lstat()
+            self.assertEqual(
+                (foreign_now.st_dev, foreign_now.st_ino), foreign_identity
+            )
+            self.assertEqual(
+                temporary.read_bytes(), b"PRIVATE_FOREIGN_TEMPORARY"
+            )
+            owned_now = owned_original.lstat()
+            self.assertEqual(
+                (owned_now.st_dev, owned_now.st_ino), owned_identity
+            )
+            self.assertEqual(owned_original.read_bytes(), b"")
+            self.assertFalse((runtime / "openusage-collector").exists())
+            self.assertEqual(source.read_bytes(), b"frozen collector")
+            install.assert_not_called()
+
     @unittest.skipIf(os.name == "nt", "requires POSIX symlink and dirfd semantics")
     def test_install_rename_cannot_be_redirected_by_runtime_parent_swap(self):
         from openusage_bar import managed_collector
@@ -170,22 +439,22 @@ class ManagedCollectorTests(unittest.TestCase):
             source = root / "openusage-collector"
             source.write_bytes(b"frozen collector")
             source.chmod(0o700)
-            real_replace = managed_collector.os.replace
+            real_link = managed_collector.os.link
             swapped = False
 
-            def swap_at_replace(source_name, target_name, *args, **kwargs):
+            def swap_at_link(source_name, target_name, *args, **kwargs):
                 nonlocal swapped
                 product.rename(original_product)
                 product.symlink_to(foreign_product, target_is_directory=True)
                 foreign_temporary = foreign_runtime / Path(source_name).name
                 foreign_temporary.write_bytes(b"attacker temporary")
                 swapped = True
-                return real_replace(source_name, target_name, *args, **kwargs)
+                return real_link(source_name, target_name, *args, **kwargs)
 
             patches = self._frozen_linux(source, home)
             with patches[0], patches[1], patches[2], patches[3], patch(
-                "openusage_bar.managed_collector.os.replace",
-                side_effect=swap_at_replace,
+                "openusage_bar.managed_collector.os.link",
+                side_effect=swap_at_link,
             ), patch(
                 "openusage_bar.managed_collector.platform_services.install_service"
             ) as install:
@@ -214,20 +483,20 @@ class ManagedCollectorTests(unittest.TestCase):
             source = root / "openusage-collector"
             source.write_bytes(b"frozen collector version one")
             source.chmod(0o700)
-            real_replace = managed_collector.os.replace
+            real_link = managed_collector.os.link
             mutated = False
 
-            def mutate_source_at_replace(source_name, target_name, *args, **kwargs):
+            def mutate_source_at_link(source_name, target_name, *args, **kwargs):
                 nonlocal mutated
                 with source.open("ab") as stream:
                     stream.write(b" private mutation")
                 mutated = True
-                return real_replace(source_name, target_name, *args, **kwargs)
+                return real_link(source_name, target_name, *args, **kwargs)
 
             patches = self._frozen_linux(source, home)
             with patches[0], patches[1], patches[2], patches[3], patch(
-                "openusage_bar.managed_collector.os.replace",
-                side_effect=mutate_source_at_replace,
+                "openusage_bar.managed_collector.os.link",
+                side_effect=mutate_source_at_link,
             ), patch(
                 "openusage_bar.managed_collector.platform_services.install_service"
             ) as install:

@@ -5229,6 +5229,255 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 )
                 self.assertEqual(list(run_directory.iterdir()), [])
 
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_fresh_stable_collector_reproves_the_authoritative_runtime_root_absent(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativePathState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        missing = NativePathState(False, "missing", 0, None, 0, None)
+
+        for authority_kind in ("default", "custom"):
+            with self.subTest(case="missing", authority=authority_kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "authoritative-home"
+                (home / ".config" / "systemd" / "user").mkdir(parents=True)
+                custom_data = root / "authoritative-xdg-data"
+                if authority_kind == "default":
+                    (home / ".local" / "share" / "usagehub").mkdir(parents=True)
+                    xdg_data_home = None
+                else:
+                    (custom_data / "usagehub").mkdir(parents=True)
+                    xdg_data_home = custom_data
+                authority = LifecycleStatePaths(platform="linux", home=home)
+                with ExitStack() as stack:
+                    dependencies, run_directory, profile, package = (
+                        _enter_linux_host_dependencies(
+                            stack,
+                            authority,
+                            xdg_data_home=xdg_data_home,
+                        )
+                    )
+                    self.assertEqual(
+                        package.collector,
+                        profile.runtime_root / "openusage-collector",
+                    )
+                    with patch.object(Path, "home", return_value=home):
+                        self.assertEqual(
+                            dependencies.inspect_path(
+                                "fresh_task_definition",
+                                profile.task_definition,
+                            ),
+                            missing,
+                        )
+                    with ExitStack() as probe_stack:
+                        home_probe = probe_stack.enter_context(
+                            patch.object(Path, "home", return_value=home)
+                        )
+                        _prohibit_lifecycle_broad_reads_and_mutation(probe_stack)
+                        stable_state = dependencies.inspect_path(
+                            "fresh_stable_collector", package.collector
+                        )
+                    home_probe.assert_called_once_with()
+                    self.assertEqual(stable_state, missing)
+                    self.assertFalse(profile.runtime_root.exists())
+                    self.assertEqual(list(run_directory.iterdir()), [])
+
+        with self.subTest(case="runtime root appears after task"), tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            (home / ".config" / "systemd" / "user").mkdir(parents=True)
+            (home / ".local" / "share" / "usagehub").mkdir(parents=True)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            with ExitStack() as stack:
+                dependencies, run_directory, profile, package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                with patch.object(Path, "home", return_value=home):
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "fresh_task_definition", profile.task_definition
+                        ),
+                        missing,
+                    )
+                profile.runtime_root.mkdir()
+                marker = profile.runtime_root / "PRIVATE_RUNTIME_MARKER"
+                marker.write_bytes(b"runtime root remains unchanged")
+                with patch.object(Path, "home", return_value=home), self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as unavailable:
+                    dependencies.inspect_path(
+                        "fresh_stable_collector", package.collector
+                    )
+                self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                self.assertNotIn(str(root), str(unavailable.exception))
+                self.assertNotIn("PRIVATE", str(unavailable.exception))
+                self.assertFalse(package.collector.exists())
+                self.assertEqual(
+                    marker.read_bytes(), b"runtime root remains unchanged"
+                )
+                self.assertEqual(list(run_directory.iterdir()), [])
+
+        uninitialized_collector = (
+            Path(tempfile.gettempdir()).resolve()
+            / "uninitialized-runtime"
+            / "openusage-collector"
+        )
+        with self.subTest(case="before initialization"), patch(
+            "scripts.native_lifecycle_evidence.sys.platform", "linux"
+        ), patch(
+            "scripts.native_lifecycle_evidence.host_platform_module.machine",
+            return_value="x86_64",
+        ), native_lifecycle_dependencies_for_host() as dependencies, patch(
+            "scripts.native_lifecycle_evidence.os.open",
+            side_effect=AssertionError("invalid order must not probe"),
+        ) as open_probe, patch(
+            "scripts.native_lifecycle_evidence.os.stat",
+            side_effect=AssertionError("invalid order must not probe"),
+        ) as stat_probe, self.assertRaisesRegex(
+            LifecycleEvidenceError, "driver_failed"
+        ) as rejected:
+            dependencies.inspect_path(
+                "fresh_stable_collector", uninitialized_collector
+            )
+        self.assertEqual(str(rejected.exception), "driver_failed")
+        open_probe.assert_not_called()
+        stat_probe.assert_not_called()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch.dict(
+                os.environ, {}, clear=True
+            ), native_lifecycle_dependencies_for_host() as dependencies:
+                dependencies.make_run_directory("linux", "x64")
+                profile = dependencies.profile_paths("linux")
+                with patch(
+                    "scripts.native_lifecycle_evidence.os.open",
+                    side_effect=AssertionError("missing package must not probe"),
+                ) as open_probe, patch(
+                    "scripts.native_lifecycle_evidence.os.stat",
+                    side_effect=AssertionError("missing package must not probe"),
+                ) as stat_probe, self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ) as rejected:
+                    dependencies.inspect_path(
+                        "fresh_stable_collector",
+                        profile.runtime_root / "openusage-collector",
+                    )
+                self.assertEqual(str(rejected.exception), "driver_failed")
+                open_probe.assert_not_called()
+                stat_probe.assert_not_called()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            with ExitStack() as stack:
+                dependencies, run_directory, profile, package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                wrong_inputs = (
+                    (True, package.collector),
+                    ("fresh_stable_collector", root / "foreign-collector"),
+                    ("fresh_stable_collector", object()),
+                )
+                for purpose, path in wrong_inputs:
+                    with self.subTest(case="wrong input", purpose=purpose):
+                        with patch.object(
+                            Path,
+                            "home",
+                            side_effect=AssertionError(
+                                "invalid input must not read authority"
+                            ),
+                        ) as home_probe, patch(
+                            "scripts.native_lifecycle_evidence.os.open",
+                            side_effect=AssertionError("invalid input must not probe"),
+                        ) as open_probe, patch(
+                            "scripts.native_lifecycle_evidence.os.stat",
+                            side_effect=AssertionError("invalid input must not probe"),
+                        ) as stat_probe:
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ) as rejected:
+                                dependencies.inspect_path(purpose, path)
+                        self.assertEqual(str(rejected.exception), "driver_failed")
+                        home_probe.assert_not_called()
+                        open_probe.assert_not_called()
+                        stat_probe.assert_not_called()
+                self.assertEqual(list(run_directory.iterdir()), [])
+
+        for uncertainty in (
+            "home mismatch",
+            "home error",
+            "xdg data drift",
+            "xdg config drift",
+        ):
+            with self.subTest(case=uncertainty), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "authoritative-home"
+                home.mkdir()
+                authority = LifecycleStatePaths(platform="linux", home=home)
+                with ExitStack() as stack:
+                    dependencies, run_directory, profile, package = (
+                        _enter_linux_host_dependencies(stack, authority)
+                    )
+                    environment: dict[str, str] = {}
+                    home_result: object = home
+                    if uncertainty == "home mismatch":
+                        home_result = root / "different-home"
+                    elif uncertainty == "home error":
+                        home_result = RuntimeError("PRIVATE_HOME_FAILURE")
+                    elif uncertainty == "xdg data drift":
+                        environment["XDG_DATA_HOME"] = str(root / "drifted-data")
+                    else:
+                        environment["XDG_CONFIG_HOME"] = str(root / "drifted-config")
+                    with patch.dict(
+                        os.environ, environment, clear=True
+                    ), patch.object(
+                        Path,
+                        "home",
+                        return_value=home_result
+                        if not isinstance(home_result, Exception)
+                        else None,
+                        side_effect=home_result
+                        if isinstance(home_result, Exception)
+                        else None,
+                    ), patch(
+                        "scripts.native_lifecycle_evidence.os.open",
+                        side_effect=AssertionError("uncertain authority must not probe"),
+                    ) as open_probe, patch(
+                        "scripts.native_lifecycle_evidence.os.stat",
+                        side_effect=AssertionError("uncertain authority must not probe"),
+                    ) as stat_probe, self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        dependencies.inspect_path(
+                            "fresh_stable_collector", package.collector
+                        )
+                    self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                    self.assertNotIn("PRIVATE", str(unavailable.exception))
+                    open_probe.assert_not_called()
+                    stat_probe.assert_not_called()
+                    self.assertEqual(list(run_directory.iterdir()), [])
+
     def test_fresh_baseline_consumes_linux_runtime_install_alias_before_task_definition(
         self,
     ) -> None:

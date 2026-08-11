@@ -1576,6 +1576,65 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         except Exception:
             _driver_fail()
 
+    def current_runtime_authority() -> tuple[Path, tuple[str, ...], Path]:
+        if profile_projection is None or profile_home is None:
+            _driver_fail()
+        try:
+            current_home = Path.home()
+            current_xdg_binding = os.environ.get("XDG_DATA_HOME")
+        except Exception:
+            _fail("driver_unavailable")
+        if (
+            not isinstance(current_home, Path)
+            or not _valid_native_path(current_home)
+            or current_home != profile_home
+        ):
+            _fail("driver_unavailable")
+        if profile_xdg_binding is None:
+            if current_xdg_binding not in {None, ""}:
+                _fail("driver_unavailable")
+            anchor = profile_home
+            relative_components = (
+                ".local",
+                "share",
+                "usagehub",
+                "runtime",
+            )
+            expected_runtime_root = anchor.joinpath(*relative_components)
+        else:
+            if (
+                current_xdg_binding != profile_xdg_binding
+                or profile_xdg_trusted_root is None
+                or profile_xdg_runtime_parts is None
+            ):
+                _fail("driver_unavailable")
+            try:
+                current_xdg_root = Path(current_xdg_binding)
+                current_trusted_root = current_xdg_root
+                while not os.path.lexists(current_trusted_root):
+                    parent = current_trusted_root.parent
+                    if parent == current_trusted_root:
+                        break
+                    current_trusted_root = parent
+                current_runtime_parts = (
+                    current_xdg_root / "usagehub" / "runtime"
+                ).relative_to(current_trusted_root).parts
+            except Exception:
+                _fail("driver_unavailable")
+            if (
+                not _valid_native_path(current_xdg_root)
+                or not current_runtime_parts
+                or current_trusted_root != profile_xdg_trusted_root
+                or current_runtime_parts != profile_xdg_runtime_parts
+            ):
+                _fail("driver_unavailable")
+            anchor = profile_xdg_trusted_root
+            relative_components = profile_xdg_runtime_parts
+            expected_runtime_root = current_xdg_root / "usagehub" / "runtime"
+        if profile_projection.runtime_root != expected_runtime_root:
+            _fail("driver_unavailable")
+        return anchor, relative_components, expected_runtime_root
+
     def inspect_service(platform: object) -> NativeServiceState:
         nonlocal runtime_install_absence_fact
         nonlocal service_absence_confirmed, local_listener_absence_confirmed
@@ -2127,63 +2186,9 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                 or path != profile_projection.runtime_root
             ):
                 _driver_fail()
-            try:
-                current_home = Path.home()
-            except Exception:
-                _fail("driver_unavailable")
-            assert profile_home is not None
-            if (
-                not isinstance(current_home, Path)
-                or not _valid_native_path(current_home)
-                or current_home != profile_home
-            ):
-                _fail("driver_unavailable")
-            current_xdg_binding = os.environ.get("XDG_DATA_HOME")
-            if profile_xdg_binding is None:
-                anchor = profile_home
-                relative_components = (
-                    ".local",
-                    "share",
-                    "usagehub",
-                    "runtime",
-                )
-                expected_runtime_root = anchor.joinpath(*relative_components)
-                if current_xdg_binding not in {None, ""}:
-                    _fail("driver_unavailable")
-            else:
-                if (
-                    current_xdg_binding != profile_xdg_binding
-                    or profile_xdg_trusted_root is None
-                    or profile_xdg_runtime_parts is None
-                ):
-                    _fail("driver_unavailable")
-                try:
-                    current_xdg_root = Path(current_xdg_binding)
-                    current_trusted_root = current_xdg_root
-                    while not os.path.lexists(current_trusted_root):
-                        parent = current_trusted_root.parent
-                        if parent == current_trusted_root:
-                            break
-                        current_trusted_root = parent
-                    current_runtime_parts = (
-                        current_xdg_root / "usagehub" / "runtime"
-                    ).relative_to(current_trusted_root).parts
-                except Exception:
-                    _fail("driver_unavailable")
-                if (
-                    not _valid_native_path(current_xdg_root)
-                    or not current_runtime_parts
-                    or current_trusted_root != profile_xdg_trusted_root
-                    or current_runtime_parts != profile_xdg_runtime_parts
-                ):
-                    _fail("driver_unavailable")
-                anchor = profile_xdg_trusted_root
-                relative_components = profile_xdg_runtime_parts
-                expected_runtime_root = (
-                    current_xdg_root / "usagehub" / "runtime"
-                )
-            if profile_projection.runtime_root != expected_runtime_root:
-                _fail("driver_unavailable")
+            anchor, relative_components, _expected_runtime_root = (
+                current_runtime_authority()
+            )
             prove_authoritative_path_absence(
                 anchor=anchor,
                 relative_components=relative_components,
@@ -2193,6 +2198,42 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             fact = NativePathState(False, "missing", 0, None, 0, None)
             runtime_install_absence_fact = fact
             return fact
+        if purpose == "fresh_stable_collector":
+            if (
+                profile_projection is None
+                or package_projection is None
+                or profile_home is None
+            ):
+                _driver_fail()
+            try:
+                collector_is_exact = (
+                    package_projection.install_root
+                    == profile_projection.runtime_root
+                    and package_projection.collector
+                    == profile_projection.runtime_root
+                    / "openusage-collector"
+                    and path == package_projection.collector
+                )
+            except Exception:
+                _driver_fail()
+            if collector_is_exact is not True:
+                _driver_fail()
+            try:
+                configured_xdg_home = os.environ.get("XDG_CONFIG_HOME")
+            except Exception:
+                _fail("driver_unavailable")
+            if configured_xdg_home not in {None, ""}:
+                _fail("driver_unavailable")
+            anchor, relative_components, _expected_runtime_root = (
+                current_runtime_authority()
+            )
+            prove_authoritative_path_absence(
+                anchor=anchor,
+                relative_components=relative_components,
+                root_missing=True,
+                entry_names=(),
+            )
+            return NativePathState(False, "missing", 0, None, 0, None)
         if purpose == "fresh_task_definition":
             if profile_projection is None or package_projection is None:
                 _driver_fail()
