@@ -632,6 +632,162 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             )
 
     @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_linux_host_set_file_mode_promotes_only_the_owned_execution_copy_to_0700(
+        self,
+    ) -> None:
+        import stat
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativePathState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        source_bytes = b"audited chmod payload"
+        source_sha256 = (
+            "f4f1c1610a5d3b905e72c19e6f6ae2bb3b9fbf323d3a9619680726cd4ac7ca51"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source.write_bytes(source_bytes)
+            source.chmod(0o644)
+            source_before = source.lstat()
+            source_signature = (
+                source_before.st_dev,
+                source_before.st_ino,
+                source_before.st_size,
+                source_before.st_mode,
+                source_before.st_mtime_ns,
+                source_before.st_ctime_ns,
+                source_before.st_nlink,
+            )
+            run_directory: Path | None = None
+            execution_copy: Path | None = None
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ):
+                with native_lifecycle_dependencies_for_host() as dependencies:
+                    run_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    execution_copy = run_directory / source.name
+                    dependencies.copy_file(source, execution_copy)
+                    initial = execution_copy.lstat()
+                    file_id = f"{initial.st_dev}:{initial.st_ino}"
+                    self.assertEqual(stat.S_IMODE(initial.st_mode), 0o600)
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "execution_copy", execution_copy
+                        ),
+                        NativePathState(
+                            True,
+                            "file",
+                            len(source_bytes),
+                            source_sha256,
+                            0o600,
+                            file_id,
+                        ),
+                    )
+
+                    self.assertIsNone(
+                        dependencies.set_file_mode(execution_copy, 0o700)
+                    )
+                    promoted = execution_copy.lstat()
+                    self.assertEqual(
+                        (promoted.st_dev, promoted.st_ino),
+                        (initial.st_dev, initial.st_ino),
+                    )
+                    self.assertEqual(promoted.st_size, len(source_bytes))
+                    self.assertEqual(stat.S_IMODE(promoted.st_mode), 0o700)
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "execution_copy", execution_copy
+                        ),
+                        NativePathState(
+                            True,
+                            "file",
+                            len(source_bytes),
+                            source_sha256,
+                            0o700,
+                            file_id,
+                        ),
+                    )
+
+                    invalid_cases = (
+                        (execution_copy, True),
+                        (execution_copy, 0o600),
+                        (execution_copy, 0o755),
+                        (Path(execution_copy.name), 0o700),
+                        (source, 0o700),
+                    )
+                    for invalid_path, invalid_mode in invalid_cases:
+                        with self.subTest(
+                            path=str(invalid_path), mode=invalid_mode
+                        ):
+                            before_invalid = execution_copy.lstat()
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ) as rejected:
+                                dependencies.set_file_mode(
+                                    invalid_path, invalid_mode
+                                )
+                            self.assertEqual(
+                                str(rejected.exception), "driver_failed"
+                            )
+                            self.assertNotIn(
+                                str(run_directory), str(rejected.exception)
+                            )
+                            after_invalid = execution_copy.lstat()
+                            self.assertEqual(
+                                (
+                                    after_invalid.st_dev,
+                                    after_invalid.st_ino,
+                                    after_invalid.st_size,
+                                    after_invalid.st_mode,
+                                    after_invalid.st_mtime_ns,
+                                    after_invalid.st_ctime_ns,
+                                    after_invalid.st_nlink,
+                                ),
+                                (
+                                    before_invalid.st_dev,
+                                    before_invalid.st_ino,
+                                    before_invalid.st_size,
+                                    before_invalid.st_mode,
+                                    before_invalid.st_mtime_ns,
+                                    before_invalid.st_ctime_ns,
+                                    before_invalid.st_nlink,
+                                ),
+                            )
+
+                assert run_directory is not None
+                assert execution_copy is not None
+                self.assertFalse(execution_copy.exists())
+                self.assertFalse(run_directory.exists())
+
+            source_after = source.lstat()
+            self.assertEqual(
+                (
+                    source_after.st_dev,
+                    source_after.st_ino,
+                    source_after.st_size,
+                    source_after.st_mode,
+                    source_after.st_mtime_ns,
+                    source_after.st_ctime_ns,
+                    source_after.st_nlink,
+                ),
+                source_signature,
+            )
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(
+                hashlib.sha256(source.read_bytes()).hexdigest(), source_sha256
+            )
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_copy_rejects_a_source_inside_the_owned_run_directory(
         self,
     ) -> None:

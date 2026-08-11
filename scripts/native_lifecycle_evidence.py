@@ -920,6 +920,63 @@ class _BoundRunDirectory:
                 except Exception:
                     _driver_fail()
 
+    def set_file_mode(self, path: object, mode: object) -> None:
+        if type(mode) is not int or mode != 0o700:
+            _driver_fail()
+        child = self._validate_child_path(path)
+        bound = self.execution_copy
+        if (
+            bound is None
+            or child.name != bound.name
+            or bound.mode != 0o600
+        ):
+            _driver_fail()
+        self.inspect_path("execution_copy", child)
+        try:
+            before = os.fstat(bound.descriptor)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or (before.st_dev, before.st_ino) != bound.identity
+                or before.st_nlink != 1
+                or before.st_size != bound.size_bytes
+                or stat.S_IMODE(before.st_mode) != 0o600
+            ):
+                _driver_fail()
+            os.fchmod(bound.descriptor, 0o700)
+            os.fsync(bound.descriptor)
+            opened = os.fstat(bound.descriptor)
+            total, digest = _hash_descriptor(bound.descriptor)
+            finished = os.fstat(bound.descriptor)
+            final_entry = os.stat(
+                bound.name,
+                dir_fd=self.directory_fd,
+                follow_symlinks=False,
+            )
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _driver_fail()
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (opened.st_dev, opened.st_ino) != bound.identity
+            or opened.st_nlink != 1
+            or opened.st_size != bound.size_bytes
+            or stat.S_IMODE(opened.st_mode) != 0o700
+            or total != bound.size_bytes
+            or digest != bound.sha256
+            or _native_file_signature(finished)
+            != _native_file_signature(opened)
+            or not stat.S_ISREG(final_entry.st_mode)
+            or (final_entry.st_dev, final_entry.st_ino) != bound.identity
+            or final_entry.st_nlink != 1
+            or final_entry.st_size != bound.size_bytes
+            or stat.S_IMODE(final_entry.st_mode) != 0o700
+            or _native_file_signature(final_entry)
+            != _native_file_signature(finished)
+        ):
+            _driver_fail()
+        bound.mode = 0o700
+
     def _cleanup_execution_copy(self) -> None:
         bound = self.execution_copy
         if bound is None:
@@ -1222,11 +1279,16 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _driver_fail()
         run_directory.copy_file(source, destination)
 
+    def set_file_mode(path: object, mode: object) -> None:
+        if run_directory is None:
+            _driver_fail()
+        run_directory.set_file_mode(path, mode)
+
     dependencies = NativeLifecycleDependencies(
         make_run_directory=make_run_directory,
         inspect_path=inspect_path,
         copy_file=copy_file,
-        set_file_mode=unavailable,
+        set_file_mode=set_file_mode,
         remove_path=unavailable,
         start_process=unavailable,
         run_process=unavailable,
