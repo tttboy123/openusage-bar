@@ -19,6 +19,7 @@ on:
       - "requirements-linux.txt"
       - "setup.py"
       - "docs/native-ci-evidence.md"
+      - "docs/native-lifecycle-evidence.md"
       - "docs/observer-native-runner-prerequisites.md"
       - "docs/observer-source-native-evidence.md"
       - "docs/distribution-trust-posture.md"
@@ -29,6 +30,7 @@ on:
       - "docs/schemas/distribution-trust-posture-v1.schema.json"
       - "docs/schemas/gateway-performance-v1.schema.json"
       - "docs/schemas/native-ci-evidence-v1.schema.json"
+      - "docs/schemas/native-lifecycle-evidence-v1.schema.json"
       - "docs/schemas/observer-source-native-evidence-v1.schema.json"
       - "docs/schemas/release-handoff-v1.schema.json"
       - "docs/schemas/product-version-truth-v1.schema.json"
@@ -36,6 +38,7 @@ on:
       - "scripts/extract_nsis_payload.py"
       - "scripts/distribution_trust_posture.py"
       - "scripts/native_ci_evidence.py"
+      - "scripts/native_lifecycle_evidence.py"
       - "scripts/observer_source_native_evidence.py"
       - "scripts/release_handoff.py"
       - "scripts/measure_gateway_performance.py"
@@ -62,6 +65,8 @@ on:
       - "tests/fixtures/gateway/performance-v1.json"
       - "tests/test_local_api.py"
       - "tests/test_native_ci_evidence.py"
+      - "tests/test_native_lifecycle_evidence.py"
+      - "tests/test_native_lifecycle_runner.py"
       - "tests/test_observer_source_native_evidence.py"
       - "tests/test_release_handoff.py"
       - "tests/test_product_version_truth.py"
@@ -95,6 +100,7 @@ on:
       - "requirements-linux.txt"
       - "setup.py"
       - "docs/native-ci-evidence.md"
+      - "docs/native-lifecycle-evidence.md"
       - "docs/observer-native-runner-prerequisites.md"
       - "docs/observer-source-native-evidence.md"
       - "docs/distribution-trust-posture.md"
@@ -105,6 +111,7 @@ on:
       - "docs/schemas/distribution-trust-posture-v1.schema.json"
       - "docs/schemas/gateway-performance-v1.schema.json"
       - "docs/schemas/native-ci-evidence-v1.schema.json"
+      - "docs/schemas/native-lifecycle-evidence-v1.schema.json"
       - "docs/schemas/observer-source-native-evidence-v1.schema.json"
       - "docs/schemas/release-handoff-v1.schema.json"
       - "docs/schemas/product-version-truth-v1.schema.json"
@@ -112,6 +119,7 @@ on:
       - "scripts/extract_nsis_payload.py"
       - "scripts/distribution_trust_posture.py"
       - "scripts/native_ci_evidence.py"
+      - "scripts/native_lifecycle_evidence.py"
       - "scripts/observer_source_native_evidence.py"
       - "scripts/release_handoff.py"
       - "scripts/measure_gateway_performance.py"
@@ -138,6 +146,8 @@ on:
       - "tests/fixtures/gateway/performance-v1.json"
       - "tests/test_local_api.py"
       - "tests/test_native_ci_evidence.py"
+      - "tests/test_native_lifecycle_evidence.py"
+      - "tests/test_native_lifecycle_runner.py"
       - "tests/test_observer_source_native_evidence.py"
       - "tests/test_release_handoff.py"
       - "tests/test_product_version_truth.py"
@@ -347,6 +357,8 @@ jobs:
             tests.test_keychain \
             tests.test_local_api \
             tests.test_native_ci_evidence \
+            tests.test_native_lifecycle_evidence \
+            tests.test_native_lifecycle_runner \
             tests.test_observer_source_native_evidence \
             tests.test_openusage_settings_entrypoint \
             tests.test_product_version_truth \

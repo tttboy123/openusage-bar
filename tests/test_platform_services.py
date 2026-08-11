@@ -98,6 +98,49 @@ class PlatformServicesRenderTests(unittest.TestCase):
 
         self.assert_flag_value(arguments, "--api-socket", socket_path)
 
+    def test_systemd_uses_one_validated_packaged_collector_command(self):
+        command_path = "/opt/Usage Hub/resources/collector/openusage-collector"
+        rendered = platform_services.systemd_unit(
+            interval=60,
+            api_socket="/state/openusage.sock",
+            command=command_path,
+        )
+        command = next(
+            line.removeprefix("ExecStart=")
+            for line in rendered.splitlines()
+            if line.startswith("ExecStart=")
+        )
+        arguments = shlex.split(command)
+
+        self.assertEqual(arguments[0], command_path)
+        self.assertEqual(arguments[1], "daemon")
+        self.assertEqual(arguments.count(command_path), 1)
+
+    def test_service_renderers_reject_untrusted_collector_commands(self):
+        for command in (
+            "relative/openusage-collector",
+            "/opt/openusage-collector\nExecStart=/bin/false",
+            "/opt/openusage-collector\x00private",
+        ):
+            with self.subTest(command=command):
+                with self.assertRaisesRegex(
+                    ValueError, "service command is invalid"
+                ) as raised:
+                    platform_services.systemd_unit(command=command)
+                self.assertNotIn(command, str(raised.exception))
+
+    def test_windows_task_uses_validated_packaged_collector_command(self):
+        command_path = r"C:\Program Files\UsageHub\resources\collector\openusage-collector.exe"
+        rendered = platform_services.windows_task_xml(
+            interval_minutes=5,
+            command=command_path,
+        )
+        root = ET.fromstring(rendered)
+        command = root.find(".//{*}Command")
+
+        self.assertIsNotNone(command)
+        self.assertEqual(command.text, command_path)
+
     def test_systemd_rejects_paths_with_unit_or_expansion_syntax(self):
         unsafe_paths = (
             "/state/openusage.sock\nExecStartPost=/bin/false",
@@ -280,6 +323,27 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                 ],
             )
 
+    def test_install_service_linux_binds_the_packaged_collector_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            home.mkdir(parents=True)
+            command = "/opt/Usage Hub/resources/collector/openusage-collector"
+            with patch.object(platform_services.sys, "platform", "linux"), patch.object(
+                platform_services.Path, "home", lambda: home
+            ), patch.object(
+                platform_services.shutil, "which", return_value="/usr/bin/systemctl"
+            ), patch.object(platform_services, "_run"):
+                platform_services.install_service(interval=60, command=command)
+
+            unit = (
+                home / ".config" / "systemd" / "user"
+                / "openusage-bar.service"
+            ).read_text(encoding="utf-8")
+            self.assertIn(
+                'ExecStart="/opt/Usage Hub/resources/collector/openusage-collector" daemon',
+                unit,
+            )
+
     def test_uninstall_service_linux_removes_unit(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -339,3 +403,21 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                     ]
                 ],
             )
+
+    def test_install_service_windows_binds_the_packaged_collector_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            home.mkdir(parents=True)
+            command = r"C:\Program Files\UsageHub\resources\collector\openusage-collector.exe"
+            with patch.object(platform_services.sys, "platform", "win32"), patch.dict(
+                "os.environ", {"LOCALAPPDATA": str(home)}
+            ), patch.object(platform_services, "_run"):
+                platform_services.install_service(
+                    interval=300,
+                    command=command,
+                )
+
+            content = (home / "openusage-bar-task.xml").read_text(
+                encoding="utf-16"
+            )
+            self.assertIn(f"<Command>{command}</Command>", content)

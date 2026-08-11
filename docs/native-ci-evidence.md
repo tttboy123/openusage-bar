@@ -38,6 +38,17 @@ D-Bus/Secret Service session only around the source probe, as documented in
 That bootstrap is not serialized as a native-evidence check and is not a
 support claim.
 
+Windows x64 and Linux x64 documents may additionally embed one verified
+`native-lifecycle-evidence/v1` object as `nativeLifecycleEvidence`. The native
+generator rebinds that object to the same source commit and final-container
+name, size, and SHA-256 digest. macOS and arm64 rows reject the field, and
+legacy x64 documents without it remain valid. This optional contract is not a
+hosted lifecycle claim: the workflow will begin supplying it only after the
+external install/uninstall driver described in
+[`native-lifecycle-evidence.md`](native-lifecycle-evidence.md) can observe the
+complete real lifecycle. It remains embedded in the native document rather
+than becoming a sixth handoff file.
+
 The upload unit is now the verified
 [`release-handoff/v1`](release-handoff.md) directory. It also retains the
 standalone built Collector and one path-free handoff manifest, so the exact
@@ -95,6 +106,7 @@ python scripts/verify_artifact_build_identity.py
 python scripts/verify_action_pins.py
 python -m json.tool docs/schemas/artifact-build-identity-v1.schema.json >/dev/null
 python -m json.tool docs/schemas/native-ci-evidence-v1.schema.json >/dev/null
+python -m json.tool docs/schemas/native-lifecycle-evidence-v1.schema.json >/dev/null
 python -m json.tool \
   docs/schemas/observer-source-native-evidence-v1.schema.json >/dev/null
 python -m json.tool \

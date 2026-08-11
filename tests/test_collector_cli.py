@@ -1196,6 +1196,27 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual((code, err), (0, ""))
         self.assertTrue(out)
 
+    def test_service_print_passes_one_absolute_packaged_collector_command(self):
+        command = "/opt/Usage Hub/resources/collector/openusage-collector"
+        with patch(
+            "openusage_bar.platform_services.render_current_platform",
+            return_value="[Unit]",
+        ) as render:
+            code, out, err = self.run_cli(
+                [
+                    "service",
+                    "print",
+                    "--interval",
+                    "300",
+                    "--command",
+                    command,
+                ],
+                refresher=FakeRefresher(),
+            )
+
+        self.assertEqual((code, out, err), (0, "[Unit]\n", ""))
+        render.assert_called_once_with(interval=300, command=command)
+
     def test_executor_list_returns_both_plugins(self):
         code, out, err = self.run_cli(
             ["executor", "list", "--format", "json"],

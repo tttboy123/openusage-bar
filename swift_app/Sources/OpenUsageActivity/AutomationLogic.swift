@@ -9,17 +9,11 @@ enum AutomationFailureState: Sendable, Equatable {
     case invalidResponse
 }
 
-struct AutomationCommands: Sendable, Equatable {
-    let curl: String
-    let helper: String
-}
-
 struct AutomationLoadedState: Sendable, Equatable {
     let health: LocalAPIHealth
     let schema: LocalAPISchema
     let snapshot: LocalAPIResourceSnapshot
     let preview: String
-    let commands: AutomationCommands
 }
 
 enum AutomationPresentation {
@@ -31,13 +25,6 @@ enum AutomationPresentation {
         case .responseTooLarge: .responseTooLarge
         case .invalidResponse: .invalidResponse
         }
-    }
-
-    static func commands(socketURL: URL, helperURL: URL) -> AutomationCommands {
-        AutomationCommands(
-            curl: "curl --unix-socket \(quote(socketURL.path)) http://localhost/v1/snapshot",
-            helper: "\(quote(helperURL.path)) snapshot --format json --offline"
-        )
     }
 
     static func snapshotPreview(_ snapshot: LocalAPIResourceSnapshot) -> String {
@@ -64,19 +51,4 @@ enum AutomationPresentation {
         return String(decoding: data, as: UTF8.self)
     }
 
-    static func helperURL(
-        activityBundleURL: URL = Bundle.main.bundleURL,
-        executableURL: URL? = Bundle.main.executableURL
-    ) -> URL {
-        let helpers = activityBundleURL.pathExtension.lowercased() == "app"
-            ? activityBundleURL.deletingLastPathComponent()
-            : (executableURL ?? activityBundleURL).deletingLastPathComponent()
-        return helpers
-            .appendingPathComponent("OpenUsage Provider Settings.app")
-            .appendingPathComponent("Contents/MacOS/OpenUsage Provider Settings")
-    }
-
-    private static func quote(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
-    }
 }

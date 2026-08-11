@@ -24,6 +24,11 @@ from scripts.observer_source_native_evidence import (
     validate_evidence as validate_observer_source_evidence,
     verify_evidence_file as verify_observer_source_evidence_file,
 )
+from scripts.native_lifecycle_evidence import (
+    LifecycleEvidenceError,
+    validate_lifecycle_record,
+    verify_lifecycle_evidence,
+)
 from scripts.verify_artifact_build_identity import (
     ArtifactBuildIdentityError,
     CANONICAL_IDENTITY,
@@ -483,12 +488,63 @@ def _observer_source_evidence(
     return value
 
 
+def _native_lifecycle_evidence(
+    arguments: argparse.Namespace,
+    artifact_path: Path,
+) -> dict[str, Any] | None:
+    source_path = getattr(arguments, "native_lifecycle_evidence", None)
+    embedded = getattr(arguments, "embedded_native_lifecycle_evidence", None)
+    if source_path is not None and embedded is not None:
+        _fail("native_lifecycle_evidence_invalid")
+    if source_path is None and embedded is None:
+        return None
+    if arguments.platform not in {"win", "linux"} or arguments.arch != "x64":
+        _fail("native_lifecycle_evidence_not_applicable")
+    try:
+        if embedded is not None:
+            value = validate_lifecycle_record(embedded)
+        else:
+            value = verify_lifecycle_evidence(
+                report=Path(source_path),
+                artifact=artifact_path,
+                expected_source_commit=arguments.source_sha,
+                expected_platform=arguments.platform,
+                expected_arch=arguments.arch,
+            )
+    except LifecycleEvidenceError:
+        _fail("native_lifecycle_evidence_invalid")
+    expected_target = {
+        "platform": arguments.platform,
+        "arch": arguments.arch,
+        "serviceManager": (
+            "task_scheduler"
+            if arguments.platform == "win"
+            else "systemd_user"
+        ),
+    }
+    if value["sourceCommit"] != arguments.source_sha or value["target"] != expected_target:
+        _fail("native_lifecycle_evidence_binding_invalid")
+    return json.loads(
+        json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
+
+
 def _payload(arguments: argparse.Namespace) -> dict[str, Any]:
     _validate_scalar_metadata(arguments)
     row = MATRIX[(arguments.platform, arguments.arch)]
     observer_source_evidence = _observer_source_evidence(arguments)
     collector_path = Path(arguments.collector)
     artifact_path = Path(arguments.artifact)
+    native_lifecycle_evidence = _native_lifecycle_evidence(
+        arguments,
+        artifact_path,
+    )
     trust_posture_path = Path(arguments.trust_posture_report)
     collector_inspection = _inspect_regular(collector_path, "collector")
     artifact_inspection = _inspect_regular(artifact_path, "final_container")
@@ -594,6 +650,14 @@ def _payload(arguments: argparse.Namespace) -> dict[str, Any]:
     }
     if observer_source_evidence is not None:
         payload["observerSourceEvidence"] = observer_source_evidence
+    if native_lifecycle_evidence is not None:
+        expected_artifact = {
+            key: payload["artifacts"]["finalContainer"][key]
+            for key in ("name", "sha256", "sizeBytes")
+        }
+        if native_lifecycle_evidence["artifact"] != expected_artifact:
+            _fail("native_lifecycle_evidence_binding_invalid")
+        payload["nativeLifecycleEvidence"] = native_lifecycle_evidence
     return payload
 
 
@@ -626,10 +690,12 @@ def _validate_loaded_payload(payload: Any) -> dict[str, Any]:
         "target",
         "toolchain",
     }
-    if not isinstance(payload, dict) or frozenset(payload) not in {
-        frozenset(root_keys),
-        frozenset(root_keys | {"observerSourceEvidence"}),
-    }:
+    optional_root_keys = {"observerSourceEvidence", "nativeLifecycleEvidence"}
+    if (
+        not isinstance(payload, dict)
+        or not frozenset(root_keys).issubset(payload)
+        or not frozenset(payload).issubset(root_keys | optional_root_keys)
+    ):
         _fail("root_schema_invalid")
     if type(payload["schemaVersion"]) is not int or payload["schemaVersion"] != 1:
         _fail("schema_version_invalid")
@@ -763,6 +829,36 @@ def _validate_loaded_payload(payload: Any) -> dict[str, Any]:
         if validated_source_evidence["platform"] != expected_platform:
             _fail("observer_source_evidence_platform_invalid")
         payload["observerSourceEvidence"] = validated_source_evidence
+    embedded_lifecycle_evidence = payload.get("nativeLifecycleEvidence")
+    if embedded_lifecycle_evidence is not None:
+        if target_platform not in {"win", "linux"} or payload["target"]["arch"] != "x64":
+            _fail("native_lifecycle_evidence_not_applicable")
+        try:
+            validated_lifecycle = validate_lifecycle_record(
+                embedded_lifecycle_evidence
+            )
+        except LifecycleEvidenceError:
+            _fail("native_lifecycle_evidence_invalid")
+        expected_lifecycle_target = {
+            "platform": target_platform,
+            "arch": "x64",
+            "serviceManager": (
+                "task_scheduler"
+                if target_platform == "win"
+                else "systemd_user"
+            ),
+        }
+        expected_lifecycle_artifact = {
+            key: payload["artifacts"]["finalContainer"][key]
+            for key in ("name", "sha256", "sizeBytes")
+        }
+        if (
+            validated_lifecycle["sourceCommit"] != payload["source"]["sha"]
+            or validated_lifecycle["target"] != expected_lifecycle_target
+            or validated_lifecycle["artifact"] != expected_lifecycle_artifact
+        ):
+            _fail("native_lifecycle_evidence_binding_invalid")
+        payload["nativeLifecycleEvidence"] = validated_lifecycle
     return payload
 
 
@@ -880,6 +976,10 @@ def _namespace_from_payload(
         observer_source_evidence=None,
         embedded_observer_source_evidence=payload.get(
             "observerSourceEvidence"
+        ),
+        native_lifecycle_evidence=None,
+        embedded_native_lifecycle_evidence=payload.get(
+            "nativeLifecycleEvidence"
         ),
         allow_legacy_observer_source_evidence=(
             "observerSourceEvidence" not in payload
@@ -1053,6 +1153,7 @@ def _parser() -> argparse.ArgumentParser:
         default=str(REPOSITORY_ROOT / PRODUCT_TRUTH),
     )
     generate_parser.add_argument("--observer-source-evidence")
+    generate_parser.add_argument("--native-lifecycle-evidence")
     generate_parser.add_argument("--check", action="append", default=[])
     generate_parser.set_defaults(handler=generate)
 

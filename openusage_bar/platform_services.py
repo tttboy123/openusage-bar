@@ -66,6 +66,24 @@ def _systemd_argument(value: str) -> str:
     return f'"{escaped}"'
 
 
+def _validated_service_command(
+    command: str | None, *, windows: bool = False
+) -> str:
+    if command is None:
+        return COLLECTOR_COMMAND_NAME
+    path_type = PureWindowsPath if windows else PurePosixPath
+    if (
+        not isinstance(command, str)
+        or not command
+        or len(command) > 4096
+        or not path_type(command).is_absolute()
+        or ".." in path_type(command).parts
+        or any(not character.isprintable() for character in command)
+    ):
+        raise ValueError("service command is invalid")
+    return command
+
+
 def _windows_runtime_descriptor(
     *,
     allow_cross_host_state: bool = False,
@@ -104,6 +122,7 @@ def launchd_plist(
     api_socket: str = DEFAULT_API_SOCKET,
     stdout_path: str = DEFAULT_LOG_PATH,
     stderr_path: str = DEFAULT_ERROR_LOG_PATH,
+    command: str | None = None,
 ) -> str:
     """Render a macOS LaunchAgent property list (XML) for the collector."""
     import plistlib
@@ -111,7 +130,7 @@ def launchd_plist(
     payload = {
         "Label": COLLECTOR_LABEL,
         "ProgramArguments": [
-            COLLECTOR_COMMAND_NAME,
+            _validated_service_command(command),
             "daemon",
             "--interval",
             str(interval),
@@ -129,9 +148,20 @@ def launchd_plist(
     return plistlib.dumps(payload).decode("utf-8")
 
 
-def systemd_unit(*, interval: int = 300, api_socket: str = DEFAULT_API_SOCKET) -> str:
+def systemd_unit(
+    *,
+    interval: int = 300,
+    api_socket: str = DEFAULT_API_SOCKET,
+    command: str | None = None,
+) -> str:
     """Render a systemd user unit for the collector."""
     socket_argument = _systemd_argument(_validated_expanded_path(api_socket))
+    service_command = _validated_service_command(command)
+    rendered_command = (
+        COLLECTOR_COMMAND_NAME
+        if command is None
+        else _systemd_argument(service_command)
+    )
     return "\n".join(
         [
             "[Unit]",
@@ -140,7 +170,7 @@ def systemd_unit(*, interval: int = 300, api_socket: str = DEFAULT_API_SOCKET) -
             "",
             "[Service]",
             "Type=simple",
-            f"ExecStart={COLLECTOR_COMMAND_NAME} daemon --interval {int(interval)} --api-transport unix --api-socket {socket_argument}",
+            f"ExecStart={rendered_command} daemon --interval {int(interval)} --api-transport unix --api-socket {socket_argument}",
             "Restart=on-failure",
             "",
             "[Install]",
@@ -153,6 +183,7 @@ def systemd_unit(*, interval: int = 300, api_socket: str = DEFAULT_API_SOCKET) -
 def windows_task_xml(
     *,
     interval_minutes: int = 5,
+    command: str | None = None,
     _allow_cross_host_state: bool = False,
 ) -> str:
     """Render a Windows Task Scheduler task definition (UTF-16) for the collector."""
@@ -162,6 +193,7 @@ def windows_task_xml(
     descriptor = _windows_runtime_descriptor(
         allow_cross_host_state=_allow_cross_host_state
     )
+    service_command = _validated_service_command(command, windows=True)
     arguments = subprocess.list2cmdline(
         [
             "daemon",
@@ -209,7 +241,7 @@ def windows_task_xml(
         "  </Settings>\n"
         '  <Actions Context="Author">\n'
         "    <Exec>\n"
-        f"      <Command>{escape(COLLECTOR_COMMAND_NAME)}</Command>\n"
+        f"      <Command>{escape(service_command)}</Command>\n"
         f"      <Arguments>{escape(arguments)}</Arguments>\n"
         "    </Exec>\n"
         "  </Actions>\n"
@@ -287,14 +319,19 @@ def render_plugin_current_platform(*, command: str | None = None) -> str:
     raise RuntimeError(f"unsupported platform: {sys.platform}")
 
 
-def render_current_platform(*, interval: int = 300) -> str:
+def render_current_platform(
+    *, interval: int = 300, command: str | None = None
+) -> str:
     """Render the service definition for the active platform."""
     if sys.platform == "darwin":
-        return launchd_plist(interval=interval)
+        return launchd_plist(interval=interval, command=command)
     if sys.platform.startswith("linux"):
-        return systemd_unit(interval=interval)
+        return systemd_unit(interval=interval, command=command)
     if sys.platform == "win32":
-        return windows_task_xml(interval_minutes=max(1, int(interval) // 60))
+        return windows_task_xml(
+            interval_minutes=max(1, int(interval) // 60),
+            command=command,
+        )
     raise RuntimeError(f"unsupported platform: {sys.platform}")
 
 
@@ -361,18 +398,24 @@ def _write_plugin_service_file(target: Path, payload: str, *, encoding: str) -> 
         temporary.unlink(missing_ok=True)
 
 
-def install_service(*, interval: int = 300) -> None:
+def install_service(*, interval: int = 300, command: str | None = None) -> None:
     """Write and activate the user service for the active platform."""
     if sys.platform == "darwin":
         target = Path.home() / "Library" / "LaunchAgents" / f"{COLLECTOR_LABEL}.plist"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(launchd_plist(interval=interval), encoding="utf-8")
+        target.write_text(
+            launchd_plist(interval=interval, command=command),
+            encoding="utf-8",
+        )
         _run(["launchctl", "load", "-w", str(target)])
         return
     if sys.platform.startswith("linux"):
         target = Path.home() / ".config" / "systemd" / "user" / SYSTEMD_UNIT_NAME
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(systemd_unit(interval=interval), encoding="utf-8")
+        target.write_text(
+            systemd_unit(interval=interval, command=command),
+            encoding="utf-8",
+        )
         if shutil.which("systemctl"):
             _run(["systemctl", "--user", "daemon-reload"])
             _run(["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT_NAME])
@@ -380,6 +423,7 @@ def install_service(*, interval: int = 300) -> None:
     if sys.platform == "win32":
         xml = windows_task_xml(
             interval_minutes=max(1, int(interval) // 60),
+            command=command,
             _allow_cross_host_state=True,
         )
         local_app_data = os.environ.get("LOCALAPPDATA")

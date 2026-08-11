@@ -342,6 +342,9 @@
       ],
       "type": "object"
     },
+    "nativeLifecycleEvidence": {
+      "$ref": "#/$defs/nativeLifecycleEvidence"
+    },
     "observerSourceEvidence": {
       "additionalProperties": false,
       "oneOf": [
@@ -877,10 +880,169 @@
       ],
       "type": "object"
     },
+    "lifecycleArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-(win-x64\\.exe|linux-x86_64\\.AppImage)$",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": ["name", "sha256", "sizeBytes"],
+      "type": "object"
+    },
+    "lifecycleChecks": {
+      "additionalProperties": false,
+      "properties": {
+        "finalStateRemoved": {"const": "passed", "type": "string"},
+        "firstRun": {"const": "passed", "type": "string"},
+        "install": {"const": "passed", "type": "string"},
+        "observeDefault": {"const": "passed", "type": "string"},
+        "reinstall": {"const": "passed", "type": "string"},
+        "serviceRegistered": {"const": "passed", "type": "string"},
+        "serviceRemoved": {"const": "passed", "type": "string"},
+        "uninstallDelete": {"const": "passed", "type": "string"},
+        "uninstallPreserve": {"const": "passed", "type": "string"}
+      },
+      "required": [
+        "finalStateRemoved",
+        "firstRun",
+        "install",
+        "observeDefault",
+        "reinstall",
+        "serviceRegistered",
+        "serviceRemoved",
+        "uninstallDelete",
+        "uninstallPreserve"
+      ],
+      "type": "object"
+    },
+    "lifecycleGateway": {
+      "additionalProperties": false,
+      "properties": {
+        "cacheCreated": {"const": false, "type": "boolean"},
+        "defaultMode": {"const": "observe", "type": "string"},
+        "listenerActive": {"const": false, "type": "boolean"},
+        "telemetryCreated": {"const": false, "type": "boolean"}
+      },
+      "required": [
+        "cacheCreated",
+        "defaultMode",
+        "listenerActive",
+        "telemetryCreated"
+      ],
+      "type": "object"
+    },
+    "lifecyclePersistence": {
+      "additionalProperties": false,
+      "properties": {
+        "credentialsOnPreserve": {"const": "not_created", "type": "string"},
+        "gatewayCacheOnPreserve": {"const": "not_created", "type": "string"},
+        "gatewayTelemetryOnPreserve": {"const": "not_created", "type": "string"},
+        "ledgerOnPreserve": {"const": "preserved", "type": "string"},
+        "stateAfterDelete": {"const": "removed", "type": "string"}
+      },
+      "required": [
+        "credentialsOnPreserve",
+        "gatewayCacheOnPreserve",
+        "gatewayTelemetryOnPreserve",
+        "ledgerOnPreserve",
+        "stateAfterDelete"
+      ],
+      "type": "object"
+    },
+    "lifecyclePrivacy": {
+      "additionalProperties": false,
+      "properties": {
+        "providerCredentialReads": {"const": 0, "type": "integer"},
+        "providerNetworkCalls": {"const": 0, "type": "integer"}
+      },
+      "required": ["providerCredentialReads", "providerNetworkCalls"],
+      "type": "object"
+    },
+    "lifecycleTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {"const": "x64", "type": "string"},
+        "platform": {"enum": ["linux", "win"], "type": "string"},
+        "serviceManager": {
+          "enum": ["systemd_user", "task_scheduler"],
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "arch": {"const": "x64"},
+            "platform": {"const": "win"},
+            "serviceManager": {"const": "task_scheduler"}
+          }
+        },
+        {
+          "properties": {
+            "arch": {"const": "x64"},
+            "platform": {"const": "linux"},
+            "serviceManager": {"const": "systemd_user"}
+          }
+        }
+      ],
+      "required": ["arch", "platform", "serviceManager"],
+      "type": "object"
+    },
+    "nativeLifecycleEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {"$ref": "#/$defs/lifecycleArtifact"},
+        "checks": {"$ref": "#/$defs/lifecycleChecks"},
+        "gateway": {"$ref": "#/$defs/lifecycleGateway"},
+        "object": {"const": "native.lifecycle", "type": "string"},
+        "observedAt": {
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}Z$",
+          "type": "string"
+        },
+        "persistence": {"$ref": "#/$defs/lifecyclePersistence"},
+        "privacy": {"$ref": "#/$defs/lifecyclePrivacy"},
+        "releaseEligible": {"const": false, "type": "boolean"},
+        "schemaVersion": {
+          "const": "native-lifecycle-evidence/v1",
+          "type": "string"
+        },
+        "sourceCommit": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "synthetic": {"const": false, "type": "boolean"},
+        "target": {"$ref": "#/$defs/lifecycleTarget"}
+      },
+      "required": [
+        "artifact",
+        "checks",
+        "gateway",
+        "object",
+        "observedAt",
+        "persistence",
+        "privacy",
+        "releaseEligible",
+        "schemaVersion",
+        "sourceCommit",
+        "synthetic",
+        "target"
+      ],
+      "type": "object"
+    },
     "macRow": {
       "not": {
-        "required": [
-          "observerSourceEvidence"
+        "anyOf": [
+          {"required": ["nativeLifecycleEvidence"]},
+          {"required": ["observerSourceEvidence"]}
         ]
       },
       "properties": {
@@ -957,6 +1119,16 @@
             }
           }
         },
+        "nativeLifecycleEvidence": {
+          "properties": {
+            "target": {
+              "properties": {
+                "platform": {"const": "win"},
+                "serviceManager": {"const": "task_scheduler"}
+              }
+            }
+          }
+        },
         "runner": {
           "properties": {
             "os": {
@@ -1006,6 +1178,16 @@
           "properties": {
             "platform": {
               "const": "linux"
+            }
+          }
+        },
+        "nativeLifecycleEvidence": {
+          "properties": {
+            "target": {
+              "properties": {
+                "platform": {"const": "linux"},
+                "serviceManager": {"const": "systemd_user"}
+              }
             }
           }
         },
@@ -1256,6 +1438,9 @@
       }
     },
     "arm64Row": {
+      "not": {
+        "required": ["nativeLifecycleEvidence"]
+      },
       "properties": {
         "artifacts": {
           "properties": {

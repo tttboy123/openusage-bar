@@ -252,6 +252,70 @@ def _write_source_evidence(
     return payload
 
 
+def _write_lifecycle_evidence(
+    path: Path,
+    *,
+    artifact: Path,
+    platform: str,
+    source_commit: str = "a" * 40,
+) -> dict[str, object]:
+    artifact_bytes = artifact.read_bytes()
+    payload: dict[str, object] = {
+        "schemaVersion": "native-lifecycle-evidence/v1",
+        "object": "native.lifecycle",
+        "synthetic": False,
+        "releaseEligible": False,
+        "observedAt": "2026-08-11T01:02:03.000000Z",
+        "sourceCommit": source_commit,
+        "target": {
+            "platform": platform,
+            "arch": "x64",
+            "serviceManager": (
+                "task_scheduler" if platform == "win" else "systemd_user"
+            ),
+        },
+        "artifact": {
+            "name": artifact.name,
+            "sha256": hashlib.sha256(artifact_bytes).hexdigest(),
+            "sizeBytes": len(artifact_bytes),
+        },
+        "checks": {
+            "install": "passed",
+            "firstRun": "passed",
+            "observeDefault": "passed",
+            "serviceRegistered": "passed",
+            "uninstallPreserve": "passed",
+            "serviceRemoved": "passed",
+            "reinstall": "passed",
+            "uninstallDelete": "passed",
+            "finalStateRemoved": "passed",
+        },
+        "gateway": {
+            "defaultMode": "observe",
+            "listenerActive": False,
+            "cacheCreated": False,
+            "telemetryCreated": False,
+        },
+        "privacy": {
+            "providerCredentialReads": 0,
+            "providerNetworkCalls": 0,
+        },
+        "persistence": {
+            "ledgerOnPreserve": "preserved",
+            "credentialsOnPreserve": "not_created",
+            "gatewayCacheOnPreserve": "not_created",
+            "gatewayTelemetryOnPreserve": "not_created",
+            "stateAfterDelete": "removed",
+        },
+    }
+    path.write_text(
+        json.dumps(payload, allow_nan=False, ensure_ascii=True, indent=2, sort_keys=True)
+        + "\n",
+        encoding="ascii",
+    )
+    return payload
+
+
 def _generate_command(
     *,
     collector: Path,
@@ -262,6 +326,7 @@ def _generate_command(
     build_identity: Path = BUILD_IDENTITY,
     product_truth: Path = PRODUCT_TRUTH,
     observer_source_evidence: Path | None = None,
+    native_lifecycle_evidence: Path | None = None,
 ) -> list[str]:
     posture_report = _posture_report_path(output, platform, arch)
     _write_posture_report(
@@ -322,6 +387,10 @@ def _generate_command(
     if observer_source_evidence is not None:
         command.extend(
             ("--observer-source-evidence", str(observer_source_evidence))
+        )
+    if native_lifecycle_evidence is not None:
+        command.extend(
+            ("--native-lifecycle-evidence", str(native_lifecycle_evidence))
         )
     return command
 
@@ -538,7 +607,12 @@ class NativeCiEvidenceTests(unittest.TestCase):
         self.assertNotIn("observerSourceEvidence", schema["required"])
         self.assertEqual(
             schema["$defs"]["macRow"]["not"],
-            {"required": ["observerSourceEvidence"]},
+            {
+                "anyOf": [
+                    {"required": ["nativeLifecycleEvidence"]},
+                    {"required": ["observerSourceEvidence"]},
+                ]
+            },
         )
         for row_name, source_platform in (
             ("winRow", "windows"),
@@ -584,11 +658,18 @@ class NativeCiEvidenceTests(unittest.TestCase):
                     )
                     source_evidence = None
                     source_payload = None
+                    lifecycle_evidence = None
                     if source_platform is not None:
                         source_evidence = row / "observer-source.json"
                         source_payload = _write_source_evidence(
                             source_evidence,
                             platform=source_platform,
+                        )
+                        lifecycle_evidence = row / "native-lifecycle.json"
+                        _write_lifecycle_evidence(
+                            lifecycle_evidence,
+                            artifact=artifact,
+                            platform=platform,
                         )
                     generated = subprocess.run(
                         _generate_command(
@@ -597,6 +678,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
                             output=evidence,
                             platform=platform,
                             observer_source_evidence=source_evidence,
+                            native_lifecycle_evidence=lifecycle_evidence,
                         ),
                         cwd=ROOT,
                         capture_output=True,
@@ -623,6 +705,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
 
                     legacy = json.loads(json.dumps(payload))
                     del legacy["observerSourceEvidence"]
+                    del legacy["nativeLifecycleEvidence"]
                     self.assertTrue(validator.is_valid(legacy))
 
                     swapped = json.loads(json.dumps(payload))
@@ -706,6 +789,210 @@ class NativeCiEvidenceTests(unittest.TestCase):
                     check=False,
                 )
                 self.assertEqual(verified.returncode, 0, verified.stderr)
+
+    def test_generate_embeds_and_verifies_exact_x64_native_lifecycle_evidence(self):
+        for platform, source_platform in (
+            ("win", "windows"),
+            ("linux", "linux"),
+        ):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                collector_name, artifact_name = TARGET_FILES[(platform, "x64")]
+                collector = root / collector_name
+                artifact = root / artifact_name
+                evidence = root / f"native-{platform}.json"
+                source_evidence = root / f"observer-source-{platform}.json"
+                lifecycle_evidence = root / f"native-lifecycle-{platform}.json"
+                _write_native_row_files(
+                    collector,
+                    artifact,
+                    platform=platform,
+                    arch="x64",
+                )
+                _write_source_evidence(
+                    source_evidence,
+                    platform=source_platform,
+                )
+                expected_lifecycle = _write_lifecycle_evidence(
+                    lifecycle_evidence,
+                    artifact=artifact,
+                    platform=platform,
+                )
+
+                generated = subprocess.run(
+                    _generate_command(
+                        collector=collector,
+                        artifact=artifact,
+                        output=evidence,
+                        platform=platform,
+                        observer_source_evidence=source_evidence,
+                        native_lifecycle_evidence=lifecycle_evidence,
+                    ),
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                self.assertEqual(generated.returncode, 0, generated.stderr)
+                raw = evidence.read_text(encoding="ascii")
+                payload = json.loads(raw)
+                self.assertEqual(
+                    payload["nativeLifecycleEvidence"],
+                    expected_lifecycle,
+                )
+                self.assertNotIn(str(root), raw)
+
+                verified = subprocess.run(
+                    _verify_command(
+                        evidence=evidence,
+                        collector=collector,
+                        artifact=artifact,
+                        platform=platform,
+                    ),
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(verified.returncode, 0, verified.stderr)
+
+    def test_generate_rejects_hostile_or_crossed_native_lifecycle_evidence(self):
+        private_canary = "PRIVATE_NATIVE_LIFECYCLE_CANARY"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            collector = root / "openusage-collector.exe"
+            artifact = root / "UsageHub-0.8.6-win-x64.exe"
+            source_evidence = root / "observer-source.json"
+            lifecycle_evidence = root / "native-lifecycle.json"
+            _write_native_row_files(
+                collector,
+                artifact,
+                platform="win",
+                arch="x64",
+            )
+            _write_source_evidence(source_evidence, platform="windows")
+            valid = _write_lifecycle_evidence(
+                lifecycle_evidence,
+                artifact=artifact,
+                platform="win",
+            )
+
+            mutations = {
+                "additive_private": lambda payload: payload.__setitem__(
+                    "privatePath", private_canary
+                ),
+                "source_swap": lambda payload: payload.__setitem__(
+                    "sourceCommit", "c" * 40
+                ),
+                "artifact_swap": lambda payload: payload["artifact"].__setitem__(
+                    "sha256", "d" * 64
+                ),
+                "platform_swap": lambda payload: payload.__setitem__(
+                    "target",
+                    {
+                        "platform": "linux",
+                        "arch": "x64",
+                        "serviceManager": "systemd_user",
+                    },
+                ),
+            }
+            for label, mutate in mutations.items():
+                with self.subTest(label=label):
+                    payload = json.loads(json.dumps(valid))
+                    mutate(payload)
+                    lifecycle_evidence.write_text(
+                        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                        encoding="ascii",
+                    )
+                    evidence = root / f"native-{label}.json"
+                    generated = subprocess.run(
+                        _generate_command(
+                            collector=collector,
+                            artifact=artifact,
+                            output=evidence,
+                            platform="win",
+                            observer_source_evidence=source_evidence,
+                            native_lifecycle_evidence=lifecycle_evidence,
+                        ),
+                        cwd=ROOT,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+
+                    self.assertEqual(generated.returncode, 1)
+                    self.assertEqual(generated.stdout, "")
+                    self.assertEqual(
+                        generated.stderr,
+                        "native_ci_evidence_invalid "
+                        "reason=native_lifecycle_evidence_invalid\n",
+                    )
+                    self.assertNotIn(private_canary, generated.stderr)
+                    self.assertNotIn(str(root), generated.stderr)
+                    self.assertFalse(evidence.exists())
+
+    def test_native_lifecycle_evidence_is_not_applicable_to_arm64_rows(self):
+        for platform, source_platform in (
+            ("win", "windows"),
+            ("linux", "linux"),
+        ):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                collector_name, artifact_name = TARGET_FILES[(platform, "arm64")]
+                collector = root / collector_name
+                artifact = root / artifact_name
+                evidence = root / f"native-{platform}-arm64.json"
+                source_evidence = root / "observer-source.json"
+                lifecycle_artifact_name = TARGET_FILES[(platform, "x64")][1]
+                lifecycle_artifact = root / lifecycle_artifact_name
+                lifecycle_evidence = root / "native-lifecycle.json"
+                _write_native_row_files(
+                    collector,
+                    artifact,
+                    platform=platform,
+                    arch="arm64",
+                )
+                _write_native_row_files(
+                    root / ("lifecycle-collector.exe" if platform == "win" else "lifecycle-collector"),
+                    lifecycle_artifact,
+                    platform=platform,
+                    arch="x64",
+                )
+                _write_source_evidence(
+                    source_evidence,
+                    platform=source_platform,
+                )
+                _write_lifecycle_evidence(
+                    lifecycle_evidence,
+                    artifact=lifecycle_artifact,
+                    platform=platform,
+                )
+
+                generated = subprocess.run(
+                    _generate_command(
+                        collector=collector,
+                        artifact=artifact,
+                        output=evidence,
+                        platform=platform,
+                        arch="arm64",
+                        observer_source_evidence=source_evidence,
+                        native_lifecycle_evidence=lifecycle_evidence,
+                    ),
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                self.assertEqual(generated.returncode, 1)
+                self.assertEqual(generated.stdout, "")
+                self.assertEqual(
+                    generated.stderr,
+                    "native_ci_evidence_invalid "
+                    "reason=native_lifecycle_evidence_not_applicable\n",
+                )
+                self.assertFalse(evidence.exists())
 
     def test_generate_requires_source_evidence_for_new_windows_and_linux_rows(self):
         for platform in ("win", "linux"):
@@ -2048,6 +2335,69 @@ class NativeCiEvidenceTests(unittest.TestCase):
                         any(fnmatchcase(path, pattern) for pattern in patterns),
                         f"{event} does not track {path}",
                     )
+
+    def test_swift_automation_presentation_never_exposes_private_transport(self):
+        production = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (
+                ROOT
+                / "swift_app/Sources/OpenUsageActivity/AutomationLogic.swift",
+                ROOT
+                / "swift_app/Sources/OpenUsageActivity/AutomationViews.swift",
+            )
+        )
+        for forbidden in (
+            "socketURL.path",
+            "Read-only commands",
+            "commandRow",
+            "curl --unix-socket",
+            "helper executable",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, production)
+
+        focused_test = (
+            ROOT
+            / "swift_app/Tests/OpenUsageActivityTests/AutomationLogicTests.swift"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Loaded state carries only safe aggregate Automation facts", focused_test)
+        self.assertIn("func loadedStateCarriesOnlySafeFacts()", focused_test)
+        for canary in ("socket", "localhost", "curl", "unix-socket", "helper"):
+            with self.subTest(canary=canary):
+                self.assertIn(f'"{canary}"', focused_test)
+
+    def test_workflow_tracks_native_lifecycle_contract_without_claiming_execution(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        push = source[source.index("  push:\n"):source.index("  pull_request:\n")]
+        pull_request = source[
+            source.index("  pull_request:\n"):source.index("\npermissions:")
+        ]
+        contracts = source[
+            source.index("- name: Run portable Observer and Gateway contracts"):
+            source.index("- name: Run native Windows Job contracts")
+        ]
+        for module in (
+            "tests.test_native_lifecycle_evidence",
+            "tests.test_native_lifecycle_runner",
+        ):
+            self.assertTrue(
+                module in contracts,
+                f"portable contracts do not run {module}",
+            )
+        for event, block in (("push", push), ("pull_request", pull_request)):
+            for path in (
+                "docs/native-lifecycle-evidence.md",
+                "docs/schemas/native-lifecycle-evidence-v1.schema.json",
+                "scripts/native_lifecycle_evidence.py",
+                "tests/test_native_lifecycle_evidence.py",
+                "tests/test_native_lifecycle_runner.py",
+            ):
+                with self.subTest(event=event, path=path):
+                    self.assertIn(f'- "{path}"', block)
+
+        package = source[:source.index("\n  gateway-performance:")]
+        self.assertNotIn("native_lifecycle_evidence.py generate", package)
+        self.assertNotIn("native_lifecycle_evidence.py verify", package)
 
 
 if __name__ == "__main__":

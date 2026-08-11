@@ -330,6 +330,7 @@ def _parser() -> SafeArgumentParser:
         choices=("install", "uninstall", "print"),
     )
     service.add_argument("--interval", default="300")
+    service.add_argument("--command", dest="service_command")
     reconcile = commands.add_parser("reconcile")
     reconcile.add_argument("--format", choices=("json",), required=True)
     reconcile.add_argument("--from", dest="from_day", required=True)
@@ -1381,13 +1382,19 @@ def main(
 
             if args.action == "print":
                 stdout.write(
-                    platform_services.render_current_platform(interval=interval)
+                    platform_services.render_current_platform(
+                        interval=interval,
+                        command=args.service_command,
+                    )
                 )
                 stdout.write("\n")
                 return 0
             try:
                 if args.action == "install":
-                    platform_services.install_service(interval=interval)
+                    platform_services.install_service(
+                        interval=interval,
+                        command=args.service_command,
+                    )
                 else:
                     platform_services.uninstall_service()
             except Exception:
