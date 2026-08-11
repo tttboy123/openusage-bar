@@ -351,6 +351,103 @@ class WindowsFailureFixture:
 
 
 class NativeLifecycleRunnerTests(unittest.TestCase):
+    def test_default_executor_owns_and_closes_zero_arg_host_dependencies_context(
+        self,
+    ) -> None:
+        from inspect import signature
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeLifecycleDependencies,
+            NativeLifecycleExecutor,
+            generate_lifecycle_evidence,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        self.assertEqual(tuple(signature(native_lifecycle_dependencies_for_host).parameters), ())
+        for forbidden in ("executor", "dependencies", "artifact_sha256"):
+            self.assertNotIn(forbidden, signature(generate_lifecycle_evidence).parameters)
+
+        events: list[object] = []
+
+        def fail_make_run_directory(_platform: str, _arch: str) -> Path:
+            events.append("make_run_directory")
+            raise RuntimeError("PRIVATE_LOW_LEVEL_FAILURE")
+
+        noop = lambda *args, **kwargs: None
+        dependencies = NativeLifecycleDependencies(
+            make_run_directory=fail_make_run_directory,
+            inspect_path=noop,
+            copy_file=noop,
+            set_file_mode=noop,
+            remove_path=noop,
+            start_process=noop,
+            run_process=noop,
+            stop_process=noop,
+            read_registry_value=noop,
+            profile_paths=noop,
+            package_paths=noop,
+            inspect_service=noop,
+            inspect_listener=noop,
+            inspect_ledger=noop,
+            network_events=noop,
+            credential_events=noop,
+            monotonic=noop,
+            wait=noop,
+        )
+
+        class DependencyContext:
+            def __enter__(self) -> NativeLifecycleDependencies:
+                events.append("enter")
+                return dependencies
+
+            def __exit__(self, exc_type, _exc, _traceback) -> bool:
+                events.append(("exit", exc_type is not None))
+                return False
+
+        def dependency_context() -> DependencyContext:
+            events.append("factory")
+            return DependencyContext()
+
+        artifact = (
+            Path(tempfile.gettempdir()).resolve()
+            / "UsageHub-0.8.6-linux-x86_64.AppImage"
+        )
+        with patch(
+            "scripts.native_lifecycle_evidence.native_lifecycle_dependencies_for_host",
+            side_effect=dependency_context,
+        ):
+            executor = NativeLifecycleExecutor(
+                host_platform="linux",
+                host_machine="x86_64",
+            )
+            for platform, arch in (("win", "x64"), ("linux", "arm64")):
+                with self.subTest(platform=platform, arch=arch), self.assertRaisesRegex(
+                    LifecycleEvidenceError,
+                    "host_invalid",
+                ):
+                    executor.execute(
+                        platform=platform,
+                        arch=arch,
+                        artifact=artifact,
+                        artifact_sha256="a" * 64,
+                    )
+            self.assertEqual(events, [])
+
+            with self.assertRaisesRegex(LifecycleEvidenceError, "driver_failed"):
+                executor.execute(
+                    platform="linux",
+                    arch="x64",
+                    artifact=artifact,
+                    artifact_sha256="a" * 64,
+                )
+
+        self.assertEqual(
+            events,
+            ["factory", "enter", "make_run_directory", ("exit", True)],
+        )
+
     def test_generate_cannot_accept_a_caller_executor_or_write_real_evidence(
         self,
     ) -> None:

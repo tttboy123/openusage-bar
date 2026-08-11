@@ -17,10 +17,11 @@ import platform as host_platform_module
 import re
 import stat
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Iterator, Protocol
 
 
 SCHEMA_VERSION = "native-lifecycle-evidence/v1"
@@ -586,6 +587,20 @@ class NativeLifecycleDependencies:
     credential_events: Callable[..., object]
     monotonic: Callable[..., object]
     wait: Callable[..., object]
+
+
+@contextmanager
+def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependencies]:
+    """Own the low-level dependency session for the current native host.
+
+    A real host backend is intentionally not active yet.  Keeping this as a
+    zero-argument context factory makes eventual event watchers and ephemeral
+    profile resources host-owned, while failing closed until that backend can
+    provide every required observation.
+    """
+
+    _fail("driver_unavailable")
+    yield  # pragma: no cover - keeps the context-manager contract explicit
 
 
 class PlatformLifecycleDriver(Protocol):
@@ -1581,11 +1596,12 @@ class NativeLifecycleExecutor:
     ) -> None:
         if driver is not None and dependencies is not None:
             raise ValueError("driver and dependencies are mutually exclusive")
-        self._driver = (
-            driver
-            if driver is not None
-            else _BuiltInPlatformDriver(dependencies=dependencies)
-        )
+        if driver is not None:
+            self._driver: PlatformLifecycleDriver | None = driver
+        elif dependencies is not None:
+            self._driver = _BuiltInPlatformDriver(dependencies=dependencies)
+        else:
+            self._driver = None
         self._host_platform = host_platform if host_platform is not None else sys.platform
         self._host_machine = (
             host_machine
@@ -1612,12 +1628,25 @@ class NativeLifecycleExecutor:
         ) or arch != "x64" or machine not in {"x86_64", "amd64"}:
             _fail("host_invalid")
         try:
-            observations = self._driver.execute(
-                platform=platform,
-                arch=arch,
-                artifact=artifact,
-                artifact_sha256=artifact_sha256,
-            )
+            if self._driver is None:
+                with native_lifecycle_dependencies_for_host() as dependencies:
+                    if not isinstance(dependencies, NativeLifecycleDependencies):
+                        _driver_fail()
+                    observations = _BuiltInPlatformDriver(
+                        dependencies=dependencies
+                    ).execute(
+                        platform=platform,
+                        arch=arch,
+                        artifact=artifact,
+                        artifact_sha256=artifact_sha256,
+                    )
+            else:
+                observations = self._driver.execute(
+                    platform=platform,
+                    arch=arch,
+                    artifact=artifact,
+                    artifact_sha256=artifact_sha256,
+                )
         except LifecycleEvidenceError:
             raise
         except Exception:
