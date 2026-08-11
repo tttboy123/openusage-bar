@@ -3374,6 +3374,135 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 ):
                     validate_lifecycle_record(record)
 
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_package_paths_are_a_pure_mapping_of_a_safe_profile(
+        self,
+    ) -> None:
+        import stat
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativePackagePaths,
+            NativeProfilePaths,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        def tree_snapshot(root: Path) -> tuple[tuple[object, ...], ...]:
+            snapshot: list[tuple[object, ...]] = []
+            for path in sorted(root.rglob("*")):
+                metadata = path.lstat()
+                relative = path.relative_to(root).as_posix()
+                if stat.S_ISLNK(metadata.st_mode):
+                    payload: object = os.readlink(path)
+                elif stat.S_ISREG(metadata.st_mode):
+                    payload = path.read_bytes()
+                else:
+                    payload = None
+                snapshot.append(
+                    (
+                        relative,
+                        stat.S_IFMT(metadata.st_mode),
+                        stat.S_IMODE(metadata.st_mode),
+                        metadata.st_dev,
+                        metadata.st_ino,
+                        metadata.st_size,
+                        metadata.st_nlink,
+                        payload,
+                    )
+                )
+            return tuple(snapshot)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            safe_root = root / "safe-profile"
+            safe_profile = NativeProfilePaths(
+                state_root=safe_root / "state" / "openusage-bar",
+                config_root=safe_root / "config" / "openusage-bar",
+                runtime_root=safe_root / "data" / "usagehub" / "runtime",
+                task_definition=(
+                    safe_root
+                    / "config"
+                    / "systemd"
+                    / "user"
+                    / "openusage-bar.service"
+                ),
+            )
+            expected = NativePackagePaths(
+                install_root=safe_profile.runtime_root,
+                app=None,
+                uninstaller=None,
+                collector=safe_profile.runtime_root / "openusage-collector",
+            )
+
+            foreign_runtime = root / "foreign-runtime"
+            foreign_runtime.mkdir()
+            foreign_marker = foreign_runtime / "PRIVATE_FOREIGN_MARKER"
+            foreign_marker.write_bytes(b"foreign remains unchanged")
+            alias_root = root / "aliased-runtime"
+            alias_root.symlink_to(foreign_runtime, target_is_directory=True)
+            alias_profile = NativeProfilePaths(
+                state_root=root / "alias-state",
+                config_root=root / "alias-config",
+                runtime_root=alias_root,
+                task_definition=root / "alias-systemd" / "openusage-bar.service",
+            )
+
+            hostile_profile = object.__new__(NativeProfilePaths)
+            object.__setattr__(
+                hostile_profile, "state_root", root / "hostile-state"
+            )
+            object.__setattr__(
+                hostile_profile, "config_root", root / "hostile-config"
+            )
+            object.__setattr__(
+                hostile_profile,
+                "runtime_root",
+                root / "hostile-runtime" / ".." / "escape",
+            )
+            object.__setattr__(
+                hostile_profile,
+                "task_definition",
+                root / "hostile-systemd" / "openusage-bar.service",
+            )
+
+            before = tree_snapshot(root)
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), native_lifecycle_dependencies_for_host() as dependencies:
+                self.assertEqual(
+                    dependencies.package_paths("linux", safe_profile), expected
+                )
+                self.assertEqual(tree_snapshot(root), before)
+
+                for platform, profile in (
+                    ("win", safe_profile),
+                    (True, safe_profile),
+                    ("linux", object()),
+                    ("linux", hostile_profile),
+                    ("linux", alias_profile),
+                ):
+                    with self.subTest(platform=platform, profile=type(profile)):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as rejected:
+                            dependencies.package_paths(platform, profile)
+                        self.assertEqual(str(rejected.exception), "driver_failed")
+                        self.assertNotIn(str(root), str(rejected.exception))
+                        self.assertEqual(tree_snapshot(root), before)
+
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as unavailable:
+                    dependencies.profile_paths("linux")
+                self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                self.assertEqual(tree_snapshot(root), before)
+
+            self.assertEqual(tree_snapshot(root), before)
+
     @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_unimplemented_dependencies_are_driver_unavailable(
         self,

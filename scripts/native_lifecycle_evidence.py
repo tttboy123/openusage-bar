@@ -1234,6 +1234,46 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         del args, kwargs
         _fail("driver_unavailable")
 
+    def package_paths(
+        platform: object,
+        profile: object,
+    ) -> NativePackagePaths:
+        if (
+            type(platform) is not str
+            or platform != "linux"
+            or type(profile) is not NativeProfilePaths
+        ):
+            _driver_fail()
+        assert isinstance(profile, NativeProfilePaths)
+        if any(
+            not _valid_native_path(value)
+            for value in (
+                profile.state_root,
+                profile.config_root,
+                profile.runtime_root,
+                profile.task_definition,
+            )
+        ):
+            _driver_fail()
+        try:
+            try:
+                metadata = profile.runtime_root.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if stat.S_ISLNK(metadata.st_mode):
+                    _driver_fail()
+            return NativePackagePaths(
+                install_root=profile.runtime_root,
+                app=None,
+                uninstaller=None,
+                collector=profile.runtime_root / "openusage-collector",
+            )
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _driver_fail()
+
     def make_run_directory(platform: object, arch: object) -> Path:
         nonlocal run_directory
         if (
@@ -1402,7 +1442,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         stop_process=unavailable,
         read_registry_value=unavailable,
         profile_paths=unavailable,
-        package_paths=unavailable,
+        package_paths=package_paths,
         inspect_service=unavailable,
         inspect_listener=unavailable,
         inspect_ledger=unavailable,
