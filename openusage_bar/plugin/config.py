@@ -74,8 +74,18 @@ def _load_or_create_token(path: Path) -> str:
         if os.name == "nt":
             if _WINDOWS_FILE_SECURITY is None:
                 raise ValueError("Windows Plugin token security unavailable")
-            _WINDOWS_FILE_SECURITY.harden_file(descriptor)
-            _WINDOWS_FILE_SECURITY.verify_file(descriptor)
+            if created:
+                _WINDOWS_FILE_SECURITY.harden_file(descriptor)
+            else:
+                security_deadline = time.monotonic() + 0.5
+                while True:
+                    try:
+                        _WINDOWS_FILE_SECURITY.verify_file(descriptor)
+                        break
+                    except OSError:
+                        if time.monotonic() >= security_deadline:
+                            raise
+                        time.sleep(0.025)
         elif hasattr(os, "fchmod"):
             os.fchmod(descriptor, 0o600)
         if created:
