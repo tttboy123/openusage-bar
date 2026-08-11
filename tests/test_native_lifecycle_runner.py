@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 
 SOURCE_COMMIT = "a" * 40
@@ -76,6 +77,32 @@ class MutatingExecutor(RecordingExecutor):
 
 
 class NativeLifecycleRunnerTests(unittest.TestCase):
+    def test_windows_file_signature_ignores_only_unstable_ctime(self) -> None:
+        from scripts.native_lifecycle_evidence import _stable_metadata_signature
+
+        baseline = SimpleNamespace(
+            st_dev=4,
+            st_ino=8,
+            st_size=16,
+            st_mtime_ns=32,
+            st_ctime_ns=64,
+        )
+        ctime_drift = SimpleNamespace(**{**vars(baseline), "st_ctime_ns": 65})
+        mtime_drift = SimpleNamespace(**{**vars(baseline), "st_mtime_ns": 33})
+
+        self.assertEqual(
+            _stable_metadata_signature(baseline, platform_name="nt"),
+            _stable_metadata_signature(ctime_drift, platform_name="nt"),
+        )
+        self.assertNotEqual(
+            _stable_metadata_signature(baseline, platform_name="nt"),
+            _stable_metadata_signature(mtime_drift, platform_name="nt"),
+        )
+        self.assertNotEqual(
+            _stable_metadata_signature(baseline, platform_name="posix"),
+            _stable_metadata_signature(ctime_drift, platform_name="posix"),
+        )
+
     def test_validator_rejects_boolean_counters_and_unknown_fields(self) -> None:
         from scripts.native_lifecycle_evidence import (
             LifecycleEvidenceError,

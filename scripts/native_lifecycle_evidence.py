@@ -233,9 +233,33 @@ def _canonical(record: dict[str, Any]) -> str:
         _fail("record_invalid")
 
 
+def _stable_metadata_signature(
+    metadata: Any,
+    *,
+    platform_name: str | None = None,
+) -> tuple[int, ...]:
+    """Return the mutation-sensitive fields that are stable on this host.
+
+    Windows may update ``st_ctime_ns`` when a freshly written file is first
+    opened.  File identity, size, modification time, and the content digest
+    remain authoritative there; POSIX hosts retain the stricter ctime check.
+    """
+
+    active_platform = os.name if platform_name is None else platform_name
+    signature = (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+    )
+    if active_platform != "nt":
+        signature += (metadata.st_ctime_ns,)
+    return signature
+
+
 def _inspect_artifact(
     path: Path, *, expected_platform: str
-) -> tuple[dict[str, Any], tuple[int, int, int, int, int]]:
+) -> tuple[dict[str, Any], tuple[int, ...]]:
     try:
         metadata = path.lstat()
         if (
@@ -257,14 +281,8 @@ def _inspect_artifact(
             opened = os.fstat(descriptor)
             if (
                 not stat.S_ISREG(opened.st_mode)
-                or (opened.st_dev, opened.st_ino)
-                != (metadata.st_dev, metadata.st_ino)
-                or (opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns)
-                != (
-                    metadata.st_size,
-                    metadata.st_mtime_ns,
-                    metadata.st_ctime_ns,
-                )
+                or _stable_metadata_signature(opened)
+                != _stable_metadata_signature(metadata)
             ):
                 _fail("artifact_invalid")
             while True:
@@ -276,26 +294,19 @@ def _inspect_artifact(
             finished = os.fstat(descriptor)
         finally:
             os.close(descriptor)
+        final_link = path.lstat()
     except LifecycleEvidenceError:
         raise
     except OSError:
         _fail("artifact_unavailable")
     if (
         total != metadata.st_size
-        or (
-            finished.st_dev,
-            finished.st_ino,
-            finished.st_size,
-            finished.st_mtime_ns,
-            finished.st_ctime_ns,
-        )
-        != (
-            metadata.st_dev,
-            metadata.st_ino,
-            metadata.st_size,
-            metadata.st_mtime_ns,
-            metadata.st_ctime_ns,
-        )
+        or _stable_metadata_signature(finished)
+        != _stable_metadata_signature(opened)
+        or stat.S_ISLNK(final_link.st_mode)
+        or not stat.S_ISREG(final_link.st_mode)
+        or _stable_metadata_signature(final_link)
+        != _stable_metadata_signature(finished)
     ):
         _fail("artifact_changed")
     return (
@@ -304,13 +315,7 @@ def _inspect_artifact(
             "sha256": digest.hexdigest(),
             "sizeBytes": total,
         },
-        (
-            finished.st_dev,
-            finished.st_ino,
-            finished.st_size,
-            finished.st_mtime_ns,
-            finished.st_ctime_ns,
-        ),
+        _stable_metadata_signature(finished),
     )
 
 
@@ -553,42 +558,23 @@ def _read_canonical_report(path: Path) -> dict[str, Any]:
             opened = os.fstat(descriptor)
             if (
                 not stat.S_ISREG(opened.st_mode)
-                or (
-                    opened.st_dev,
-                    opened.st_ino,
-                    opened.st_size,
-                    opened.st_mtime_ns,
-                    opened.st_ctime_ns,
-                )
-                != (
-                    metadata.st_dev,
-                    metadata.st_ino,
-                    metadata.st_size,
-                    metadata.st_mtime_ns,
-                    metadata.st_ctime_ns,
-                )
+                or _stable_metadata_signature(opened)
+                != _stable_metadata_signature(metadata)
             ):
                 _fail("report_unavailable")
             raw = os.read(descriptor, MAX_REPORT_BYTES + 1)
             finished = os.fstat(descriptor)
         finally:
             os.close(descriptor)
+        final_link = path.lstat()
         if (
             len(raw) != metadata.st_size
-            or (
-                finished.st_dev,
-                finished.st_ino,
-                finished.st_size,
-                finished.st_mtime_ns,
-                finished.st_ctime_ns,
-            )
-            != (
-                metadata.st_dev,
-                metadata.st_ino,
-                metadata.st_size,
-                metadata.st_mtime_ns,
-                metadata.st_ctime_ns,
-            )
+            or _stable_metadata_signature(finished)
+            != _stable_metadata_signature(opened)
+            or stat.S_ISLNK(final_link.st_mode)
+            or not stat.S_ISREG(final_link.st_mode)
+            or _stable_metadata_signature(final_link)
+            != _stable_metadata_signature(finished)
         ):
             _fail("report_unavailable")
         text = raw.decode("ascii")
