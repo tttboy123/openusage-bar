@@ -1170,6 +1170,58 @@ class GatewayHTTPTests(unittest.TestCase):
             self.assertEqual(server.active_deadline_count, 0)
             self.assertLess(time.monotonic() - started, 2)
 
+    def test_expired_deadline_remains_active_until_worker_releases_its_slot(
+        self,
+    ) -> None:
+        router = GatewayRouter(mode=GatewayMode.ADVISE, policy=policy, proxy=None)
+        finish_entered = threading.Event()
+        allow_finish = threading.Event()
+        original_finish = gateway_server_module._GatewayHandler.finish
+
+        def blocked_finish(handler: object) -> None:
+            finish_entered.set()
+            allow_finish.wait(2)
+            original_finish(handler)
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            gateway_server_module._GatewayHandler,
+            "finish",
+            blocked_finish,
+        ):
+            server = create_gateway_server(
+                router,
+                port=0,
+                token_path=Path(directory) / "gateway.token",
+                max_threads=1,
+                client_timeout=1,
+                request_deadline=0.05,
+            )
+            thread = start(server)
+            peer = socket.create_connection(server.server_address, timeout=1)
+            try:
+                peer.sendall(b"GET /gateway/v1/health HTTP/1.1\r\n")
+                self.assertTrue(finish_entered.wait(1))
+                self.assertEqual(server.active_deadline_count, 1)
+                self.assertFalse(server._thread_slots.acquire(blocking=False))
+
+                allow_finish.set()
+                deadline = time.monotonic() + 1
+                while server.active_deadline_count and time.monotonic() < deadline:
+                    time.sleep(0.005)
+                self.assertEqual(server.active_deadline_count, 0)
+                status, _, _ = request(
+                    server.server_address[1],
+                    server.bearer_token,
+                )
+                self.assertEqual(status, 200)
+            finally:
+                allow_finish.set()
+                peer.close()
+                server.shutdown()
+                server.server_close()
+                thread.join(1)
+            self.assertFalse(thread.is_alive())
+
     def test_fast_requests_share_server_watchdog_without_per_request_timers(
         self,
     ) -> None:

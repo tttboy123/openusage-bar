@@ -854,6 +854,7 @@ class _BoundedThreads:
         self._request_deadline = request_deadline
         self._deadline_condition = threading.Condition()
         self._deadline_entries: dict[socket.socket, tuple[float, int]] = {}
+        self._expired_deadlines: set[socket.socket] = set()
         self._deadline_sequence = 0
         self._closing = False
         self._deadline_watchdog = threading.Thread(
@@ -906,11 +907,14 @@ class _BoundedThreads:
         try:
             super().process_request_thread(request, client_address)  # type: ignore[misc]
         finally:
-            with self._deadline_condition:
-                if self._deadline_entries.get(request) == registration:
-                    self._deadline_entries.pop(request, None)
+            try:
+                self._thread_slots.release()
+            finally:
+                with self._deadline_condition:
+                    if self._deadline_entries.get(request) == registration:
+                        self._deadline_entries.pop(request, None)
+                    self._expired_deadlines.discard(request)
                     self._deadline_condition.notify()
-            self._thread_slots.release()
 
     def _watch_request_deadlines(self) -> None:
         while True:
@@ -922,9 +926,16 @@ class _BoundedThreads:
                         self._deadline_condition.wait()
                         continue
 
+                    pending = tuple(
+                        item
+                        for item in self._deadline_entries.items()
+                        if item[0] not in self._expired_deadlines
+                    )
+                    if not pending:
+                        self._deadline_condition.wait()
+                        continue
                     request, registration = min(
-                        self._deadline_entries.items(),
-                        key=lambda item: item[1],
+                        pending, key=lambda item: item[1]
                     )
                     remaining = registration[0] - time.monotonic()
                     if remaining > 0:
@@ -932,7 +943,7 @@ class _BoundedThreads:
                         continue
                     if self._deadline_entries.get(request) != registration:
                         continue
-                    self._deadline_entries.pop(request, None)
+                    self._expired_deadlines.add(request)
                     break
             self._expire_request(request)
 
@@ -953,6 +964,7 @@ class _BoundedThreads:
             self._closing = True
             active = tuple(self._deadline_entries)
             self._deadline_entries.clear()
+            self._expired_deadlines.clear()
             self._deadline_condition.notify_all()
         for request in active:
             self._expire_request(request)
