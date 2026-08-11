@@ -1202,16 +1202,10 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     self.assertEqual(
                         stat.S_IMODE(second_unpromoted.st_mode), 0o600
                     )
-                    self.assertNotEqual(
-                        (
-                            second_unpromoted.st_dev,
-                            second_unpromoted.st_ino,
-                        ),
-                        (
-                            first_execution_metadata.st_dev,
-                            first_execution_metadata.st_ino,
-                        ),
-                    )
+                    # A filesystem may legitimately reuse the first file's
+                    # inode after its authoritative unlink. O_EXCL, the
+                    # generation gate, and the intervening missing probe prove
+                    # this is a newly created file instance.
                     self.assertNotEqual(
                         (
                             second_unpromoted.st_dev,
