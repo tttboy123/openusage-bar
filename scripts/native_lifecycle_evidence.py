@@ -15,8 +15,10 @@ import json
 import os
 import platform as host_platform_module
 import re
+import secrets
 import stat
 import sys
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -589,18 +591,190 @@ class NativeLifecycleDependencies:
     wait: Callable[..., object]
 
 
+@dataclass
+class _BoundRunDirectory:
+    path: Path
+    parent_fd: int
+    directory_fd: int
+    identity: tuple[int, int]
+
+    def cleanup(self) -> None:
+        quarantine = f".{self.path.name}.quarantine-{secrets.token_hex(16)}"
+        quarantined = False
+        cleanup_failed = False
+        try:
+            os.rename(
+                self.path.name,
+                quarantine,
+                src_dir_fd=self.parent_fd,
+                dst_dir_fd=self.parent_fd,
+            )
+            quarantined = True
+            current = os.stat(
+                quarantine,
+                dir_fd=self.parent_fd,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or (current.st_dev, current.st_ino) != self.identity
+            ):
+                os.rename(
+                    quarantine,
+                    self.path.name,
+                    src_dir_fd=self.parent_fd,
+                    dst_dir_fd=self.parent_fd,
+                )
+                quarantined = False
+                cleanup_failed = True
+            else:
+                os.rmdir(quarantine, dir_fd=self.parent_fd)
+                quarantined = False
+        except Exception:
+            cleanup_failed = True
+            if quarantined:
+                try:
+                    os.stat(
+                        self.path.name,
+                        dir_fd=self.parent_fd,
+                        follow_symlinks=False,
+                    )
+                except FileNotFoundError:
+                    try:
+                        os.rename(
+                            quarantine,
+                            self.path.name,
+                            src_dir_fd=self.parent_fd,
+                            dst_dir_fd=self.parent_fd,
+                        )
+                        quarantined = False
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+        finally:
+            try:
+                os.close(self.directory_fd)
+            except Exception:
+                cleanup_failed = True
+            try:
+                os.close(self.parent_fd)
+            except Exception:
+                cleanup_failed = True
+        if cleanup_failed:
+            _driver_fail()
+
+
 @contextmanager
 def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependencies]:
     """Own the low-level dependency session for the current native host.
 
-    A real host backend is intentionally not active yet.  Keeping this as a
-    zero-argument context factory makes eventual event watchers and ephemeral
-    profile resources host-owned, while failing closed until that backend can
-    provide every required observation.
+    Only the private Linux x86_64 run-directory resource is active.  Every
+    observation callback remains unavailable until its independent host probe
+    exists, so this context cannot yet produce lifecycle evidence.
     """
 
-    _fail("driver_unavailable")
-    yield  # pragma: no cover - keeps the context-manager contract explicit
+    try:
+        active_platform = sys.platform
+        active_machine = host_platform_module.machine()
+    except Exception:
+        _fail("driver_unavailable")
+    if (
+        type(active_platform) is not str
+        or not active_platform.startswith("linux")
+        or type(active_machine) is not str
+        or active_machine.casefold() not in {"x86_64", "amd64"}
+    ):
+        _fail("driver_unavailable")
+
+    run_directory: _BoundRunDirectory | None = None
+
+    def unavailable(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        _driver_fail()
+
+    def make_run_directory(platform: object, arch: object) -> Path:
+        nonlocal run_directory
+        if (
+            type(platform) is not str
+            or platform != "linux"
+            or type(arch) is not str
+            or arch != "x64"
+            or run_directory is not None
+        ):
+            _driver_fail()
+        parent_fd: int | None = None
+        directory_fd: int | None = None
+        try:
+            candidate = Path(
+                tempfile.mkdtemp(prefix="usagehub-native-lifecycle-")
+            )
+            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+            parent_fd = os.open(candidate.parent, flags)
+            directory_fd = os.open(candidate.name, flags, dir_fd=parent_fd)
+            metadata = os.fstat(directory_fd)
+            entry = os.stat(
+                candidate.name,
+                dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+            if (
+                not candidate.is_absolute()
+                or stat.S_ISLNK(metadata.st_mode)
+                or not stat.S_ISDIR(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) != 0o700
+                or (entry.st_dev, entry.st_ino)
+                != (metadata.st_dev, metadata.st_ino)
+            ):
+                _driver_fail()
+        except LifecycleEvidenceError:
+            if directory_fd is not None:
+                os.close(directory_fd)
+            if parent_fd is not None:
+                os.close(parent_fd)
+            raise
+        except Exception:
+            if directory_fd is not None:
+                os.close(directory_fd)
+            if parent_fd is not None:
+                os.close(parent_fd)
+            _driver_fail()
+        assert parent_fd is not None
+        assert directory_fd is not None
+        run_directory = _BoundRunDirectory(
+            path=candidate,
+            parent_fd=parent_fd,
+            directory_fd=directory_fd,
+            identity=(metadata.st_dev, metadata.st_ino),
+        )
+        return candidate
+
+    dependencies = NativeLifecycleDependencies(
+        make_run_directory=make_run_directory,
+        inspect_path=unavailable,
+        copy_file=unavailable,
+        set_file_mode=unavailable,
+        remove_path=unavailable,
+        start_process=unavailable,
+        run_process=unavailable,
+        stop_process=unavailable,
+        read_registry_value=unavailable,
+        profile_paths=unavailable,
+        package_paths=unavailable,
+        inspect_service=unavailable,
+        inspect_listener=unavailable,
+        inspect_ledger=unavailable,
+        network_events=unavailable,
+        credential_events=unavailable,
+        monotonic=unavailable,
+        wait=unavailable,
+    )
+    try:
+        yield dependencies
+    finally:
+        if run_directory is not None:
+            run_directory.cleanup()
 
 
 class PlatformLifecycleDriver(Protocol):

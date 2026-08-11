@@ -448,6 +448,206 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             ["factory", "enter", "make_run_directory", ("exit", True)],
         )
 
+    def test_linux_host_dependency_context_owns_and_cleans_one_private_run_directory(
+        self,
+    ) -> None:
+        import stat
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeLifecycleDependencies,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        host_patches = (
+            patch("scripts.native_lifecycle_evidence.sys.platform", "linux"),
+            patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ),
+        )
+        with host_patches[0], host_patches[1]:
+            with native_lifecycle_dependencies_for_host() as dependencies:
+                self.assertIsInstance(dependencies, NativeLifecycleDependencies)
+                for platform, arch in (
+                    ("win", "x64"),
+                    ("linux", "arm64"),
+                    (True, "x64"),
+                    ("linux", True),
+                ):
+                    with self.subTest(platform=platform, arch=arch):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as raised:
+                            dependencies.make_run_directory(platform, arch)
+                        self.assertEqual(str(raised.exception), "driver_failed")
+
+                run_directory = dependencies.make_run_directory("linux", "x64")
+                metadata = run_directory.lstat()
+                self.assertTrue(run_directory.is_absolute())
+                self.assertTrue(stat.S_ISDIR(metadata.st_mode))
+                self.assertFalse(run_directory.is_symlink())
+                self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o700)
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ) as repeated:
+                    dependencies.make_run_directory("linux", "x64")
+                self.assertEqual(str(repeated.exception), "driver_failed")
+                self.assertNotIn(str(run_directory), str(repeated.exception))
+            self.assertFalse(run_directory.exists())
+
+            escaped_directory: Path | None = None
+            with self.assertRaisesRegex(RuntimeError, "unit test exit"):
+                with native_lifecycle_dependencies_for_host() as dependencies:
+                    escaped_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    raise RuntimeError("unit test exit")
+            assert escaped_directory is not None
+            self.assertFalse(escaped_directory.exists())
+
+        for platform, machine in (
+            ("darwin", "x86_64"),
+            ("win32", "AMD64"),
+            ("linux", "aarch64"),
+        ):
+            with self.subTest(host=(platform, machine)), patch(
+                "scripts.native_lifecycle_evidence.sys.platform", platform
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value=machine,
+            ):
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as unavailable:
+                    with native_lifecycle_dependencies_for_host():
+                        self.fail("unsupported host entered lifecycle context")
+                self.assertEqual(str(unavailable.exception), "driver_unavailable")
+
+    def test_linux_host_dependency_cleanup_does_not_delete_a_swapped_foreign_directory(
+        self,
+    ) -> None:
+        import os
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        real_rename = os.rename
+        real_rmdir = os.rmdir
+        run_directory: Path | None = None
+        original_directory: Path | None = None
+        foreign_directory: Path | None = None
+        foreign_identity: tuple[int, int] | None = None
+        swapped = False
+
+        def swap_then_quarantine(
+            source: object,
+            destination: object,
+            *args: object,
+            **kwargs: object,
+        ) -> None:
+            nonlocal swapped
+            if not swapped:
+                assert run_directory is not None
+                assert original_directory is not None
+                assert foreign_directory is not None
+                real_rename(run_directory, original_directory)
+                (original_directory / "owned-marker").write_bytes(b"owned")
+                real_rename(foreign_directory, run_directory)
+                swapped = True
+            real_rename(source, destination, *args, **kwargs)
+
+        try:
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), patch(
+                "scripts.native_lifecycle_evidence.os.rename",
+                side_effect=swap_then_quarantine,
+            ):
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ) as raised:
+                    with native_lifecycle_dependencies_for_host() as dependencies:
+                        run_directory = dependencies.make_run_directory(
+                            "linux", "x64"
+                        )
+                        original_directory = run_directory.with_name(
+                            f"{run_directory.name}-owned-original"
+                        )
+                        foreign_directory = run_directory.with_name(
+                            f"{run_directory.name}-foreign"
+                        )
+                        foreign_directory.mkdir(mode=0o700)
+                        metadata = foreign_directory.lstat()
+                        foreign_identity = (metadata.st_dev, metadata.st_ino)
+
+            self.assertEqual(str(raised.exception), "driver_failed")
+            self.assertTrue(swapped)
+            assert run_directory is not None
+            assert original_directory is not None
+            assert foreign_identity is not None
+            replacement = run_directory.lstat()
+            self.assertEqual(
+                (replacement.st_dev, replacement.st_ino), foreign_identity
+            )
+            self.assertEqual(
+                (original_directory / "owned-marker").read_bytes(), b"owned"
+            )
+        finally:
+            for directory in (run_directory, original_directory, foreign_directory):
+                if directory is None or not directory.exists():
+                    continue
+                marker = directory / "owned-marker"
+                if marker.exists():
+                    marker.unlink()
+                real_rmdir(directory)
+
+    def test_linux_host_dependency_cleanup_failures_are_path_free(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        real_rmdir = os.rmdir
+        for body_fails in (False, True):
+            with self.subTest(body_fails=body_fails):
+                run_directory: Path | None = None
+                try:
+                    with patch(
+                        "scripts.native_lifecycle_evidence.sys.platform", "linux"
+                    ), patch(
+                        "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                        return_value="x86_64",
+                    ), patch(
+                        "scripts.native_lifecycle_evidence.os.rmdir",
+                        side_effect=OSError("PRIVATE_CLEANUP_PATH"),
+                    ):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as raised:
+                            with native_lifecycle_dependencies_for_host() as dependencies:
+                                run_directory = dependencies.make_run_directory(
+                                    "linux", "x64"
+                                )
+                                if body_fails:
+                                    raise RuntimeError("PRIVATE_BODY_VALUE")
+
+                    self.assertEqual(str(raised.exception), "driver_failed")
+                    self.assertNotIn("PRIVATE_", str(raised.exception))
+                finally:
+                    if run_directory is not None and run_directory.exists():
+                        real_rmdir(run_directory)
+
     def test_generate_cannot_accept_a_caller_executor_or_write_real_evidence(
         self,
     ) -> None:
