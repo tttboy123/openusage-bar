@@ -2534,7 +2534,10 @@ def _require_fresh_baseline(
         authenticated_ready=False,
     )
     _require_listener(
-        dependencies.inspect_listener(platform, "gateway"),
+        dependencies.inspect_listener(
+            platform,
+            "gateway_default_endpoint" if platform == "linux" else "gateway",
+        ),
         active=False,
         authenticated_ready=False,
     )

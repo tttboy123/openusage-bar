@@ -2728,7 +2728,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 platform: str, namespace: str
             ) -> NativeListenerState:
                 events.append(("inspect_listener", platform, namespace))
-                if namespace == "gateway":
+                if namespace in {"gateway", "gateway_default_endpoint"}:
                     return NativeListenerState(False, False)
                 return next(local_listeners)
 
@@ -2913,6 +2913,25 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     "config_root",
                     "delete_execution_copy",
                     "sentinel",
+                ],
+            )
+            self.assertEqual(
+                [
+                    (event[1], event[2])
+                    for event in events
+                    if event[0] == "inspect_listener"
+                ],
+                [
+                    ("linux", "local"),
+                    ("linux", "gateway_default_endpoint"),
+                    ("linux", "local"),
+                    ("linux", "gateway"),
+                    ("linux", "local"),
+                    ("linux", "gateway"),
+                    ("linux", "local"),
+                    ("linux", "gateway"),
+                    ("linux", "local"),
+                    ("linux", "gateway"),
                 ],
             )
             self.assertEqual(
@@ -5587,6 +5606,162 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     tuple(event[1] for event in events),
                     expected_purposes,
                 )
+
+    def test_linux_default_executor_baseline_consumes_only_default_gateway_endpoint_absence(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeLedgerState,
+            NativeLifecycleDependencies,
+            NativeLifecycleExecutor,
+            NativeListenerState,
+            NativePackagePaths,
+            NativePathState,
+            NativeProfilePaths,
+            NativeServiceState,
+        )
+
+        root = Path(tempfile.gettempdir()).resolve() / "linux-baseline-endpoint"
+        run_directory = root / "run"
+        profile = NativeProfilePaths(
+            state_root=root / "state",
+            config_root=root / "config",
+            runtime_root=root / "runtime",
+            task_definition=root / "openusage-bar.service",
+        )
+        package = NativePackagePaths(
+            install_root=profile.runtime_root,
+            app=None,
+            uninstaller=None,
+            collector=profile.runtime_root / "openusage-collector",
+        )
+        missing = NativePathState(False, "missing", 0, None, 0, None)
+        events: list[tuple[object, ...]] = []
+
+        def make_run_directory(platform: str, arch: str) -> Path:
+            events.append(("make_run_directory", platform, arch))
+            return run_directory
+
+        def profile_paths(platform: str) -> NativeProfilePaths:
+            events.append(("profile_paths", platform))
+            return profile
+
+        def package_paths(
+            platform: str, observed_profile: NativeProfilePaths
+        ) -> NativePackagePaths:
+            events.append(("package_paths", platform, observed_profile))
+            return package
+
+        def inspect_service(platform: str) -> NativeServiceState:
+            events.append(("inspect_service", platform))
+            return NativeServiceState(False, False, None)
+
+        def inspect_listener(
+            platform: str, namespace: str
+        ) -> NativeListenerState:
+            events.append(("inspect_listener", platform, namespace))
+            if namespace == "gateway":
+                raise AssertionError("generic Gateway must remain unavailable")
+            return NativeListenerState(False, False)
+
+        def inspect_path(purpose: str, path: Path) -> NativePathState:
+            events.append(("inspect_path", purpose, path))
+            return missing
+
+        def inspect_ledger(platform: str) -> NativeLedgerState:
+            events.append(("inspect_ledger", platform))
+            return NativeLedgerState(False, None, 0, None, False, 0)
+
+        def copy_blocker(source: Path, destination: Path) -> None:
+            events.append(("copy_file", source, destination))
+            raise LifecycleEvidenceError("driver_unavailable")
+
+        def remove_path(path: Path) -> None:
+            events.append(("remove_path", path))
+
+        dependencies = NativeLifecycleDependencies(
+            make_run_directory=make_run_directory,
+            inspect_path=inspect_path,
+            copy_file=copy_blocker,
+            set_file_mode=lambda *args: None,
+            remove_path=remove_path,
+            start_process=lambda *args: None,
+            run_process=lambda *args: None,
+            stop_process=lambda *args: None,
+            read_registry_value=lambda *args: None,
+            profile_paths=profile_paths,
+            package_paths=package_paths,
+            inspect_service=inspect_service,
+            inspect_listener=inspect_listener,
+            inspect_ledger=inspect_ledger,
+            network_events=lambda: (),
+            credential_events=lambda: (),
+            monotonic=lambda: 0.0,
+            wait=lambda seconds: None,
+        )
+        executor = NativeLifecycleExecutor(
+            dependencies=dependencies,
+            host_platform="linux",
+            host_machine="x86_64",
+        )
+
+        with self.assertRaisesRegex(
+            LifecycleEvidenceError, "driver_unavailable"
+        ):
+            executor.execute(
+                platform="linux",
+                arch="x64",
+                artifact=root / "OpenUsage-Bar.AppImage",
+                artifact_sha256="a" * 64,
+            )
+
+        self.assertEqual(
+            [event[0] for event in events],
+            [
+                "make_run_directory",
+                "profile_paths",
+                "package_paths",
+                "inspect_service",
+                "inspect_listener",
+                "inspect_listener",
+                "inspect_ledger",
+                "inspect_path",
+                "inspect_path",
+                "inspect_path",
+                "inspect_path",
+                "inspect_path",
+                "inspect_path",
+                "inspect_path",
+                "inspect_path",
+                "copy_file",
+                "remove_path",
+            ],
+        )
+        self.assertEqual(
+            [event for event in events if event[0] == "inspect_listener"],
+            [
+                ("inspect_listener", "linux", "local"),
+                ("inspect_listener", "linux", "gateway_default_endpoint"),
+            ],
+        )
+        self.assertEqual(
+            [event[1] for event in events if event[0] == "inspect_path"],
+            [
+                "fresh_state_root",
+                "fresh_config_root",
+                "fresh_runtime_root",
+                "fresh_install_root",
+                "fresh_task_definition",
+                "fresh_stable_collector",
+                "fresh_execution_copy",
+                "fresh_sentinel",
+            ],
+        )
+        self.assertEqual(
+            [event[0] for event in events[-2:]],
+            ["copy_file", "remove_path"],
+        )
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_runtime_install_token_is_revoked_by_service_observation(
