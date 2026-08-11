@@ -1969,18 +1969,38 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     validate_lifecycle_record(record)
 
     def test_default_generate_fails_closed_without_a_real_platform_backend(self) -> None:
+        from unittest.mock import patch
+
         from scripts.native_lifecycle_evidence import (
             LifecycleEvidenceError,
             generate_lifecycle_evidence,
+            native_lifecycle_dependencies_for_host,
         )
 
-        with tempfile.TemporaryDirectory() as directory:
+        with patch(
+            "scripts.native_lifecycle_evidence.sys.platform", "linux"
+        ), patch(
+            "scripts.native_lifecycle_evidence.host_platform_module.machine",
+            return_value="x86_64",
+        ), native_lifecycle_dependencies_for_host() as dependencies:
+            with self.assertRaisesRegex(
+                LifecycleEvidenceError, "driver_unavailable"
+            ) as unavailable:
+                dependencies.profile_paths("linux")
+            self.assertEqual(str(unavailable.exception), "driver_unavailable")
+
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "scripts.native_lifecycle_evidence.sys.platform", "linux"
+        ), patch(
+            "scripts.native_lifecycle_evidence.host_platform_module.machine",
+            return_value="x86_64",
+        ):
             root = Path(directory)
             artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
             artifact.write_bytes(b"final AppImage bytes")
             output = root / "private-machine-name.json"
             with self.assertRaisesRegex(
-                LifecycleEvidenceError, "host_invalid|driver_unavailable"
+                LifecycleEvidenceError, "driver_unavailable"
             ) as raised:
                 generate_lifecycle_evidence(
                     platform="linux",

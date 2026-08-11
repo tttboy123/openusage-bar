@@ -691,7 +691,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
 
     def unavailable(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        _driver_fail()
+        _fail("driver_unavailable")
 
     def make_run_directory(platform: object, arch: object) -> Path:
         nonlocal run_directory
