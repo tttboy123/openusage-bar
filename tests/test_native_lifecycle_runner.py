@@ -162,6 +162,66 @@ def _enter_linux_host_dependencies(
     return dependencies, run_directory, profile, package
 
 
+def _linux_positive_listener_facts(home: Path) -> tuple[object, object, tuple[str, ...]]:
+    from openusage_bar.local_api import LinuxLocalAPIState
+    from openusage_bar.platform_services import (
+        LinuxCollectorServiceState,
+        systemd_unit,
+    )
+
+    state_root = home / ".local" / "state" / "openusage-bar"
+    collector = home / ".local" / "share" / "usagehub" / "runtime" / "openusage-collector"
+    unit = home / ".config" / "systemd" / "user" / "openusage-bar.service"
+    api_socket = state_root / "openusage.sock"
+    command = (
+        str(collector),
+        "daemon",
+        "--interval",
+        "300",
+        "--api-transport",
+        "unix",
+        "--api-socket",
+        str(api_socket),
+    )
+    unit_bytes = systemd_unit(
+        interval=300,
+        api_socket=str(api_socket),
+        command=str(collector),
+    ).encode("utf-8")
+    service = LinuxCollectorServiceState(
+        unit_file_id="unit-dev:unit-ino",
+        unit_size_bytes=len(unit_bytes),
+        unit_sha256=hashlib.sha256(unit_bytes).hexdigest(),
+        unit_id="openusage-bar.service",
+        load_state="loaded",
+        active_state="active",
+        sub_state="running",
+        unit_file_state="enabled",
+        fragment_path=unit,
+        drop_in_paths=(),
+        needs_reload=False,
+        main_pid=4312,
+        process_uid=os.getuid(),
+        process_start_time_ticks=987654,
+        process_executable=collector,
+        process_executable_file_id="collector-dev:collector-ino",
+        process_argv_nul=("\0".join(command) + "\0").encode(),
+    )
+    local = LinuxLocalAPIState(
+        socket_file_id="socket-dev:socket-ino",
+        socket_mode=0o600,
+        socket_uid=os.getuid(),
+        peer_pid=service.main_pid,
+        peer_uid=os.getuid(),
+        peer_gid=os.getgid(),
+        http_status=200,
+        schema_version="1.0",
+        health_ok=True,
+        health_status="ok",
+    )
+    return service, local, command
+
+
 def _native_path_identity(path: Path) -> tuple[int, int, int, int, int]:
     metadata = path.lstat()
     return (
@@ -6156,6 +6216,484 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         self.assertEqual(tree_snapshot(root), before)
 
             self.assertEqual(tree_snapshot(root), before)
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_local_listener_requires_one_stable_positive_service_fact(
+        self,
+    ) -> None:
+        from dataclasses import fields, replace
+        from unittest.mock import patch
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from openusage_bar.local_api import (
+            LinuxLocalAPIState,
+            read_current_user_local_api_state,
+        )
+        from openusage_bar.platform_services import (
+            LinuxCollectorServiceState,
+            systemd_unit,
+        )
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeListenerState,
+            NativeServiceState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        del read_current_user_local_api_state
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            state_root = home / ".local" / "state" / "openusage-bar"
+            runtime_root = home / ".local" / "share" / "usagehub" / "runtime"
+            collector = runtime_root / "openusage-collector"
+            unit = home / ".config" / "systemd" / "user" / "openusage-bar.service"
+            api_socket = state_root / "openusage.sock"
+            command = (
+                str(collector),
+                "daemon",
+                "--interval",
+                "300",
+                "--api-transport",
+                "unix",
+                "--api-socket",
+                str(api_socket),
+            )
+            unit_bytes = systemd_unit(
+                interval=300,
+                api_socket=str(api_socket),
+                command=str(collector),
+            ).encode("utf-8")
+            service_s1 = LinuxCollectorServiceState(
+                unit_file_id="unit-dev:unit-ino",
+                unit_size_bytes=len(unit_bytes),
+                unit_sha256=hashlib.sha256(unit_bytes).hexdigest(),
+                unit_id="openusage-bar.service",
+                load_state="loaded",
+                active_state="active",
+                sub_state="running",
+                unit_file_state="enabled",
+                fragment_path=unit,
+                drop_in_paths=(),
+                needs_reload=False,
+                main_pid=4312,
+                process_uid=os.getuid(),
+                process_start_time_ticks=987654,
+                process_executable=collector,
+                process_executable_file_id="collector-dev:collector-ino",
+                process_argv_nul=("\0".join(command) + "\0").encode(),
+            )
+            service_s2 = replace(service_s1)
+            local_state = LinuxLocalAPIState(
+                socket_file_id="socket-dev:socket-ino",
+                socket_mode=0o600,
+                socket_uid=os.getuid(),
+                peer_pid=service_s1.main_pid,
+                peer_uid=os.getuid(),
+                peer_gid=os.getgid(),
+                http_status=200,
+                schema_version="1.0",
+                health_ok=True,
+                health_status="ok",
+            )
+            self.assertEqual(
+                tuple(field.name for field in fields(LinuxLocalAPIState)),
+                (
+                    "socket_file_id",
+                    "socket_mode",
+                    "socket_uid",
+                    "peer_pid",
+                    "peer_uid",
+                    "peer_gid",
+                    "http_status",
+                    "schema_version",
+                    "health_ok",
+                    "health_status",
+                ),
+            )
+
+            def initialize(dependencies):
+                dependencies.make_run_directory("linux", "x64")
+                profile = dependencies.profile_paths("linux")
+                package = dependencies.package_paths("linux", profile)
+                self.assertEqual(package.collector, collector)
+
+            def exercise_failure(
+                *,
+                second_service: LinuxCollectorServiceState,
+                observed_local: LinuxLocalAPIState,
+            ) -> None:
+                events: list[str] = []
+
+                def read_service():
+                    events.append("service")
+                    return next(service_states)
+
+                def read_local():
+                    events.append("local")
+                    return observed_local
+
+                service_states = iter((service_s1, second_service))
+                with patch(
+                    "openusage_bar.platform_services.read_current_user_collector_service_state",
+                    side_effect=read_service,
+                ) as service_reader, patch(
+                    "openusage_bar.local_api.read_current_user_local_api_state",
+                    side_effect=read_local,
+                ) as local_reader, native_lifecycle_dependencies_for_host() as dependencies:
+                    initialize(dependencies)
+                    self.assertEqual(
+                        dependencies.inspect_service("linux"),
+                        NativeServiceState(True, True, command),
+                    )
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        dependencies.inspect_listener("linux", "local")
+                    self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                    self.assertNotIn(str(root), str(unavailable.exception))
+                    self.assertNotIn("PRIVATE", str(unavailable.exception))
+                    self.assertEqual(events, ["service", "local", "service"])
+                    self.assertEqual(service_reader.call_count, 2)
+                    local_reader.assert_called_once_with()
+
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as consumed:
+                        dependencies.inspect_listener("linux", "local")
+                    self.assertEqual(str(consumed.exception), "driver_failed")
+                    self.assertEqual(events, ["service", "local", "service"])
+                    self.assertEqual(service_reader.call_count, 2)
+                    local_reader.assert_called_once_with()
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch(
+                "scripts.native_lifecycle_evidence.Path.home",
+                return_value=home,
+            ), patch.dict(
+                os.environ,
+                {},
+                clear=True,
+            ), patch(
+                "openusage_bar.platform_services.service_is_registered",
+                return_value=True,
+            ) as registered:
+                events: list[str] = []
+
+                def read_service():
+                    events.append("service")
+                    return next(service_states)
+
+                def read_local():
+                    events.append("local")
+                    return local_state
+
+                service_states = iter((service_s1, service_s2))
+                with patch(
+                    "openusage_bar.platform_services.read_current_user_collector_service_state",
+                    side_effect=read_service,
+                ) as service_reader, patch(
+                    "openusage_bar.local_api.read_current_user_local_api_state",
+                    side_effect=read_local,
+                ) as local_reader, native_lifecycle_dependencies_for_host() as dependencies:
+                    initialize(dependencies)
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as wrong_order:
+                        dependencies.inspect_listener("linux", "local")
+                    self.assertEqual(str(wrong_order.exception), "driver_failed")
+                    service_reader.assert_not_called()
+                    local_reader.assert_not_called()
+
+                    self.assertEqual(
+                        dependencies.inspect_service("linux"),
+                        NativeServiceState(True, True, command),
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_listener("linux", "local"),
+                        NativeListenerState(True, True),
+                    )
+                    self.assertEqual(events, ["service", "local", "service"])
+                    self.assertEqual(service_reader.call_count, 2)
+                    local_reader.assert_called_once_with()
+
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as repeated:
+                        dependencies.inspect_listener("linux", "local")
+                    self.assertEqual(str(repeated.exception), "driver_failed")
+                    self.assertEqual(events, ["service", "local", "service"])
+                    self.assertEqual(service_reader.call_count, 2)
+                    local_reader.assert_called_once_with()
+
+                drift_values = {
+                    "unit_file_id": "foreign-unit:inode",
+                    "unit_size_bytes": service_s1.unit_size_bytes + 1,
+                    "unit_sha256": "1" * 64,
+                    "unit_id": "foreign.service",
+                    "load_state": "not-found",
+                    "active_state": "inactive",
+                    "sub_state": "dead",
+                    "unit_file_state": "disabled",
+                    "fragment_path": root / "foreign.service",
+                    "drop_in_paths": (root / "PRIVATE-drop-in.conf",),
+                    "needs_reload": True,
+                    "main_pid": service_s1.main_pid + 1,
+                    "process_uid": os.getuid() + 1,
+                    "process_start_time_ticks": (
+                        service_s1.process_start_time_ticks + 1
+                    ),
+                    "process_executable": root / "foreign-collector",
+                    "process_executable_file_id": "foreign-dev:foreign-ino",
+                    "process_argv_nul": b"foreign\0",
+                }
+                self.assertEqual(
+                    set(drift_values),
+                    {field.name for field in fields(LinuxCollectorServiceState)},
+                )
+                for field_name, drifted_value in drift_values.items():
+                    with self.subTest(service_field=field_name):
+                        exercise_failure(
+                            second_service=replace(
+                                service_s1,
+                                **{field_name: drifted_value},
+                            ),
+                            observed_local=local_state,
+                        )
+
+                for field_name, drifted_value in (
+                    ("peer_pid", local_state.peer_pid + 1),
+                    ("peer_uid", local_state.peer_uid + 1),
+                ):
+                    with self.subTest(local_field=field_name):
+                        exercise_failure(
+                            second_service=service_s2,
+                            observed_local=replace(
+                                local_state,
+                                **{field_name: drifted_value},
+                            ),
+                        )
+
+            self.assertGreaterEqual(registered.call_count, 1)
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_positive_service_fact_is_revoked_by_every_other_observation(
+        self,
+    ) -> None:
+        from unittest.mock import patch
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativePathState,
+            NativeServiceState,
+        )
+
+        callbacks = (
+            (
+                "implemented_path_observation",
+                lambda dependencies, profile: self.assertEqual(
+                    dependencies.inspect_path(
+                        "fresh_state_root",
+                        profile.state_root,
+                    ),
+                    NativePathState(False, "missing", 0, None, 0, None),
+                ),
+            ),
+            (
+                "ordered_ledger_observation",
+                lambda dependencies, _profile: self.assertRaisesRegex(
+                    LifecycleEvidenceError,
+                    "driver_failed",
+                    dependencies.inspect_ledger,
+                    "linux",
+                ),
+            ),
+            (
+                "unavailable_network_observation",
+                lambda dependencies, _profile: self.assertRaisesRegex(
+                    LifecycleEvidenceError,
+                    "driver_unavailable",
+                    dependencies.network_events,
+                ),
+            ),
+        )
+        for callback_name, invoke in callbacks:
+            with self.subTest(callback=callback_name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "authoritative-home"
+                home.mkdir()
+                authority = LifecycleStatePaths(platform="linux", home=home)
+                service_state, local_state, command = _linux_positive_listener_facts(home)
+                with ExitStack() as stack:
+                    stack.enter_context(
+                        patch(
+                            "openusage_bar.platform_services.service_is_registered",
+                            return_value=True,
+                        )
+                    )
+                    service_reader = stack.enter_context(
+                        patch(
+                            "openusage_bar.platform_services.read_current_user_collector_service_state",
+                            side_effect=(service_state, service_state),
+                        )
+                    )
+                    local_reader = stack.enter_context(
+                        patch(
+                            "openusage_bar.local_api.read_current_user_local_api_state",
+                            return_value=local_state,
+                        )
+                    )
+                    dependencies, _run_directory, profile, _package = (
+                        _enter_linux_host_dependencies(stack, authority)
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_service("linux"),
+                        NativeServiceState(True, True, command),
+                    )
+                    self.assertEqual(service_reader.call_count, 1)
+                    local_reader.assert_not_called()
+
+                    invoke(dependencies, profile)
+
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError,
+                        "driver_failed",
+                    ) as revoked:
+                        dependencies.inspect_listener("linux", "local")
+                    self.assertEqual(str(revoked.exception), "driver_failed")
+                    self.assertNotIn(str(root), str(revoked.exception))
+                    self.assertNotIn("PRIVATE", str(revoked.exception))
+                    self.assertEqual(service_reader.call_count, 1)
+                    local_reader.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_positive_listener_rejects_hostile_observation_subclasses_closed(
+        self,
+    ) -> None:
+        from dataclasses import fields
+        from unittest.mock import patch
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from openusage_bar.local_api import LinuxLocalAPIState
+        from openusage_bar.platform_services import LinuxCollectorServiceState
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeServiceState,
+        )
+
+        class HostileServiceState(LinuxCollectorServiceState):
+            comparisons = 0
+
+            def __eq__(self, _other: object) -> bool:
+                type(self).comparisons += 1
+                raise RuntimeError("PRIVATE_SERVICE_COMPARISON")
+
+        class HostileLocalState(LinuxLocalAPIState):
+            property_reads = 0
+            armed = False
+
+            def __getattribute__(self, name: str) -> object:
+                if name == "socket_mode" and type(self).armed:
+                    type(self).property_reads += 1
+                    raise RuntimeError("PRIVATE_LOCAL_PROPERTY")
+                return super().__getattribute__(name)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            service_state, local_state, command = _linux_positive_listener_facts(home)
+            service_values = {
+                field.name: getattr(service_state, field.name)
+                for field in fields(LinuxCollectorServiceState)
+            }
+            local_values = {
+                field.name: getattr(local_state, field.name)
+                for field in fields(LinuxLocalAPIState)
+            }
+            hostile_local = HostileLocalState(**local_values)
+            HostileLocalState.armed = True
+            hostile_cases = (
+                (
+                    "service_subclass",
+                    HostileServiceState(**service_values),
+                    local_state,
+                ),
+                (
+                    "local_subclass",
+                    service_state,
+                    hostile_local,
+                ),
+            )
+            for case_name, service_after, local_after in hostile_cases:
+                with self.subTest(case=case_name), ExitStack() as stack:
+                    HostileServiceState.comparisons = 0
+                    HostileLocalState.property_reads = 0
+                    stack.enter_context(
+                        patch(
+                            "openusage_bar.platform_services.service_is_registered",
+                            return_value=True,
+                        )
+                    )
+                    service_reader = stack.enter_context(
+                        patch(
+                            "openusage_bar.platform_services.read_current_user_collector_service_state",
+                            side_effect=(service_state, service_after),
+                        )
+                    )
+                    local_reader = stack.enter_context(
+                        patch(
+                            "openusage_bar.local_api.read_current_user_local_api_state",
+                            return_value=local_after,
+                        )
+                    )
+                    dependencies, _run_directory, _profile, _package = (
+                        _enter_linux_host_dependencies(stack, authority)
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_service("linux"),
+                        NativeServiceState(True, True, command),
+                    )
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError,
+                        "driver_unavailable",
+                    ) as unavailable:
+                        dependencies.inspect_listener("linux", "local")
+                    self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                    self.assertNotIn(str(root), str(unavailable.exception))
+                    self.assertNotIn("PRIVATE", str(unavailable.exception))
+                    self.assertEqual(HostileServiceState.comparisons, 0)
+                    self.assertEqual(HostileLocalState.property_reads, 0)
+
+                    reads_after_failure = (
+                        service_reader.call_count,
+                        local_reader.call_count,
+                    )
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError,
+                        "driver_failed",
+                    ) as consumed:
+                        dependencies.inspect_listener("linux", "local")
+                    self.assertEqual(str(consumed.exception), "driver_failed")
+                    self.assertEqual(
+                        (
+                            service_reader.call_count,
+                            local_reader.call_count,
+                        ),
+                        reads_after_failure,
+                    )
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_service_probe_observes_only_the_canonical_active_collector_command(

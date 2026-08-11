@@ -1482,14 +1482,23 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     package_projection: NativePackagePaths | None = None
     runtime_install_absence_fact: NativePathState | None = None
     service_absence_confirmed = False
+    service_presence_observation: object | None = None
     local_listener_absence_confirmed = False
 
     def revoke_runtime_install_absence_fact() -> None:
         nonlocal runtime_install_absence_fact
         runtime_install_absence_fact = None
 
-    def unavailable(*args: object, **kwargs: object) -> object:
+    def revoke_service_presence_observation() -> None:
+        nonlocal service_presence_observation
+        service_presence_observation = None
+
+    def revoke_transient_observation_facts() -> None:
         revoke_runtime_install_absence_fact()
+        revoke_service_presence_observation()
+
+    def unavailable(*args: object, **kwargs: object) -> object:
+        revoke_transient_observation_facts()
         del args, kwargs
         _fail("driver_unavailable")
 
@@ -1499,7 +1508,9 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         nonlocal profile_xdg_runtime_parts
         nonlocal runtime_install_absence_fact
         nonlocal service_absence_confirmed
+        nonlocal service_presence_observation
         nonlocal local_listener_absence_confirmed
+        revoke_service_presence_observation()
         profile_projection = None
         profile_xdg_binding = None
         profile_xdg_trusted_root = None
@@ -1569,6 +1580,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             profile_home = authority.home
             profile_projection = profile
             service_absence_confirmed = False
+            service_presence_observation = None
             local_listener_absence_confirmed = False
             return profile
         except LifecycleEvidenceError:
@@ -1638,7 +1650,9 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     def inspect_service(platform: object) -> NativeServiceState:
         nonlocal runtime_install_absence_fact
         nonlocal service_absence_confirmed, local_listener_absence_confirmed
+        nonlocal service_presence_observation
         runtime_install_absence_fact = None
+        service_presence_observation = None
         if (
             type(platform) is not str
             or platform != "linux"
@@ -1700,7 +1714,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         except Exception:
             _fail("driver_unavailable")
         if (
-            not isinstance(observed, LinuxCollectorServiceState)
+            type(observed) is not LinuxCollectorServiceState
             or observed.unit_size_bytes != len(expected_unit)
             or observed.unit_sha256 != hashlib.sha256(expected_unit).hexdigest()
             or observed.unit_id != "openusage-bar.service"
@@ -1717,6 +1731,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             or observed.process_argv_nul != expected_argv_nul
         ):
             _fail("driver_unavailable")
+        service_presence_observation = observed
         return NativeServiceState(True, True, command)
 
     def prove_authoritative_path_absence(
@@ -1908,7 +1923,10 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     ) -> NativeListenerState:
         nonlocal runtime_install_absence_fact
         nonlocal service_absence_confirmed, local_listener_absence_confirmed
+        nonlocal service_presence_observation
         runtime_install_absence_fact = None
+        positive_service_observation = service_presence_observation
+        service_presence_observation = None
         if (
             type(platform) is not str
             or platform != "linux"
@@ -1927,8 +1945,54 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _prove_linux_default_gateway_endpoint_absent()
             return NativeListenerState(False, False)
         local_listener_absence_confirmed = False
-        if profile_home is None or not service_absence_confirmed:
+        if profile_home is None:
             _driver_fail()
+        if not service_absence_confirmed:
+            if positive_service_observation is None:
+                _driver_fail()
+            try:
+                from openusage_bar.local_api import (
+                    LinuxLocalAPIState,
+                    read_current_user_local_api_state,
+                )
+                from openusage_bar.platform_services import (
+                    LinuxCollectorServiceState,
+                    read_current_user_collector_service_state,
+                )
+
+                local_state = read_current_user_local_api_state()
+                service_after = read_current_user_collector_service_state()
+                current_uid = os.getuid()
+                current_gid = os.getgid()
+                if (
+                    type(positive_service_observation)
+                    is not LinuxCollectorServiceState
+                    or type(service_after) is not LinuxCollectorServiceState
+                    or service_after != positive_service_observation
+                    or type(local_state) is not LinuxLocalAPIState
+                    or local_state.socket_mode != 0o600
+                    or local_state.socket_uid != current_uid
+                    # This slice intentionally supports only a single-process
+                    # service topology.  A PyInstaller onefile child listener
+                    # remains unavailable until its PPID/start-time/cgroup and
+                    # executable facts are bound by a real packaged canary.
+                    or local_state.peer_pid
+                    != positive_service_observation.main_pid
+                    or local_state.peer_uid != current_uid
+                    or local_state.peer_uid
+                    != positive_service_observation.process_uid
+                    or local_state.peer_gid != current_gid
+                    or local_state.http_status != 200
+                    or local_state.schema_version != "1.0"
+                    or local_state.health_ok is not True
+                    or local_state.health_status != "ok"
+                ):
+                    _fail("driver_unavailable")
+            except LifecycleEvidenceError:
+                raise
+            except Exception:
+                _fail("driver_unavailable")
+            return NativeListenerState(True, True)
         service_absence_confirmed = False
         prove_authoritative_path_absence(
             anchor=profile_home,
@@ -1960,6 +2024,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         nonlocal runtime_install_absence_fact
         nonlocal local_listener_absence_confirmed
         runtime_install_absence_fact = None
+        revoke_service_presence_observation()
         if (
             type(platform) is not str
             or platform != "linux"
@@ -2016,6 +2081,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         profile: object,
     ) -> NativePackagePaths:
         nonlocal package_projection, runtime_install_absence_fact
+        revoke_service_presence_observation()
         package_projection = None
         runtime_install_absence_fact = None
         if (
@@ -2059,7 +2125,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
 
     def make_run_directory(platform: object, arch: object) -> Path:
         nonlocal run_directory
-        revoke_runtime_install_absence_fact()
+        revoke_transient_observation_facts()
         if (
             type(platform) is not str
             or platform != "linux"
@@ -2199,6 +2265,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         nonlocal runtime_install_absence_fact
         pending_runtime_install_fact = runtime_install_absence_fact
         runtime_install_absence_fact = None
+        revoke_service_presence_observation()
         if run_directory is None:
             _driver_fail()
         try:
@@ -2369,19 +2436,19 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         return run_directory.inspect_path(purpose, path)
 
     def copy_file(source: object, destination: object) -> None:
-        revoke_runtime_install_absence_fact()
+        revoke_transient_observation_facts()
         if run_directory is None:
             _driver_fail()
         run_directory.copy_file(source, destination)
 
     def set_file_mode(path: object, mode: object) -> None:
-        revoke_runtime_install_absence_fact()
+        revoke_transient_observation_facts()
         if run_directory is None:
             _driver_fail()
         run_directory.set_file_mode(path, mode)
 
     def remove_path(path: object) -> None:
-        revoke_runtime_install_absence_fact()
+        revoke_transient_observation_facts()
         if run_directory is None:
             _driver_fail()
         run_directory.remove_path(path)

@@ -72,6 +72,537 @@ class APIProblem(Exception):
     retry_after: int | None = None
 
 
+class LocalAPIObservationError(RuntimeError):
+    """A path-free failure to observe the current-user Local API."""
+
+    def __init__(self) -> None:
+        super().__init__("Local API observation failed")
+
+
+@dataclass(frozen=True)
+class LinuxLocalAPIState:
+    """Closed Linux Unix-socket and health observation."""
+
+    socket_file_id: str
+    socket_mode: int
+    socket_uid: int
+    peer_pid: int
+    peer_uid: int
+    peer_gid: int
+    http_status: int
+    schema_version: str
+    health_ok: bool
+    health_status: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.socket_file_id) is not str
+            or not self.socket_file_id
+            or type(self.socket_mode) is not int
+            or self.socket_mode != 0o600
+            or type(self.socket_uid) is not int
+            or self.socket_uid < 0
+            or type(self.peer_pid) is not int
+            or self.peer_pid <= 0
+            or type(self.peer_uid) is not int
+            or self.peer_uid < 0
+            or type(self.peer_gid) is not int
+            or self.peer_gid < 0
+            or type(self.http_status) is not int
+            or self.http_status != 200
+            or type(self.schema_version) is not str
+            or self.schema_version != "1.0"
+            or self.health_ok is not True
+            or type(self.health_status) is not str
+            or self.health_status != "ok"
+        ):
+            raise ValueError("Linux Local API state invalid")
+
+
+class _LinuxOpenHow(ctypes.Structure):
+    _fields_ = (
+        ("flags", ctypes.c_uint64),
+        ("mode", ctypes.c_uint64),
+        ("resolve", ctypes.c_uint64),
+    )
+
+
+def _stat_linux_canonical_local_socket(home: Path) -> os.stat_result:
+    """Bind the full canonical socket path without following any symlink."""
+
+    canonical = home / ".local" / "state" / "openusage-bar" / "openusage.sock"
+    try:
+        active_kernel = os.uname().sysname
+    except Exception:
+        raise LocalAPIObservationError from None
+    if active_kernel == "Linux":
+        open_path = getattr(os, "O_PATH", 0)
+        close_on_exec = getattr(os, "O_CLOEXEC", 0)
+        if open_path == 0 or close_on_exec == 0:
+            raise LocalAPIObservationError
+        how = _LinuxOpenHow(
+            flags=open_path | os.O_NOFOLLOW | close_on_exec,
+            mode=0,
+            resolve=0x04,  # RESOLVE_NO_SYMLINKS
+        )
+        descriptor: int | None = None
+        failed = False
+        metadata: os.stat_result | None = None
+        try:
+            libc = ctypes.CDLL(None, use_errno=True)
+            syscall = libc.syscall
+            syscall.restype = ctypes.c_long
+            result = syscall(
+                ctypes.c_long(437),  # __NR_openat2 on supported Linux arches
+                ctypes.c_int(-100),  # AT_FDCWD
+                ctypes.c_char_p(os.fsencode(canonical)),
+                ctypes.byref(how),
+                ctypes.c_size_t(ctypes.sizeof(how)),
+            )
+            if result < 0:
+                raise LocalAPIObservationError
+            descriptor = int(result)
+            metadata = os.fstat(descriptor)
+        except Exception:
+            failed = True
+        finally:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except Exception:
+                    failed = True
+        if failed or metadata is None:
+            raise LocalAPIObservationError
+        return metadata
+
+    # Cross-host tests cannot invoke a foreign syscall.  Preserve the same
+    # nofollow semantics by reopening the fixed chain component by component.
+    descriptors: list[int] = []
+    failed = False
+    metadata = None
+    try:
+        directory_flag = getattr(os, "O_DIRECTORY", 0)
+        nofollow_flag = getattr(os, "O_NOFOLLOW", 0)
+        if directory_flag == 0 or nofollow_flag == 0:
+            raise LocalAPIObservationError
+        flags = os.O_RDONLY | directory_flag | nofollow_flag
+        descriptor = os.open(home, flags)
+        descriptors.append(descriptor)
+        for name in (".local", "state", "openusage-bar"):
+            descriptor = os.open(name, flags, dir_fd=descriptor)
+            descriptors.append(descriptor)
+        metadata = os.stat(
+            "openusage.sock",
+            dir_fd=descriptor,
+            follow_symlinks=False,
+        )
+    except Exception:
+        failed = True
+    finally:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except Exception:
+                failed = True
+    if failed or metadata is None:
+        raise LocalAPIObservationError
+    return metadata
+
+
+def read_current_user_local_api_state() -> LinuxLocalAPIState:
+    """Observe one bounded canonical Linux Local API health transaction."""
+
+    from .lifecycle_state import LifecycleStatePaths
+
+    directory_descriptors: list[int] = []
+    client: socket.socket | None = None
+    failed = False
+    observed: LinuxLocalAPIState | None = None
+
+    def directory_signature(metadata: os.stat_result) -> tuple[int, ...]:
+        return (
+            metadata.st_mode,
+            metadata.st_uid,
+            metadata.st_gid,
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_nlink,
+        )
+
+    def socket_signature(metadata: os.stat_result) -> tuple[int, ...]:
+        return (
+            metadata.st_mode,
+            metadata.st_uid,
+            metadata.st_gid,
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_nlink,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            metadata.st_ctime_ns,
+        )
+
+    try:
+        if sys.platform != "linux":
+            raise LocalAPIObservationError
+        directory_flag = getattr(os, "O_DIRECTORY", 0)
+        nofollow_flag = getattr(os, "O_NOFOLLOW", 0)
+        if directory_flag == 0 or nofollow_flag == 0:
+            raise LocalAPIObservationError
+        flags = os.O_RDONLY | directory_flag | nofollow_flag
+        current_uid = os.getuid()
+        current_gid = os.getgid()
+        authority = LifecycleStatePaths.for_current_user(platform="linux")
+        current_home = Path.home()
+        if (
+            type(authority) is not LifecycleStatePaths
+            or authority.platform != "linux"
+            or not isinstance(authority.home, Path)
+            or not authority.home.is_absolute()
+            or authority.home != current_home
+        ):
+            raise LocalAPIObservationError
+
+        home_public = os.stat(authority.home, follow_symlinks=False)
+        home_descriptor = os.open(authority.home, flags)
+        directory_descriptors.append(home_descriptor)
+        home_opened = os.fstat(home_descriptor)
+        if (
+            stat.S_ISLNK(home_public.st_mode)
+            or not stat.S_ISDIR(home_public.st_mode)
+            or not stat.S_ISDIR(home_opened.st_mode)
+            or directory_signature(home_public)
+            != directory_signature(home_opened)
+            or home_opened.st_uid != current_uid
+            or stat.S_IMODE(home_opened.st_mode) & 0o022 != 0
+        ):
+            raise LocalAPIObservationError
+
+        bindings: list[tuple[int, str, tuple[int, ...]]] = []
+        parent_descriptor = home_descriptor
+        for name in (".local", "state", "openusage-bar"):
+            child_descriptor = os.open(
+                name,
+                flags,
+                dir_fd=parent_descriptor,
+            )
+            directory_descriptors.append(child_descriptor)
+            opened = os.fstat(child_descriptor)
+            public = os.stat(
+                name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                stat.S_ISLNK(public.st_mode)
+                or not stat.S_ISDIR(public.st_mode)
+                or not stat.S_ISDIR(opened.st_mode)
+                or directory_signature(public) != directory_signature(opened)
+                or opened.st_uid != current_uid
+                or stat.S_IMODE(opened.st_mode) & 0o022 != 0
+            ):
+                raise LocalAPIObservationError
+            bindings.append(
+                (parent_descriptor, name, directory_signature(opened))
+            )
+            parent_descriptor = child_descriptor
+
+        state_root_descriptor = directory_descriptors[-1]
+        state_root = os.fstat(state_root_descriptor)
+        if (
+            state_root.st_uid != current_uid
+            or stat.S_IMODE(state_root.st_mode) != 0o700
+        ):
+            raise LocalAPIObservationError
+
+        socket_before = os.stat(
+            "openusage.sock",
+            dir_fd=state_root_descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISSOCK(socket_before.st_mode)
+            or socket_before.st_uid != current_uid
+            or stat.S_IMODE(socket_before.st_mode) != 0o600
+            or socket_before.st_nlink != 1
+        ):
+            raise LocalAPIObservationError
+        expected_socket_signature = socket_signature(socket_before)
+
+        started = time.monotonic()
+        if (
+            isinstance(started, bool)
+            or not isinstance(started, (int, float))
+            or not math.isfinite(started)
+        ):
+            raise LocalAPIObservationError
+        deadline = float(started) + 2.0
+        last_time = float(started)
+
+        def remaining_timeout() -> float:
+            nonlocal last_time
+            current = time.monotonic()
+            if (
+                isinstance(current, bool)
+                or not isinstance(current, (int, float))
+                or not math.isfinite(current)
+                or float(current) < last_time
+                or float(current) >= deadline
+            ):
+                raise LocalAPIObservationError
+            last_time = float(current)
+            return float(min(1.0, deadline - last_time))
+
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(remaining_timeout())
+        client.connect(
+            f"/proc/self/fd/{state_root_descriptor}/openusage.sock"
+        )
+        peer_before_raw = client.getsockopt(1, 17, 12)
+        if type(peer_before_raw) is not bytes or len(peer_before_raw) != 12:
+            raise LocalAPIObservationError
+        peer_before = struct.unpack("=3i", peer_before_raw)
+        if (
+            peer_before[0] <= 0
+            or peer_before[1] != current_uid
+            or peer_before[2] != current_gid
+        ):
+            raise LocalAPIObservationError
+
+        request = (
+            b"GET /v1/health HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Accept: application/json\r\n"
+            b"Connection: close\r\n\r\n"
+        )
+        client.settimeout(remaining_timeout())
+        client.sendall(request)
+        response = bytearray()
+        while True:
+            client.settimeout(remaining_timeout())
+            chunk = client.recv(65_536)
+            if type(chunk) is not bytes:
+                raise LocalAPIObservationError
+            if not chunk:
+                break
+            response.extend(chunk)
+            if len(response) > 81_920:
+                raise LocalAPIObservationError
+
+        peer_after_raw = client.getsockopt(1, 17, 12)
+        if (
+            type(peer_after_raw) is not bytes
+            or len(peer_after_raw) != 12
+            or peer_after_raw != peer_before_raw
+        ):
+            raise LocalAPIObservationError
+
+        status_code, payload = _parse_local_api_health_response(
+            bytes(response)
+        )
+        home_after = os.stat(authority.home, follow_symlinks=False)
+        if directory_signature(home_after) != directory_signature(home_opened):
+            raise LocalAPIObservationError
+        for parent_fd, name, expected in bindings:
+            public = os.stat(
+                name,
+                dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+            if directory_signature(public) != expected:
+                raise LocalAPIObservationError
+        socket_after = _stat_linux_canonical_local_socket(authority.home)
+        if socket_signature(socket_after) != expected_socket_signature:
+            raise LocalAPIObservationError
+        remaining_timeout()
+        observed = LinuxLocalAPIState(
+            socket_file_id=f"{socket_before.st_dev}:{socket_before.st_ino}",
+            socket_mode=stat.S_IMODE(socket_before.st_mode),
+            socket_uid=socket_before.st_uid,
+            peer_pid=peer_before[0],
+            peer_uid=peer_before[1],
+            peer_gid=peer_before[2],
+            http_status=status_code,
+            schema_version=payload["schemaVersion"],
+            health_ok=payload["health"]["ok"],
+            health_status=payload["health"]["status"],
+        )
+    except Exception:
+        failed = True
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                failed = True
+        for descriptor in reversed(directory_descriptors):
+            try:
+                os.close(descriptor)
+            except Exception:
+                failed = True
+    if failed or observed is None:
+        raise LocalAPIObservationError
+    return observed
+
+
+def _parse_local_api_health_response(
+    response: bytes,
+) -> tuple[int, dict[str, Any]]:
+    if type(response) is not bytes or len(response) > 81_920:
+        raise LocalAPIObservationError
+    separator = response.find(b"\r\n\r\n")
+    if separator < 0 or separator > 16_384:
+        raise LocalAPIObservationError
+    try:
+        header_lines = response[:separator].decode("ascii").split("\r\n")
+    except (UnicodeDecodeError, ValueError):
+        raise LocalAPIObservationError from None
+    if (
+        not header_lines
+        or len(header_lines) > 65
+        or header_lines[0] != "HTTP/1.1 200 OK"
+    ):
+        raise LocalAPIObservationError
+    headers: dict[str, str] = {}
+    for line in header_lines[1:]:
+        if ":" not in line:
+            raise LocalAPIObservationError
+        name, value = line.split(":", 1)
+        normalized = name.strip().casefold()
+        if not normalized or normalized in headers:
+            raise LocalAPIObservationError
+        headers[normalized] = value.strip()
+    content_length = headers.get("content-length")
+    if (
+        "transfer-encoding" in headers
+        or content_length is None
+        or not content_length.isascii()
+        or not content_length.isdecimal()
+        or headers.get("content-type")
+        != "application/json; charset=utf-8"
+        or headers.get("connection", "").casefold() != "close"
+    ):
+        raise LocalAPIObservationError
+    body = response[separator + 4 :]
+    if int(content_length) != len(body) or len(body) > 65_536:
+        raise LocalAPIObservationError
+
+    def reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if type(key) is not str or key in result:
+                raise LocalAPIObservationError
+            result[key] = value
+        return result
+
+    def reject_constant(_value: str) -> object:
+        raise LocalAPIObservationError
+
+    try:
+        payload = json.loads(
+            body.decode("utf-8"),
+            object_pairs_hook=reject_duplicate_pairs,
+            parse_constant=reject_constant,
+        )
+    except LocalAPIObservationError:
+        raise
+    except Exception:
+        raise LocalAPIObservationError from None
+    if type(payload) is not dict or set(payload) != {
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "sources",
+        "health",
+    }:
+        raise LocalAPIObservationError
+    generated_at = payload["generatedAt"]
+    try:
+        generated_time = datetime.fromisoformat(
+            generated_at.replace("Z", "+00:00")
+        )
+    except Exception:
+        raise LocalAPIObservationError from None
+    if (
+        payload["schemaVersion"] != "1.0"
+        or type(payload["dataRevision"]) is not int
+        or payload["dataRevision"] < 0
+        or type(generated_at) is not str
+        or not generated_at
+        or len(generated_at) > 40
+        or _CONTROL.search(generated_at) is not None
+        or generated_time.tzinfo is None
+        or generated_time.utcoffset() is None
+        or generated_time.utcoffset().total_seconds() != 0
+        or type(payload["sources"]) is not list
+        or payload["health"] != {"ok": True, "status": "ok"}
+    ):
+        raise LocalAPIObservationError
+
+    def valid_utc_timestamp(value: object, *, optional: bool) -> bool:
+        if value is None:
+            return optional
+        if (
+            type(value) is not str
+            or not value
+            or len(value) > 40
+            or _CONTROL.search(value) is not None
+        ):
+            return False
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            offset = parsed.utcoffset()
+        except Exception:
+            return False
+        return (
+            parsed.tzinfo is not None
+            and offset is not None
+            and offset.total_seconds() == 0
+        )
+
+    source_keys = {
+        "providerId",
+        "sourceId",
+        "state",
+        "lastAttemptAt",
+        "lastSuccessAt",
+        "staleAt",
+        "errorCode",
+    }
+    for source in payload["sources"]:
+        if type(source) is not dict or set(source) != source_keys:
+            raise LocalAPIObservationError
+        error_code = source["errorCode"]
+        if (
+            type(source["providerId"]) is not str
+            or ID_PATTERN.fullmatch(source["providerId"]) is None
+            or type(source["sourceId"]) is not str
+            or ID_PATTERN.fullmatch(source["sourceId"]) is None
+            or type(source["state"]) is not str
+            or not source["state"]
+            or len(source["state"]) > 64
+            or _CONTROL.search(source["state"]) is not None
+            or not valid_utc_timestamp(
+                source["lastAttemptAt"], optional=False
+            )
+            or not valid_utc_timestamp(
+                source["lastSuccessAt"], optional=True
+            )
+            or not valid_utc_timestamp(source["staleAt"], optional=True)
+            or (
+                error_code is not None
+                and (
+                    type(error_code) is not str
+                    or not error_code
+                    or len(error_code) > 128
+                    or _CONTROL.search(error_code) is not None
+                )
+            )
+        ):
+            raise LocalAPIObservationError
+    return 200, payload
+
+
 class TokenBucket:
     """One bounded, thread-safe bucket for one local TCP server bearer."""
 
