@@ -498,6 +498,71 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
                 ).fetchone()[0]
             self.assertEqual(count, 4)
 
+    def test_queued_writer_survives_one_slow_but_bounded_database_write(self) -> None:
+        """A queued handle survives one bounded scheduled-writer stall."""
+
+        now = datetime(2026, 8, 8, 12, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "gateway-telemetry.sqlite3"
+            stores = (GatewayTelemetryStore(path), GatewayTelemetryStore(path))
+            original_write_connection = GatewayTelemetryStore._write_connection
+            first_entered = threading.Event()
+            release_first = threading.Event()
+            selection_lock = threading.Lock()
+            delay_next = True
+
+            @contextmanager
+            def delayed_first_write(
+                store: GatewayTelemetryStore,
+                *,
+                busy_timeout_ms: int = 5_000,
+            ):
+                nonlocal delay_next
+                with original_write_connection(
+                    store,
+                    busy_timeout_ms=busy_timeout_ms,
+                ) as connection:
+                    with selection_lock:
+                        should_delay = delay_next
+                        delay_next = False
+                    if should_delay:
+                        first_entered.set()
+                        if not release_first.wait(timeout=3):
+                            raise RuntimeError("bounded test writer was not released")
+                    yield connection
+
+            def write(store: GatewayTelemetryStore, index: int) -> None:
+                _record_request(
+                    store,
+                    request_id=f"bounded-{index}",
+                    finished_at=now + timedelta(milliseconds=index),
+                )
+
+            timer = threading.Timer(0.75, release_first.set)
+            try:
+                with patch.object(
+                    GatewayTelemetryStore,
+                    "_write_connection",
+                    delayed_first_write,
+                ), ThreadPoolExecutor(max_workers=2) as pool:
+                    first = pool.submit(write, stores[0], 0)
+                    self.assertTrue(first_entered.wait(timeout=2))
+                    timer.start()
+                    second = pool.submit(write, stores[1], 1)
+                    first.result(timeout=3)
+                    second.result(timeout=3)
+            finally:
+                release_first.set()
+                timer.cancel()
+                for store in stores:
+                    store.close()
+
+            with closing(sqlite3.connect(path)) as inspector:
+                count = inspector.execute(
+                    "SELECT COUNT(*) FROM request_aggregates"
+                ).fetchone()[0]
+            self.assertEqual(count, 2)
+
     def test_independent_handles_serialize_record_writers(self) -> None:
         """Independent handles coordinate ordinary in-process record writes."""
 

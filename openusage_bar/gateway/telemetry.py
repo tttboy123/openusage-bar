@@ -47,7 +47,11 @@ SANITIZED_ERROR_CODES = frozenset(
 _BUSY_TIMEOUT_SECONDS = 5.0
 _BUSY_TIMEOUT_MS = int(_BUSY_TIMEOUT_SECONDS * 1_000)
 _OPERATION_BUSY_TIMEOUT_MS = 50
-_IN_PROCESS_WRITE_WAIT_SECONDS = 0.5
+# Independent store handles serialize through one process-local writer. Keep
+# this bound long enough for a scheduled writer to survive ordinary Windows
+# filesystem/AV stalls, while still bounding optional telemetry on the request
+# path well below the database-wide busy timeout.
+_IN_PROCESS_WRITE_WAIT_SECONDS = 2.0
 _MAX_SQLITE_INTEGER = (1 << 63) - 1
 _MAX_REQUEST_ID_BYTES = 4_096
 _MAX_MODEL_LENGTH = 256
