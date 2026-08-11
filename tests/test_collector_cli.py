@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import tempfile
 import threading
@@ -1339,6 +1340,7 @@ class CollectorCLITests(unittest.TestCase):
         )
         self.assertNotIn(private_error, stderr.getvalue())
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX state deletion")
     def test_confirmed_state_delete_removes_owned_roots_without_opening_ledger(self):
         stdout, stderr = io.StringIO(), io.StringIO()
 
