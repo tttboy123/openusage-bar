@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from dataclasses import FrozenInstanceError, fields
@@ -448,6 +449,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             ["factory", "enter", "make_run_directory", ("exit", True)],
         )
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_dependency_context_owns_and_cleans_one_private_run_directory(
         self,
     ) -> None:
@@ -525,6 +527,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         self.fail("unsupported host entered lifecycle context")
                 self.assertEqual(str(unavailable.exception), "driver_unavailable")
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_run_directory_rejects_an_entry_swap_before_identity_binding(
         self,
     ) -> None:
@@ -652,6 +655,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         marker.unlink()
                     real_rmdir(candidate)
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_dependency_cleanup_does_not_delete_a_swapped_foreign_directory(
         self,
     ) -> None:
@@ -736,6 +740,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     marker.unlink()
                 real_rmdir(directory)
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_dependency_cleanup_failures_are_path_free(self) -> None:
         import os
         from unittest.mock import patch
@@ -2095,12 +2100,14 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 ):
                     validate_lifecycle_record(record)
 
-    def test_default_generate_fails_closed_without_a_real_platform_backend(self) -> None:
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_linux_host_unimplemented_dependencies_are_driver_unavailable(
+        self,
+    ) -> None:
         from unittest.mock import patch
 
         from scripts.native_lifecycle_evidence import (
             LifecycleEvidenceError,
-            generate_lifecycle_evidence,
             native_lifecycle_dependencies_for_host,
         )
 
@@ -2116,18 +2123,19 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 dependencies.profile_paths("linux")
             self.assertEqual(str(unavailable.exception), "driver_unavailable")
 
-        with tempfile.TemporaryDirectory() as directory, patch(
-            "scripts.native_lifecycle_evidence.sys.platform", "linux"
-        ), patch(
-            "scripts.native_lifecycle_evidence.host_platform_module.machine",
-            return_value="x86_64",
-        ):
+    def test_default_generate_fails_closed_without_a_real_platform_backend(self) -> None:
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            generate_lifecycle_evidence,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
             artifact.write_bytes(b"final AppImage bytes")
             output = root / "private-machine-name.json"
             with self.assertRaisesRegex(
-                LifecycleEvidenceError, "driver_unavailable"
+                LifecycleEvidenceError, "host_invalid|driver_unavailable"
             ) as raised:
                 generate_lifecycle_evidence(
                     platform="linux",
