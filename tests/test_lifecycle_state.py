@@ -47,6 +47,7 @@ class LifecycleStateTests(unittest.TestCase):
         self.assertEqual((paths.home, paths.local_app_data), (profile, local_app_data))
         self.assertEqual(known_folder.call_count, 2)
 
+    @unittest.skipUnless(os.name == "posix", "requires POSIX symlinks")
     def test_broken_root_symlink_is_rejected_before_any_state_is_deleted(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -70,6 +71,7 @@ class LifecycleStateTests(unittest.TestCase):
             self.assertEqual(preserved.read_text(encoding="utf-8"), "[]")
             self.assertNotIn(str(home), str(raised.exception))
 
+    @unittest.skipUnless(os.name == "posix", "requires POSIX symlinks")
     def test_symlinked_home_is_rejected_before_following_it_to_state(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
@@ -261,6 +263,7 @@ class LifecycleStateTests(unittest.TestCase):
             )
             self.assertNotIn(str(base), str(raised.exception))
 
+    @unittest.skipUnless(os.name == "posix", "requires POSIX dirfd operations")
     def test_posix_delete_uses_bound_recursive_removal_not_shutil_rmtree(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"

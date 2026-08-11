@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import stat
 import tempfile
 import unittest
@@ -21,6 +22,7 @@ class ManagedCollectorTests(unittest.TestCase):
             ),
         )
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_install_copies_frozen_self_and_registers_only_the_stable_command(self):
         from openusage_bar import managed_collector
 
@@ -48,6 +50,7 @@ class ManagedCollectorTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(stable.stat().st_mode), 0o700)
             self.assertEqual(calls, [{"interval": 300, "command": str(stable)}])
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_install_and_uninstall_honor_one_validated_xdg_data_root(self):
         from openusage_bar import managed_collector
 
@@ -93,6 +96,7 @@ class ManagedCollectorTests(unittest.TestCase):
                 (home / ".local" / "share" / "usagehub").exists()
             )
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX symlink and dirfd semantics")
     def test_install_rejects_symlinked_data_parent_without_touching_foreign(self):
         from openusage_bar import managed_collector
 
@@ -122,6 +126,7 @@ class ManagedCollectorTests(unittest.TestCase):
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve")
             install.assert_not_called()
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_install_failure_rolls_back_the_identity_bound_stable_copy(self):
         from openusage_bar import managed_collector
 
@@ -146,6 +151,7 @@ class ManagedCollectorTests(unittest.TestCase):
             )
             self.assertFalse(stable.exists())
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX symlink and dirfd semantics")
     def test_install_rename_cannot_be_redirected_by_runtime_parent_swap(self):
         from openusage_bar import managed_collector
 
@@ -197,6 +203,7 @@ class ManagedCollectorTests(unittest.TestCase):
             self.assertEqual(foreign_stable.read_bytes(), b"preserve foreign")
             install.assert_not_called()
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_install_rejects_source_change_during_atomic_copy(self):
         from openusage_bar import managed_collector
 
@@ -235,6 +242,7 @@ class ManagedCollectorTests(unittest.TestCase):
             self.assertFalse(stable.exists())
             install.assert_not_called()
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX symlink and dirfd semantics")
     def test_uninstall_detects_runtime_parent_swap_without_deleting_foreign(self):
         from openusage_bar import managed_collector
 
@@ -270,6 +278,7 @@ class ManagedCollectorTests(unittest.TestCase):
             self.assertEqual((original / stable.name).read_bytes(), b"owned stable")
             self.assertEqual(foreign_stable.read_bytes(), b"preserve foreign")
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_uninstall_removes_stable_copy_but_preserves_product_siblings(self):
         from openusage_bar import managed_collector
 

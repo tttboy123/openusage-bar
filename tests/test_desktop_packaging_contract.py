@@ -324,6 +324,7 @@ process.stdout.write(JSON.stringify(output));
 
 
 class DesktopPackagingContractTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "requires the POSIX managed Collector")
     def test_linux_xdg_data_root_is_identical_across_desktop_and_managed_collector(self):
         from openusage_bar import managed_collector
         from openusage_bar.lifecycle_state import LifecycleStatePaths

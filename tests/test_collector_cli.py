@@ -1190,13 +1190,18 @@ class CollectorCLITests(unittest.TestCase):
             self.assertFalse(socket_path.exists())
 
     def test_service_print_renders_current_platform(self):
-        code, out, err = self.run_cli(
-            ["service", "print", "--interval", "300"],
-            refresher=FakeRefresher(),
-        )
+        with patch(
+            "openusage_bar.platform_services.render_current_platform",
+            return_value="native-service-definition",
+        ) as render:
+            code, out, err = self.run_cli(
+                ["service", "print", "--interval", "300"],
+                refresher=FakeRefresher(),
+            )
 
         self.assertEqual((code, err), (0, ""))
-        self.assertTrue(out)
+        self.assertEqual(out, "native-service-definition\n")
+        render.assert_called_once_with(interval=300, command=None)
 
     def test_service_print_passes_one_absolute_packaged_collector_command(self):
         command = "/opt/Usage Hub/resources/collector/openusage-collector"

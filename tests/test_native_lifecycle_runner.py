@@ -1422,6 +1422,9 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             NativeServiceState,
         )
 
+        host_root = Path(tempfile.gettempdir()).resolve() / "native-contract-root"
+        profile_root = host_root / "profile"
+        install_root = host_root / "Program Files" / "UsageHub"
         contracts = (
             (
                 NativePathState,
@@ -1436,29 +1439,26 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             (
                 NativeServiceState,
                 ("registered", "active", "command"),
-                (True, True, ("C:\\Program Files\\UsageHub\\openusage-collector.exe", "daemon")),
+                (True, True, (str(install_root / "openusage-collector.exe"), "daemon")),
             ),
             (
                 NativeProfilePaths,
                 ("state_root", "config_root", "runtime_root", "task_definition"),
                 (
-                    Path("/profile/.local/state/openusage-bar"),
-                    Path("/profile/.config/openusage-bar"),
-                    Path("/profile/AppData/Local/openusage-bar"),
-                    Path("/profile/AppData/Local/openusage-bar-task.xml"),
+                    profile_root / ".local" / "state" / "openusage-bar",
+                    profile_root / ".config" / "openusage-bar",
+                    profile_root / "AppData" / "Local" / "openusage-bar",
+                    profile_root / "AppData" / "Local" / "openusage-bar-task.xml",
                 ),
             ),
             (
                 NativePackagePaths,
                 ("install_root", "app", "uninstaller", "collector"),
                 (
-                    Path("/Program Files/UsageHub"),
-                    Path("/Program Files/UsageHub/UsageHub.exe"),
-                    Path("/Program Files/UsageHub/Uninstall UsageHub.exe"),
-                    Path(
-                        "/Program Files/UsageHub/resources/collector/"
-                        "openusage-collector.exe"
-                    ),
+                    install_root,
+                    install_root / "UsageHub.exe",
+                    install_root / "Uninstall UsageHub.exe",
+                    install_root / "resources" / "collector" / "openusage-collector.exe",
                 ),
             ),
             (
@@ -1498,18 +1498,20 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             NativeProfilePaths,
         )
 
+        host_root = Path(tempfile.gettempdir()).resolve() / "native-contract-root"
+        profile_root = host_root / "profile"
         safe_profile = (
-            Path("/profile/.local/state/openusage-bar"),
-            Path("/profile/.config/openusage-bar"),
-            Path("/profile/AppData/Local/openusage-bar"),
-            Path("/profile/AppData/Local/openusage-bar-task.xml"),
+            profile_root / ".local" / "state" / "openusage-bar",
+            profile_root / ".config" / "openusage-bar",
+            profile_root / "AppData" / "Local" / "openusage-bar",
+            profile_root / "AppData" / "Local" / "openusage-bar-task.xml",
         )
         hostile_paths = (
-            Path("/profile/safe/../foreign"),
-            Path("/profile/control\x01path"),
-            Path("/profile/delete\x7fpath"),
-            Path("/profile") / ("x" * 4097),
-            Path("/"),
+            profile_root / "safe" / ".." / "foreign",
+            profile_root / "control\x01path",
+            profile_root / "delete\x7fpath",
+            profile_root / ("x" * 4097),
+            Path(host_root.anchor),
         )
         for hostile in hostile_paths:
             with self.subTest(contract="profile", hostile=repr(hostile)):
@@ -1518,7 +1520,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 ):
                     NativeProfilePaths(hostile, *safe_profile[1:])
 
-        install_root = Path("/Program Files/UsageHub")
+        install_root = host_root / "Program Files" / "UsageHub"
         safe_app = install_root / "UsageHub.exe"
         safe_uninstaller = install_root / "Uninstall UsageHub.exe"
         safe_collector = (
@@ -1528,7 +1530,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             / "openusage-collector.exe"
         )
         hostile_packages = (
-            (Path("/"), safe_app, safe_uninstaller, safe_collector),
+            (Path(host_root.anchor), safe_app, safe_uninstaller, safe_collector),
             (
                 install_root,
                 safe_app,
@@ -1754,16 +1756,17 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 },
                 **_observations(),
             }
-            output.write_text(
-                json.dumps(
-                    expected,
-                    allow_nan=False,
-                    ensure_ascii=True,
-                    indent=2,
-                    sort_keys=True,
-                )
-                + "\n",
-                encoding="ascii",
+            output.write_bytes(
+                (
+                    json.dumps(
+                        expected,
+                        allow_nan=False,
+                        ensure_ascii=True,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    + "\n"
+                ).encode("ascii")
             )
 
             self.assertEqual(
@@ -1777,8 +1780,8 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 expected,
             )
 
-            output.write_text(
-                json.dumps(expected, sort_keys=True), encoding="ascii"
+            output.write_bytes(
+                json.dumps(expected, sort_keys=True).encode("ascii")
             )
             with self.assertRaisesRegex(
                 LifecycleEvidenceError, "report_not_canonical"
