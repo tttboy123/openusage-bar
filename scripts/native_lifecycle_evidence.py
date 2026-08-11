@@ -1234,6 +1234,52 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         del args, kwargs
         _fail("driver_unavailable")
 
+    def profile_paths(platform: object) -> NativeProfilePaths:
+        if type(platform) is not str or platform != "linux":
+            _driver_fail()
+        try:
+            from openusage_bar.lifecycle_state import LifecycleStatePaths
+
+            authority = LifecycleStatePaths.for_current_user(platform="linux")
+            if (
+                type(authority) is not LifecycleStatePaths
+                or authority.platform != "linux"
+                or not _valid_native_path(authority.home)
+            ):
+                _driver_fail()
+            configured = os.environ.get("XDG_DATA_HOME")
+            if configured:
+                data_root = Path(configured)
+                if not _valid_native_path(data_root):
+                    _driver_fail()
+                try:
+                    metadata = data_root.lstat()
+                except FileNotFoundError:
+                    pass
+                else:
+                    if stat.S_ISLNK(metadata.st_mode):
+                        _driver_fail()
+            else:
+                data_root = authority.home / ".local" / "share"
+            return NativeProfilePaths(
+                state_root=(
+                    authority.home / ".local" / "state" / "openusage-bar"
+                ),
+                config_root=authority.home / ".config" / "openusage-bar",
+                runtime_root=data_root / "usagehub" / "runtime",
+                task_definition=(
+                    authority.home
+                    / ".config"
+                    / "systemd"
+                    / "user"
+                    / "openusage-bar.service"
+                ),
+            )
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _driver_fail()
+
     def package_paths(
         platform: object,
         profile: object,
@@ -1441,7 +1487,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         run_process=unavailable,
         stop_process=unavailable,
         read_registry_value=unavailable,
-        profile_paths=unavailable,
+        profile_paths=profile_paths,
         package_paths=package_paths,
         inspect_service=unavailable,
         inspect_listener=unavailable,

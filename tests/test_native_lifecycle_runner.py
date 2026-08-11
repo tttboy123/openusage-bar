@@ -3494,12 +3494,189 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         self.assertNotIn(str(root), str(rejected.exception))
                         self.assertEqual(tree_snapshot(root), before)
 
-                with self.assertRaisesRegex(
-                    LifecycleEvidenceError, "driver_unavailable"
-                ) as unavailable:
-                    dependencies.profile_paths("linux")
-                self.assertEqual(str(unavailable.exception), "driver_unavailable")
+            self.assertEqual(tree_snapshot(root), before)
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_profile_paths_are_a_pure_authoritative_projection(
+        self,
+    ) -> None:
+        import stat
+        from unittest.mock import patch
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativePackagePaths,
+            NativeProfilePaths,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        def tree_snapshot(root: Path) -> tuple[tuple[object, ...], ...]:
+            paths = (root, *sorted(root.rglob("*")))
+            snapshot: list[tuple[object, ...]] = []
+            for path in paths:
+                metadata = path.lstat()
+                relative = "." if path == root else path.relative_to(root).as_posix()
+                if stat.S_ISLNK(metadata.st_mode):
+                    payload: object = os.readlink(path)
+                elif stat.S_ISREG(metadata.st_mode):
+                    payload = path.read_bytes()
+                else:
+                    payload = None
+                snapshot.append(
+                    (
+                        relative,
+                        stat.S_IFMT(metadata.st_mode),
+                        stat.S_IMODE(metadata.st_mode),
+                        metadata.st_dev,
+                        metadata.st_ino,
+                        metadata.st_size,
+                        metadata.st_mtime_ns,
+                        metadata.st_ctime_ns,
+                        metadata.st_nlink,
+                        payload,
+                    )
+                )
+            return tuple(snapshot)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            xdg_data = root / "authoritative-xdg-data"
+            xdg_data.mkdir()
+            foreign = root / "foreign-xdg-data"
+            foreign.mkdir()
+            foreign_marker = foreign / "PRIVATE_FOREIGN_MARKER"
+            foreign_marker.write_bytes(b"foreign remains unchanged")
+            xdg_alias = root / "aliased-xdg-data"
+            xdg_alias.symlink_to(foreign, target_is_directory=True)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            expected_default = NativeProfilePaths(
+                state_root=home / ".local" / "state" / "openusage-bar",
+                config_root=home / ".config" / "openusage-bar",
+                runtime_root=home / ".local" / "share" / "usagehub" / "runtime",
+                task_definition=(
+                    home
+                    / ".config"
+                    / "systemd"
+                    / "user"
+                    / "openusage-bar.service"
+                ),
+            )
+            expected_xdg = NativeProfilePaths(
+                state_root=expected_default.state_root,
+                config_root=expected_default.config_root,
+                runtime_root=xdg_data / "usagehub" / "runtime",
+                task_definition=expected_default.task_definition,
+            )
+            before = tree_snapshot(root)
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), native_lifecycle_dependencies_for_host() as dependencies:
+                with patch.object(
+                    LifecycleStatePaths,
+                    "for_current_user",
+                    return_value=authority,
+                ) as current_user, patch.dict(os.environ, {}, clear=True):
+                    profile = dependencies.profile_paths("linux")
+                current_user.assert_called_once_with(platform="linux")
+                self.assertEqual(profile, expected_default)
+                self.assertEqual(
+                    dependencies.package_paths("linux", profile),
+                    NativePackagePaths(
+                        install_root=profile.runtime_root,
+                        app=None,
+                        uninstaller=None,
+                        collector=profile.runtime_root / "openusage-collector",
+                    ),
+                )
                 self.assertEqual(tree_snapshot(root), before)
+
+                with patch.object(
+                    LifecycleStatePaths,
+                    "for_current_user",
+                    return_value=authority,
+                ) as current_user, patch.dict(
+                    os.environ,
+                    {"XDG_DATA_HOME": str(xdg_data)},
+                    clear=True,
+                ):
+                    profile = dependencies.profile_paths("linux")
+                current_user.assert_called_once_with(platform="linux")
+                self.assertEqual(profile, expected_xdg)
+                self.assertEqual(
+                    dependencies.package_paths("linux", profile).collector,
+                    xdg_data / "usagehub" / "runtime" / "openusage-collector",
+                )
+                self.assertEqual(tree_snapshot(root), before)
+
+                for platform in ("win", True):
+                    with self.subTest(platform=platform), patch.object(
+                        LifecycleStatePaths, "for_current_user"
+                    ) as current_user:
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as rejected:
+                            dependencies.profile_paths(platform)
+                        self.assertEqual(str(rejected.exception), "driver_failed")
+                        self.assertNotIn(str(root), str(rejected.exception))
+                        current_user.assert_not_called()
+
+                for authority_result in (
+                    object(),
+                    LifecycleStatePaths(platform="win32", home=home),
+                ):
+                    with self.subTest(authority=type(authority_result)), patch.object(
+                        LifecycleStatePaths,
+                        "for_current_user",
+                        return_value=authority_result,
+                    ), patch.dict(os.environ, {}, clear=True):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as rejected:
+                            dependencies.profile_paths("linux")
+                        self.assertEqual(str(rejected.exception), "driver_failed")
+                        self.assertNotIn(str(root), str(rejected.exception))
+
+                with patch.object(
+                    LifecycleStatePaths,
+                    "for_current_user",
+                    side_effect=RuntimeError("PRIVATE_AUTHORITY_FAILURE"),
+                ), patch.dict(os.environ, {}, clear=True):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as rejected:
+                        dependencies.profile_paths("linux")
+                    self.assertEqual(str(rejected.exception), "driver_failed")
+                    self.assertNotIn("PRIVATE_", str(rejected.exception))
+
+                for configured in (
+                    "relative-xdg-data",
+                    str(root / "control\nxdg-data"),
+                    str(Path(root.anchor)),
+                    str(xdg_alias),
+                ):
+                    with self.subTest(xdg=configured), patch.object(
+                        LifecycleStatePaths,
+                        "for_current_user",
+                        return_value=authority,
+                    ), patch.dict(
+                        os.environ,
+                        {"XDG_DATA_HOME": configured},
+                        clear=True,
+                    ):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as rejected:
+                            dependencies.profile_paths("linux")
+                        self.assertEqual(str(rejected.exception), "driver_failed")
+                        self.assertNotIn(str(root), str(rejected.exception))
+                        self.assertEqual(tree_snapshot(root), before)
 
             self.assertEqual(tree_snapshot(root), before)
 
@@ -3523,7 +3700,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 LifecycleEvidenceError, "driver_unavailable"
             ) as unavailable:
-                dependencies.profile_paths("linux")
+                dependencies.inspect_service("linux")
             self.assertEqual(str(unavailable.exception), "driver_unavailable")
 
     def test_default_generate_fails_closed_without_a_real_platform_backend(self) -> None:
