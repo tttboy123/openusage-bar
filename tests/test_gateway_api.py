@@ -1170,6 +1170,29 @@ class GatewayHTTPTests(unittest.TestCase):
             self.assertEqual(server.active_deadline_count, 0)
             self.assertLess(time.monotonic() - started, 2)
 
+    def test_accepted_socket_timeout_never_exceeds_the_absolute_deadline(
+        self,
+    ) -> None:
+        router = GatewayRouter(mode=GatewayMode.ADVISE, policy=policy, proxy=None)
+        with tempfile.TemporaryDirectory() as directory:
+            server = create_gateway_server(
+                router,
+                port=0,
+                token_path=Path(directory) / "gateway.token",
+                client_timeout=1,
+                request_deadline=0.15,
+            )
+            peer = socket.create_connection(server.server_address, timeout=1)
+            accepted: socket.socket | None = None
+            try:
+                accepted, _ = server.get_request()
+                self.assertEqual(accepted.gettimeout(), 0.15)
+            finally:
+                peer.close()
+                if accepted is not None:
+                    accepted.close()
+                server.server_close()
+
     def test_expired_deadline_remains_active_until_worker_releases_its_slot(
         self,
     ) -> None:

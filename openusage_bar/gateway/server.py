@@ -866,7 +866,7 @@ class _BoundedThreads:
 
     def get_request(self) -> tuple[socket.socket, Any]:
         request, address = super().get_request()  # type: ignore[misc]
-        request.settimeout(self._client_timeout)
+        request.settimeout(min(self._client_timeout, self._request_deadline))
         return request, address
 
     def handle_error(self, request: socket.socket, client_address: Any) -> None:
