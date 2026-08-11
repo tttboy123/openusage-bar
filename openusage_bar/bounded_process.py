@@ -172,6 +172,7 @@ def run_bounded(
     encoding: str | None = None,
     errors: str | None = None,
     env: Mapping[str, str] | None = None,
+    pass_fds: tuple[int, ...] = (),
     input_data: bytes | None = None,
     _platform: str | None = None,
     _scope_factory: Callable[[str], Any] | None = None,
@@ -196,8 +197,16 @@ def run_bounded(
         raise TypeError("input_data must be bytes")
     if input_data is not None and stdin != subprocess.DEVNULL:
         raise ValueError("input_data owns the child stdin pipe")
+    if (
+        type(pass_fds) is not tuple
+        or any(type(descriptor) is not int or descriptor < 0 for descriptor in pass_fds)
+        or len(set(pass_fds)) != len(pass_fds)
+    ):
+        raise ValueError("pass_fds must contain unique descriptors")
 
     active_platform = sys.platform if _platform is None else _platform
+    if pass_fds and active_platform == "win32":
+        raise ValueError("pass_fds are unavailable on Windows")
     scope_factory = _scope_factory or _make_process_scope
     try:
         scope = scope_factory(active_platform)
@@ -206,6 +215,8 @@ def run_bounded(
 
     try:
         popen_kwargs = dict(scope.popen_kwargs)
+        if pass_fds:
+            popen_kwargs["pass_fds"] = pass_fds
         process = subprocess.Popen(
             list(args),
             shell=False,

@@ -5,6 +5,93 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
+
+
+class BoundedProcessPassFdsTests(unittest.TestCase):
+    class FakeProcess:
+        pid = 1234
+        returncode = 0
+        stdin = None
+        stdout = None
+        stderr = None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            return None
+
+        def poll(self):
+            return 0
+
+    class FakeScope:
+        popen_kwargs = {"start_new_session": True}
+
+        def attach(self, process):
+            self.process = process
+
+        def direct_child_exited(self):
+            return True
+
+        def terminate(self):
+            return None
+
+        def close(self):
+            return None
+
+    def test_pass_fds_is_posix_only_unique_and_forwarded_exactly(self):
+        from openusage_bar.bounded_process import run_bounded
+
+        def run(*, pass_fds=()):
+            with patch(
+                "openusage_bar.bounded_process.subprocess.Popen",
+                return_value=self.FakeProcess(),
+            ) as popen:
+                completed = run_bounded(
+                    ["bounded-helper"],
+                    timeout=1,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    pass_fds=pass_fds,
+                    _platform="linux",
+                    _scope_factory=lambda _platform: self.FakeScope(),
+                )
+            self.assertEqual(completed.returncode, 0)
+            return popen.call_args
+
+        forwarded = run(pass_fds=(7, 9))
+        self.assertEqual(forwarded.args, (["bounded-helper"],))
+        self.assertEqual(forwarded.kwargs["pass_fds"], (7, 9))
+
+        defaulted = run()
+        self.assertNotIn("pass_fds", defaulted.kwargs)
+
+        invalid = (
+            ("duplicate", (7, 7), "linux"),
+            ("bool", (True,), "linux"),
+            ("negative", (-1,), "linux"),
+            ("non_tuple", [7], "linux"),
+            ("windows", (7,), "win32"),
+        )
+        for label, descriptors, active_platform in invalid:
+            with self.subTest(case=label):
+                scope_factory = Mock(
+                    side_effect=AssertionError("scope must not be created")
+                )
+                with patch(
+                    "openusage_bar.bounded_process.subprocess.Popen",
+                    side_effect=AssertionError("Popen must not run"),
+                ) as popen, self.assertRaises(ValueError):
+                    run_bounded(
+                        ["bounded-helper"],
+                        timeout=1,
+                        pass_fds=descriptors,
+                        _platform=active_platform,
+                        _scope_factory=scope_factory,
+                    )
+                scope_factory.assert_not_called()
+                popen.assert_not_called()
 
 
 class BoundedProcessTests(unittest.TestCase):

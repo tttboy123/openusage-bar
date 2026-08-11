@@ -8,12 +8,16 @@ surface activation errors without hiding secrets.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import secrets
 import shutil
+import socket
 import stat
+import struct
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from xml.sax.saxutils import escape
 
@@ -32,6 +36,22 @@ DEFAULT_LOG_PATH = "~/.local/state/openusage-bar/collector.log"
 DEFAULT_ERROR_LOG_PATH = "~/.local/state/openusage-bar/collector.err.log"
 _PURE_WINDOWS_RENDER_STATE_DIR = PureWindowsPath("C:/openusage-bar/state")
 _SYSTEMD_UNSAFE_PATH_CHARACTERS = frozenset("%$'\"\\")
+_LINUX_SERVICE_FACT_LIMIT = 64 * 1024
+_LINUX_SERVICE_QUERY_TIMEOUT_SECONDS = 5
+_LINUX_SERVICE_PROPERTIES = (
+    "Id",
+    "LoadState",
+    "ActiveState",
+    "SubState",
+    "UnitFileState",
+    "FragmentPath",
+    "DropInPaths",
+    "NeedDaemonReload",
+    "MainPID",
+)
+_TRUSTED_SYSTEMCTL_PATHS = frozenset({"/usr/bin/systemctl"})
+_LINUX_SOL_SOCKET = 1
+_LINUX_SO_PEERCRED = 17
 
 
 class ServiceCommandError(RuntimeError):
@@ -40,6 +60,90 @@ class ServiceCommandError(RuntimeError):
     def __init__(self, *, returncode: int | None = None) -> None:
         super().__init__("service activation command failed")
         self.returncode = returncode
+
+
+@dataclass(frozen=True)
+class LinuxCollectorServiceState:
+    """Closed, current-user systemd collector ownership observation."""
+
+    unit_file_id: str
+    unit_size_bytes: int
+    unit_sha256: str
+    unit_id: str
+    load_state: str
+    active_state: str
+    sub_state: str
+    unit_file_state: str
+    fragment_path: Path
+    drop_in_paths: tuple[Path, ...]
+    needs_reload: bool
+    main_pid: int
+    process_uid: int
+    process_start_time_ticks: int
+    process_executable: Path
+    process_executable_file_id: str
+    process_argv_nul: bytes
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.unit_file_id) is not str
+            or not self.unit_file_id
+            or type(self.unit_size_bytes) is not int
+            or self.unit_size_bytes <= 0
+            or type(self.unit_sha256) is not str
+            or len(self.unit_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in self.unit_sha256)
+            or type(self.unit_id) is not str
+            or not self.unit_id
+            or type(self.load_state) is not str
+            or not self.load_state
+            or type(self.active_state) is not str
+            or not self.active_state
+            or type(self.sub_state) is not str
+            or not self.sub_state
+            or type(self.unit_file_state) is not str
+            or not self.unit_file_state
+            or not isinstance(self.fragment_path, Path)
+            or not self.fragment_path.is_absolute()
+            or type(self.drop_in_paths) is not tuple
+            or any(
+                not isinstance(path, Path) or not path.is_absolute()
+                for path in self.drop_in_paths
+            )
+            or type(self.needs_reload) is not bool
+            or type(self.main_pid) is not int
+            or self.main_pid <= 0
+            or type(self.process_uid) is not int
+            or self.process_uid < 0
+            or type(self.process_start_time_ticks) is not int
+            or self.process_start_time_ticks <= 0
+            or not isinstance(self.process_executable, Path)
+            or not self.process_executable.is_absolute()
+            or type(self.process_executable_file_id) is not str
+            or not self.process_executable_file_id
+            or type(self.process_argv_nul) is not bytes
+            or not self.process_argv_nul
+            or not self.process_argv_nul.endswith(b"\0")
+        ):
+            raise ValueError("Linux collector service state invalid")
+
+
+@dataclass(frozen=True)
+class _BoundLinuxExecutable:
+    parent_descriptor: int
+    executable_descriptor: int
+    signature: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _BoundLinuxManagerPeer:
+    directory_descriptor: int
+    connection: object
+    directory_signature: tuple[int, ...]
+    socket_signature: tuple[int, ...]
+    pid: int
+    uid: int
+    gid: int
 
 
 def _expand(path: str) -> str:
@@ -492,6 +596,855 @@ def service_is_registered(
             raise ServiceCommandError(returncode=returncode)
         raise ServiceCommandError(returncode=returncode)
     raise RuntimeError("unsupported platform")
+
+
+def read_current_user_collector_service_state() -> LinuxCollectorServiceState:
+    """Read a verified active Linux collector fact, or fail closed."""
+
+    if not sys.platform.startswith("linux") or os.name == "nt":
+        raise ServiceCommandError()
+    runtime_descriptor: int | None = None
+    systemctl_binding: _BoundLinuxExecutable | None = None
+    manager_peer: _BoundLinuxManagerPeer | None = None
+    try:
+        configured_xdg_home = os.environ.get("XDG_CONFIG_HOME")
+        if configured_xdg_home not in {None, ""}:
+            raise ServiceCommandError()
+        from .lifecycle_state import LifecycleStatePaths
+
+        authority = LifecycleStatePaths.for_current_user(platform="linux")
+        home = authority.home
+        if not isinstance(home, Path) or not home.is_absolute():
+            raise ServiceCommandError()
+        unit = home / ".config" / "systemd" / "user" / SYSTEMD_UNIT_NAME
+        systemctl = shutil.which("systemctl")
+        if systemctl not in _TRUSTED_SYSTEMCTL_PATHS:
+            raise ServiceCommandError()
+        current_uid = os.getuid()
+        runtime_descriptor = _open_linux_user_runtime_directory(current_uid)
+        runtime_identity = _linux_file_signature(os.fstat(runtime_descriptor))
+        manager_peer = _bind_linux_systemd_private_peer(
+            runtime_descriptor, current_uid
+        )
+        manager_environment = {
+            "HOME": str(home),
+            "XDG_RUNTIME_DIR": f"/proc/self/fd/{runtime_descriptor}",
+            "DBUS_SESSION_BUS_ADDRESS": (
+                "unix:path=/proc/self/fd/"
+                f"{manager_peer.directory_descriptor}/private"
+            ),
+            "LC_ALL": "C",
+            "LANG": "C",
+            "SYSTEMD_COLORS": "0",
+            "PAGER": "cat",
+        }
+        manager_identity_before = _read_linux_process_identity(manager_peer.pid)
+        if manager_identity_before[2] != 1:
+            raise ServiceCommandError()
+        manager_cgroup_before = _read_linux_systemd_manager_cgroup(
+            manager_peer.pid, current_uid
+        )
+        manager_executable_before = _read_linux_systemd_manager_executable(
+            manager_peer.pid
+        )
+        manager_cmdline_before = _read_linux_systemd_manager_cmdline(
+            manager_peer.pid
+        )
+        systemctl_binding = _bind_linux_systemctl_executable(systemctl)
+        unit_before = _read_linux_service_unit(home, unit)
+        manager_before = _read_linux_service_manager_state(
+            systemctl,
+            manager_environment,
+            (runtime_descriptor, manager_peer.directory_descriptor),
+        )
+        main_pid = int(manager_before["MainPID"])
+        process_identity_before = _read_linux_process_identity(main_pid)
+        if process_identity_before[2] != manager_peer.pid:
+            raise ServiceCommandError()
+        process_cgroup_before = _read_linux_collector_cgroup(
+            main_pid, current_uid
+        )
+        (
+            process_executable,
+            executable_file_id,
+            process_executable_signature,
+        ) = _read_linux_process_executable(main_pid)
+        process_argv_nul = _read_linux_process_cmdline(main_pid)
+        manager_after = _read_linux_service_manager_state(
+            systemctl,
+            manager_environment,
+            (runtime_descriptor, manager_peer.directory_descriptor),
+        )
+        process_identity_after = _read_linux_process_identity(main_pid)
+        process_cgroup_after = _read_linux_collector_cgroup(
+            main_pid, current_uid
+        )
+        (
+            process_executable_after,
+            executable_file_id_after,
+            process_executable_signature_after,
+        ) = _read_linux_process_executable(main_pid)
+        process_argv_nul_after = _read_linux_process_cmdline(main_pid)
+        process_identity_final = _read_linux_process_identity(main_pid)
+        unit_after = _read_linux_service_unit(home, unit)
+        manager_identity_after = _read_linux_process_identity(manager_peer.pid)
+        manager_cgroup_after = _read_linux_systemd_manager_cgroup(
+            manager_peer.pid, current_uid
+        )
+        manager_executable_after = _read_linux_systemd_manager_executable(
+            manager_peer.pid
+        )
+        manager_cmdline_after = _read_linux_systemd_manager_cmdline(
+            manager_peer.pid
+        )
+        if (
+            manager_after != manager_before
+            or process_identity_after != process_identity_before
+            or process_identity_final != process_identity_before
+            or process_cgroup_after != process_cgroup_before
+            or process_executable_after != process_executable
+            or executable_file_id_after != executable_file_id
+            or process_executable_signature_after
+            != process_executable_signature
+            or process_argv_nul_after != process_argv_nul
+            or unit_after != unit_before
+            or _linux_file_signature(os.fstat(runtime_descriptor))
+            != runtime_identity
+            or manager_identity_after != manager_identity_before
+            or manager_cgroup_after != manager_cgroup_before
+            or manager_executable_after != manager_executable_before
+            or manager_cmdline_after != manager_cmdline_before
+        ):
+            raise ServiceCommandError()
+        _revalidate_linux_systemd_private_peer(manager_peer, current_uid)
+        _revalidate_linux_systemctl_executable(systemctl_binding)
+        return LinuxCollectorServiceState(
+            unit_file_id=unit_before[0],
+            unit_size_bytes=len(unit_before[1]),
+            unit_sha256=hashlib.sha256(unit_before[1]).hexdigest(),
+            unit_id=manager_before["Id"],
+            load_state=manager_before["LoadState"],
+            active_state=manager_before["ActiveState"],
+            sub_state=manager_before["SubState"],
+            unit_file_state=manager_before["UnitFileState"],
+            fragment_path=Path(manager_before["FragmentPath"]),
+            drop_in_paths=(),
+            needs_reload=manager_before["NeedDaemonReload"] == "yes",
+            main_pid=main_pid,
+            process_uid=process_identity_before[0],
+            process_start_time_ticks=process_identity_before[1],
+            process_executable=process_executable,
+            process_executable_file_id=executable_file_id,
+            process_argv_nul=process_argv_nul,
+        )
+    except ServiceCommandError:
+        raise
+    except Exception as error:
+        raise ServiceCommandError() from error
+    finally:
+        close_failed = False
+        if manager_peer is not None:
+            try:
+                manager_peer.connection.close()
+            except Exception:
+                close_failed = True
+            try:
+                os.close(manager_peer.directory_descriptor)
+            except OSError:
+                close_failed = True
+        if systemctl_binding is not None:
+            for descriptor in (
+                systemctl_binding.executable_descriptor,
+                systemctl_binding.parent_descriptor,
+            ):
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    close_failed = True
+        if runtime_descriptor is not None:
+            try:
+                os.close(runtime_descriptor)
+            except OSError:
+                close_failed = True
+        if close_failed:
+            raise ServiceCommandError()
+
+
+def _root_owned_directory(metadata: os.stat_result) -> bool:
+    return (
+        stat.S_ISDIR(metadata.st_mode)
+        and metadata.st_uid == 0
+        and not stat.S_IMODE(metadata.st_mode) & 0o022
+    )
+
+
+def _bind_linux_systemctl_executable(path: str) -> _BoundLinuxExecutable:
+    directory_flag = getattr(os, "O_DIRECTORY", 0)
+    nofollow_flag = getattr(os, "O_NOFOLLOW", 0)
+    if (
+        path != "/usr/bin/systemctl"
+        or not directory_flag
+        or not nofollow_flag
+    ):
+        raise ServiceCommandError()
+    directory_flags = (
+        os.O_RDONLY
+        | directory_flag
+        | nofollow_flag
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    file_flags = os.O_RDONLY | nofollow_flag | getattr(os, "O_CLOEXEC", 0)
+    descriptors: list[int] = []
+    try:
+        root_descriptor = os.open("/", directory_flags)
+        descriptors.append(root_descriptor)
+        if not _root_owned_directory(os.fstat(root_descriptor)):
+            raise ServiceCommandError()
+        usr_descriptor = os.open("usr", directory_flags, dir_fd=root_descriptor)
+        descriptors.append(usr_descriptor)
+        if not _root_owned_directory(os.fstat(usr_descriptor)):
+            raise ServiceCommandError()
+        bin_descriptor = os.open("bin", directory_flags, dir_fd=usr_descriptor)
+        descriptors.append(bin_descriptor)
+        if not _root_owned_directory(os.fstat(bin_descriptor)):
+            raise ServiceCommandError()
+        executable_descriptor = os.open(
+            "systemctl", file_flags, dir_fd=bin_descriptor
+        )
+        descriptors.append(executable_descriptor)
+        executable_metadata = os.fstat(executable_descriptor)
+        executable_mode = stat.S_IMODE(executable_metadata.st_mode)
+        if (
+            not stat.S_ISREG(executable_metadata.st_mode)
+            or executable_metadata.st_uid != 0
+            or executable_metadata.st_nlink != 1
+            or not executable_mode & 0o100
+            or executable_mode & 0o022
+        ):
+            os.close(executable_descriptor)
+            descriptors.remove(executable_descriptor)
+            raise ServiceCommandError()
+        public_metadata = os.stat(
+            "systemctl", dir_fd=bin_descriptor, follow_symlinks=False
+        )
+        signature = _linux_file_signature(executable_metadata)
+        if _linux_file_signature(public_metadata) != signature:
+            os.close(executable_descriptor)
+            descriptors.remove(executable_descriptor)
+            raise ServiceCommandError()
+        for descriptor in (usr_descriptor, root_descriptor):
+            os.close(descriptor)
+            descriptors.remove(descriptor)
+        descriptors.remove(executable_descriptor)
+        descriptors.remove(bin_descriptor)
+        return _BoundLinuxExecutable(
+            parent_descriptor=bin_descriptor,
+            executable_descriptor=executable_descriptor,
+            signature=signature,
+        )
+    except ServiceCommandError:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise
+    except Exception as error:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise ServiceCommandError() from error
+
+
+def _revalidate_linux_systemctl_executable(
+    binding: _BoundLinuxExecutable,
+) -> None:
+    try:
+        descriptor_metadata = os.fstat(binding.executable_descriptor)
+        public_metadata = os.stat(
+            "systemctl",
+            dir_fd=binding.parent_descriptor,
+            follow_symlinks=False,
+        )
+    except Exception as error:
+        raise ServiceCommandError() from error
+    if (
+        _linux_file_signature(descriptor_metadata) != binding.signature
+        or _linux_file_signature(public_metadata) != binding.signature
+    ):
+        raise ServiceCommandError()
+
+
+def _open_linux_user_runtime_directory(current_uid: int) -> int:
+    directory_flag = getattr(os, "O_DIRECTORY", 0)
+    nofollow_flag = getattr(os, "O_NOFOLLOW", 0)
+    if (
+        type(current_uid) is not int
+        or current_uid < 0
+        or not directory_flag
+        or not nofollow_flag
+    ):
+        raise ServiceCommandError()
+    flags = os.O_RDONLY | directory_flag | nofollow_flag | getattr(
+        os, "O_CLOEXEC", 0
+    )
+    descriptors: list[int] = []
+    try:
+        run_descriptor = os.open("/run", flags)
+        descriptors.append(run_descriptor)
+        run_metadata = os.fstat(run_descriptor)
+        if (
+            not stat.S_ISDIR(run_metadata.st_mode)
+            or run_metadata.st_uid != 0
+            or stat.S_IMODE(run_metadata.st_mode) & 0o022
+        ):
+            raise ServiceCommandError()
+        user_descriptor = os.open("user", flags, dir_fd=run_descriptor)
+        descriptors.append(user_descriptor)
+        user_metadata = os.fstat(user_descriptor)
+        if (
+            not stat.S_ISDIR(user_metadata.st_mode)
+            or user_metadata.st_uid != 0
+            or stat.S_IMODE(user_metadata.st_mode) & 0o022
+        ):
+            raise ServiceCommandError()
+        runtime_descriptor = os.open(
+            str(current_uid), flags, dir_fd=user_descriptor
+        )
+        runtime_metadata = os.fstat(runtime_descriptor)
+        if (
+            not stat.S_ISDIR(runtime_metadata.st_mode)
+            or runtime_metadata.st_uid != current_uid
+            or stat.S_IMODE(runtime_metadata.st_mode) != 0o700
+        ):
+            os.close(runtime_descriptor)
+            raise ServiceCommandError()
+        close_failed = False
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                close_failed = True
+        descriptors.clear()
+        if close_failed:
+            os.close(runtime_descriptor)
+            raise ServiceCommandError()
+        return runtime_descriptor
+    except ServiceCommandError:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise
+    except Exception as error:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise ServiceCommandError() from error
+
+
+def _bind_linux_systemd_private_peer(
+    runtime_descriptor: int, current_uid: int
+) -> _BoundLinuxManagerPeer:
+    directory_flag = getattr(os, "O_DIRECTORY", 0)
+    nofollow_flag = getattr(os, "O_NOFOLLOW", 0)
+    if not directory_flag or not nofollow_flag:
+        raise ServiceCommandError()
+    flags = os.O_RDONLY | directory_flag | nofollow_flag | getattr(
+        os, "O_CLOEXEC", 0
+    )
+    directory_descriptor: int | None = None
+    connection: object | None = None
+    try:
+        directory_descriptor = os.open(
+            "systemd", flags, dir_fd=runtime_descriptor
+        )
+        directory_metadata = os.fstat(directory_descriptor)
+        public_directory = os.stat(
+            "systemd",
+            dir_fd=runtime_descriptor,
+            follow_symlinks=False,
+        )
+        directory_signature = _linux_file_signature(directory_metadata)
+        directory_mode = stat.S_IMODE(directory_metadata.st_mode)
+        if (
+            not stat.S_ISDIR(directory_metadata.st_mode)
+            or directory_metadata.st_uid != current_uid
+            or directory_mode & 0o022
+            or _linux_file_signature(public_directory) != directory_signature
+        ):
+            raise ServiceCommandError()
+        private_metadata = os.stat(
+            "private",
+            dir_fd=directory_descriptor,
+            follow_symlinks=False,
+        )
+        private_mode = stat.S_IMODE(private_metadata.st_mode)
+        if (
+            not stat.S_ISSOCK(private_metadata.st_mode)
+            or private_metadata.st_uid != current_uid
+            or private_metadata.st_nlink != 1
+            or private_mode & 0o700 != 0o600
+            or private_mode & 0o111
+        ):
+            raise ServiceCommandError()
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        connection.settimeout(1.0)
+        connection.connect(
+            f"/proc/self/fd/{directory_descriptor}/private"
+        )
+        raw_credentials = connection.getsockopt(
+            _LINUX_SOL_SOCKET, _LINUX_SO_PEERCRED, struct.calcsize("3i")
+        )
+        if type(raw_credentials) is not bytes or len(raw_credentials) != 12:
+            raise ServiceCommandError()
+        peer_pid, peer_uid, peer_gid = struct.unpack("3i", raw_credentials)
+        if (
+            peer_pid <= 0
+            or peer_uid != current_uid
+            or peer_gid != os.getgid()
+        ):
+            raise ServiceCommandError()
+        return _BoundLinuxManagerPeer(
+            directory_descriptor=directory_descriptor,
+            connection=connection,
+            directory_signature=directory_signature,
+            socket_signature=_linux_file_signature(private_metadata),
+            pid=peer_pid,
+            uid=peer_uid,
+            gid=peer_gid,
+        )
+    except ServiceCommandError:
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+        if directory_descriptor is not None:
+            try:
+                os.close(directory_descriptor)
+            except OSError:
+                pass
+        raise
+    except Exception as error:
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+        if directory_descriptor is not None:
+            try:
+                os.close(directory_descriptor)
+            except OSError:
+                pass
+        raise ServiceCommandError() from error
+
+
+def _revalidate_linux_systemd_private_peer(
+    binding: _BoundLinuxManagerPeer, current_uid: int
+) -> None:
+    try:
+        directory_metadata = os.fstat(binding.directory_descriptor)
+        private_metadata = os.stat(
+            "private",
+            dir_fd=binding.directory_descriptor,
+            follow_symlinks=False,
+        )
+        raw_credentials = binding.connection.getsockopt(
+            _LINUX_SOL_SOCKET, _LINUX_SO_PEERCRED, struct.calcsize("3i")
+        )
+    except Exception as error:
+        raise ServiceCommandError() from error
+    if type(raw_credentials) is not bytes or len(raw_credentials) != 12:
+        raise ServiceCommandError()
+    peer_pid, peer_uid, peer_gid = struct.unpack("3i", raw_credentials)
+    if (
+        _linux_file_signature(directory_metadata)
+        != binding.directory_signature
+        or _linux_file_signature(private_metadata) != binding.socket_signature
+        or (peer_pid, peer_uid, peer_gid)
+        != (binding.pid, current_uid, binding.gid)
+    ):
+        raise ServiceCommandError()
+
+
+def _read_linux_systemd_manager_executable(
+    manager_pid: int,
+) -> tuple[str, tuple[int, ...]]:
+    proc_executable = f"/proc/{manager_pid}/exe"
+    try:
+        raw_path = os.readlink(proc_executable)
+        if raw_path != "/usr/lib/systemd/systemd":
+            raise ServiceCommandError()
+        proc_metadata = os.stat(proc_executable)
+        public_metadata = os.stat(raw_path, follow_symlinks=False)
+    except ServiceCommandError:
+        raise
+    except Exception as error:
+        raise ServiceCommandError() from error
+    mode = stat.S_IMODE(proc_metadata.st_mode)
+    signature = _linux_file_signature(proc_metadata)
+    if (
+        not stat.S_ISREG(proc_metadata.st_mode)
+        or proc_metadata.st_uid != 0
+        or proc_metadata.st_nlink != 1
+        or not mode & 0o100
+        or mode & 0o022
+        or _linux_file_signature(public_metadata) != signature
+    ):
+        raise ServiceCommandError()
+    return raw_path, signature
+
+
+def _read_linux_systemd_manager_cmdline(manager_pid: int) -> bytes:
+    payload = _read_linux_process_cmdline(manager_pid)
+    if payload not in {
+        b"/usr/lib/systemd/systemd\0--user\0",
+        b"/lib/systemd/systemd\0--user\0",
+    }:
+        raise ServiceCommandError()
+    return payload
+
+
+def _read_linux_systemd_manager_cgroup(
+    manager_pid: int, current_uid: int
+) -> str:
+    try:
+        payload = _read_linux_proc_file(manager_pid, "cgroup")
+        text = payload.decode("ascii")
+    except (UnicodeError, ServiceCommandError) as error:
+        raise ServiceCommandError() from error
+    expected = (
+        f"0::/user.slice/user-{current_uid}.slice/"
+        f"user@{current_uid}.service/init.scope\n"
+    )
+    if text != expected:
+        raise ServiceCommandError()
+    return text
+
+
+def _read_bounded_descriptor(descriptor: int, limit: int) -> bytes:
+    payload = bytearray()
+    while True:
+        block = os.read(descriptor, min(8192, limit + 1 - len(payload)))
+        if not block:
+            return bytes(payload)
+        payload.extend(block)
+        if len(payload) > limit:
+            raise ServiceCommandError()
+
+
+def _linux_file_signature(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_uid,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _read_linux_service_unit(home: Path, unit: Path) -> tuple[str, bytes]:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow:
+        raise ServiceCommandError()
+    parent = _open_service_directory_posix(
+        home,
+        (".config", "systemd", "user"),
+        create=False,
+    )
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            unit.name,
+            os.O_RDONLY | nofollow | getattr(os, "O_CLOEXEC", 0),
+            dir_fd=parent,
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.getuid()
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or before.st_size <= 0
+            or before.st_size > _LINUX_SERVICE_FACT_LIMIT
+        ):
+            raise ServiceCommandError()
+        payload = _read_bounded_descriptor(
+            descriptor, _LINUX_SERVICE_FACT_LIMIT
+        )
+        after = os.fstat(descriptor)
+        public = os.stat(unit.name, dir_fd=parent, follow_symlinks=False)
+        signature = _linux_file_signature(before)
+        if (
+            len(payload) != before.st_size
+            or _linux_file_signature(after) != signature
+            or _linux_file_signature(public) != signature
+        ):
+            raise ServiceCommandError()
+        return f"{before.st_dev}:{before.st_ino}", payload
+    except ServiceCommandError:
+        raise
+    except Exception as error:
+        raise ServiceCommandError() from error
+    finally:
+        close_failed = False
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                close_failed = True
+        try:
+            os.close(parent)
+        except OSError:
+            close_failed = True
+        if close_failed:
+            raise ServiceCommandError()
+
+
+def _read_linux_service_manager_state(
+    executable: str,
+    environment: dict[str, str],
+    pass_fds: tuple[int, ...],
+) -> dict[str, str]:
+    if executable not in _TRUSTED_SYSTEMCTL_PATHS:
+        raise ServiceCommandError()
+    command = [
+        executable,
+        "--user",
+        "show",
+        SYSTEMD_UNIT_NAME,
+        *[f"--property={name}" for name in _LINUX_SERVICE_PROPERTIES],
+        "--no-pager",
+    ]
+    try:
+        from .bounded_process import BoundedProcessError, run_bounded
+
+        completed = run_bounded(
+            command,
+            timeout=_LINUX_SERVICE_QUERY_TIMEOUT_SECONDS,
+            stdout_limit=_LINUX_SERVICE_FACT_LIMIT,
+            stderr_limit=0,
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            env=environment,
+            pass_fds=pass_fds,
+        )
+    except (BoundedProcessError, OSError, subprocess.SubprocessError) as error:
+        raise ServiceCommandError() from error
+    if (
+        type(completed.returncode) is not int
+        or completed.returncode != 0
+        or type(completed.stdout) is not bytes
+        or not completed.stdout
+        or len(completed.stdout) > _LINUX_SERVICE_FACT_LIMIT
+    ):
+        raise ServiceCommandError()
+    try:
+        lines = completed.stdout.decode("utf-8").splitlines()
+    except UnicodeError as error:
+        raise ServiceCommandError() from error
+    if len(lines) != len(_LINUX_SERVICE_PROPERTIES):
+        raise ServiceCommandError()
+    values: dict[str, str] = {}
+    for line in lines:
+        name, separator, value = line.partition("=")
+        if (
+            separator != "="
+            or name not in _LINUX_SERVICE_PROPERTIES
+            or (not value and name != "DropInPaths")
+            or any(not character.isprintable() for character in value)
+            or name in values
+        ):
+            raise ServiceCommandError()
+        values[name] = value
+    if set(values) != set(_LINUX_SERVICE_PROPERTIES):
+        raise ServiceCommandError()
+    if values["DropInPaths"]:
+        raise ServiceCommandError()
+    if values["NeedDaemonReload"] not in {"yes", "no"}:
+        raise ServiceCommandError()
+    pid_text = values["MainPID"]
+    if not pid_text.isascii() or not pid_text.isdecimal():
+        raise ServiceCommandError()
+    pid = int(pid_text)
+    if pid <= 0 or str(pid) != pid_text:
+        raise ServiceCommandError()
+    return values
+
+
+def _read_linux_process_executable(
+    main_pid: int,
+) -> tuple[Path, str, tuple[int, ...]]:
+    proc_executable = f"/proc/{main_pid}/exe"
+    try:
+        raw_path = os.readlink(proc_executable)
+        executable = Path(raw_path)
+        proc_metadata = os.stat(proc_executable)
+        public_metadata = os.stat(executable, follow_symlinks=False)
+    except Exception as error:
+        raise ServiceCommandError() from error
+    if (
+        type(raw_path) is not str
+        or not executable.is_absolute()
+        or ".." in executable.parts
+        or any(not character.isprintable() for character in raw_path)
+        or not stat.S_ISREG(proc_metadata.st_mode)
+        or proc_metadata.st_uid != os.getuid()
+        or proc_metadata.st_nlink != 1
+        or stat.S_IMODE(proc_metadata.st_mode) != 0o700
+        or (proc_metadata.st_dev, proc_metadata.st_ino)
+        != (public_metadata.st_dev, public_metadata.st_ino)
+        or _linux_file_signature(proc_metadata)
+        != _linux_file_signature(public_metadata)
+    ):
+        raise ServiceCommandError()
+    return (
+        executable,
+        f"{proc_metadata.st_dev}:{proc_metadata.st_ino}",
+        _linux_file_signature(proc_metadata),
+    )
+
+
+def _read_linux_process_cmdline(main_pid: int) -> bytes:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow:
+        raise ServiceCommandError()
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            f"/proc/{main_pid}/cmdline",
+            os.O_RDONLY | nofollow | getattr(os, "O_CLOEXEC", 0),
+        )
+        payload = _read_bounded_descriptor(
+            descriptor, _LINUX_SERVICE_FACT_LIMIT
+        )
+        if (
+            not payload
+            or not payload.endswith(b"\0")
+            or b"\0\0" in payload
+        ):
+            raise ServiceCommandError()
+        return payload
+    except ServiceCommandError:
+        raise
+    except Exception as error:
+        raise ServiceCommandError() from error
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError as error:
+                raise ServiceCommandError() from error
+
+
+def _read_linux_proc_file(main_pid: int, name: str) -> bytes:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow or name not in {"cgroup", "stat", "status"}:
+        raise ServiceCommandError()
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            f"/proc/{main_pid}/{name}",
+            os.O_RDONLY | nofollow | getattr(os, "O_CLOEXEC", 0),
+        )
+        payload = _read_bounded_descriptor(
+            descriptor, _LINUX_SERVICE_FACT_LIMIT
+        )
+        if not payload:
+            raise ServiceCommandError()
+        return payload
+    except ServiceCommandError:
+        raise
+    except Exception as error:
+        raise ServiceCommandError() from error
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError as error:
+                raise ServiceCommandError() from error
+
+
+def _read_linux_process_identity(main_pid: int) -> tuple[int, int, int]:
+    try:
+        status_text = _read_linux_proc_file(main_pid, "status").decode("ascii")
+        stat_text = _read_linux_proc_file(main_pid, "stat").decode("ascii").strip()
+    except (UnicodeError, ServiceCommandError) as error:
+        raise ServiceCommandError() from error
+    uid_lines = [line for line in status_text.splitlines() if line.startswith("Uid:")]
+    if len(uid_lines) != 1:
+        raise ServiceCommandError()
+    uid_parts = uid_lines[0].split()
+    if len(uid_parts) != 5 or uid_parts[0] != "Uid:":
+        raise ServiceCommandError()
+    try:
+        uid_values = tuple(int(value) for value in uid_parts[1:])
+    except ValueError as error:
+        raise ServiceCommandError() from error
+    if (
+        any(not value.isascii() or not value.isdecimal() for value in uid_parts[1:])
+        or any(str(number) != value for number, value in zip(uid_values, uid_parts[1:], strict=True))
+        or len(set(uid_values)) != 1
+        or uid_values[0] != os.getuid()
+    ):
+        raise ServiceCommandError()
+    closing_parenthesis = stat_text.rfind(")")
+    if (
+        not stat_text.startswith(f"{main_pid} (")
+        or closing_parenthesis <= len(str(main_pid)) + 2
+        or closing_parenthesis + 2 >= len(stat_text)
+        or stat_text[closing_parenthesis + 1] != " "
+    ):
+        raise ServiceCommandError()
+    remaining_fields = stat_text[closing_parenthesis + 2 :].split()
+    if len(remaining_fields) <= 19:
+        raise ServiceCommandError()
+    parent_pid_text = remaining_fields[1]
+    start_time_text = remaining_fields[19]
+    if (
+        not parent_pid_text.isascii()
+        or not parent_pid_text.isdecimal()
+        or not start_time_text.isascii()
+        or not start_time_text.isdecimal()
+    ):
+        raise ServiceCommandError()
+    parent_pid = int(parent_pid_text)
+    start_time_ticks = int(start_time_text)
+    if (
+        parent_pid < 0
+        or str(parent_pid) != parent_pid_text
+        or start_time_ticks <= 0
+        or str(start_time_ticks) != start_time_text
+    ):
+        raise ServiceCommandError()
+    return uid_values[0], start_time_ticks, parent_pid
+
+
+def _read_linux_collector_cgroup(main_pid: int, current_uid: int) -> str:
+    try:
+        payload = _read_linux_proc_file(main_pid, "cgroup")
+        text = payload.decode("ascii")
+    except (UnicodeError, ServiceCommandError) as error:
+        raise ServiceCommandError() from error
+    expected = (
+        f"0::/user.slice/user-{current_uid}.slice/"
+        f"user@{current_uid}.service/app.slice/{SYSTEMD_UNIT_NAME}\n"
+    )
+    if text != expected:
+        raise ServiceCommandError()
+    return text
 
 
 def _collector_command() -> str:

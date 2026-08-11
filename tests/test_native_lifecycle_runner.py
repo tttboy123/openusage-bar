@@ -6158,6 +6158,141 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             self.assertEqual(tree_snapshot(root), before)
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_service_probe_observes_only_the_canonical_active_collector_command(
+        self,
+    ) -> None:
+        import stat
+        from dataclasses import replace
+        from unittest.mock import patch
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from openusage_bar.platform_services import (
+            LinuxCollectorServiceState,
+            systemd_unit,
+        )
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeServiceState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            state_root = home / ".local" / "state" / "openusage-bar"
+            runtime_root = home / ".local" / "share" / "usagehub" / "runtime"
+            collector = runtime_root / "openusage-collector"
+            unit = home / ".config" / "systemd" / "user" / "openusage-bar.service"
+            api_socket = state_root / "openusage.sock"
+            command = (
+                str(collector),
+                "daemon",
+                "--interval",
+                "300",
+                "--api-transport",
+                "unix",
+                "--api-socket",
+                str(api_socket),
+            )
+            unit_bytes = systemd_unit(
+                interval=300,
+                api_socket=str(api_socket),
+                command=str(collector),
+            ).encode("utf-8")
+            observation = LinuxCollectorServiceState(
+                unit_file_id="unit-dev:unit-ino",
+                unit_size_bytes=len(unit_bytes),
+                unit_sha256=hashlib.sha256(unit_bytes).hexdigest(),
+                unit_id="openusage-bar.service",
+                load_state="loaded",
+                active_state="active",
+                sub_state="running",
+                unit_file_state="enabled",
+                fragment_path=unit,
+                drop_in_paths=(),
+                needs_reload=False,
+                main_pid=4312,
+                process_uid=os.getuid(),
+                process_start_time_ticks=987654,
+                process_executable=collector,
+                process_executable_file_id="collector-dev:collector-ino",
+                process_argv_nul=("\0".join(command) + "\0").encode(),
+            )
+            before = tuple(
+                (path.relative_to(root).as_posix(), stat.S_IFMT(path.lstat().st_mode))
+                for path in (root, *sorted(root.rglob("*")))
+            )
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch(
+                "scripts.native_lifecycle_evidence.Path.home",
+                return_value=home,
+            ), patch.dict(
+                os.environ,
+                {},
+                clear=True,
+            ), patch(
+                "openusage_bar.platform_services.service_is_registered",
+                return_value=True,
+            ), patch(
+                "openusage_bar.platform_services.read_current_user_collector_service_state",
+                return_value=observation,
+                create=True,
+            ) as read_service_state, native_lifecycle_dependencies_for_host() as dependencies:
+                dependencies.make_run_directory("linux", "x64")
+                profile = dependencies.profile_paths("linux")
+                package = dependencies.package_paths("linux", profile)
+                self.assertEqual(package.collector, collector)
+                self.assertEqual(
+                    dependencies.inspect_service("linux"),
+                    NativeServiceState(True, True, command),
+                )
+                read_service_state.return_value = replace(
+                    observation,
+                    process_uid=os.getuid() + 1,
+                )
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as foreign_process:
+                    dependencies.inspect_service("linux")
+                self.assertEqual(
+                    str(foreign_process.exception), "driver_unavailable"
+                )
+                self.assertNotIn(str(root), str(foreign_process.exception))
+                read_service_state.return_value = replace(
+                    observation,
+                    drop_in_paths=(root / "PRIVATE-drop-in.conf",),
+                )
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as hostile_drop_in:
+                    dependencies.inspect_service("linux")
+                self.assertEqual(
+                    str(hostile_drop_in.exception), "driver_unavailable"
+                )
+                self.assertNotIn("PRIVATE", str(hostile_drop_in.exception))
+
+            self.assertEqual(read_service_state.call_count, 3)
+            self.assertTrue(
+                all(call.args == () and call.kwargs == {} for call in read_service_state.call_args_list)
+            )
+            after = tuple(
+                (path.relative_to(root).as_posix(), stat.S_IFMT(path.lstat().st_mode))
+                for path in (root, *sorted(root.rglob("*")))
+            )
+            self.assertEqual(after, before)
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_service_probe_rejects_custom_xdg_config_home(
         self,
     ) -> None:
@@ -6299,20 +6434,32 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         self.assertNotIn(str(root), str(rejected.exception))
                         service_probe.assert_not_called()
 
+                with patch(
+                    "openusage_bar.platform_services.service_is_registered",
+                    return_value=True,
+                ) as service_probe, patch(
+                    "openusage_bar.platform_services.read_current_user_collector_service_state"
+                ) as read_service_state:
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as missing_package:
+                        dependencies.inspect_service("linux")
+                    self.assertEqual(
+                        str(missing_package.exception), "driver_failed"
+                    )
+                    service_probe.assert_called_once_with(
+                        platform="linux", home=authority.home
+                    )
+                    read_service_state.assert_not_called()
+
                 for probe_result in (
-                    True,
                     ServiceCommandError(),
                     RuntimeError("PRIVATE_SERVICE_PROBE_FAILURE"),
                 ):
                     with self.subTest(probe=type(probe_result)):
-                        patch_arguments = (
-                            {"return_value": probe_result}
-                            if type(probe_result) is bool
-                            else {"side_effect": probe_result}
-                        )
                         with patch(
                             "openusage_bar.platform_services.service_is_registered",
-                            **patch_arguments,
+                            side_effect=probe_result,
                         ) as service_probe:
                             with self.assertRaisesRegex(
                                 LifecycleEvidenceError, "driver_unavailable"

@@ -1662,10 +1662,62 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             )
         except Exception:
             _fail("driver_unavailable")
-        if registered is not False:
+        if registered is False:
+            service_absence_confirmed = True
+            return NativeServiceState(False, False, None)
+        if registered is not True:
             _fail("driver_unavailable")
-        service_absence_confirmed = True
-        return NativeServiceState(False, False, None)
+        if package_projection is None or profile_projection is None:
+            _driver_fail()
+        try:
+            from openusage_bar.platform_services import (
+                LinuxCollectorServiceState,
+                read_current_user_collector_service_state,
+                systemd_unit,
+            )
+
+            observed = read_current_user_collector_service_state()
+            collector = package_projection.collector
+            api_socket = profile_projection.state_root / "openusage.sock"
+            command = (
+                str(collector),
+                "daemon",
+                "--interval",
+                "300",
+                "--api-transport",
+                "unix",
+                "--api-socket",
+                str(api_socket),
+            )
+            expected_unit = systemd_unit(
+                interval=300,
+                api_socket=str(api_socket),
+                command=str(collector),
+            ).encode("utf-8")
+            expected_argv_nul = ("\0".join(command) + "\0").encode("utf-8")
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _fail("driver_unavailable")
+        if (
+            not isinstance(observed, LinuxCollectorServiceState)
+            or observed.unit_size_bytes != len(expected_unit)
+            or observed.unit_sha256 != hashlib.sha256(expected_unit).hexdigest()
+            or observed.unit_id != "openusage-bar.service"
+            or observed.load_state != "loaded"
+            or observed.active_state != "active"
+            or observed.sub_state != "running"
+            or observed.unit_file_state != "enabled"
+            or observed.fragment_path != profile_projection.task_definition
+            or observed.drop_in_paths != ()
+            or observed.needs_reload
+            or observed.process_uid != os.getuid()
+            or observed.process_start_time_ticks <= 0
+            or observed.process_executable != collector
+            or observed.process_argv_nul != expected_argv_nul
+        ):
+            _fail("driver_unavailable")
+        return NativeServiceState(True, True, command)
 
     def prove_authoritative_path_absence(
         *,

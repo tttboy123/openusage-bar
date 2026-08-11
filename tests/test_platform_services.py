@@ -249,6 +249,1696 @@ class PlatformServicesRenderTests(unittest.TestCase):
 
 
 class PlatformServicesBehaviorTests(unittest.TestCase):
+    def test_linux_service_state_binds_manager_process_and_unit_facts(self):
+        import errno
+        import hashlib
+        import os
+        import socket
+        import stat
+        import struct
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            unit = home / ".config" / "systemd" / "user" / "openusage-bar.service"
+            collector = (
+                home
+                / ".local"
+                / "share"
+                / "usagehub"
+                / "runtime"
+                / "openusage-collector"
+            )
+            socket_path = (
+                home / ".local" / "state" / "openusage-bar" / "openusage.sock"
+            )
+            unit.parent.mkdir(parents=True)
+            collector.parent.mkdir(parents=True)
+            unit_bytes = platform_services.systemd_unit(
+                interval=300,
+                api_socket=str(socket_path),
+                command=str(collector),
+            ).encode("utf-8")
+            unit.write_bytes(unit_bytes)
+            unit.chmod(0o600)
+            collector.write_bytes(b"audited packaged collector")
+            collector.chmod(0o700)
+            collector_metadata = collector.stat()
+            original_collector = collector.with_name(
+                "openusage-collector.original"
+            )
+            foreign_collector_bytes = b"PRIVATE_FOREIGN_COLLECTOR"
+            same_size_foreign_collector_bytes = b"X" * len(
+                b"audited packaged collector"
+            )
+            fake_cmdline = root / "cmdline"
+            argv = (
+                str(collector),
+                "daemon",
+                "--interval",
+                "300",
+                "--api-transport",
+                "unix",
+                "--api-socket",
+                str(socket_path),
+            )
+            argv_nul = ("\0".join(argv) + "\0").encode("utf-8")
+            fake_cmdline.write_bytes(argv_nul)
+            foreign_collector_cmdline = root / "foreign-collector-cmdline"
+            foreign_collector_cmdline.write_bytes(
+                b"/PRIVATE/foreign-collector\0daemon\0"
+            )
+            fake_status = root / "status"
+            process_uid = os.getuid()
+            runtime_fd = 9202
+            systemd_fd = 9203
+            session_env = {
+                "HOME": str(home),
+                "XDG_RUNTIME_DIR": f"/proc/self/fd/{runtime_fd}",
+                "DBUS_SESSION_BUS_ADDRESS": (
+                    f"unix:path=/proc/self/fd/{systemd_fd}/private"
+                ),
+                "LC_ALL": "C",
+                "LANG": "C",
+                "SYSTEMD_COLORS": "0",
+                "PAGER": "cat",
+            }
+            fake_status.write_text(
+                "Name:\topenusage-collector\n"
+                f"Uid:\t{process_uid}\t{process_uid}\t{process_uid}\t{process_uid}\n",
+                encoding="ascii",
+            )
+            peer_pid = 4321
+            fake_process_stat = root / "stat"
+            foreign_parent_process_stat = root / "foreign-parent-stat"
+            process_start_time_ticks = 987654
+            process_stat_fields = ["4312", "(openusage-collector)", "S"] + [
+                "0"
+            ] * 49
+            process_stat_fields[3] = str(peer_pid)
+            process_stat_fields[21] = str(process_start_time_ticks)
+            fake_process_stat.write_text(
+                " ".join(process_stat_fields) + "\n",
+                encoding="ascii",
+            )
+            foreign_parent_fields = list(process_stat_fields)
+            foreign_parent_fields[3] = str(peer_pid + 1)
+            foreign_parent_process_stat.write_text(
+                " ".join(foreign_parent_fields) + "\n",
+                encoding="ascii",
+            )
+            collector_cgroup = root / "collector-cgroup"
+            foreign_collector_cgroup = root / "foreign-collector-cgroup"
+            collector_cgroup.write_text(
+                "0::/user.slice/"
+                f"user-{process_uid}.slice/user@{process_uid}.service/"
+                "app.slice/openusage-bar.service\n",
+                encoding="ascii",
+            )
+            foreign_collector_cgroup.write_text(
+                "0::/user.slice/foreign.service\n",
+                encoding="ascii",
+            )
+            peer_start_time_ticks = 246810
+            peer_status = root / "peer-status"
+            peer_foreign_status = root / "peer-foreign-status"
+            peer_status.write_text(
+                "Name:\tsystemd\n"
+                f"Uid:\t{process_uid}\t{process_uid}\t{process_uid}\t{process_uid}\n",
+                encoding="ascii",
+            )
+            peer_foreign_status.write_text(
+                "Name:\tsystemd\n"
+                f"Uid:\t{process_uid + 1}\t{process_uid + 1}\t"
+                f"{process_uid + 1}\t{process_uid + 1}\n",
+                encoding="ascii",
+            )
+            peer_process_stat = root / "peer-stat"
+            peer_foreign_parent_process_stat = root / "peer-foreign-parent-stat"
+            peer_stat_fields = [str(peer_pid), "(systemd)", "S"] + ["0"] * 49
+            peer_stat_fields[3] = "1"
+            peer_stat_fields[21] = str(peer_start_time_ticks)
+            peer_process_stat.write_text(
+                " ".join(peer_stat_fields) + "\n",
+                encoding="ascii",
+            )
+            peer_foreign_parent_fields = list(peer_stat_fields)
+            peer_foreign_parent_fields[3] = "2"
+            peer_foreign_parent_process_stat.write_text(
+                " ".join(peer_foreign_parent_fields) + "\n",
+                encoding="ascii",
+            )
+            peer_cgroup = root / "peer-cgroup"
+            foreign_peer_cgroup = root / "foreign-peer-cgroup"
+            peer_cgroup.write_text(
+                "0::/user.slice/"
+                f"user-{process_uid}.slice/user@{process_uid}.service/"
+                "init.scope\n",
+                encoding="ascii",
+            )
+            foreign_peer_cgroup.write_text(
+                "0::/user.slice/foreign.service\n",
+                encoding="ascii",
+            )
+            peer_cmdline = root / "peer-cmdline"
+            foreign_peer_cmdline = root / "foreign-peer-cmdline"
+            peer_cmdline.write_bytes(b"/usr/lib/systemd/systemd\0--user\0")
+            foreign_peer_cmdline.write_bytes(b"/usr/lib/systemd/systemd\0")
+            fake_run = root / "run"
+            fake_user = fake_run / "user"
+            fake_runtime = fake_user / str(process_uid)
+            fake_runtime.mkdir(parents=True)
+            fake_run.chmod(0o755)
+            fake_user.chmod(0o755)
+            fake_runtime.chmod(0o700)
+            run_values = list(fake_run.stat())
+            run_values[4] = 0
+            run_metadata = os.stat_result(run_values)
+            user_values = list(fake_user.stat())
+            user_values[4] = 0
+            user_metadata = os.stat_result(user_values)
+            runtime_metadata = fake_runtime.stat()
+            fake_systemd = fake_runtime / "systemd"
+            fake_systemd.mkdir()
+            fake_systemd.chmod(0o700)
+            owned_runtime_marker = fake_runtime / "owned-marker"
+            owned_runtime_marker.write_bytes(b"owned-runtime")
+            original_runtime = fake_user / f"{process_uid}.original"
+            replacement_runtime_marker = fake_runtime / "replacement-marker"
+            systemd_metadata = fake_systemd.stat()
+            private_metadata = os.stat_result(
+                (
+                    stat.S_IFSOCK | 0o600,
+                    systemd_metadata.st_ino + 1000,
+                    systemd_metadata.st_dev,
+                    1,
+                    process_uid,
+                    systemd_metadata.st_gid,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            )
+            drifted_private_metadata = os.stat_result(
+                (
+                    stat.S_IFSOCK | 0o600,
+                    systemd_metadata.st_ino + 1001,
+                    systemd_metadata.st_dev,
+                    1,
+                    process_uid,
+                    systemd_metadata.st_gid,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            )
+            fake_system_root = root / "system-root"
+            fake_system_bin = fake_system_root / "usr" / "bin"
+            fake_system_bin.mkdir(parents=True)
+            fake_systemctl = fake_system_bin / "systemctl"
+            fake_systemctl.write_bytes(b"audited systemctl executable")
+            fake_system_root.chmod(0o755)
+            fake_system_bin.parent.chmod(0o755)
+            fake_system_bin.chmod(0o755)
+            fake_systemctl.chmod(0o755)
+
+            def root_owned(metadata):
+                values = list(metadata)
+                values[4] = 0
+                return os.stat_result(values)
+
+            system_root_metadata = root_owned(fake_system_root.stat())
+            system_usr_metadata = root_owned(fake_system_bin.parent.stat())
+            system_bin_metadata = root_owned(fake_system_bin.stat())
+            systemctl_metadata = root_owned(fake_systemctl.stat())
+            fake_systemd_executable = root / "systemd-executable"
+            fake_systemd_executable.write_bytes(b"audited systemd user manager")
+            fake_systemd_executable.chmod(0o755)
+            systemd_executable_metadata = root_owned(
+                fake_systemd_executable.stat()
+            )
+            run_fd, user_fd = 9200, 9201
+            system_root_fd, system_usr_fd, system_bin_fd, systemctl_fd = (
+                9600,
+                9601,
+                9602,
+                9603,
+            )
+            unit_metadata = unit.stat()
+            collector_metadata = collector.stat()
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            happy_manager_stdout = (
+                "MainPID=4312\n"
+                "DropInPaths=\n"
+                "Id=openusage-bar.service\n"
+                f"FragmentPath={unit}\n"
+                "ActiveState=active\n"
+                "LoadState=loaded\n"
+                "NeedDaemonReload=no\n"
+                "UnitFileState=enabled\n"
+                "SubState=running\n"
+            ).encode("utf-8")
+            manager_stdout = happy_manager_stdout
+            manager_command = [
+                "/usr/bin/systemctl",
+                "--user",
+                "show",
+                "openusage-bar.service",
+                "--property=Id",
+                "--property=LoadState",
+                "--property=ActiveState",
+                "--property=SubState",
+                "--property=UnitFileState",
+                "--property=FragmentPath",
+                "--property=DropInPaths",
+                "--property=NeedDaemonReload",
+                "--property=MainPID",
+                "--no-pager",
+            ]
+            events: list[str] = []
+            systemctl_events: list[str] = []
+            reject_systemctl_bin = False
+            private_missing = False
+            foreign_peer_process_uid = False
+            manager_provenance_case = "safe"
+            peer_cmdline_case = "safe"
+            collector_ownership_case = "safe"
+            swap_collector_cmdline_on_second_manager = False
+            collector_cmdline_is_foreign = False
+            rewrite_collector_on_second_manager = False
+            collector_was_rewritten = False
+            swap_collector_on_second_manager = False
+            collector_executable_swapped = False
+            foreign_collector_identity = None
+            drift_collector_identity_on_second_manager = False
+            collector_identity_is_foreign = False
+            peer_open_flags: list[int] = []
+            peer_connect_paths: list[str] = []
+            queued_private_facts: list[os.stat_result] = []
+            queued_peer_credentials: list[bytes] = []
+            runtime_rebound = False
+            test_case = self
+
+            class PeerSocket:
+                def settimeout(self, timeout):
+                    test_case.assertEqual(timeout, 1.0)
+                    events.append("peer_timeout")
+
+                def connect(self, path):
+                    test_case.assertEqual(
+                        path,
+                        f"/proc/self/fd/{systemd_fd}/private",
+                    )
+                    peer_connect_paths.append(path)
+                    events.append("peer_connect")
+
+                def getsockopt(self, level, option, length):
+                    test_case.assertEqual((level, option, length), (1, 17, 12))
+                    events.append("peer_credentials")
+                    if queued_peer_credentials:
+                        return queued_peer_credentials.pop(0)
+                    return struct.pack("3i", peer_pid, process_uid, os.getgid())
+
+                def close(self):
+                    events.append("peer_close")
+
+            def open_peer_socket(family, socket_type):
+                self.assertEqual((family, socket_type), (socket.AF_UNIX, socket.SOCK_STREAM))
+                events.append("peer_socket")
+                return PeerSocket()
+
+            def run_manager(command, **kwargs):
+                nonlocal runtime_rebound
+                nonlocal collector_executable_swapped
+                nonlocal foreign_collector_identity
+                nonlocal collector_cmdline_is_foreign
+                nonlocal collector_was_rewritten
+                nonlocal collector_identity_is_foreign
+                if not runtime_rebound:
+                    fake_runtime.rename(original_runtime)
+                    fake_runtime.mkdir(mode=0o700)
+                    replacement_runtime_marker.write_bytes(b"replacement-runtime")
+                    runtime_rebound = True
+                self.assertIn("peer_credentials", events)
+                self.assertTrue(
+                    {
+                        "peer_status",
+                        "peer_stat",
+                        "peer_exe",
+                        "peer_exe_stat",
+                        "peer_public_exe_stat",
+                    }.issubset(events)
+                )
+                self.assertEqual(command, manager_command)
+                self.assertEqual(
+                    kwargs,
+                    {
+                        "shell": False,
+                        "stdin": platform_services.subprocess.DEVNULL,
+                        "stdout": platform_services.subprocess.PIPE,
+                        "stderr": platform_services.subprocess.DEVNULL,
+                        "timeout": 5,
+                        "stdout_limit": 64 * 1024,
+                        "stderr_limit": 0,
+                        "check": False,
+                        "env": session_env,
+                        "pass_fds": (runtime_fd, systemd_fd),
+                    },
+                )
+                if "manager" in events:
+                    self.assertTrue(
+                        {
+                            "proc_exe",
+                            "proc_exe_stat",
+                            "proc_cmdline",
+                            "proc_status",
+                            "proc_stat",
+                        }.issubset(events)
+                    )
+                    if swap_collector_on_second_manager:
+                        collector.rename(original_collector)
+                        collector.write_bytes(foreign_collector_bytes)
+                        collector.chmod(0o700)
+                        foreign_metadata = collector.stat()
+                        foreign_collector_identity = (
+                            foreign_metadata.st_dev,
+                            foreign_metadata.st_ino,
+                        )
+                        collector_executable_swapped = True
+                    if swap_collector_cmdline_on_second_manager:
+                        collector_cmdline_is_foreign = True
+                    if rewrite_collector_on_second_manager:
+                        with collector.open("r+b", buffering=0) as output:
+                            output.write(same_size_foreign_collector_bytes)
+                            os.fsync(output.fileno())
+                        collector_was_rewritten = True
+                    if drift_collector_identity_on_second_manager:
+                        collector_identity_is_foreign = True
+                events.append("manager")
+                return platform_services.subprocess.CompletedProcess(
+                    command, 0, stdout=manager_stdout, stderr=b""
+                )
+
+            real_open = os.open
+            real_stat = os.stat
+            real_readlink = os.readlink
+            real_fstat = os.fstat
+            real_close = os.close
+
+            def open_fact(path, flags, mode=0o777, *, dir_fd=None):
+                if os.fspath(path) == "/" and dir_fd is None:
+                    systemctl_events.append("root")
+                    return system_root_fd
+                if os.fspath(path) == "usr" and dir_fd == system_root_fd:
+                    systemctl_events.append("usr")
+                    return system_usr_fd
+                if os.fspath(path) == "bin" and dir_fd == system_usr_fd:
+                    systemctl_events.append("bin")
+                    if reject_systemctl_bin:
+                        raise OSError(errno.ELOOP, "PRIVATE_SYSTEMCTL_BIN_SYMLINK")
+                    return system_bin_fd
+                if os.fspath(path) == "systemctl" and dir_fd == system_bin_fd:
+                    systemctl_events.append("systemctl")
+                    return systemctl_fd
+                if os.fspath(path) == "/run" and dir_fd is None:
+                    return run_fd
+                if os.fspath(path) == "user" and dir_fd == run_fd:
+                    return user_fd
+                if os.fspath(path) == str(process_uid) and dir_fd == user_fd:
+                    return runtime_fd
+                if os.fspath(path) == "systemd" and dir_fd == runtime_fd:
+                    peer_open_flags.append(flags)
+                    events.append("systemd_open")
+                    return systemd_fd
+                process_fact = {
+                    "/proc/4312/cmdline": (
+                        "proc_cmdline",
+                        foreign_collector_cmdline
+                        if collector_cmdline_is_foreign
+                        else fake_cmdline,
+                    ),
+                    "/proc/4312/status": ("proc_status", fake_status),
+                    "/proc/4312/stat": (
+                        "proc_stat",
+                        foreign_parent_process_stat
+                        if collector_ownership_case == "wrong_ppid"
+                        or collector_identity_is_foreign
+                        else fake_process_stat,
+                    ),
+                    "/proc/4312/cgroup": (
+                        "proc_cgroup",
+                        foreign_collector_cgroup
+                        if collector_ownership_case == "foreign_cgroup"
+                        else collector_cgroup,
+                    ),
+                    f"/proc/{peer_pid}/status": (
+                        "peer_status",
+                        peer_foreign_status
+                        if foreign_peer_process_uid
+                        else peer_status,
+                    ),
+                    f"/proc/{peer_pid}/stat": (
+                        "peer_stat",
+                        peer_foreign_parent_process_stat
+                        if manager_provenance_case == "wrong_ppid"
+                        else peer_process_stat,
+                    ),
+                    f"/proc/{peer_pid}/cgroup": (
+                        "peer_cgroup",
+                        foreign_peer_cgroup
+                        if manager_provenance_case == "foreign_cgroup"
+                        else peer_cgroup,
+                    ),
+                    f"/proc/{peer_pid}/cmdline": (
+                        "peer_cmdline",
+                        foreign_peer_cmdline
+                        if peer_cmdline_case == "missing_user"
+                        else peer_cmdline,
+                    ),
+                }.get(os.fspath(path))
+                if process_fact is not None:
+                    event, source = process_fact
+                    events.append(event)
+                    return real_open(source, flags)
+                if dir_fd is None:
+                    return real_open(path, flags, mode)
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            def stat_fact(path, *args, **kwargs):
+                if os.fspath(path) == "bus":
+                    raise AssertionError("session bus must not be probed")
+                if os.fspath(path) == "/proc/4312/exe":
+                    events.append("proc_exe_stat")
+                    if rewrite_collector_on_second_manager:
+                        return real_stat(collector)
+                    return collector_metadata
+                if os.fspath(path) == f"/proc/{peer_pid}/exe":
+                    events.append("peer_exe_stat")
+                    return systemd_executable_metadata
+                if os.fspath(path) == "/usr/lib/systemd/systemd":
+                    events.append("peer_public_exe_stat")
+                    return systemd_executable_metadata
+                if (
+                    os.fspath(path) == "systemctl"
+                    and kwargs.get("dir_fd") == system_bin_fd
+                    and kwargs.get("follow_symlinks") is False
+                ):
+                    return systemctl_metadata
+                if (
+                    os.fspath(path) == "private"
+                    and kwargs.get("dir_fd") == systemd_fd
+                    and kwargs.get("follow_symlinks") is False
+                ):
+                    events.append("private_stat")
+                    if private_missing:
+                        raise FileNotFoundError("PRIVATE_SYSTEMD_SOCKET_MISSING")
+                    if queued_private_facts:
+                        return queued_private_facts.pop(0)
+                    return private_metadata
+                if (
+                    os.fspath(path) == "systemd"
+                    and kwargs.get("dir_fd") == runtime_fd
+                    and kwargs.get("follow_symlinks") is False
+                ):
+                    return systemd_metadata
+                return real_stat(path, *args, **kwargs)
+
+            def fstat_fact(descriptor):
+                return {
+                    run_fd: run_metadata,
+                    user_fd: user_metadata,
+                    runtime_fd: runtime_metadata,
+                    systemd_fd: systemd_metadata,
+                    system_root_fd: system_root_metadata,
+                    system_usr_fd: system_usr_metadata,
+                    system_bin_fd: system_bin_metadata,
+                    systemctl_fd: systemctl_metadata,
+                }.get(descriptor) or real_fstat(descriptor)
+
+            def close_fact(descriptor):
+                if descriptor in {run_fd, user_fd, runtime_fd, systemd_fd}:
+                    if descriptor == runtime_fd:
+                        events.append("runtime_close")
+                    if descriptor == systemd_fd:
+                        events.append("systemd_close")
+                    return None
+                if descriptor in {
+                    system_root_fd,
+                    system_usr_fd,
+                    system_bin_fd,
+                    systemctl_fd,
+                }:
+                    systemctl_events.append(f"close:{descriptor}")
+                    return None
+                return real_close(descriptor)
+
+            def readlink_fact(path, *args, **kwargs):
+                if os.fspath(path) == "/proc/4312/exe":
+                    events.append("proc_exe")
+                    return str(collector)
+                if os.fspath(path) == f"/proc/{peer_pid}/exe":
+                    events.append("peer_exe")
+                    return "/usr/lib/systemd/systemd"
+                return real_readlink(path, *args, **kwargs)
+
+            with patch.object(platform_services.sys, "platform", "linux"), patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch.object(
+                platform_services.shutil, "which", return_value="/usr/bin/systemctl"
+            ) as systemctl_which, patch.dict(
+                os.environ,
+                {
+                    "HOME": "PRIVATE_FOREIGN_HOME",
+                    "XDG_RUNTIME_DIR": "/PRIVATE/foreign-runtime",
+                    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/PRIVATE/foreign-bus",
+                },
+                clear=True,
+            ), patch.object(
+                platform_services.subprocess,
+                "run",
+                side_effect=AssertionError("unbounded manager capture is forbidden"),
+            ) as unbounded, patch(
+                "openusage_bar.bounded_process.run_bounded",
+                side_effect=run_manager,
+            ) as bounded, patch.object(
+                socket, "SO_PEERCRED", 17, create=True
+            ), patch.object(
+                socket, "socket", side_effect=open_peer_socket
+            ) as peer_socket_factory, patch.object(
+                platform_services.os, "open", side_effect=open_fact
+            ), patch.object(
+                platform_services.os, "stat", side_effect=stat_fact
+            ), patch.object(
+                platform_services.os, "fstat", side_effect=fstat_fact
+            ), patch.object(
+                platform_services.os, "close", side_effect=close_fact
+            ), patch.object(
+                platform_services.os, "readlink", side_effect=readlink_fact
+            ):
+                observed = platform_services.read_current_user_collector_service_state()
+                happy_events = tuple(events)
+                events.clear()
+                observed_headless = (
+                    platform_services.read_current_user_collector_service_state()
+                )
+                headless_events = tuple(events)
+                events.clear()
+                ownership_failures = []
+                for ownership_case in ("wrong_ppid", "foreign_cgroup"):
+                    collector_ownership_case = ownership_case
+                    with self.assertRaises(
+                        platform_services.ServiceCommandError
+                    ) as ownership_failure:
+                        platform_services.read_current_user_collector_service_state()
+                    ownership_failures.append(
+                        (
+                            ownership_case,
+                            ownership_failure.exception,
+                            tuple(events),
+                        )
+                    )
+                    events.clear()
+                collector_ownership_case = "safe"
+                manager_stdout = manager_stdout.replace(
+                    b"DropInPaths=\n",
+                    b"DropInPaths=/PRIVATE/drop-in.conf\n",
+                )
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as hostile_drop_in:
+                    platform_services.read_current_user_collector_service_state()
+                hostile_events = tuple(events)
+                events.clear()
+                manager_stdout = happy_manager_stdout
+                queued_private_facts.extend(
+                    [private_metadata, drifted_private_metadata]
+                )
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as drifted_private:
+                    platform_services.read_current_user_collector_service_state()
+                drifted_private_events = tuple(events)
+                events.clear()
+                queued_peer_credentials.extend(
+                    [
+                        struct.pack("3i", peer_pid, process_uid, os.getgid()),
+                        struct.pack("3i", peer_pid + 1, process_uid, os.getgid()),
+                    ]
+                )
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as drifted_peer_credentials:
+                    platform_services.read_current_user_collector_service_state()
+                drifted_peer_events = tuple(events)
+                events.clear()
+                drift_collector_identity_on_second_manager = True
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as drifted_collector_identity:
+                    platform_services.read_current_user_collector_service_state()
+                drifted_collector_identity_events = tuple(events)
+                events.clear()
+                drift_collector_identity_on_second_manager = False
+                collector_identity_is_foreign = False
+                swap_collector_cmdline_on_second_manager = True
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as drifted_collector_cmdline:
+                    platform_services.read_current_user_collector_service_state()
+                drifted_collector_cmdline_events = tuple(events)
+                events.clear()
+                swap_collector_cmdline_on_second_manager = False
+                collector_cmdline_is_foreign = False
+                rewrite_collector_on_second_manager = True
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as rewritten_collector:
+                    platform_services.read_current_user_collector_service_state()
+                rewritten_collector_events = tuple(events)
+                events.clear()
+                rewrite_collector_on_second_manager = False
+                self.assertTrue(collector_was_rewritten)
+                self.assertEqual(
+                    (collector.stat().st_dev, collector.stat().st_ino),
+                    (collector_metadata.st_dev, collector_metadata.st_ino),
+                )
+                self.assertEqual(
+                    collector.stat().st_size, collector_metadata.st_size
+                )
+                self.assertEqual(
+                    collector.read_bytes(), same_size_foreign_collector_bytes
+                )
+                with collector.open("r+b", buffering=0) as output:
+                    output.write(b"audited packaged collector")
+                    os.fsync(output.fileno())
+                collector_metadata = real_stat(collector)
+                manager_provenance_failures = []
+                for provenance_case in ("wrong_ppid", "foreign_cgroup"):
+                    manager_provenance_case = provenance_case
+                    manager_calls_before_provenance = bounded.call_count
+                    with self.assertRaises(
+                        platform_services.ServiceCommandError
+                    ) as provenance_failure:
+                        platform_services.read_current_user_collector_service_state()
+                    manager_provenance_failures.append(
+                        (
+                            provenance_case,
+                            provenance_failure.exception,
+                            tuple(events),
+                            bounded.call_count
+                            - manager_calls_before_provenance,
+                        )
+                    )
+                    events.clear()
+                manager_provenance_case = "safe"
+                swap_collector_on_second_manager = True
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as swapped_collector:
+                    platform_services.read_current_user_collector_service_state()
+                swapped_collector_events = tuple(events)
+                events.clear()
+                swap_collector_on_second_manager = False
+                foreign_peer_process_uid = True
+                manager_calls_before_foreign_peer = bounded.call_count
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as foreign_peer:
+                    platform_services.read_current_user_collector_service_state()
+                foreign_peer_events = tuple(events)
+                events.clear()
+                foreign_peer_process_uid = False
+                peer_cmdline_case = "missing_user"
+                manager_calls_before_foreign_peer_cmdline = bounded.call_count
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as foreign_peer_cmdline_error:
+                    platform_services.read_current_user_collector_service_state()
+                foreign_peer_cmdline_events = tuple(events)
+                events.clear()
+                peer_cmdline_case = "safe"
+                systemctl_events.clear()
+                reject_systemctl_bin = True
+                manager_calls_before_unsafe_systemctl = bounded.call_count
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as unsafe_systemctl:
+                    platform_services.read_current_user_collector_service_state()
+                unsafe_systemctl_events = tuple(systemctl_events)
+                events.clear()
+                systemctl_events.clear()
+                reject_systemctl_bin = False
+                private_missing = True
+                manager_calls_before_missing_private = bounded.call_count
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as missing_private:
+                    platform_services.read_current_user_collector_service_state()
+                missing_private_events = tuple(events)
+
+            self.assertEqual(str(hostile_drop_in.exception), "service activation command failed")
+            self.assertNotIn("PRIVATE", str(hostile_drop_in.exception))
+            self.assertEqual(
+                str(drifted_private.exception), "service activation command failed"
+            )
+            self.assertNotIn("PRIVATE", str(drifted_private.exception))
+            self.assertEqual(
+                str(drifted_peer_credentials.exception),
+                "service activation command failed",
+            )
+            self.assertNotIn("PRIVATE", str(drifted_peer_credentials.exception))
+            self.assertEqual(
+                str(drifted_collector_identity.exception),
+                "service activation command failed",
+            )
+            self.assertNotIn("PRIVATE", str(drifted_collector_identity.exception))
+            self.assertEqual(
+                str(drifted_collector_cmdline.exception),
+                "service activation command failed",
+            )
+            self.assertNotIn("PRIVATE", str(drifted_collector_cmdline.exception))
+            self.assertEqual(
+                str(rewritten_collector.exception),
+                "service activation command failed",
+            )
+            self.assertNotIn("PRIVATE", str(rewritten_collector.exception))
+            self.assertEqual(
+                str(swapped_collector.exception),
+                "service activation command failed",
+            )
+            self.assertNotIn("PRIVATE", str(swapped_collector.exception))
+            self.assertEqual(str(foreign_peer.exception), "service activation command failed")
+            self.assertNotIn("PRIVATE", str(foreign_peer.exception))
+            self.assertEqual(
+                str(foreign_peer_cmdline_error.exception),
+                "service activation command failed",
+            )
+            self.assertNotIn("PRIVATE", str(foreign_peer_cmdline_error.exception))
+            self.assertEqual(str(unsafe_systemctl.exception), "service activation command failed")
+            self.assertNotIn("PRIVATE", str(unsafe_systemctl.exception))
+            self.assertEqual(str(missing_private.exception), "service activation command failed")
+            self.assertNotIn("PRIVATE", str(missing_private.exception))
+            self.assertEqual(systemctl_which.call_count, 17)
+            self.assertTrue(
+                all(call.args == ("systemctl",) for call in systemctl_which.call_args_list)
+            )
+            unbounded.assert_not_called()
+            self.assertEqual(
+                bounded.call_count,
+                manager_calls_before_foreign_peer,
+            )
+            self.assertEqual(
+                bounded.call_count,
+                manager_calls_before_unsafe_systemctl,
+            )
+            self.assertEqual(
+                bounded.call_count,
+                manager_calls_before_foreign_peer_cmdline,
+            )
+            self.assertEqual(
+                bounded.call_count,
+                manager_calls_before_missing_private,
+            )
+            self.assertEqual(happy_events.count("manager"), 2)
+            self.assertEqual(happy_events.count("proc_cgroup"), 2)
+            self.assertIn("peer_credentials", happy_events)
+            for peer_event in (
+                "peer_status",
+                "peer_stat",
+                "peer_cgroup",
+                "peer_exe",
+                "peer_exe_stat",
+                "peer_public_exe_stat",
+                "peer_cmdline",
+            ):
+                self.assertEqual(happy_events.count(peer_event), 2)
+            self.assertLess(
+                happy_events.index("peer_credentials"),
+                happy_events.index("manager"),
+            )
+            self.assertGreater(
+                happy_events.index("systemd_close"),
+                len(happy_events) - 1 - happy_events[::-1].index("manager"),
+            )
+            self.assertGreater(
+                happy_events.index("runtime_close"),
+                len(happy_events) - 1 - happy_events[::-1].index("manager"),
+            )
+            self.assertEqual(hostile_events.count("manager"), 1)
+            self.assertIn("peer_credentials", hostile_events)
+            self.assertIn("systemd_close", hostile_events)
+            self.assertIn("runtime_close", hostile_events)
+            for case, post_transaction_events in (
+                ("private", drifted_private_events),
+                ("peer", drifted_peer_events),
+                ("collector_identity", drifted_collector_identity_events),
+                ("collector_cmdline", drifted_collector_cmdline_events),
+                ("collector_content", rewritten_collector_events),
+                ("collector_path", swapped_collector_events),
+            ):
+                with self.subTest(post_transaction_case=case):
+                    self.assertEqual(
+                        post_transaction_events.count("manager"), 2
+                    )
+                    self.assertIn("peer_close", post_transaction_events)
+                    self.assertIn("systemd_close", post_transaction_events)
+                    self.assertIn("runtime_close", post_transaction_events)
+            self.assertIn("peer_status", foreign_peer_events)
+            self.assertNotIn("manager", foreign_peer_events)
+            self.assertIn("peer_close", foreign_peer_events)
+            self.assertIn("systemd_close", foreign_peer_events)
+            self.assertIn("runtime_close", foreign_peer_events)
+            for (
+                provenance_case,
+                provenance_error,
+                provenance_events,
+                manager_calls_during_provenance,
+            ) in manager_provenance_failures:
+                with self.subTest(manager_provenance=provenance_case):
+                    self.assertEqual(
+                        str(provenance_error),
+                        "service activation command failed",
+                    )
+                    self.assertNotIn("PRIVATE", str(provenance_error))
+                    self.assertEqual(manager_calls_during_provenance, 0)
+                    self.assertIn("peer_stat", provenance_events)
+                    if provenance_case == "foreign_cgroup":
+                        self.assertIn("peer_cgroup", provenance_events)
+                    self.assertNotIn("manager", provenance_events)
+                    self.assertIn("peer_close", provenance_events)
+                    self.assertIn("systemd_close", provenance_events)
+                    self.assertIn("runtime_close", provenance_events)
+            self.assertIn("peer_cmdline", foreign_peer_cmdline_events)
+            self.assertNotIn("manager", foreign_peer_cmdline_events)
+            self.assertIn("peer_close", foreign_peer_cmdline_events)
+            self.assertIn("systemd_close", foreign_peer_cmdline_events)
+            self.assertIn("runtime_close", foreign_peer_cmdline_events)
+            self.assertEqual(
+                unsafe_systemctl_events,
+                (
+                    "root",
+                    "usr",
+                    "bin",
+                    f"close:{system_usr_fd}",
+                    f"close:{system_root_fd}",
+                ),
+            )
+            self.assertIn("private_stat", missing_private_events)
+            self.assertNotIn("peer_socket", missing_private_events)
+            self.assertNotIn("manager", missing_private_events)
+            self.assertIn("systemd_close", missing_private_events)
+            self.assertIn("runtime_close", missing_private_events)
+            self.assertTrue(peer_open_flags)
+            self.assertTrue(
+                all(
+                    flags & getattr(os, "O_DIRECTORY", 0)
+                    and flags & getattr(os, "O_NOFOLLOW", 0)
+                    for flags in peer_open_flags
+                )
+            )
+            self.assertEqual(peer_socket_factory.call_count, 16)
+            self.assertEqual(observed_headless, observed)
+            self.assertEqual(headless_events.count("manager"), 2)
+            self.assertIn("peer_credentials", headless_events)
+            self.assertEqual(headless_events.count("proc_cgroup"), 2)
+            for ownership_case, ownership_error, ownership_events in ownership_failures:
+                self.assertEqual(
+                    str(ownership_error), "service activation command failed"
+                )
+                self.assertNotIn("PRIVATE", str(ownership_error))
+                self.assertIn("manager", ownership_events)
+                self.assertIn("proc_stat", ownership_events)
+                if ownership_case == "foreign_cgroup":
+                    self.assertIn("proc_cgroup", ownership_events)
+            self.assertTrue(peer_connect_paths)
+            self.assertTrue(
+                all(
+                    path == f"/proc/self/fd/{systemd_fd}/private"
+                    for path in peer_connect_paths
+                )
+            )
+            self.assertTrue(runtime_rebound)
+            self.assertTrue(collector_executable_swapped)
+            self.assertEqual(
+                (
+                    original_collector.stat().st_dev,
+                    original_collector.stat().st_ino,
+                ),
+                (collector_metadata.st_dev, collector_metadata.st_ino),
+            )
+            self.assertEqual(
+                original_collector.read_bytes(), b"audited packaged collector"
+            )
+            self.assertEqual(
+                (collector.stat().st_dev, collector.stat().st_ino),
+                foreign_collector_identity,
+            )
+            self.assertEqual(collector.read_bytes(), foreign_collector_bytes)
+            self.assertEqual(
+                (original_runtime / owned_runtime_marker.name).read_bytes(),
+                b"owned-runtime",
+            )
+            self.assertEqual(
+                replacement_runtime_marker.read_bytes(),
+                b"replacement-runtime",
+            )
+            self.assertEqual(
+                observed,
+                platform_services.LinuxCollectorServiceState(
+                    unit_file_id=f"{unit_metadata.st_dev}:{unit_metadata.st_ino}",
+                    unit_size_bytes=len(unit_bytes),
+                    unit_sha256=hashlib.sha256(unit_bytes).hexdigest(),
+                    unit_id="openusage-bar.service",
+                    load_state="loaded",
+                    active_state="active",
+                    sub_state="running",
+                    unit_file_state="enabled",
+                    fragment_path=unit,
+                    drop_in_paths=(),
+                    needs_reload=False,
+                    main_pid=4312,
+                    process_uid=process_uid,
+                    process_start_time_ticks=process_start_time_ticks,
+                    process_executable=collector,
+                    process_executable_file_id=(
+                        f"{collector_metadata.st_dev}:{collector_metadata.st_ino}"
+                    ),
+                    process_argv_nul=argv_nul,
+                ),
+            )
+
+    def test_linux_service_state_caps_manager_output_before_accumulation(self):
+        import os
+        import socket
+        import stat
+        import struct
+
+        from openusage_bar.bounded_process import BoundedProcessError
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            unit = home / ".config" / "systemd" / "user" / "openusage-bar.service"
+            unit.parent.mkdir(parents=True)
+            unit_bytes = b"[Unit]\nDescription=PRIVATE_OUTPUT_LIMIT_MARKER\n"
+            unit.write_bytes(unit_bytes)
+            unit.chmod(0o600)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            uid = os.getuid()
+            peer_pid = 4322
+            peer_status = root / "peer-status"
+            peer_status.write_text(
+                "Name:\tsystemd\n"
+                f"Uid:\t{uid}\t{uid}\t{uid}\t{uid}\n",
+                encoding="ascii",
+            )
+            peer_process_stat = root / "peer-stat"
+            peer_stat_fields = [str(peer_pid), "(systemd)", "S"] + ["0"] * 49
+            peer_stat_fields[3] = "1"
+            peer_stat_fields[21] = "135790"
+            peer_process_stat.write_text(
+                " ".join(peer_stat_fields) + "\n",
+                encoding="ascii",
+            )
+            peer_cmdline = root / "peer-cmdline"
+            peer_cmdline.write_bytes(b"/usr/lib/systemd/systemd\0--user\0")
+            peer_cgroup = root / "peer-cgroup"
+            peer_cgroup.write_text(
+                "0::/user.slice/"
+                f"user-{uid}.slice/user@{uid}.service/init.scope\n",
+                encoding="ascii",
+            )
+            collector_pid = 4312
+            collector_process_stat = root / "collector-stat"
+            collector_stat_fields = [
+                str(collector_pid),
+                "(openusage-collector)",
+                "S",
+            ] + ["0"] * 49
+            collector_stat_fields[3] = str(peer_pid)
+            collector_stat_fields[21] = "97531"
+            collector_process_stat.write_text(
+                " ".join(collector_stat_fields) + "\n",
+                encoding="ascii",
+            )
+            collector_cgroup = root / "collector-cgroup"
+            collector_cgroup.write_text(
+                "0::/user.slice/"
+                f"user-{uid}.slice/user@{uid}.service/"
+                "app.slice/openusage-bar.service\n",
+                encoding="ascii",
+            )
+            fake_run = root / "run"
+            fake_user = fake_run / "user"
+            fake_runtime = fake_user / str(uid)
+            fake_runtime.mkdir(parents=True)
+            fake_run.chmod(0o755)
+            fake_user.chmod(0o755)
+            fake_runtime.chmod(0o700)
+            run_values = list(fake_run.stat())
+            run_values[4] = 0
+            run_metadata = os.stat_result(run_values)
+            user_values = list(fake_user.stat())
+            user_values[4] = 0
+            user_metadata = os.stat_result(user_values)
+            runtime_metadata = fake_runtime.stat()
+            fake_systemd = fake_runtime / "systemd"
+            fake_systemd.mkdir()
+            fake_systemd.chmod(0o700)
+            systemd_metadata = fake_systemd.stat()
+            private_metadata = os.stat_result(
+                (
+                    stat.S_IFSOCK | 0o600,
+                    systemd_metadata.st_ino + 1000,
+                    systemd_metadata.st_dev,
+                    1,
+                    uid,
+                    systemd_metadata.st_gid,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            )
+            fake_system_root = root / "system-root"
+            fake_system_bin = fake_system_root / "usr" / "bin"
+            fake_system_bin.mkdir(parents=True)
+            fake_systemctl = fake_system_bin / "systemctl"
+            fake_systemctl.write_bytes(b"audited systemctl executable")
+            fake_system_root.chmod(0o755)
+            fake_system_bin.parent.chmod(0o755)
+            fake_system_bin.chmod(0o755)
+            fake_systemctl.chmod(0o755)
+
+            def root_owned(metadata):
+                values = list(metadata)
+                values[4] = 0
+                return os.stat_result(values)
+
+            system_root_metadata = root_owned(fake_system_root.stat())
+            system_usr_metadata = root_owned(fake_system_bin.parent.stat())
+            system_bin_metadata = root_owned(fake_system_bin.stat())
+            systemctl_metadata = root_owned(fake_systemctl.stat())
+            fake_systemd_executable = root / "systemd-executable"
+            fake_systemd_executable.write_bytes(b"audited systemd user manager")
+            fake_systemd_executable.chmod(0o755)
+            systemd_executable_metadata = root_owned(
+                fake_systemd_executable.stat()
+            )
+            bus_metadata = os.stat_result(
+                (
+                    stat.S_IFSOCK | 0o666,
+                    runtime_metadata.st_ino + 1000,
+                    runtime_metadata.st_dev,
+                    1,
+                    uid,
+                    runtime_metadata.st_gid,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            )
+            run_fd, user_fd, runtime_fd = 9300, 9301, 9302
+            systemd_fd = 9303
+            system_root_fd, system_usr_fd, system_bin_fd, systemctl_fd = (
+                9700,
+                9701,
+                9702,
+                9703,
+            )
+            real_open = os.open
+            real_fstat = os.fstat
+            real_stat = os.stat
+            real_readlink = os.readlink
+            real_close = os.close
+
+            class PeerSocket:
+                def settimeout(self, timeout):
+                    test_case.assertEqual(timeout, 1.0)
+
+                def connect(self, path):
+                    test_case.assertEqual(
+                        path,
+                        f"/proc/self/fd/{systemd_fd}/private",
+                    )
+
+                def getsockopt(self, level, option, length):
+                    test_case.assertEqual((level, option, length), (1, 17, 12))
+                    return struct.pack("3i", peer_pid, uid, os.getgid())
+
+                def close(self):
+                    return None
+
+            test_case = self
+
+            def open_peer_socket(family, socket_type):
+                test_case.assertEqual(
+                    (family, socket_type),
+                    (socket.AF_UNIX, socket.SOCK_STREAM),
+                )
+                return PeerSocket()
+
+            def open_session(path, flags, mode=0o777, *, dir_fd=None):
+                if os.fspath(path) == "/" and dir_fd is None:
+                    return system_root_fd
+                if os.fspath(path) == "usr" and dir_fd == system_root_fd:
+                    return system_usr_fd
+                if os.fspath(path) == "bin" and dir_fd == system_usr_fd:
+                    return system_bin_fd
+                if os.fspath(path) == "systemctl" and dir_fd == system_bin_fd:
+                    return systemctl_fd
+                if os.fspath(path) == "/run" and dir_fd is None:
+                    return run_fd
+                if os.fspath(path) == "user" and dir_fd == run_fd:
+                    return user_fd
+                if os.fspath(path) == str(uid) and dir_fd == user_fd:
+                    return runtime_fd
+                if os.fspath(path) == "systemd" and dir_fd == runtime_fd:
+                    return systemd_fd
+                process_fact = {
+                    f"/proc/{peer_pid}/status": peer_status,
+                    f"/proc/{peer_pid}/stat": peer_process_stat,
+                    f"/proc/{peer_pid}/cmdline": peer_cmdline,
+                    f"/proc/{peer_pid}/cgroup": peer_cgroup,
+                    f"/proc/{collector_pid}/stat": collector_process_stat,
+                    f"/proc/{collector_pid}/cgroup": collector_cgroup,
+                }.get(os.fspath(path))
+                if process_fact is not None:
+                    return real_open(process_fact, flags)
+                if dir_fd is None:
+                    return real_open(path, flags, mode)
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            def fstat_session(descriptor):
+                return {
+                    run_fd: run_metadata,
+                    user_fd: user_metadata,
+                    runtime_fd: runtime_metadata,
+                    systemd_fd: systemd_metadata,
+                    system_root_fd: system_root_metadata,
+                    system_usr_fd: system_usr_metadata,
+                    system_bin_fd: system_bin_metadata,
+                    systemctl_fd: systemctl_metadata,
+                }.get(descriptor) or real_fstat(descriptor)
+
+            def close_session(descriptor):
+                if descriptor in {
+                    run_fd,
+                    user_fd,
+                    runtime_fd,
+                    systemd_fd,
+                    system_root_fd,
+                    system_usr_fd,
+                    system_bin_fd,
+                    systemctl_fd,
+                }:
+                    return None
+                return real_close(descriptor)
+
+            def stat_session(path, *args, **kwargs):
+                if (
+                    os.fspath(path) == "systemctl"
+                    and kwargs.get("dir_fd") == system_bin_fd
+                    and kwargs.get("follow_symlinks") is False
+                ):
+                    return systemctl_metadata
+                if (
+                    os.fspath(path) == "systemd"
+                    and kwargs.get("dir_fd") == runtime_fd
+                    and kwargs.get("follow_symlinks") is False
+                ):
+                    return systemd_metadata
+                if (
+                    os.fspath(path) == "private"
+                    and kwargs.get("dir_fd") == systemd_fd
+                    and kwargs.get("follow_symlinks") is False
+                ):
+                    return private_metadata
+                if (
+                    os.fspath(path) == "bus"
+                    and kwargs.get("dir_fd") == runtime_fd
+                    and kwargs.get("follow_symlinks") is False
+                ):
+                    return bus_metadata
+                if os.fspath(path) == f"/proc/{peer_pid}/exe":
+                    return systemd_executable_metadata
+                if os.fspath(path) == "/usr/lib/systemd/systemd":
+                    return systemd_executable_metadata
+                return real_stat(path, *args, **kwargs)
+
+            def readlink_session(path, *args, **kwargs):
+                if os.fspath(path) == f"/proc/{peer_pid}/exe":
+                    return "/usr/lib/systemd/systemd"
+                return real_readlink(path, *args, **kwargs)
+
+            session_env = {
+                "HOME": str(home),
+                "XDG_RUNTIME_DIR": f"/proc/self/fd/{runtime_fd}",
+                "DBUS_SESSION_BUS_ADDRESS": (
+                    f"unix:path=/proc/self/fd/{systemd_fd}/private"
+                ),
+                "LC_ALL": "C",
+                "LANG": "C",
+                "SYSTEMD_COLORS": "0",
+                "PAGER": "cat",
+            }
+            manager_command = [
+                "/usr/bin/systemctl",
+                "--user",
+                "show",
+                "openusage-bar.service",
+                "--property=Id",
+                "--property=LoadState",
+                "--property=ActiveState",
+                "--property=SubState",
+                "--property=UnitFileState",
+                "--property=FragmentPath",
+                "--property=DropInPaths",
+                "--property=NeedDaemonReload",
+                "--property=MainPID",
+                "--no-pager",
+            ]
+
+            with patch.object(platform_services.sys, "platform", "linux"), patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch.object(
+                platform_services.shutil, "which", return_value="/usr/bin/systemctl"
+            ), patch.dict(
+                os.environ,
+                {
+                    "HOME": "PRIVATE_FOREIGN_HOME",
+                    "XDG_RUNTIME_DIR": "/PRIVATE/foreign-runtime",
+                    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/PRIVATE/foreign-bus",
+                },
+                clear=True,
+            ), patch.object(
+                platform_services.subprocess,
+                "run",
+                side_effect=AssertionError("unbounded manager capture is forbidden"),
+            ) as unbounded, patch(
+                "openusage_bar.bounded_process.run_bounded",
+                side_effect=BoundedProcessError("output_overflow"),
+            ) as bounded, patch.object(
+                socket, "SO_PEERCRED", 17, create=True
+            ), patch.object(
+                socket, "socket", side_effect=open_peer_socket
+            ), patch.object(
+                platform_services.os, "open", side_effect=open_session
+            ), patch.object(
+                platform_services.os, "fstat", side_effect=fstat_session
+            ), patch.object(
+                platform_services.os, "stat", side_effect=stat_session
+            ), patch.object(
+                platform_services.os, "close", side_effect=close_session
+            ), patch.object(
+                platform_services.os, "readlink", side_effect=readlink_session
+            ):
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as overflow:
+                    platform_services.read_current_user_collector_service_state()
+
+            self.assertEqual(
+                str(overflow.exception), "service activation command failed"
+            )
+            self.assertNotIn("PRIVATE", str(overflow.exception))
+            unbounded.assert_not_called()
+            bounded.assert_called_once_with(
+                manager_command,
+                timeout=5,
+                stdout_limit=64 * 1024,
+                stderr_limit=0,
+                shell=False,
+                stdin=platform_services.subprocess.DEVNULL,
+                stdout=platform_services.subprocess.PIPE,
+                stderr=platform_services.subprocess.DEVNULL,
+                check=False,
+                env=session_env,
+                pass_fds=(runtime_fd, systemd_fd),
+            )
+            self.assertEqual(unit.read_bytes(), unit_bytes)
+
+    def test_linux_service_state_rejects_unsafe_session_runtime_before_manager(self):
+        import errno
+        import os
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            unit = home / ".config" / "systemd" / "user" / "openusage-bar.service"
+            unit.parent.mkdir(parents=True)
+            unit_bytes = b"[Unit]\nDescription=session authority fixture\n"
+            unit.write_bytes(unit_bytes)
+            unit.chmod(0o600)
+            fake_run = root / "run"
+            fake_user = fake_run / "user"
+            fake_user.mkdir(parents=True)
+            fake_run.chmod(0o755)
+            fake_user.chmod(0o755)
+            run_values = list(fake_run.stat())
+            run_values[4] = 0
+            run_metadata = os.stat_result(run_values)
+            user_values = list(fake_user.stat())
+            user_values[4] = 0
+            user_metadata = os.stat_result(user_values)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            uid = os.getuid()
+            real_open = os.open
+            real_fstat = os.fstat
+            real_close = os.close
+            run_fd = 9100
+            user_fd = 9101
+            target_flags: list[int] = []
+            closed: list[int] = []
+
+            def open_session(path, flags, mode=0o777, *, dir_fd=None):
+                if os.fspath(path) == "/run" and dir_fd is None:
+                    return run_fd
+                if os.fspath(path) == "user" and dir_fd == run_fd:
+                    return user_fd
+                if os.fspath(path) == str(uid) and dir_fd == user_fd:
+                    target_flags.append(flags)
+                    raise OSError(errno.ELOOP, "PRIVATE_RUNTIME_SYMLINK")
+                if dir_fd is None:
+                    return real_open(path, flags, mode)
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            def fstat_session(descriptor):
+                if descriptor == run_fd:
+                    return run_metadata
+                if descriptor == user_fd:
+                    return user_metadata
+                return real_fstat(descriptor)
+
+            def close_session(descriptor):
+                if descriptor in {run_fd, user_fd}:
+                    closed.append(descriptor)
+                    return None
+                return real_close(descriptor)
+
+            with patch.object(platform_services.sys, "platform", "linux"), patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch.object(
+                platform_services.shutil, "which", return_value="/usr/bin/systemctl"
+            ), patch.dict(
+                os.environ, {}, clear=True
+            ), patch.object(
+                platform_services.os, "open", side_effect=open_session
+            ), patch.object(
+                platform_services.os, "fstat", side_effect=fstat_session
+            ), patch.object(
+                platform_services.os, "close", side_effect=close_session
+            ), patch.object(
+                platform_services.subprocess,
+                "run",
+                side_effect=AssertionError("manager must not run"),
+            ) as unbounded, patch(
+                "openusage_bar.bounded_process.run_bounded",
+                side_effect=AssertionError("manager must not run"),
+            ) as manager:
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as unsafe_runtime:
+                    platform_services.read_current_user_collector_service_state()
+
+            self.assertEqual(
+                str(unsafe_runtime.exception), "service activation command failed"
+            )
+            self.assertNotIn("PRIVATE", str(unsafe_runtime.exception))
+            unbounded.assert_not_called()
+            manager.assert_not_called()
+            self.assertEqual(len(target_flags), 1)
+            self.assertTrue(target_flags[0] & getattr(os, "O_DIRECTORY", 0))
+            self.assertTrue(target_flags[0] & getattr(os, "O_NOFOLLOW", 0))
+            self.assertEqual(closed, [user_fd, run_fd])
+            self.assertEqual(unit.read_bytes(), unit_bytes)
+
+    def test_linux_service_state_rejects_untrusted_runtime_ancestor_before_manager(self):
+        import os
+        import stat
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            unit = home / ".config" / "systemd" / "user" / "openusage-bar.service"
+            unit.parent.mkdir(parents=True)
+            unit_bytes = b"[Unit]\nDescription=runtime ancestor authority fixture\n"
+            unit.write_bytes(unit_bytes)
+            unit.chmod(0o600)
+            fake_run = root / "run"
+            fake_user = fake_run / "user"
+            uid = os.getuid()
+            fake_runtime = fake_user / str(uid)
+            fake_runtime.mkdir(parents=True)
+            fake_run.chmod(0o755)
+            fake_user.chmod(0o755)
+            fake_runtime.chmod(0o700)
+            run_values = list(fake_run.stat())
+            run_values[4] = 1
+            untrusted_run = os.stat_result(run_values)
+            user_values = list(fake_user.stat())
+            user_values[4] = 0
+            user_metadata = os.stat_result(user_values)
+            runtime_metadata = fake_runtime.stat()
+            bus_metadata = os.stat_result(
+                (
+                    stat.S_IFSOCK | 0o666,
+                    runtime_metadata.st_ino + 1000,
+                    runtime_metadata.st_dev,
+                    1,
+                    uid,
+                    runtime_metadata.st_gid,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            )
+            run_fd, user_fd, runtime_fd = 9500, 9501, 9502
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            opened: list[str] = []
+            closed: list[int] = []
+            real_open = os.open
+            real_fstat = os.fstat
+            real_stat = os.stat
+            real_close = os.close
+
+            def open_session(path, flags, mode=0o777, *, dir_fd=None):
+                rendered = os.fspath(path)
+                if rendered == "/run" and dir_fd is None:
+                    opened.append("run")
+                    return run_fd
+                if rendered == "user" and dir_fd == run_fd:
+                    opened.append("user")
+                    return user_fd
+                if rendered == str(uid) and dir_fd == user_fd:
+                    opened.append("runtime")
+                    return runtime_fd
+                if dir_fd is None:
+                    return real_open(path, flags, mode)
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            def fstat_session(descriptor):
+                return {
+                    run_fd: untrusted_run,
+                    user_fd: user_metadata,
+                    runtime_fd: runtime_metadata,
+                }.get(descriptor) or real_fstat(descriptor)
+
+            def stat_session(path, *args, **kwargs):
+                if (
+                    os.fspath(path) == "bus"
+                    and kwargs.get("dir_fd") == runtime_fd
+                    and kwargs.get("follow_symlinks") is False
+                ):
+                    return bus_metadata
+                return real_stat(path, *args, **kwargs)
+
+            def close_session(descriptor):
+                if descriptor in {run_fd, user_fd, runtime_fd}:
+                    closed.append(descriptor)
+                    return None
+                return real_close(descriptor)
+
+            with patch.object(platform_services.sys, "platform", "linux"), patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch.object(
+                platform_services.shutil, "which", return_value="/usr/bin/systemctl"
+            ), patch.dict(
+                os.environ, {}, clear=True
+            ), patch.object(
+                platform_services.os, "open", side_effect=open_session
+            ), patch.object(
+                platform_services.os, "fstat", side_effect=fstat_session
+            ), patch.object(
+                platform_services.os, "stat", side_effect=stat_session
+            ), patch.object(
+                platform_services.os, "close", side_effect=close_session
+            ), patch(
+                "openusage_bar.bounded_process.run_bounded",
+                side_effect=AssertionError("manager must not run"),
+            ) as manager:
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as unsafe_ancestor:
+                    platform_services.read_current_user_collector_service_state()
+
+            self.assertEqual(
+                str(unsafe_ancestor.exception), "service activation command failed"
+            )
+            self.assertNotIn("PRIVATE", str(unsafe_ancestor.exception))
+            manager.assert_not_called()
+            self.assertEqual(opened, ["run"])
+            self.assertEqual(closed, [run_fd])
+            self.assertEqual(unit.read_bytes(), unit_bytes)
+
+    def test_linux_service_state_rejects_unsafe_session_bus_before_manager(self):
+        import os
+        import stat
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            unit = home / ".config" / "systemd" / "user" / "openusage-bar.service"
+            unit.parent.mkdir(parents=True)
+            unit_bytes = b"[Unit]\nDescription=session bus authority fixture\n"
+            unit.write_bytes(unit_bytes)
+            unit.chmod(0o600)
+            fake_run = root / "run"
+            fake_user = fake_run / "user"
+            uid = os.getuid()
+            fake_runtime = fake_user / str(uid)
+            fake_runtime.mkdir(parents=True)
+            fake_run.chmod(0o755)
+            fake_user.chmod(0o755)
+            fake_runtime.chmod(0o700)
+            run_values = list(fake_run.stat())
+            run_values[4] = 0
+            run_metadata = os.stat_result(run_values)
+            user_values = list(fake_user.stat())
+            user_values[4] = 0
+            user_metadata = os.stat_result(user_values)
+            runtime_metadata = fake_runtime.stat()
+            run_fd, user_fd, runtime_fd = 9400, 9401, 9402
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            real_open = os.open
+            real_fstat = os.fstat
+            real_stat = os.stat
+            real_close = os.close
+
+            def bus_fact(mode, *, fact_uid=uid, nlink=1):
+                return os.stat_result(
+                    (
+                        mode,
+                        runtime_metadata.st_ino + 1000,
+                        runtime_metadata.st_dev,
+                        nlink,
+                        fact_uid,
+                        runtime_metadata.st_gid,
+                        0,
+                        0,
+                        0,
+                        0,
+                    )
+                )
+
+            cases = {
+                "missing": FileNotFoundError("PRIVATE_MISSING_BUS"),
+                "symlink": bus_fact(stat.S_IFLNK | 0o777),
+                "non_socket": bus_fact(stat.S_IFREG | 0o600),
+                "wrong_uid": bus_fact(stat.S_IFSOCK | 0o666, fact_uid=uid + 1),
+                "multiple_links": bus_fact(stat.S_IFSOCK | 0o666, nlink=2),
+                "unsafe_mode": bus_fact(stat.S_IFSOCK | 0o766),
+            }
+
+            for label, selected_fact in cases.items():
+                with self.subTest(case=label):
+                    closed: list[int] = []
+
+                    def open_session(path, flags, mode=0o777, *, dir_fd=None):
+                        if os.fspath(path) == "/run" and dir_fd is None:
+                            return run_fd
+                        if os.fspath(path) == "user" and dir_fd == run_fd:
+                            return user_fd
+                        if os.fspath(path) == str(uid) and dir_fd == user_fd:
+                            return runtime_fd
+                        if dir_fd is None:
+                            return real_open(path, flags, mode)
+                        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+                    def fstat_session(descriptor):
+                        return {
+                            run_fd: run_metadata,
+                            user_fd: user_metadata,
+                            runtime_fd: runtime_metadata,
+                        }.get(descriptor) or real_fstat(descriptor)
+
+                    def stat_session(path, *args, **kwargs):
+                        if (
+                            os.fspath(path) == "bus"
+                            and kwargs.get("dir_fd") == runtime_fd
+                            and kwargs.get("follow_symlinks") is False
+                        ):
+                            if isinstance(selected_fact, BaseException):
+                                raise selected_fact
+                            return selected_fact
+                        return real_stat(path, *args, **kwargs)
+
+                    def close_session(descriptor):
+                        if descriptor in {run_fd, user_fd, runtime_fd}:
+                            closed.append(descriptor)
+                            return None
+                        return real_close(descriptor)
+
+                    with patch.object(
+                        platform_services.sys, "platform", "linux"
+                    ), patch.object(
+                        LifecycleStatePaths,
+                        "for_current_user",
+                        return_value=authority,
+                    ), patch.object(
+                        platform_services.shutil,
+                        "which",
+                        return_value="/usr/bin/systemctl",
+                    ), patch.dict(
+                        os.environ, {}, clear=True
+                    ), patch.object(
+                        platform_services.os, "open", side_effect=open_session
+                    ), patch.object(
+                        platform_services.os, "fstat", side_effect=fstat_session
+                    ), patch.object(
+                        platform_services.os, "stat", side_effect=stat_session
+                    ), patch.object(
+                        platform_services.os, "close", side_effect=close_session
+                    ), patch(
+                        "openusage_bar.bounded_process.run_bounded",
+                        side_effect=AssertionError("manager must not run"),
+                    ) as manager:
+                        with self.assertRaises(
+                            platform_services.ServiceCommandError
+                        ) as unsafe_bus:
+                            platform_services.read_current_user_collector_service_state()
+
+                    self.assertEqual(
+                        str(unsafe_bus.exception),
+                        "service activation command failed",
+                    )
+                    self.assertNotIn("PRIVATE", str(unsafe_bus.exception))
+                    manager.assert_not_called()
+                    self.assertEqual(closed, [user_fd, run_fd, runtime_fd])
+                    self.assertEqual(unit.read_bytes(), unit_bytes)
+
     def test_linux_service_registration_probe_uses_systemd_user_manager(self):
         completed = platform_services.subprocess.CompletedProcess(args=[], returncode=0)
         with patch.object(
