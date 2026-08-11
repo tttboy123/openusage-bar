@@ -64,6 +64,8 @@ on:
       - "tests/test_keychain.py"
       - "tests/fixtures/gateway/performance-v1.json"
       - "tests/test_local_api.py"
+      - "tests/test_lifecycle_state.py"
+      - "tests/test_managed_collector.py"
       - "tests/test_native_ci_evidence.py"
       - "tests/test_native_lifecycle_evidence.py"
       - "tests/test_native_lifecycle_runner.py"
@@ -145,6 +147,8 @@ on:
       - "tests/test_keychain.py"
       - "tests/fixtures/gateway/performance-v1.json"
       - "tests/test_local_api.py"
+      - "tests/test_lifecycle_state.py"
+      - "tests/test_managed_collector.py"
       - "tests/test_native_ci_evidence.py"
       - "tests/test_native_lifecycle_evidence.py"
       - "tests/test_native_lifecycle_runner.py"
@@ -355,7 +359,9 @@ jobs:
             tests.test_plugin_bridge \
             tests.test_plugin_cross_layer_contract \
             tests.test_keychain \
+            tests.test_lifecycle_state \
             tests.test_local_api \
+            tests.test_managed_collector \
             tests.test_native_ci_evidence \
             tests.test_native_lifecycle_evidence \
             tests.test_native_lifecycle_runner \

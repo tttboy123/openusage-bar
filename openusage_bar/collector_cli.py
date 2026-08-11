@@ -331,6 +331,18 @@ def _parser() -> SafeArgumentParser:
     )
     service.add_argument("--interval", default="300")
     service.add_argument("--command", dest="service_command")
+    desktop_service = commands.add_parser("desktop-service")
+    desktop_actions = desktop_service.add_subparsers(
+        dest="desktop_service_action",
+        required=True,
+    )
+    desktop_install = desktop_actions.add_parser("install")
+    desktop_install.add_argument("--interval", choices=("300",), required=True)
+    desktop_actions.add_parser("uninstall")
+    state = commands.add_parser("state")
+    state.add_argument("state_action", choices=("delete",))
+    state.add_argument("--confirm", dest="state_confirmation", required=True)
+    state.add_argument("--format", choices=("json",), required=True)
     reconcile = commands.add_parser("reconcile")
     reconcile.add_argument("--format", choices=("json",), required=True)
     reconcile.add_argument("--from", dest="from_day", required=True)
@@ -1272,7 +1284,10 @@ def main(
     parser = _parser()
     try:
         args = parser.parse_args(arguments)
-        if args.command in ("daemon", "service"):
+        if args.command in ("daemon", "service") or (
+            args.command == "desktop-service"
+            and args.desktop_service_action == "install"
+        ):
             interval = _interval(args.interval)
         else:
             interval = None
@@ -1318,6 +1333,74 @@ def main(
         except Exception:
             stderr.write("plugin API unavailable\n")
             return 1
+
+    if args.command == "service":
+        from . import platform_services
+
+        if args.action == "print":
+            stdout.write(
+                platform_services.render_current_platform(
+                    interval=interval,
+                    command=args.service_command,
+                )
+            )
+            stdout.write("\n")
+            return 0
+        try:
+            if args.action == "install":
+                platform_services.install_service(
+                    interval=interval,
+                    command=args.service_command,
+                )
+            else:
+                platform_services.uninstall_service()
+        except Exception:
+            stderr.write("service action failed\n")
+            return 1
+        return 0
+
+    if args.command == "desktop-service":
+        from .managed_collector import (
+            install_managed_collector,
+            uninstall_managed_collector,
+        )
+
+        try:
+            if args.desktop_service_action == "install":
+                install_managed_collector(interval=interval)
+            else:
+                uninstall_managed_collector()
+        except Exception:
+            stderr.write("desktop service action failed\n")
+            return 1
+        return 0
+
+    if args.command == "state":
+        from .lifecycle_state import (
+            LifecycleStatePaths,
+            current_user_runtime_is_active,
+            delete_local_state,
+        )
+
+        try:
+            paths = LifecycleStatePaths.for_current_user()
+            result = delete_local_state(
+                paths,
+                confirmation=args.state_confirmation,
+                runtime_is_active=lambda: current_user_runtime_is_active(paths),
+            )
+        except Exception:
+            stderr.write("local state delete failed\n")
+            return 1
+        _write_json(
+            stdout,
+            {
+                "apiVersion": "local-state-lifecycle/v1",
+                "object": "local.state_delete",
+                "deleted": result.deleted,
+            },
+        )
+        return 0
 
     gateway_config: Any | None = None
     gateway_token_path: str | None = None
@@ -1376,31 +1459,6 @@ def main(
                 server_factory=gateway_server_factory,
                 stderr=stderr,
             )
-
-        if args.command == "service":
-            from . import platform_services
-
-            if args.action == "print":
-                stdout.write(
-                    platform_services.render_current_platform(
-                        interval=interval,
-                        command=args.service_command,
-                    )
-                )
-                stdout.write("\n")
-                return 0
-            try:
-                if args.action == "install":
-                    platform_services.install_service(
-                        interval=interval,
-                        command=args.service_command,
-                    )
-                else:
-                    platform_services.uninstall_service()
-            except Exception:
-                stderr.write("service action failed\n")
-                return 1
-            return 0
 
         if args.command == "reconcile":
             from .reconciliation import reconciliation_from_local_sources

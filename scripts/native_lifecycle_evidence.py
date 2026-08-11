@@ -17,6 +17,7 @@ import platform as host_platform_module
 import re
 import stat
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -367,6 +368,226 @@ class LifecycleExecutor(Protocol):
     ) -> dict[str, object]: ...
 
 
+@dataclass(frozen=True)
+class NativePathState:
+    exists: bool
+    kind: str
+    size_bytes: int
+    sha256: str | None
+    mode: int
+    file_id: str | None
+
+    def __post_init__(self) -> None:
+        valid = (
+            type(self.exists) is bool
+            and self.kind in {"missing", "file", "directory"}
+            and type(self.size_bytes) is int
+            and self.size_bytes >= 0
+            and type(self.mode) is int
+            and 0 <= self.mode <= 0o7777
+            and (self.file_id is None or type(self.file_id) is str)
+            and (self.sha256 is None or SHA256.fullmatch(self.sha256) is not None)
+        )
+        if not valid:
+            raise ValueError("native path state invalid")
+        if self.exists != (self.kind != "missing"):
+            raise ValueError("native path state invalid")
+        if self.kind == "file" and (
+            self.sha256 is None or not self.file_id
+        ):
+            raise ValueError("native path state invalid")
+        if self.kind != "file" and self.sha256 is not None:
+            raise ValueError("native path state invalid")
+        if self.kind == "missing" and (
+            self.size_bytes != 0 or self.mode != 0 or self.file_id is not None
+        ):
+            raise ValueError("native path state invalid")
+
+
+@dataclass(frozen=True)
+class NativeProcessResult:
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+    timed_out: bool
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.returncode) is not int
+            or type(self.stdout) is not bytes
+            or type(self.stderr) is not bytes
+            or type(self.timed_out) is not bool
+        ):
+            raise ValueError("native process result invalid")
+
+
+@dataclass(frozen=True)
+class NativeServiceState:
+    registered: bool
+    active: bool
+    command: tuple[str, ...] | None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.registered) is not bool
+            or type(self.active) is not bool
+            or (
+                self.command is not None
+                and (
+                    type(self.command) is not tuple
+                    or not self.command
+                    or any(type(value) is not str or not value for value in self.command)
+                )
+            )
+            or (not self.registered and (self.active or self.command is not None))
+        ):
+            raise ValueError("native service state invalid")
+
+
+@dataclass(frozen=True)
+class NativeLedgerState:
+    exists: bool
+    file_id: str | None
+    size_bytes: int
+    sha256: str | None
+    integrity_ok: bool
+    revision: int
+
+    def __post_init__(self) -> None:
+        valid = (
+            type(self.exists) is bool
+            and (self.file_id is None or type(self.file_id) is str)
+            and type(self.size_bytes) is int
+            and self.size_bytes >= 0
+            and (self.sha256 is None or SHA256.fullmatch(self.sha256) is not None)
+            and type(self.integrity_ok) is bool
+            and type(self.revision) is int
+            and self.revision >= 0
+        )
+        if not valid:
+            raise ValueError("native ledger state invalid")
+        if self.exists and (
+            not self.file_id or self.sha256 is None or not self.integrity_ok
+        ):
+            raise ValueError("native ledger state invalid")
+        if not self.exists and (
+            self.file_id is not None
+            or self.size_bytes != 0
+            or self.sha256 is not None
+            or self.integrity_ok
+            or self.revision != 0
+        ):
+            raise ValueError("native ledger state invalid")
+
+
+@dataclass(frozen=True)
+class NativeListenerState:
+    active: bool
+    authenticated_ready: bool
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.active) is not bool
+            or type(self.authenticated_ready) is not bool
+            or (self.authenticated_ready and not self.active)
+        ):
+            raise ValueError("native listener state invalid")
+
+
+def _valid_native_path(value: object) -> bool:
+    if not isinstance(value, Path) or not value.is_absolute():
+        return False
+    rendered = str(value)
+    return (
+        value != Path(value.anchor)
+        and len(rendered) <= 4096
+        and rendered.isprintable()
+        and ".." not in value.parts
+    )
+
+
+@dataclass(frozen=True)
+class NativeProfilePaths:
+    """Authoritative current-user product paths observed outside the app."""
+
+    state_root: Path
+    config_root: Path
+    runtime_root: Path
+    task_definition: Path
+
+    def __post_init__(self) -> None:
+        if any(
+            not _valid_native_path(value)
+            for value in (
+                self.state_root,
+                self.config_root,
+                self.runtime_root,
+                self.task_definition,
+            )
+        ):
+            raise ValueError("native profile paths invalid")
+
+
+@dataclass(frozen=True)
+class NativePackagePaths:
+    """Authoritative installed product paths for one target platform."""
+
+    install_root: Path
+    app: Path | None
+    uninstaller: Path | None
+    collector: Path
+
+    def __post_init__(self) -> None:
+        if (
+            not _valid_native_path(self.install_root)
+            or not _valid_native_path(self.collector)
+            or (self.app is None) != (self.uninstaller is None)
+            or (
+                self.app is not None
+                and (
+                    not _valid_native_path(self.app)
+                    or not _valid_native_path(self.uninstaller)
+                )
+            )
+        ):
+            raise ValueError("native package paths invalid")
+        descendants = [self.collector]
+        if self.app is not None:
+            descendants.extend((self.app, self.uninstaller))
+        for value in descendants:
+            assert isinstance(value, Path)
+            try:
+                relative = value.relative_to(self.install_root)
+            except ValueError:
+                raise ValueError("native package paths invalid") from None
+            if not relative.parts:
+                raise ValueError("native package paths invalid")
+
+
+@dataclass(frozen=True)
+class NativeLifecycleDependencies:
+    """Closed low-level effects available to the external lifecycle driver."""
+
+    make_run_directory: Callable[..., object]
+    inspect_path: Callable[..., object]
+    copy_file: Callable[..., object]
+    set_file_mode: Callable[..., object]
+    remove_path: Callable[..., object]
+    start_process: Callable[..., object]
+    run_process: Callable[..., object]
+    stop_process: Callable[..., object]
+    read_registry_value: Callable[..., object]
+    profile_paths: Callable[..., object]
+    package_paths: Callable[..., object]
+    inspect_service: Callable[..., object]
+    inspect_listener: Callable[..., object]
+    inspect_ledger: Callable[..., object]
+    network_events: Callable[..., object]
+    credential_events: Callable[..., object]
+    monotonic: Callable[..., object]
+    wait: Callable[..., object]
+
+
 class PlatformLifecycleDriver(Protocol):
     def execute(
         self,
@@ -378,6 +599,933 @@ class PlatformLifecycleDriver(Protocol):
     ) -> dict[str, object]: ...
 
 
+_WINDOWS_UNINSTALL_REGISTRY_KEY = (
+    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.lune.openusagebar"
+)
+_PROCESS_TIMEOUT_SECONDS = 180.0
+_READY_TIMEOUT_SECONDS = 30.0
+_READY_WAIT_SECONDS = 0.25
+
+
+def _driver_fail() -> None:
+    _fail("driver_failed")
+
+
+def _require_path(value: object) -> Path:
+    if not _valid_native_path(value):
+        _driver_fail()
+    assert isinstance(value, Path)
+    return value
+
+
+def _require_process_success(value: object) -> None:
+    if (
+        not isinstance(value, NativeProcessResult)
+        or value.timed_out
+        or value.returncode != 0
+    ):
+        _driver_fail()
+
+
+def _require_file(
+    value: object,
+    *,
+    sha256: str | None = None,
+    mode: int | None = None,
+    executable: bool = False,
+) -> NativePathState:
+    if (
+        not isinstance(value, NativePathState)
+        or not value.exists
+        or value.kind != "file"
+        or value.size_bytes <= 0
+        or value.sha256 is None
+        or not value.file_id
+        or (sha256 is not None and value.sha256 != sha256)
+        or (mode is not None and value.mode != mode)
+        or (executable and value.mode & 0o111 == 0)
+    ):
+        _driver_fail()
+    return value
+
+
+def _require_missing(value: object) -> None:
+    if (
+        not isinstance(value, NativePathState)
+        or value.exists
+        or value.kind != "missing"
+        or value.size_bytes != 0
+        or value.sha256 is not None
+        or value.mode != 0
+        or value.file_id is not None
+    ):
+        _driver_fail()
+
+
+def _require_listener(
+    value: object,
+    *,
+    active: bool,
+    authenticated_ready: bool,
+) -> NativeListenerState:
+    if (
+        not isinstance(value, NativeListenerState)
+        or value.active is not active
+        or value.authenticated_ready is not authenticated_ready
+    ):
+        _driver_fail()
+    return value
+
+
+def _require_service_absent(value: object) -> None:
+    if (
+        not isinstance(value, NativeServiceState)
+        or value.registered
+        or value.active
+        or value.command is not None
+    ):
+        _driver_fail()
+
+
+def _require_ledger_present(value: object) -> NativeLedgerState:
+    if (
+        not isinstance(value, NativeLedgerState)
+        or not value.exists
+        or not value.file_id
+        or value.size_bytes <= 0
+        or value.sha256 is None
+        or not value.integrity_ok
+        or value.revision <= 0
+    ):
+        _driver_fail()
+    return value
+
+
+def _require_ledger_absent(value: object) -> None:
+    if (
+        not isinstance(value, NativeLedgerState)
+        or value.exists
+        or value.file_id is not None
+        or value.size_bytes != 0
+        or value.sha256 is not None
+        or value.integrity_ok
+        or value.revision != 0
+    ):
+        _driver_fail()
+
+
+def _require_profile_paths(value: object) -> NativeProfilePaths:
+    if not isinstance(value, NativeProfilePaths):
+        _driver_fail()
+    return value
+
+
+def _require_package_paths(
+    value: object,
+    *,
+    platform: str,
+    profile_paths: NativeProfilePaths,
+) -> NativePackagePaths:
+    if not isinstance(value, NativePackagePaths):
+        _driver_fail()
+    if platform == "win":
+        if value.app is None or value.uninstaller is None:
+            _driver_fail()
+    elif platform == "linux":
+        if (
+            value.install_root != profile_paths.runtime_root
+            or value.app is not None
+            or value.uninstaller is not None
+            or value.collector
+            != profile_paths.runtime_root / "openusage-collector"
+        ):
+            _driver_fail()
+    else:
+        _driver_fail()
+    return value
+
+
+def _require_fresh_baseline(
+    dependencies: NativeLifecycleDependencies,
+    *,
+    platform: str,
+    profile_paths: NativeProfilePaths,
+    package_paths: NativePackagePaths,
+    execution_copy: Path,
+    sentinel: Path,
+) -> None:
+    _require_service_absent(dependencies.inspect_service(platform))
+    _require_listener(
+        dependencies.inspect_listener(platform, "local"),
+        active=False,
+        authenticated_ready=False,
+    )
+    _require_listener(
+        dependencies.inspect_listener(platform, "gateway"),
+        active=False,
+        authenticated_ready=False,
+    )
+    _require_ledger_absent(dependencies.inspect_ledger(platform))
+    for purpose, path in (
+        ("fresh_state_root", profile_paths.state_root),
+        ("fresh_config_root", profile_paths.config_root),
+        ("fresh_runtime_root", profile_paths.runtime_root),
+        ("fresh_task_definition", profile_paths.task_definition),
+        ("fresh_install_root", package_paths.install_root),
+    ):
+        _require_missing(dependencies.inspect_path(purpose, path))
+    if platform == "win":
+        assert package_paths.app is not None
+        assert package_paths.uninstaller is not None
+        package_facts = (
+            ("fresh_installed_app", package_paths.app),
+            ("fresh_installed_uninstaller", package_paths.uninstaller),
+            ("fresh_installed_collector", package_paths.collector),
+        )
+    else:
+        package_facts = (("fresh_stable_collector", package_paths.collector),)
+    for purpose, path in package_facts:
+        _require_missing(dependencies.inspect_path(purpose, path))
+    _require_missing(
+        dependencies.inspect_path("fresh_execution_copy", execution_copy)
+    )
+    _require_missing(dependencies.inspect_path("fresh_sentinel", sentinel))
+
+
+def _windows_registry_paths(
+    dependencies: NativeLifecycleDependencies,
+    *,
+    package_paths: NativePackagePaths,
+) -> tuple[Path, Path, Path, Path]:
+    try:
+        install_root = _require_path(Path(dependencies.read_registry_value(
+            _WINDOWS_UNINSTALL_REGISTRY_KEY,
+            "InstallLocation",
+        )))
+        uninstaller = _require_path(Path(dependencies.read_registry_value(
+            _WINDOWS_UNINSTALL_REGISTRY_KEY,
+            "UninstallString",
+        )))
+    except LifecycleEvidenceError:
+        raise
+    except Exception:
+        _driver_fail()
+    try:
+        uninstaller.relative_to(install_root)
+    except ValueError:
+        _driver_fail()
+    installed_app = install_root / "UsageHub.exe"
+    installed_collector = (
+        install_root / "resources" / "collector" / "openusage-collector.exe"
+    )
+    if (
+        install_root != package_paths.install_root
+        or installed_app != package_paths.app
+        or uninstaller != package_paths.uninstaller
+        or installed_collector != package_paths.collector
+    ):
+        _driver_fail()
+    return install_root, installed_app, uninstaller, installed_collector
+
+
+def _require_windows_service(
+    value: object,
+    *,
+    collector: Path,
+    api_token: Path,
+) -> NativeServiceState:
+    if not isinstance(value, NativeServiceState):
+        _driver_fail()
+    command = value.command
+    if (
+        not value.registered
+        or not value.active
+        or command is None
+        or len(command) != 10
+        or command[0] != str(collector)
+        or command[1:9]
+        != (
+            "daemon",
+            "--interval",
+            "300",
+            "--api-transport",
+            "tcp",
+            "--api-port",
+            "17821",
+            "--api-token-path",
+        )
+    ):
+        _driver_fail()
+    token_path = _require_path(Path(command[9]))
+    if token_path != api_token:
+        _driver_fail()
+    return value
+
+
+def _wait_for_windows_observer(
+    dependencies: NativeLifecycleDependencies,
+    *,
+    collector: Path,
+    api_token: Path,
+) -> NativeServiceState:
+    try:
+        started = dependencies.monotonic()
+    except Exception:
+        _driver_fail()
+    if type(started) not in {int, float} or isinstance(started, bool):
+        _driver_fail()
+    current = started
+    for _ in range(121):
+        service = dependencies.inspect_service("win")
+        listener = dependencies.inspect_listener("win", "local")
+        ready = (
+            isinstance(service, NativeServiceState)
+            and service.registered
+            and service.active
+            and isinstance(listener, NativeListenerState)
+            and listener.active
+            and listener.authenticated_ready
+        )
+        if ready:
+            return _require_windows_service(
+                service,
+                collector=collector,
+                api_token=api_token,
+            )
+        if not isinstance(service, NativeServiceState) or not isinstance(
+            listener, NativeListenerState
+        ):
+            _driver_fail()
+        try:
+            dependencies.wait(_READY_WAIT_SECONDS)
+            next_value = dependencies.monotonic()
+        except Exception:
+            _driver_fail()
+        if (
+            type(next_value) not in {int, float}
+            or isinstance(next_value, bool)
+            or next_value < current
+            or next_value - started > _READY_TIMEOUT_SECONDS
+        ):
+            _driver_fail()
+        current = next_value
+    _driver_fail()
+
+
+def _run_windows_installer(
+    dependencies: NativeLifecycleDependencies,
+    argv: tuple[str, ...],
+) -> None:
+    try:
+        result = dependencies.run_process(argv, _PROCESS_TIMEOUT_SECONDS)
+    except Exception:
+        _driver_fail()
+    _require_process_success(result)
+
+
+def _windows_observe_install(
+    dependencies: NativeLifecycleDependencies,
+    *,
+    installed_app: Path,
+    uninstaller: Path,
+    installed_collector: Path,
+    profile_paths: NativeProfilePaths,
+) -> tuple[object, NativeLedgerState, tuple[Path, ...]]:
+    try:
+        handle = dependencies.start_process((str(installed_app),))
+    except Exception:
+        _driver_fail()
+    if handle is None:
+        _driver_fail()
+    try:
+        service = _wait_for_windows_observer(
+            dependencies,
+            collector=installed_collector,
+            api_token=profile_paths.runtime_root / "api.token",
+        )
+        _require_listener(
+            dependencies.inspect_listener("win", "gateway"),
+            active=False,
+            authenticated_ready=False,
+        )
+        ledger = _require_ledger_present(dependencies.inspect_ledger("win"))
+        app_state = _require_file(
+            dependencies.inspect_path("installed_app", installed_app),
+            executable=True,
+        )
+        uninstaller_state = _require_file(
+            dependencies.inspect_path("installed_uninstaller", uninstaller),
+            executable=True,
+        )
+        collector_state = _require_file(
+            dependencies.inspect_path("installed_collector", installed_collector),
+            executable=True,
+        )
+        roots = (
+            profile_paths.state_root,
+            profile_paths.config_root,
+            profile_paths.runtime_root,
+            profile_paths.task_definition,
+            profile_paths.runtime_root / "gateway.token",
+            profile_paths.state_root / "gateway-cache.sqlite3",
+            profile_paths.state_root / "gateway-telemetry.sqlite3",
+        )
+        for purpose, path in zip(
+            ("gateway_token", "gateway_cache", "gateway_telemetry"),
+            roots[4:],
+            strict=True,
+        ):
+            _require_missing(dependencies.inspect_path(purpose, path))
+        del app_state, uninstaller_state
+        return handle, ledger, (collector_state, *roots)
+    except Exception as error:
+        try:
+            dependencies.stop_process(handle)
+        except Exception:
+            pass
+        if isinstance(error, LifecycleEvidenceError):
+            raise
+        _driver_fail()
+
+
+def _windows_native_lifecycle(
+    dependencies: NativeLifecycleDependencies,
+    *,
+    artifact: Path,
+    artifact_sha256: str,
+) -> dict[str, object]:
+    run_directory: Path | None = None
+    active_handle: object | None = None
+    try:
+        run_directory = _require_path(dependencies.make_run_directory("win", "x64"))
+        execution_copy = run_directory / artifact.name
+        sentinel = run_directory / "outside-product-sentinel.bin"
+        profile_paths = _require_profile_paths(dependencies.profile_paths("win"))
+        package_paths = _require_package_paths(
+            dependencies.package_paths("win", profile_paths),
+            platform="win",
+            profile_paths=profile_paths,
+        )
+        _require_fresh_baseline(
+            dependencies,
+            platform="win",
+            profile_paths=profile_paths,
+            package_paths=package_paths,
+            execution_copy=execution_copy,
+            sentinel=sentinel,
+        )
+        dependencies.copy_file(artifact, execution_copy)
+        dependencies.set_file_mode(execution_copy, 0o700)
+        execution_state = _require_file(
+            dependencies.inspect_path("execution_copy", execution_copy),
+            sha256=artifact_sha256,
+            mode=0o700,
+        )
+        dependencies.copy_file(artifact, sentinel)
+
+        _run_windows_installer(
+            dependencies,
+            (str(execution_copy), "/S"),
+        )
+        install_root, installed_app, uninstaller, installed_collector = (
+            _windows_registry_paths(dependencies, package_paths=package_paths)
+        )
+        active_handle, initial_ledger, observed = _windows_observe_install(
+            dependencies,
+            installed_app=installed_app,
+            uninstaller=uninstaller,
+            installed_collector=installed_collector,
+            profile_paths=profile_paths,
+        )
+        initial_collector = observed[0]
+        roots = observed[1:]
+        dependencies.stop_process(active_handle)
+        active_handle = None
+
+        _run_windows_installer(dependencies, (str(uninstaller), "/S"))
+        _require_service_absent(dependencies.inspect_service("win"))
+        _require_listener(
+            dependencies.inspect_listener("win", "local"),
+            active=False,
+            authenticated_ready=False,
+        )
+        _require_listener(
+            dependencies.inspect_listener("win", "gateway"),
+            active=False,
+            authenticated_ready=False,
+        )
+        for purpose, path in zip(
+            (
+                "preserve_gateway_token",
+                "preserve_gateway_cache",
+                "preserve_gateway_telemetry",
+            ),
+            roots[4:],
+            strict=True,
+        ):
+            _require_missing(dependencies.inspect_path(purpose, path))
+        if dependencies.inspect_ledger("win") != initial_ledger:
+            _driver_fail()
+        _require_missing(
+            dependencies.inspect_path("preserve_installed_app", installed_app)
+        )
+        _require_missing(
+            dependencies.inspect_path("preserve_install_root", install_root)
+        )
+
+        _run_windows_installer(dependencies, (str(execution_copy), "/S"))
+        second_root, second_app, second_uninstaller, second_collector = (
+            _windows_registry_paths(dependencies, package_paths=package_paths)
+        )
+        if (
+            second_root != install_root
+            or second_app != installed_app
+            or second_uninstaller != uninstaller
+            or second_collector != installed_collector
+        ):
+            _driver_fail()
+        active_handle, reinstalled_ledger, second_observed = _windows_observe_install(
+            dependencies,
+            installed_app=installed_app,
+            uninstaller=uninstaller,
+            installed_collector=installed_collector,
+            profile_paths=profile_paths,
+        )
+        if reinstalled_ledger != initial_ledger:
+            _driver_fail()
+        second_collector_state = second_observed[0]
+        if (
+            not isinstance(initial_collector, NativePathState)
+            or not isinstance(second_collector_state, NativePathState)
+            or initial_collector.size_bytes != second_collector_state.size_bytes
+            or initial_collector.sha256 != second_collector_state.sha256
+            or initial_collector.mode != second_collector_state.mode
+        ):
+            _driver_fail()
+        if second_observed[1:] != roots:
+            _driver_fail()
+        dependencies.stop_process(active_handle)
+        active_handle = None
+
+        _run_windows_installer(
+            dependencies,
+            (str(uninstaller), "/S", "--delete-app-data"),
+        )
+        _require_service_absent(dependencies.inspect_service("win"))
+        _require_listener(
+            dependencies.inspect_listener("win", "local"),
+            active=False,
+            authenticated_ready=False,
+        )
+        _require_listener(
+            dependencies.inspect_listener("win", "gateway"),
+            active=False,
+            authenticated_ready=False,
+        )
+        _require_ledger_absent(dependencies.inspect_ledger("win"))
+        _require_missing(
+            dependencies.inspect_path("delete_installed_app", installed_app)
+        )
+        _require_missing(
+            dependencies.inspect_path("delete_install_root", install_root)
+        )
+        for purpose, path in zip(
+            ("state_root", "config_root", "runtime_root", "task_definition"),
+            roots[:4],
+            strict=True,
+        ):
+            _require_missing(dependencies.inspect_path(purpose, path))
+        sentinel_state = _require_file(
+            dependencies.inspect_path("sentinel", sentinel),
+            sha256=artifact_sha256,
+            mode=0o600,
+        )
+        if sentinel_state.size_bytes != execution_state.size_bytes:
+            _driver_fail()
+        if dependencies.network_events() != () or dependencies.credential_events() != ():
+            _driver_fail()
+        return {
+            "checks": {name: "passed" for name in CHECK_NAMES},
+            "gateway": {
+                "defaultMode": "observe",
+                "listenerActive": False,
+                "cacheCreated": False,
+                "telemetryCreated": False,
+            },
+            "privacy": {
+                "providerCredentialReads": 0,
+                "providerNetworkCalls": 0,
+            },
+            "persistence": {
+                "ledgerOnPreserve": "preserved",
+                "credentialsOnPreserve": "not_created",
+                "gatewayCacheOnPreserve": "not_created",
+                "gatewayTelemetryOnPreserve": "not_created",
+                "stateAfterDelete": "removed",
+            },
+        }
+    except LifecycleEvidenceError:
+        raise
+    except Exception:
+        _driver_fail()
+    finally:
+        primary_failed = sys.exc_info()[0] is not None
+        cleanup_failed = False
+        if active_handle is not None:
+            try:
+                dependencies.stop_process(active_handle)
+            except Exception:
+                cleanup_failed = True
+        if run_directory is not None:
+            try:
+                dependencies.remove_path(run_directory)
+            except Exception:
+                cleanup_failed = True
+        if cleanup_failed and not primary_failed:
+            _driver_fail()
+
+
+def _require_linux_service(
+    value: object,
+    *,
+    collector: Path,
+    api_socket: Path,
+) -> NativeServiceState:
+    if not isinstance(value, NativeServiceState):
+        _driver_fail()
+    if (
+        not value.registered
+        or not value.active
+        or value.command
+        != (
+            str(collector),
+            "daemon",
+            "--interval",
+            "300",
+            "--api-transport",
+            "unix",
+            "--api-socket",
+            str(api_socket),
+        )
+    ):
+        _driver_fail()
+    return value
+
+
+def _wait_for_linux_observer(
+    dependencies: NativeLifecycleDependencies,
+    *,
+    collector: Path,
+    api_socket: Path,
+) -> NativeServiceState:
+    try:
+        started = dependencies.monotonic()
+    except Exception:
+        _driver_fail()
+    if type(started) not in {int, float} or isinstance(started, bool):
+        _driver_fail()
+    current = started
+    for _ in range(121):
+        service = dependencies.inspect_service("linux")
+        listener = dependencies.inspect_listener("linux", "local")
+        ready = (
+            isinstance(service, NativeServiceState)
+            and service.registered
+            and service.active
+            and isinstance(listener, NativeListenerState)
+            and listener.active
+            and listener.authenticated_ready
+        )
+        if ready:
+            return _require_linux_service(
+                service,
+                collector=collector,
+                api_socket=api_socket,
+            )
+        if not isinstance(service, NativeServiceState) or not isinstance(
+            listener, NativeListenerState
+        ):
+            _driver_fail()
+        try:
+            dependencies.wait(_READY_WAIT_SECONDS)
+            next_value = dependencies.monotonic()
+        except Exception:
+            _driver_fail()
+        if (
+            type(next_value) not in {int, float}
+            or isinstance(next_value, bool)
+            or next_value < current
+            or next_value - started > _READY_TIMEOUT_SECONDS
+        ):
+            _driver_fail()
+        current = next_value
+    _driver_fail()
+
+
+def _linux_observe_install(
+    dependencies: NativeLifecycleDependencies,
+    *,
+    execution_copy: Path,
+    profile_paths: NativeProfilePaths,
+) -> tuple[object, NativeLedgerState, NativePathState]:
+    stable_collector = profile_paths.runtime_root / "openusage-collector"
+    api_socket = profile_paths.state_root / "openusage.sock"
+    try:
+        handle = dependencies.start_process((str(execution_copy),))
+    except Exception:
+        _driver_fail()
+    if handle is None:
+        _driver_fail()
+    try:
+        _wait_for_linux_observer(
+            dependencies,
+            collector=stable_collector,
+            api_socket=api_socket,
+        )
+        _require_listener(
+            dependencies.inspect_listener("linux", "gateway"),
+            active=False,
+            authenticated_ready=False,
+        )
+        ledger = _require_ledger_present(dependencies.inspect_ledger("linux"))
+        collector_state = _require_file(
+            dependencies.inspect_path("stable_collector", stable_collector),
+            executable=True,
+        )
+        for purpose, path in (
+            ("gateway_token", profile_paths.state_root / "gateway.token"),
+            ("gateway_cache", profile_paths.state_root / "gateway-cache.sqlite3"),
+            (
+                "gateway_telemetry",
+                profile_paths.state_root / "gateway-telemetry.sqlite3",
+            ),
+        ):
+            _require_missing(dependencies.inspect_path(purpose, path))
+        return handle, ledger, collector_state
+    except Exception as error:
+        try:
+            dependencies.stop_process(handle)
+        except Exception:
+            pass
+        if isinstance(error, LifecycleEvidenceError):
+            raise
+        _driver_fail()
+
+
+def _linux_native_lifecycle(
+    dependencies: NativeLifecycleDependencies,
+    *,
+    artifact: Path,
+    artifact_sha256: str,
+) -> dict[str, object]:
+    run_directory: Path | None = None
+    active_handle: object | None = None
+    try:
+        run_directory = _require_path(
+            dependencies.make_run_directory("linux", "x64")
+        )
+        execution_copy = run_directory / artifact.name
+        sentinel = run_directory / "outside-product-sentinel.bin"
+        profile_paths = _require_profile_paths(dependencies.profile_paths("linux"))
+        package_paths = _require_package_paths(
+            dependencies.package_paths("linux", profile_paths),
+            platform="linux",
+            profile_paths=profile_paths,
+        )
+        _require_fresh_baseline(
+            dependencies,
+            platform="linux",
+            profile_paths=profile_paths,
+            package_paths=package_paths,
+            execution_copy=execution_copy,
+            sentinel=sentinel,
+        )
+        dependencies.copy_file(artifact, execution_copy)
+        dependencies.set_file_mode(execution_copy, 0o700)
+        execution_state = _require_file(
+            dependencies.inspect_path("execution_copy", execution_copy),
+            sha256=artifact_sha256,
+            mode=0o700,
+        )
+        dependencies.copy_file(artifact, sentinel)
+        stable_collector = package_paths.collector
+
+        active_handle, initial_ledger, initial_collector = _linux_observe_install(
+            dependencies,
+            execution_copy=execution_copy,
+            profile_paths=profile_paths,
+        )
+        dependencies.stop_process(active_handle)
+        active_handle = None
+
+        _require_process_success(
+            dependencies.run_process(
+                (str(execution_copy), "--usagehub-uninstall"),
+                _PROCESS_TIMEOUT_SECONDS,
+            )
+        )
+        _require_service_absent(dependencies.inspect_service("linux"))
+        _require_listener(
+            dependencies.inspect_listener("linux", "local"),
+            active=False,
+            authenticated_ready=False,
+        )
+        _require_listener(
+            dependencies.inspect_listener("linux", "gateway"),
+            active=False,
+            authenticated_ready=False,
+        )
+        for purpose, path in (
+            (
+                "preserve_gateway_token",
+                profile_paths.state_root / "gateway.token",
+            ),
+            (
+                "preserve_gateway_cache",
+                profile_paths.state_root / "gateway-cache.sqlite3",
+            ),
+            (
+                "preserve_gateway_telemetry",
+                profile_paths.state_root / "gateway-telemetry.sqlite3",
+            ),
+        ):
+            _require_missing(dependencies.inspect_path(purpose, path))
+        if dependencies.inspect_ledger("linux") != initial_ledger:
+            _driver_fail()
+        _require_missing(
+            dependencies.inspect_path(
+                "preserve_stable_collector",
+                stable_collector,
+            )
+        )
+        _require_missing(
+            dependencies.inspect_path(
+                "preserve_unit",
+                profile_paths.task_definition,
+            )
+        )
+        _require_missing(
+            dependencies.inspect_path(
+                "preserve_runtime_root",
+                profile_paths.runtime_root,
+            )
+        )
+        dependencies.remove_path(execution_copy)
+        _require_missing(
+            dependencies.inspect_path("preserve_execution_copy", execution_copy)
+        )
+
+        dependencies.copy_file(artifact, execution_copy)
+        dependencies.set_file_mode(execution_copy, 0o700)
+        second_execution = _require_file(
+            dependencies.inspect_path("execution_copy", execution_copy),
+            sha256=artifact_sha256,
+            mode=0o700,
+        )
+        if second_execution.size_bytes != execution_state.size_bytes:
+            _driver_fail()
+        active_handle, second_ledger, second_collector = _linux_observe_install(
+            dependencies,
+            execution_copy=execution_copy,
+            profile_paths=profile_paths,
+        )
+        if second_ledger != initial_ledger or (
+            second_collector.size_bytes,
+            second_collector.sha256,
+            second_collector.mode,
+        ) != (
+            initial_collector.size_bytes,
+            initial_collector.sha256,
+            initial_collector.mode,
+        ):
+            _driver_fail()
+        dependencies.stop_process(active_handle)
+        active_handle = None
+
+        _require_process_success(
+            dependencies.run_process(
+                (
+                    str(execution_copy),
+                    "--usagehub-uninstall",
+                    "--delete-data",
+                ),
+                _PROCESS_TIMEOUT_SECONDS,
+            )
+        )
+        _require_service_absent(dependencies.inspect_service("linux"))
+        _require_listener(
+            dependencies.inspect_listener("linux", "local"),
+            active=False,
+            authenticated_ready=False,
+        )
+        _require_listener(
+            dependencies.inspect_listener("linux", "gateway"),
+            active=False,
+            authenticated_ready=False,
+        )
+        _require_ledger_absent(dependencies.inspect_ledger("linux"))
+        for purpose, path in (
+            ("delete_stable_collector", stable_collector),
+            ("runtime_root", profile_paths.runtime_root),
+            ("task_definition", profile_paths.task_definition),
+            ("state_root", profile_paths.state_root),
+            ("config_root", profile_paths.config_root),
+        ):
+            _require_missing(dependencies.inspect_path(purpose, path))
+        dependencies.remove_path(execution_copy)
+        _require_missing(
+            dependencies.inspect_path("delete_execution_copy", execution_copy)
+        )
+        sentinel_state = _require_file(
+            dependencies.inspect_path("sentinel", sentinel),
+            sha256=artifact_sha256,
+            mode=0o600,
+        )
+        if sentinel_state.size_bytes != execution_state.size_bytes:
+            _driver_fail()
+        if dependencies.network_events() != () or dependencies.credential_events() != ():
+            _driver_fail()
+        return {
+            "checks": {name: "passed" for name in CHECK_NAMES},
+            "gateway": {
+                "defaultMode": "observe",
+                "listenerActive": False,
+                "cacheCreated": False,
+                "telemetryCreated": False,
+            },
+            "privacy": {
+                "providerCredentialReads": 0,
+                "providerNetworkCalls": 0,
+            },
+            "persistence": {
+                "ledgerOnPreserve": "preserved",
+                "credentialsOnPreserve": "not_created",
+                "gatewayCacheOnPreserve": "not_created",
+                "gatewayTelemetryOnPreserve": "not_created",
+                "stateAfterDelete": "removed",
+            },
+        }
+    except LifecycleEvidenceError:
+        raise
+    except Exception:
+        _driver_fail()
+    finally:
+        primary_failed = sys.exc_info()[0] is not None
+        cleanup_failed = False
+        if active_handle is not None:
+            try:
+                dependencies.stop_process(active_handle)
+            except Exception:
+                cleanup_failed = True
+        if run_directory is not None:
+            try:
+                dependencies.remove_path(run_directory)
+            except Exception:
+                cleanup_failed = True
+        if cleanup_failed and not primary_failed:
+            _driver_fail()
+
+
 class _BuiltInPlatformDriver:
     """Independent native lifecycle driver.
 
@@ -387,6 +1535,12 @@ class _BuiltInPlatformDriver:
     intentionally completed before this driver can emit a record.
     """
 
+    def __init__(
+        self,
+        dependencies: NativeLifecycleDependencies | None = None,
+    ) -> None:
+        self._dependencies = dependencies
+
     def execute(
         self,
         *,
@@ -395,7 +1549,20 @@ class _BuiltInPlatformDriver:
         artifact: Path,
         artifact_sha256: str,
     ) -> dict[str, object]:
-        del platform, arch, artifact, artifact_sha256
+        if self._dependencies is None:
+            _fail("driver_unavailable")
+        if platform == "win" and arch == "x64":
+            return _windows_native_lifecycle(
+                self._dependencies,
+                artifact=artifact,
+                artifact_sha256=artifact_sha256,
+            )
+        if platform == "linux" and arch == "x64":
+            return _linux_native_lifecycle(
+                self._dependencies,
+                artifact=artifact,
+                artifact_sha256=artifact_sha256,
+            )
         _fail("driver_unavailable")
 
 
@@ -408,10 +1575,17 @@ class NativeLifecycleExecutor:
         self,
         *,
         driver: PlatformLifecycleDriver | None = None,
+        dependencies: NativeLifecycleDependencies | None = None,
         host_platform: str | None = None,
         host_machine: str | None = None,
     ) -> None:
-        self._driver = driver if driver is not None else _BuiltInPlatformDriver()
+        if driver is not None and dependencies is not None:
+            raise ValueError("driver and dependencies are mutually exclusive")
+        self._driver = (
+            driver
+            if driver is not None
+            else _BuiltInPlatformDriver(dependencies=dependencies)
+        )
         self._host_platform = host_platform if host_platform is not None else sys.platform
         self._host_machine = (
             host_machine
@@ -477,7 +1651,6 @@ def generate_lifecycle_evidence(
     artifact: str | Path,
     source_commit: str,
     output: str | Path,
-    executor: LifecycleExecutor | None = None,
     clock: Callable[[], datetime] = _utc_now,
 ) -> dict[str, Any]:
     """Execute the native lifecycle, then exclusively write its record."""
@@ -491,11 +1664,8 @@ def generate_lifecycle_evidence(
     before, before_signature = _inspect_artifact(
         artifact_path, expected_platform=platform
     )
-    active_executor = executor if executor is not None else NativeLifecycleExecutor()
-    expected_execution_class = (
-        "unit_test_injected" if executor is not None else "external_platform_driver"
-    )
-    if active_executor.execution_class != expected_execution_class:
+    active_executor = NativeLifecycleExecutor()
+    if active_executor.execution_class != "external_platform_driver":
         _fail("execution_not_real")
     try:
         observations = active_executor.execute(

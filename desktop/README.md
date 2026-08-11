@@ -42,3 +42,29 @@ Electron lifecycle.
 `electron-builder` produces the platform installers. Each package includes one
 native Collector at the fixed resource path and is audited to reject tokens,
 credentials, telemetry/cache databases, private paths, prompts, and responses.
+
+On packaged Windows and Linux launches, UsageHub registers the Collector as the
+current user's background service before opening a window. Windows Task
+Scheduler uses the absolute Collector under the installed app resources. A
+Linux AppImage atomically installs the same audited bytes at
+`${XDG_DATA_HOME:-$HOME/.local/share}/usagehub/runtime/openusage-collector`
+because the AppImage mount path is temporary. These services run only the
+Observer daemon; Gateway remains in `observe` and is not started by desktop
+lifecycle management.
+
+The Windows uninstaller removes the Observer service before application files.
+It always preserves local usage state, including default and silent uninstall
+and updates. Safe explicit deletion awaits a future native helper; current
+Windows packages do not advertise a local-state deletion option. Credential-
+manager items are also preserved.
+
+Linux AppImage users can remove the managed service and stable Collector copy
+without opening the renderer:
+
+```bash
+./UsageHub.AppImage --usagehub-uninstall
+```
+
+Add `--delete-data` only to also invoke the confirmed local-state deletion
+command. The AppImage file itself can then be deleted normally. Neither command
+prints private runtime paths, credentials, or Collector output.

@@ -2385,6 +2385,8 @@ class NativeCiEvidenceTests(unittest.TestCase):
             source.index("- name: Run native Windows Job contracts")
         ]
         for module in (
+            "tests.test_lifecycle_state",
+            "tests.test_managed_collector",
             "tests.test_native_lifecycle_evidence",
             "tests.test_native_lifecycle_runner",
         ):
@@ -2393,10 +2395,14 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 f"portable contracts do not run {module}",
             )
         for event, block in (("push", push), ("pull_request", pull_request)):
+            self.assertIn('- "desktop/**"', block)
+            self.assertIn('- "openusage_bar/**"', block)
             for path in (
                 "docs/native-lifecycle-evidence.md",
                 "docs/schemas/native-lifecycle-evidence-v1.schema.json",
                 "scripts/native_lifecycle_evidence.py",
+                "tests/test_lifecycle_state.py",
+                "tests/test_managed_collector.py",
                 "tests/test_native_lifecycle_evidence.py",
                 "tests/test_native_lifecycle_runner.py",
             ):
@@ -2406,6 +2412,17 @@ class NativeCiEvidenceTests(unittest.TestCase):
         package = source[:source.index("\n  gateway-performance:")]
         self.assertNotIn("native_lifecycle_evidence.py generate", package)
         self.assertNotIn("native_lifecycle_evidence.py verify", package)
+        handoff = source[
+            source.index("- name: Assemble and verify local release handoff"):
+            source.index("- name: Upload artifact and evidence")
+        ]
+        self.assertNotIn("native-lifecycle", handoff)
+        upload = source[
+            source.index("- name: Upload artifact and evidence"):
+            source.index("\n  gateway-performance:")
+        ]
+        self.assertIn("path: ${{ steps.release_handoff.outputs.path }}", upload)
+        self.assertNotIn("native-lifecycle", upload)
 
 
 if __name__ == "__main__":

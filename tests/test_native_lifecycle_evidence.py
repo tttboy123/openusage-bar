@@ -61,6 +61,32 @@ def windows_x64_record() -> dict[str, object]:
 
 
 class NativeLifecycleEvidenceTests(unittest.TestCase):
+    def test_state_delete_does_not_expand_local_or_gateway_http_namespaces(self) -> None:
+        from openusage_bar.gateway.api import GatewayRouter
+        from openusage_bar.gateway.contracts import GatewayMode
+        from openusage_bar.local_api import LocalAPIRouter
+
+        forbidden_local = ("/v1/state", "/v1/lifecycle")
+        self.assertTrue(
+            all(route not in LocalAPIRouter.ROUTES for route in forbidden_local)
+        )
+
+        gateway = GatewayRouter(mode=GatewayMode.OBSERVE, policy=None, proxy=None)
+        for route in ("/gateway/v1/state", "/gateway/v1/lifecycle"):
+            with self.subTest(route=route):
+                status, payload = gateway.dispatch("GET", route, b"")
+                self.assertEqual(status, 404)
+                self.assertEqual(payload["error"]["code"], "not_found")
+
+        status, manifest = gateway.dispatch("GET", "/gateway/v1/schema", b"")
+        self.assertEqual(status, 200)
+        self.assertTrue(
+            all(
+                "state" not in route.casefold() and "lifecycle" not in route.casefold()
+                for route in manifest["routes"]
+            )
+        )
+
     def test_public_validator_accepts_the_closed_real_windows_x64_record(self) -> None:
         from scripts.native_lifecycle_evidence import validate_lifecycle_record
 

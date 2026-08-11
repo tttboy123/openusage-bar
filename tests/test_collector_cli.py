@@ -10,6 +10,7 @@ import sys
 import subprocess
 import socket
 import time
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -29,6 +30,7 @@ from openusage_bar.collector_cli import (
 )
 from openusage_bar.collector_cli import _default_refresh_command
 from openusage_bar.daily_history import DAILY_TIMEOUT_SECONDS
+from openusage_bar.lifecycle_state import LifecycleStatePaths
 from openusage_bar.openusage_adapter import AUTO_TIMEOUT_SECONDS, DIRECT_TIMEOUT_SECONDS
 from openusage_bar.query import QueryService, to_wire
 
@@ -1216,6 +1218,212 @@ class CollectorCLITests(unittest.TestCase):
 
         self.assertEqual((code, out, err), (0, "[Unit]\n", ""))
         render.assert_called_once_with(interval=300, command=command)
+
+    def test_service_print_does_not_open_the_activity_ledger(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+
+        def forbidden_store_factory():
+            raise AssertionError("service commands must not open the activity ledger")
+
+        with patch(
+            "openusage_bar.platform_services.render_current_platform",
+            return_value="[Unit]",
+        ):
+            code = main(
+                ["service", "print", "--interval", "300"],
+                stdout=stdout,
+                stderr=stderr,
+                store_factory=forbidden_store_factory,
+            )
+
+        self.assertEqual((code, stdout.getvalue(), stderr.getvalue()), (
+            0,
+            "[Unit]\n",
+            "",
+        ))
+
+    def test_desktop_service_dispatches_fixed_actions_before_opening_the_ledger(self):
+        calls = []
+        managed = SimpleNamespace(
+            install_managed_collector=lambda *, interval=300: calls.append(
+                ("install", interval)
+            ),
+            uninstall_managed_collector=lambda: calls.append(("uninstall",)),
+        )
+
+        def forbidden_store_factory():
+            raise AssertionError("desktop-service must not open the activity ledger")
+
+        with patch.dict(
+            sys.modules,
+            {"openusage_bar.managed_collector": managed},
+        ):
+            results = []
+            for argv in (
+                ["desktop-service", "install", "--interval", "300"],
+                ["desktop-service", "uninstall"],
+            ):
+                stdout, stderr = io.StringIO(), io.StringIO()
+                code = main(
+                    argv,
+                    stdout=stdout,
+                    stderr=stderr,
+                    store_factory=forbidden_store_factory,
+                )
+                results.append((code, stdout.getvalue(), stderr.getvalue()))
+
+        self.assertEqual(results, [(0, "", ""), (0, "", "")])
+        self.assertEqual(calls, [("install", 300), ("uninstall",)])
+
+    def test_desktop_service_rejects_caller_paths_without_reflecting_them(self):
+        private_path = "/private/canary/openusage-collector"
+        code, out, err = self.run_cli(
+            [
+                "desktop-service",
+                "install",
+                "--interval",
+                "300",
+                "--command",
+                private_path,
+            ],
+        )
+
+        self.assertEqual((code, out, err), (2, "", "invalid command input\n"))
+        self.assertNotIn(private_path, err)
+
+    def test_desktop_service_install_requires_the_exact_explicit_interval(self):
+        for argv in (
+            ["desktop-service", "install"],
+            ["desktop-service", "install", "--interval", "301"],
+        ):
+            with self.subTest(argv=argv):
+                code, out, err = self.run_cli(argv)
+                self.assertEqual(
+                    (code, out, err),
+                    (2, "", "invalid command input\n"),
+                )
+                self.assertNotIn("301", err)
+
+    def test_desktop_service_failure_is_fixed_and_path_free(self):
+        private_error = "/private/canary/managed-collector"
+
+        def fail_install(*, interval=300):
+            raise RuntimeError(private_error)
+
+        managed = SimpleNamespace(
+            install_managed_collector=fail_install,
+            uninstall_managed_collector=lambda: None,
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.dict(
+            sys.modules,
+            {"openusage_bar.managed_collector": managed},
+        ):
+            code = main(
+                ["desktop-service", "install", "--interval", "300"],
+                stdout=stdout,
+                stderr=stderr,
+                store_factory=lambda: (_ for _ in ()).throw(
+                    AssertionError("desktop-service must dispatch before ledger")
+                ),
+            )
+
+        self.assertEqual(
+            (code, stdout.getvalue(), stderr.getvalue()),
+            (1, "", "desktop service action failed\n"),
+        )
+        self.assertNotIn(private_error, stderr.getvalue())
+
+    def test_confirmed_state_delete_removes_owned_roots_without_opening_ledger(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+
+        def forbidden_store_factory():
+            raise AssertionError("state commands must not open the activity ledger")
+
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            state_root = home / ".local" / "state" / "openusage-bar"
+            config_root = home / ".config" / "openusage-bar"
+            sibling = home / ".local" / "state" / "keep.txt"
+            state_root.mkdir(parents=True)
+            config_root.mkdir(parents=True)
+            sibling.write_text("keep", encoding="utf-8")
+            (state_root / "activity.sqlite3").write_bytes(b"ledger")
+            (config_root / "providers.json").write_text("[]", encoding="utf-8")
+            paths = LifecycleStatePaths(platform="linux", home=home)
+
+            with patch(
+                "openusage_bar.lifecycle_state.LifecycleStatePaths.for_current_user",
+                return_value=paths,
+            ), patch(
+                "openusage_bar.lifecycle_state.current_user_runtime_is_active",
+                return_value=False,
+            ):
+                code = main(
+                    [
+                        "state",
+                        "delete",
+                        "--confirm",
+                        "DELETE-LOCAL-USAGEHUB-STATE",
+                        "--format",
+                        "json",
+                    ],
+                    stdout=stdout,
+                    stderr=stderr,
+                    store_factory=forbidden_store_factory,
+                )
+
+            self.assertFalse(state_root.exists())
+            self.assertFalse(config_root.exists())
+            self.assertEqual(sibling.read_text(encoding="utf-8"), "keep")
+
+        self.assertEqual(
+            (code, stdout.getvalue(), stderr.getvalue()),
+            (
+                0,
+                '{"apiVersion":"local-state-lifecycle/v1","deleted":true,'
+                '"object":"local.state_delete"}\n',
+                "",
+            ),
+        )
+
+    def test_state_delete_rejects_unconfirmed_private_input_without_echoing_it(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        private_input = "/private/canary/DELETE"
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            state_root = home / ".local" / "state" / "openusage-bar"
+            state_root.mkdir(parents=True)
+            preserved = state_root / "activity.sqlite3"
+            preserved.write_bytes(b"ledger")
+            paths = LifecycleStatePaths(platform="linux", home=home)
+            with patch(
+                "openusage_bar.lifecycle_state.LifecycleStatePaths.for_current_user",
+                return_value=paths,
+            ):
+                code = main(
+                    [
+                        "state",
+                        "delete",
+                        "--confirm",
+                        private_input,
+                        "--format",
+                        "json",
+                    ],
+                    stdout=stdout,
+                    stderr=stderr,
+                    store_factory=lambda: (_ for _ in ()).throw(
+                        AssertionError("state delete must not open the ledger")
+                    ),
+                )
+
+            self.assertEqual(preserved.read_bytes(), b"ledger")
+
+        self.assertEqual(
+            (code, stdout.getvalue(), stderr.getvalue()),
+            (1, "", "local state delete failed\n"),
+        )
+        self.assertNotIn(private_input, stderr.getvalue())
 
     def test_executor_list_returns_both_plugins(self):
         code, out, err = self.run_cli(

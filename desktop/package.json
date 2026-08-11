@@ -91,6 +91,10 @@
         }
       ]
     },
+    "nsis": {
+      "include": "build/installer.nsh",
+      "deleteAppDataOnUninstall": false
+    },
     "linux": {
       "target": [
         "AppImage"

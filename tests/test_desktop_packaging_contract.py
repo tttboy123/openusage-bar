@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -6,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -322,6 +324,164 @@ process.stdout.write(JSON.stringify(output));
 
 
 class DesktopPackagingContractTests(unittest.TestCase):
+    def test_linux_xdg_data_root_is_identical_across_desktop_and_managed_collector(self):
+        from openusage_bar import managed_collector
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            data_home = root / "xdg-data"
+            source = root / "package" / "openusage-collector"
+            source.parent.mkdir()
+            source.write_bytes(b"frozen collector")
+            source.chmod(0o700)
+            script = r"""
+const path = require("path");
+const desktop = process.argv[1];
+const { resolveCollectorLifecyclePlan } = require(path.join(desktop, "collector_runtime.js"));
+const plan = resolveCollectorLifecyclePlan({
+  isPackaged: true,
+  platform: "linux",
+  resourcesPath: process.argv[2],
+  homeDir: process.argv[3],
+  environment: { XDG_DATA_HOME: process.argv[4] },
+  pathExists() { return true; },
+});
+process.stdout.write(JSON.stringify(plan));
+"""
+            completed = subprocess.run(
+                [
+                    "node",
+                    "-e",
+                    script,
+                    str(DESKTOP),
+                    str(source.parent.parent),
+                    str(home),
+                    str(data_home),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual((completed.returncode, completed.stderr), (0, ""))
+            desktop_plan = json.loads(completed.stdout)
+            installed = []
+            with patch.dict(
+                os.environ,
+                {"XDG_DATA_HOME": str(data_home)},
+                clear=False,
+            ), patch(
+                "openusage_bar.managed_collector.sys.platform", "linux"
+            ), patch(
+                "openusage_bar.managed_collector.sys.frozen", True, create=True
+            ), patch(
+                "openusage_bar.managed_collector.sys.executable", str(source)
+            ), patch(
+                "openusage_bar.managed_collector.LifecycleStatePaths.for_current_user",
+                return_value=LifecycleStatePaths(platform="linux", home=home),
+            ), patch(
+                "openusage_bar.managed_collector.platform_services.install_service",
+                side_effect=lambda **kwargs: installed.append(kwargs),
+            ):
+                managed_collector.install_managed_collector(interval=300)
+
+            self.assertEqual(
+                installed,
+                [{"interval": 300, "command": desktop_plan["serviceCommand"]}],
+            )
+            self.assertTrue(Path(desktop_plan["serviceCommand"]).is_file())
+
+    def test_linux_desktop_service_argv_matches_the_path_free_collector_cli(self):
+        script = r"""
+const path = require("path");
+const desktop = process.argv[1];
+const { resolveCollectorLifecyclePlan } = require(
+  path.join(desktop, "collector_runtime.js")
+);
+const source = "/tmp/.mount_usagehub/resources/collector/openusage-collector";
+const plan = resolveCollectorLifecyclePlan({
+  isPackaged: true,
+  platform: "linux",
+  resourcesPath: "/tmp/.mount_usagehub/resources",
+  homeDir: "/home/tester",
+  environment: {},
+  pathExists(candidate) { return candidate === source; },
+});
+process.stdout.write(JSON.stringify(plan));
+"""
+        completed = subprocess.run(
+            ["node", "-e", script, str(DESKTOP)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual((completed.returncode, completed.stderr), (0, ""))
+        plan = json.loads(completed.stdout)
+
+        self.assertEqual(
+            plan["installArgv"],
+            ["desktop-service", "install", "--interval", "300"],
+        )
+        self.assertEqual(
+            plan["uninstallArgv"],
+            ["desktop-service", "uninstall"],
+        )
+        self.assertEqual(
+            plan["sourceCommand"],
+            "/tmp/.mount_usagehub/resources/collector/openusage-collector",
+        )
+        self.assertNotIn(plan["sourceCommand"], plan["installArgv"])
+        self.assertNotIn(plan["serviceCommand"], plan["installArgv"])
+
+    def test_windows_installer_preserves_local_state_by_default(self):
+        package = json.loads(
+            (DESKTOP / "package.json").read_text(encoding="utf-8")
+        )
+
+        nsis = package["build"]["nsis"]
+        self.assertEqual(nsis["include"], "build/installer.nsh")
+        self.assertIs(nsis["deleteAppDataOnUninstall"], False)
+
+    def test_windows_uninstall_fails_closed_when_the_installed_collector_is_missing(self):
+        installer = (DESKTOP / "build/installer.nsh").read_text(encoding="utf-8")
+        missing = installer.split("usagehub_collector_missing:", 1)[1].split(
+            "usagehub_lifecycle_done:", 1
+        )[0]
+
+        first_abort = missing.index("Abort")
+        first_condition = missing.find("${If}")
+        self.assertTrue(
+            first_condition == -1 or first_abort < first_condition,
+            "a missing lifecycle Collector must abort before app files are removed",
+        )
+
+    def test_windows_uninstall_exposes_no_unimplemented_state_delete_surface(self):
+        installer = (DESKTOP / "build/installer.nsh").read_text(encoding="utf-8")
+        for forbidden in (
+            "--delete-app-data",
+            "state delete",
+            "DELETE-LOCAL-USAGEHUB-STATE",
+            "UsageHubDeleteLocalState",
+            "!macro customUnInit",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, installer)
+
+    def test_windows_lifecycle_commands_run_in_the_pre_file_removal_hook(self):
+        installer = (DESKTOP / "build/installer.nsh").read_text(encoding="utf-8")
+        uninstall = installer.split("!macro customUnInstall", 1)[1].split(
+            "!macroend", 1
+        )[0]
+
+        service = 'openusage-collector.exe" service uninstall'
+        self.assertIn(service, uninstall)
+        self.assertNotIn("state delete", uninstall)
+        self.assertNotIn("!macro customInstall", installer)
+
     def test_each_target_copies_exactly_one_native_collector_to_the_fixed_resource_path(self):
         package = json.loads((DESKTOP / "package.json").read_text(encoding="utf-8"))
 

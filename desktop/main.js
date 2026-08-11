@@ -1,4 +1,10 @@
-const { resolveCollectorCommand } = require("./collector_runtime");
+const {
+  ensurePackagedObserverService,
+  parsePackagedLifecycleCommand,
+  removePackagedObserverService,
+  resolveCollectorCommand,
+  resolveCollectorLifecyclePlan,
+} = require("./collector_runtime");
 const {
   resolveGatewayAccountEditorExecutor,
   resolveHostActionExecutor,
@@ -18,6 +24,7 @@ const {
   discoverPrivateRuntime,
   fetchPrivateObserverJson,
   isRendererApiTarget,
+  probePrivateObserver,
   startOrProbePrivateObserver,
 } = require("./gateway_proxy");
 const {
@@ -107,6 +114,25 @@ function configurePrivateRuntime() {
 
 async function ensurePrivateObserver() {
   configurePrivateRuntime();
+  const lifecyclePlan = packagedCollectorLifecyclePlan();
+  if (lifecyclePlan !== null) {
+    const lifecycle = await ensurePackagedObserverService({
+      plan: lifecyclePlan,
+      probe: () => probePrivateObserver(privateRuntime, {
+        platform: process.platform,
+        verifyWindowsAcl,
+      }),
+    });
+    privateObserverProcess = null;
+    if (lifecycle.state === "ready") return;
+    showObserverUnavailable();
+    return;
+  }
+  if (isPackagedObserverServicePlatform()) {
+    privateObserverProcess = null;
+    showObserverUnavailable();
+    return;
+  }
   const command = dashboardCommand();
   const result = await startOrProbePrivateObserver({
     runtime: privateRuntime,
@@ -120,10 +146,56 @@ async function ensurePrivateObserver() {
     privateObserverProcess.kill();
     privateObserverProcess = null;
   }
+  showObserverUnavailable();
+}
+
+function isPackagedObserverServicePlatform() {
+  return (
+    app.isPackaged === true &&
+    (process.platform === "win32" || process.platform === "linux")
+  );
+}
+
+function showObserverUnavailable() {
   dialog.showErrorBox(
     "UsageHub",
     "The private Observer service is unavailable. Usage data may be temporarily unavailable.",
   );
+}
+
+function packagedCollectorLifecyclePlan() {
+  return resolveCollectorLifecyclePlan({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    platform: process.platform,
+    homeDir: os.homedir(),
+    environment: process.env,
+    pathExists: existsSync,
+  });
+}
+
+async function runPackagedLifecycleCommand() {
+  const request = parsePackagedLifecycleCommand({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    argv: process.argv.slice(1),
+  });
+  if (request === null) return false;
+  if (request.action !== "uninstall") {
+    app.exit(2);
+    return true;
+  }
+  const plan = packagedCollectorLifecyclePlan();
+  if (plan === null) {
+    app.exit(1);
+    return true;
+  }
+  const result = await removePackagedObserverService({
+    plan,
+    deleteData: request.deleteData,
+  });
+  app.exit(result.state === "removed" ? 0 : 1);
+  return true;
 }
 
 function startStaticServer() {
@@ -476,23 +548,28 @@ function createAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-app.whenReady().then(async () => {
-  await ensurePrivateObserver();
-  await startStaticServer();
-  createAppMenu();
-  createWindow();
-  createTray();
-  await refreshTraySnapshot();
-  globalShortcut.register("CommandOrControl+Shift+T", showTrayMenu);
-  trayUpdateTimer = setInterval(refreshTraySnapshot, 60_000);
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    } else if (mainWindow) {
-      mainWindow.show();
-    }
+async function startUsageHub() {
+  if (await runPackagedLifecycleCommand()) return;
+  app.whenReady().then(async () => {
+    await ensurePrivateObserver();
+    await startStaticServer();
+    createAppMenu();
+    createWindow();
+    createTray();
+    await refreshTraySnapshot();
+    globalShortcut.register("CommandOrControl+Shift+T", showTrayMenu);
+    trayUpdateTimer = setInterval(refreshTraySnapshot, 60_000);
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      } else if (mainWindow) {
+        mainWindow.show();
+      }
+    });
   });
-});
+}
+
+void startUsageHub();
 
 app.on("window-all-closed", () => {
   // Keep running in the tray on every platform; quit explicitly from the menu.
