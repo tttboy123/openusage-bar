@@ -528,6 +528,486 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 self.assertEqual(str(unavailable.exception), "driver_unavailable")
 
     @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_linux_host_copy_file_creates_and_observes_one_private_execution_copy(
+        self,
+    ) -> None:
+        import stat
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            NativePathState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        source_bytes = b"audited AppImage payload"
+        source_sha256 = (
+            "5d228523ef8526d2b117df416820dcc217474675aff07b8ed553a766b8377088"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source.write_bytes(source_bytes)
+            source.chmod(0o644)
+            source_before = source.lstat()
+            source_signature = (
+                source_before.st_dev,
+                source_before.st_ino,
+                source_before.st_size,
+                source_before.st_mode,
+                source_before.st_mtime_ns,
+                source_before.st_ctime_ns,
+                source_before.st_nlink,
+            )
+            self.assertTrue(stat.S_ISREG(source_before.st_mode))
+            self.assertFalse(source.is_symlink())
+            self.assertEqual(hashlib.sha256(source_bytes).hexdigest(), source_sha256)
+
+            run_directory: Path | None = None
+            execution_copy: Path | None = None
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ):
+                with native_lifecycle_dependencies_for_host() as dependencies:
+                    run_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    execution_copy = run_directory / source.name
+                    self.assertEqual(execution_copy.parent, run_directory)
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "fresh_execution_copy", execution_copy
+                        ),
+                        NativePathState(False, "missing", 0, None, 0, None),
+                    )
+
+                    self.assertIsNone(
+                        dependencies.copy_file(source, execution_copy)
+                    )
+                    destination = execution_copy.lstat()
+                    self.assertTrue(stat.S_ISREG(destination.st_mode))
+                    self.assertFalse(execution_copy.is_symlink())
+                    self.assertEqual(stat.S_IMODE(destination.st_mode), 0o600)
+                    self.assertEqual(destination.st_nlink, 1)
+                    self.assertNotEqual(
+                        (destination.st_dev, destination.st_ino),
+                        (source_before.st_dev, source_before.st_ino),
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "execution_copy", execution_copy
+                        ),
+                        NativePathState(
+                            True,
+                            "file",
+                            len(source_bytes),
+                            source_sha256,
+                            0o600,
+                            f"{destination.st_dev}:{destination.st_ino}",
+                        ),
+                    )
+
+                assert run_directory is not None
+                assert execution_copy is not None
+                self.assertFalse(execution_copy.exists())
+                self.assertFalse(run_directory.exists())
+
+            source_after = source.lstat()
+            self.assertEqual(
+                (
+                    source_after.st_dev,
+                    source_after.st_ino,
+                    source_after.st_size,
+                    source_after.st_mode,
+                    source_after.st_mtime_ns,
+                    source_after.st_ctime_ns,
+                    source_after.st_nlink,
+                ),
+                source_signature,
+            )
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(
+                hashlib.sha256(source.read_bytes()).hexdigest(), source_sha256
+            )
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_linux_host_copy_rejects_a_source_inside_the_owned_run_directory(
+        self,
+    ) -> None:
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        context = None
+        run_directory: Path | None = None
+        nested: Path | None = None
+        source: Path | None = None
+        destination: Path | None = None
+        copy_error: LifecycleEvidenceError | None = None
+        destination_created = False
+        source_after = b""
+        try:
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ):
+                context = native_lifecycle_dependencies_for_host()
+                dependencies = context.__enter__()
+                run_directory = dependencies.make_run_directory("linux", "x64")
+                nested = run_directory / "nested-source"
+                nested.mkdir(mode=0o700)
+                source = nested / "UsageHub-0.8.6-linux-x86_64.AppImage"
+                source.write_bytes(b"private nested source")
+                source.chmod(0o600)
+                destination = run_directory / source.name
+                try:
+                    dependencies.copy_file(source, destination)
+                except LifecycleEvidenceError as error:
+                    copy_error = error
+                destination_created = destination.exists()
+                source_after = source.read_bytes()
+                source.unlink()
+                nested.rmdir()
+                context.__exit__(
+                    type(copy_error) if copy_error is not None else None,
+                    copy_error,
+                    copy_error.__traceback__ if copy_error is not None else None,
+                )
+                context = None
+
+            self.assertIsNotNone(copy_error)
+            assert copy_error is not None
+            self.assertEqual(str(copy_error), "driver_failed")
+            assert run_directory is not None
+            self.assertNotIn(str(run_directory), str(copy_error))
+            self.assertFalse(destination_created)
+            self.assertEqual(source_after, b"private nested source")
+            self.assertFalse(run_directory.exists())
+        finally:
+            if source is not None and source.exists():
+                source.unlink()
+            if nested is not None and nested.exists():
+                nested.rmdir()
+            if destination is not None and destination.exists():
+                destination.unlink()
+            if context is not None:
+                try:
+                    context.__exit__(None, None, None)
+                except LifecycleEvidenceError:
+                    pass
+            if run_directory is not None and run_directory.exists():
+                run_directory.rmdir()
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_linux_host_copy_failure_cleans_its_partial_file_and_run_directory(
+        self,
+    ) -> None:
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        real_write = os.write
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source_bytes = b"audited source remains unchanged"
+            source.write_bytes(source_bytes)
+            source.chmod(0o644)
+            source_before = source.lstat()
+            run_directory: Path | None = None
+            destination: Path | None = None
+            context = None
+            copy_error: LifecycleEvidenceError | None = None
+            context_error: LifecycleEvidenceError | None = None
+            wrote_partial = False
+
+            def fail_after_partial_write(
+                descriptor: int, data: object
+            ) -> int:
+                nonlocal wrote_partial
+                payload = bytes(data)
+                real_write(descriptor, payload[:4])
+                wrote_partial = True
+                raise OSError("PRIVATE_PARTIAL_WRITE")
+
+            try:
+                with patch(
+                    "scripts.native_lifecycle_evidence.sys.platform", "linux"
+                ), patch(
+                    "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                    return_value="x86_64",
+                ):
+                    context = native_lifecycle_dependencies_for_host()
+                    dependencies = context.__enter__()
+                    run_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    destination = run_directory / source.name
+                    with patch(
+                        "scripts.native_lifecycle_evidence.os.write",
+                        side_effect=fail_after_partial_write,
+                    ):
+                        try:
+                            dependencies.copy_file(source, destination)
+                        except LifecycleEvidenceError as error:
+                            copy_error = error
+                    try:
+                        context.__exit__(
+                            type(copy_error) if copy_error is not None else None,
+                            copy_error,
+                            (
+                                copy_error.__traceback__
+                                if copy_error is not None
+                                else None
+                            ),
+                        )
+                    except LifecycleEvidenceError as error:
+                        context_error = error
+                    context = None
+
+                self.assertTrue(wrote_partial)
+                self.assertIsNotNone(copy_error)
+                assert copy_error is not None
+                self.assertEqual(str(copy_error), "driver_failed")
+                self.assertNotIn("PRIVATE_", str(copy_error))
+                if context_error is not None:
+                    self.assertEqual(str(context_error), "driver_failed")
+                    self.assertNotIn("PRIVATE_", str(context_error))
+                assert destination is not None
+                assert run_directory is not None
+                self.assertFalse(destination.exists())
+                self.assertFalse(run_directory.exists())
+                source_after = source.lstat()
+                self.assertEqual(
+                    (source_after.st_dev, source_after.st_ino),
+                    (source_before.st_dev, source_before.st_ino),
+                )
+                self.assertEqual(source.read_bytes(), source_bytes)
+            finally:
+                if destination is not None and destination.exists():
+                    destination.unlink()
+                if context is not None:
+                    try:
+                        context.__exit__(None, None, None)
+                    except LifecycleEvidenceError:
+                        pass
+                if run_directory is not None and run_directory.exists():
+                    run_directory.rmdir()
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_linux_host_inspect_rejects_a_public_entry_replaced_during_hashing(
+        self,
+    ) -> None:
+        from unittest.mock import patch
+
+        import scripts.native_lifecycle_evidence as lifecycle_evidence
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        real_fstat = os.fstat
+        real_rmdir = os.rmdir
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source_bytes = b"audited execution copy"
+            source.write_bytes(source_bytes)
+            source.chmod(0o644)
+            foreign_seed = root / "foreign-seed"
+            foreign_bytes = b"PRIVATE_FOREIGN_ENTRY"
+            foreign_seed.write_bytes(foreign_bytes)
+            foreign_identity = foreign_seed.lstat()
+            context = None
+            run_directory: Path | None = None
+            destination: Path | None = None
+            owned_original: Path | None = None
+            inspect_error: LifecycleEvidenceError | None = None
+            cleanup_error: LifecycleEvidenceError | None = None
+            returned_state: object | None = None
+            swapped = False
+            descriptor_checks = 0
+
+            def swap_public_after_hashed_descriptor_check(
+                descriptor: int,
+            ) -> os.stat_result:
+                nonlocal descriptor_checks, swapped
+                result = real_fstat(descriptor)
+                descriptor_checks += 1
+                if descriptor_checks == 2:
+                    assert destination is not None
+                    assert owned_original is not None
+                    destination.rename(owned_original)
+                    foreign_seed.rename(destination)
+                    swapped = True
+                return result
+
+            try:
+                with patch(
+                    "scripts.native_lifecycle_evidence.sys.platform", "linux"
+                ), patch(
+                    "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                    return_value="x86_64",
+                ):
+                    context = lifecycle_evidence.native_lifecycle_dependencies_for_host()
+                    dependencies = context.__enter__()
+                    run_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    destination = run_directory / source.name
+                    owned_original = run_directory / "owned-original"
+                    dependencies.copy_file(source, destination)
+                    with patch(
+                        "scripts.native_lifecycle_evidence.os.fstat",
+                        side_effect=swap_public_after_hashed_descriptor_check,
+                    ):
+                        try:
+                            returned_state = dependencies.inspect_path(
+                                "execution_copy", destination
+                            )
+                        except LifecycleEvidenceError as error:
+                            inspect_error = error
+                    try:
+                        context.__exit__(
+                            type(inspect_error) if inspect_error is not None else None,
+                            inspect_error,
+                            (
+                                inspect_error.__traceback__
+                                if inspect_error is not None
+                                else None
+                            ),
+                        )
+                    except LifecycleEvidenceError as error:
+                        cleanup_error = error
+                    context = None
+
+                self.assertTrue(swapped)
+                self.assertIsNone(returned_state)
+                self.assertIsNotNone(inspect_error)
+                assert inspect_error is not None
+                self.assertEqual(str(inspect_error), "driver_failed")
+                self.assertNotIn(str(root), str(inspect_error))
+                if cleanup_error is not None:
+                    self.assertEqual(str(cleanup_error), "driver_failed")
+                    self.assertNotIn(str(root), str(cleanup_error))
+                assert destination is not None
+                assert owned_original is not None
+                replacement = destination.lstat()
+                self.assertEqual(
+                    (replacement.st_dev, replacement.st_ino),
+                    (foreign_identity.st_dev, foreign_identity.st_ino),
+                )
+                self.assertEqual(destination.read_bytes(), foreign_bytes)
+                self.assertEqual(owned_original.read_bytes(), source_bytes)
+            finally:
+                for candidate in (destination, owned_original, foreign_seed):
+                    if candidate is not None and candidate.exists():
+                        candidate.unlink()
+                if context is not None:
+                    try:
+                        context.__exit__(None, None, None)
+                    except LifecycleEvidenceError:
+                        pass
+                if run_directory is not None and run_directory.exists():
+                    real_rmdir(run_directory)
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_linux_host_inspect_rejects_same_inode_mutation_before_final_path_stat(
+        self,
+    ) -> None:
+        from unittest.mock import patch
+
+        import scripts.native_lifecycle_evidence as lifecycle_evidence
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        real_stat = os.stat
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source_bytes = b"trusted inspect payload"
+            mutated_bytes = b"hostile inspect payload"
+            self.assertEqual(len(mutated_bytes), len(source_bytes))
+            source.write_bytes(source_bytes)
+            source.chmod(0o644)
+            returned_state: object | None = None
+            inspect_error: LifecycleEvidenceError | None = None
+            destination: Path | None = None
+            mutation_fd: int | None = None
+            stat_calls = 0
+            mutated = False
+
+            def mutate_before_final_public_stat(
+                path: object,
+                *args: object,
+                **kwargs: object,
+            ) -> os.stat_result:
+                nonlocal mutated, stat_calls
+                stat_calls += 1
+                if stat_calls == 2:
+                    assert mutation_fd is not None
+                    before = os.fstat(mutation_fd)
+                    os.lseek(mutation_fd, 0, os.SEEK_SET)
+                    self.assertEqual(os.write(mutation_fd, mutated_bytes), len(mutated_bytes))
+                    os.fsync(mutation_fd)
+                    os.utime(
+                        mutation_fd,
+                        ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000),
+                    )
+                    after = os.fstat(mutation_fd)
+                    self.assertNotEqual(
+                        (after.st_mtime_ns, after.st_ctime_ns),
+                        (before.st_mtime_ns, before.st_ctime_ns),
+                    )
+                    mutated = True
+                return real_stat(path, *args, **kwargs)
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ):
+                with lifecycle_evidence.native_lifecycle_dependencies_for_host() as dependencies:
+                    run_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    destination = run_directory / source.name
+                    dependencies.copy_file(source, destination)
+                    mutation_fd = os.open(
+                        destination,
+                        os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                    )
+                    try:
+                        with patch(
+                            "scripts.native_lifecycle_evidence.os.stat",
+                            side_effect=mutate_before_final_public_stat,
+                        ):
+                            try:
+                                returned_state = dependencies.inspect_path(
+                                    "execution_copy", destination
+                                )
+                            except LifecycleEvidenceError as error:
+                                inspect_error = error
+                    finally:
+                        os.close(mutation_fd)
+                        mutation_fd = None
+
+            self.assertTrue(mutated)
+            self.assertIsNone(returned_state)
+            self.assertIsNotNone(inspect_error)
+            assert inspect_error is not None
+            self.assertEqual(str(inspect_error), "driver_failed")
+            self.assertNotIn(str(root), str(inspect_error))
+            self.assertEqual(source.read_bytes(), source_bytes)
+            assert destination is not None
+            self.assertFalse(destination.exists())
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_run_directory_rejects_an_entry_swap_before_identity_binding(
         self,
     ) -> None:
@@ -739,6 +1219,145 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 if marker.exists():
                     marker.unlink()
                 real_rmdir(directory)
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_linux_host_execution_copy_quarantine_restore_does_not_clobber_new_public_entry(
+        self,
+    ) -> None:
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        real_rename = os.rename
+        real_stat = os.stat
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            owned_bytes = b"owned execution copy"
+            source.write_bytes(owned_bytes)
+            source.chmod(0o644)
+            foreign_seed = root / "foreign-seed"
+            foreign_bytes = b"foreign quarantined entry"
+            foreign_seed.write_bytes(foreign_bytes)
+            foreign_metadata = foreign_seed.lstat()
+            foreign_identity = (
+                foreign_metadata.st_dev,
+                foreign_metadata.st_ino,
+            )
+            run_directory: Path | None = None
+            public_entry: Path | None = None
+            owned_original: Path | None = None
+            quarantine_name: str | None = None
+            new_public_identity: tuple[int, int] | None = None
+            cleanup_error: LifecycleEvidenceError | None = None
+            swapped = False
+            new_public_created = False
+
+            def swap_before_public_to_quarantine(
+                source_name: object,
+                destination_name: object,
+                *args: object,
+                **kwargs: object,
+            ) -> None:
+                nonlocal quarantine_name, swapped
+                if not swapped:
+                    assert public_entry is not None
+                    assert owned_original is not None
+                    real_rename(public_entry, owned_original)
+                    real_rename(foreign_seed, public_entry)
+                    quarantine_name = str(destination_name)
+                    swapped = True
+                real_rename(source_name, destination_name, *args, **kwargs)
+
+            def create_public_before_mismatch_restore(
+                path: object,
+                *args: object,
+                **kwargs: object,
+            ) -> os.stat_result:
+                nonlocal new_public_created, new_public_identity
+                if (
+                    not new_public_created
+                    and quarantine_name is not None
+                    and str(path) == quarantine_name
+                ):
+                    assert public_entry is not None
+                    public_entry.write_bytes(b"new concurrent public entry")
+                    metadata = public_entry.lstat()
+                    new_public_identity = (metadata.st_dev, metadata.st_ino)
+                    new_public_created = True
+                return real_stat(path, *args, **kwargs)
+
+            context = None
+            try:
+                with patch(
+                    "scripts.native_lifecycle_evidence.sys.platform", "linux"
+                ), patch(
+                    "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                    return_value="x86_64",
+                ):
+                    context = native_lifecycle_dependencies_for_host()
+                    dependencies = context.__enter__()
+                    run_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    public_entry = run_directory / source.name
+                    owned_original = run_directory / "owned-original"
+                    dependencies.copy_file(source, public_entry)
+                    with patch(
+                        "scripts.native_lifecycle_evidence.os.rename",
+                        side_effect=swap_before_public_to_quarantine,
+                    ), patch(
+                        "scripts.native_lifecycle_evidence.os.stat",
+                        side_effect=create_public_before_mismatch_restore,
+                    ):
+                        try:
+                            context.__exit__(None, None, None)
+                        except LifecycleEvidenceError as error:
+                            cleanup_error = error
+                    context = None
+
+                self.assertTrue(swapped)
+                self.assertTrue(new_public_created)
+                self.assertIsNotNone(cleanup_error)
+                assert cleanup_error is not None
+                self.assertEqual(str(cleanup_error), "driver_failed")
+                self.assertNotIn(str(root), str(cleanup_error))
+                assert public_entry is not None
+                assert new_public_identity is not None
+                public_metadata = public_entry.lstat()
+                self.assertEqual(
+                    (public_metadata.st_dev, public_metadata.st_ino),
+                    new_public_identity,
+                )
+                self.assertEqual(
+                    public_entry.read_bytes(), b"new concurrent public entry"
+                )
+                assert owned_original is not None
+                self.assertEqual(owned_original.read_bytes(), owned_bytes)
+                assert run_directory is not None
+                assert quarantine_name is not None
+                quarantine = run_directory / quarantine_name
+                quarantine_metadata = quarantine.lstat()
+                self.assertEqual(
+                    (quarantine_metadata.st_dev, quarantine_metadata.st_ino),
+                    foreign_identity,
+                )
+                self.assertEqual(quarantine.read_bytes(), foreign_bytes)
+            finally:
+                if context is not None:
+                    try:
+                        context.__exit__(None, None, None)
+                    except LifecycleEvidenceError:
+                        pass
+                if run_directory is not None and run_directory.exists():
+                    for child in run_directory.iterdir():
+                        child.unlink()
+                    run_directory.rmdir()
+                if foreign_seed.exists():
+                    foreign_seed.unlink()
 
     @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_dependency_cleanup_failures_are_path_free(self) -> None:

@@ -591,18 +591,396 @@ class NativeLifecycleDependencies:
     wait: Callable[..., object]
 
 
+def _native_file_signature(metadata: Any) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mode,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+        metadata.st_nlink,
+    )
+
+
+def _hash_descriptor(descriptor: int) -> tuple[int, str]:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    digest = hashlib.sha256()
+    total = 0
+    while True:
+        chunk = os.read(descriptor, 1024 * 1024)
+        if not chunk:
+            break
+        digest.update(chunk)
+        total += len(chunk)
+    return total, digest.hexdigest()
+
+
+def _snapshot_external_file(path: Path) -> tuple[tuple[int, ...], str]:
+    descriptor: int | None = None
+    try:
+        if not _valid_native_path(path):
+            _driver_fail()
+        entry = path.lstat()
+        if (
+            stat.S_ISLNK(entry.st_mode)
+            or not stat.S_ISREG(entry.st_mode)
+            or entry.st_size <= 0
+        ):
+            _driver_fail()
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+        )
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or _native_file_signature(opened)
+            != _native_file_signature(entry)
+        ):
+            _driver_fail()
+        total, digest = _hash_descriptor(descriptor)
+        finished = os.fstat(descriptor)
+        final_entry = path.lstat()
+        if (
+            total != opened.st_size
+            or _native_file_signature(finished)
+            != _native_file_signature(opened)
+            or _native_file_signature(final_entry)
+            != _native_file_signature(opened)
+        ):
+            _driver_fail()
+        return _native_file_signature(opened), digest
+    except LifecycleEvidenceError:
+        raise
+    except Exception:
+        _driver_fail()
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except Exception:
+                _driver_fail()
+
+
+def _restore_regular_entry_no_clobber(
+    parent_fd: int,
+    quarantine: str,
+    public_name: str,
+) -> None:
+    os.link(
+        quarantine,
+        public_name,
+        src_dir_fd=parent_fd,
+        dst_dir_fd=parent_fd,
+        follow_symlinks=False,
+    )
+    os.unlink(quarantine, dir_fd=parent_fd)
+
+
+@dataclass
+class _BoundRunFile:
+    name: str
+    descriptor: int
+    identity: tuple[int, int]
+    size_bytes: int
+    sha256: str
+    mode: int
+
+
 @dataclass
 class _BoundRunDirectory:
     path: Path
     parent_fd: int
     directory_fd: int
     identity: tuple[int, int]
+    execution_copy: _BoundRunFile | None = None
+
+    def _validate_child_path(self, path: object) -> Path:
+        if (
+            not isinstance(path, Path)
+            or not _valid_native_path(path)
+            or path.parent != self.path
+            or path.name != path.parts[-1]
+        ):
+            _driver_fail()
+        return path
+
+    def inspect_path(self, purpose: object, path: object) -> NativePathState:
+        if type(purpose) is not str:
+            _driver_fail()
+        if purpose not in {"fresh_execution_copy", "execution_copy"}:
+            _fail("driver_unavailable")
+        child = self._validate_child_path(path)
+        if ARTIFACT_NAMES["linux"].fullmatch(child.name) is None:
+            _driver_fail()
+        if purpose == "fresh_execution_copy":
+            if self.execution_copy is not None:
+                _driver_fail()
+            try:
+                os.stat(
+                    child.name,
+                    dir_fd=self.directory_fd,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                return NativePathState(False, "missing", 0, None, 0, None)
+            except Exception:
+                _driver_fail()
+            _driver_fail()
+        bound = self.execution_copy
+        if bound is None or child.name != bound.name:
+            _driver_fail()
+        try:
+            entry = os.stat(
+                bound.name,
+                dir_fd=self.directory_fd,
+                follow_symlinks=False,
+            )
+            opened = os.fstat(bound.descriptor)
+            total, digest = _hash_descriptor(bound.descriptor)
+            finished = os.fstat(bound.descriptor)
+            final_entry = os.stat(
+                bound.name,
+                dir_fd=self.directory_fd,
+                follow_symlinks=False,
+            )
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _driver_fail()
+        if (
+            not stat.S_ISREG(entry.st_mode)
+            or not stat.S_ISREG(opened.st_mode)
+            or (entry.st_dev, entry.st_ino) != bound.identity
+            or (opened.st_dev, opened.st_ino) != bound.identity
+            or _native_file_signature(finished)
+            != _native_file_signature(opened)
+            or not stat.S_ISREG(final_entry.st_mode)
+            or (final_entry.st_dev, final_entry.st_ino) != bound.identity
+            or _native_file_signature(final_entry)
+            != _native_file_signature(finished)
+            or final_entry.st_nlink != 1
+            or final_entry.st_size != bound.size_bytes
+            or stat.S_IMODE(final_entry.st_mode) != bound.mode
+            or opened.st_nlink != 1
+            or total != bound.size_bytes
+            or opened.st_size != bound.size_bytes
+            or digest != bound.sha256
+            or stat.S_IMODE(opened.st_mode) != bound.mode
+        ):
+            _driver_fail()
+        return NativePathState(
+            True,
+            "file",
+            bound.size_bytes,
+            bound.sha256,
+            bound.mode,
+            f"{bound.identity[0]}:{bound.identity[1]}",
+        )
+
+    def copy_file(self, source: object, destination: object) -> None:
+        if not isinstance(source, Path) or not _valid_native_path(source):
+            _driver_fail()
+        child = self._validate_child_path(destination)
+        if (
+            self.execution_copy is not None
+            or child.name != source.name
+            or ARTIFACT_NAMES["linux"].fullmatch(child.name) is None
+        ):
+            _driver_fail()
+        try:
+            public_run_directory = os.stat(
+                self.path.name,
+                dir_fd=self.parent_fd,
+                follow_symlinks=False,
+            )
+            resolved_source = source.resolve(strict=True)
+            resolved_run_directory = self.path.resolve(strict=True)
+            source_is_internal = (
+                resolved_source == resolved_run_directory
+                or resolved_run_directory in resolved_source.parents
+            )
+        except Exception:
+            _driver_fail()
+        if (
+            not stat.S_ISDIR(public_run_directory.st_mode)
+            or (public_run_directory.st_dev, public_run_directory.st_ino)
+            != self.identity
+            or source_is_internal
+        ):
+            _driver_fail()
+        before_signature, before_sha256 = _snapshot_external_file(source)
+        source_fd: int | None = None
+        destination_fd: int | None = None
+        try:
+            source_fd = os.open(
+                source,
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+            source_opened = os.fstat(source_fd)
+            if _native_file_signature(source_opened) != before_signature:
+                _driver_fail()
+            destination_fd = os.open(
+                child.name,
+                os.O_RDWR
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=self.directory_fd,
+            )
+            destination_opened = os.fstat(destination_fd)
+            identity = (
+                destination_opened.st_dev,
+                destination_opened.st_ino,
+            )
+            bound = _BoundRunFile(
+                name=child.name,
+                descriptor=destination_fd,
+                identity=identity,
+                size_bytes=0,
+                sha256=hashlib.sha256(b"").hexdigest(),
+                mode=0o600,
+            )
+            self.execution_copy = bound
+            destination_fd = None
+            if (
+                not stat.S_ISREG(destination_opened.st_mode)
+                or destination_opened.st_nlink != 1
+                or identity == before_signature[:2]
+            ):
+                _driver_fail()
+            os.fchmod(bound.descriptor, 0o600)
+            copied_digest = hashlib.sha256()
+            copied_size = 0
+            while True:
+                chunk = os.read(source_fd, 1024 * 1024)
+                if not chunk:
+                    break
+                copied_digest.update(chunk)
+                copied_size += len(chunk)
+                view = memoryview(chunk)
+                while view:
+                    written = os.write(bound.descriptor, view)
+                    if written <= 0:
+                        _driver_fail()
+                    view = view[written:]
+            os.fsync(bound.descriptor)
+            source_finished = os.fstat(source_fd)
+            destination_opened = os.fstat(bound.descriptor)
+            destination_size, destination_sha256 = _hash_descriptor(
+                bound.descriptor
+            )
+            destination_finished = os.fstat(bound.descriptor)
+            destination_entry = os.stat(
+                child.name,
+                dir_fd=self.directory_fd,
+                follow_symlinks=False,
+            )
+            after_signature, after_sha256 = _snapshot_external_file(source)
+            if (
+                _native_file_signature(source_finished) != before_signature
+                or after_signature != before_signature
+                or copied_size != before_signature[2]
+                or copied_digest.hexdigest() != before_sha256
+                or after_sha256 != before_sha256
+                or not stat.S_ISREG(destination_opened.st_mode)
+                or destination_opened.st_nlink != 1
+                or identity == before_signature[:2]
+                or (destination_entry.st_dev, destination_entry.st_ino)
+                != identity
+                or _native_file_signature(destination_finished)
+                != _native_file_signature(destination_opened)
+                or destination_size != copied_size
+                or destination_sha256 != before_sha256
+                or stat.S_IMODE(destination_opened.st_mode) != 0o600
+            ):
+                _driver_fail()
+            bound.size_bytes = destination_size
+            bound.sha256 = destination_sha256
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _driver_fail()
+        finally:
+            if source_fd is not None:
+                try:
+                    os.close(source_fd)
+                except Exception:
+                    _driver_fail()
+            if destination_fd is not None:
+                try:
+                    os.close(destination_fd)
+                except Exception:
+                    _driver_fail()
+
+    def _cleanup_execution_copy(self) -> None:
+        bound = self.execution_copy
+        if bound is None:
+            return
+        quarantine = f".{bound.name}.quarantine-{secrets.token_hex(16)}"
+        cleanup_failed = False
+        quarantined = False
+        try:
+            os.rename(
+                bound.name,
+                quarantine,
+                src_dir_fd=self.directory_fd,
+                dst_dir_fd=self.directory_fd,
+            )
+            quarantined = True
+            current = os.stat(
+                quarantine,
+                dir_fd=self.directory_fd,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISREG(current.st_mode)
+                or (current.st_dev, current.st_ino) != bound.identity
+            ):
+                _restore_regular_entry_no_clobber(
+                    self.directory_fd,
+                    quarantine,
+                    bound.name,
+                )
+                quarantined = False
+                cleanup_failed = True
+            else:
+                os.unlink(quarantine, dir_fd=self.directory_fd)
+                quarantined = False
+        except Exception:
+            cleanup_failed = True
+            if quarantined:
+                try:
+                    _restore_regular_entry_no_clobber(
+                        self.directory_fd,
+                        quarantine,
+                        bound.name,
+                    )
+                    quarantined = False
+                except Exception:
+                    pass
+        finally:
+            try:
+                os.close(bound.descriptor)
+            except Exception:
+                cleanup_failed = True
+        if cleanup_failed:
+            _driver_fail()
+        self.execution_copy = None
 
     def cleanup(self) -> None:
         quarantine = f".{self.path.name}.quarantine-{secrets.token_hex(16)}"
         quarantined = False
         cleanup_failed = False
         try:
+            self._cleanup_execution_copy()
             os.rename(
                 self.path.name,
                 quarantine,
@@ -669,9 +1047,13 @@ class _BoundRunDirectory:
 def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependencies]:
     """Own the low-level dependency session for the current native host.
 
-    Only the private Linux x86_64 run-directory resource is active.  Every
-    observation callback remains unavailable until its independent host probe
-    exists, so this context cannot yet produce lifecycle evidence.
+    Only the private Linux x86_64 run-directory and audited execution-copy
+    callbacks are active.  Every product observation callback remains
+    unavailable until its independent host probe exists, so this context
+    cannot yet produce lifecycle evidence.  Random quarantine names and
+    identity checks fail closed on detected replacement; they are not a claim
+    of isolation from a concurrently malicious process running as the same
+    user after the final identity check.
     """
 
     try:
@@ -830,10 +1212,20 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         )
         return candidate
 
+    def inspect_path(purpose: object, path: object) -> NativePathState:
+        if run_directory is None:
+            _driver_fail()
+        return run_directory.inspect_path(purpose, path)
+
+    def copy_file(source: object, destination: object) -> None:
+        if run_directory is None:
+            _driver_fail()
+        run_directory.copy_file(source, destination)
+
     dependencies = NativeLifecycleDependencies(
         make_run_directory=make_run_directory,
-        inspect_path=unavailable,
-        copy_file=unavailable,
+        inspect_path=inspect_path,
+        copy_file=copy_file,
         set_file_mode=unavailable,
         remove_path=unavailable,
         start_process=unavailable,
