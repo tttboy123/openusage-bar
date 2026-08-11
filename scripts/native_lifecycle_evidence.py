@@ -1566,13 +1566,24 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         service_absence_confirmed = True
         return NativeServiceState(False, False, None)
 
-    def prove_authoritative_state_absence(
+    def prove_authoritative_path_absence(
         *,
+        relative_components: tuple[str, ...],
         root_missing: bool,
         entry_names: tuple[str, ...],
     ) -> None:
         if (
             profile_home is None
+            or type(relative_components) is not tuple
+            or not relative_components
+            or any(
+                type(component) is not str
+                or not component
+                or not component.isprintable()
+                or component in {".", ".."}
+                or "/" in component
+                for component in relative_components
+            )
             or type(root_missing) is not bool
             or type(entry_names) is not tuple
             or root_missing == bool(entry_names)
@@ -1621,7 +1632,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             current_fd = home_fd
             missing_parent_fd: int | None = None
             missing_name: str | None = None
-            for component in (".local", "state", "openusage-bar"):
+            for component in relative_components:
                 try:
                     child_fd = os.open(
                         component,
@@ -1760,7 +1771,8 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         if profile_home is None or not service_absence_confirmed:
             _driver_fail()
         service_absence_confirmed = False
-        prove_authoritative_state_absence(
+        prove_authoritative_path_absence(
+            relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=("openusage.sock",),
         )
@@ -1775,7 +1787,8 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _fail("driver_unavailable")
         if registered is not False:
             _fail("driver_unavailable")
-        prove_authoritative_state_absence(
+        prove_authoritative_path_absence(
+            relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=("openusage.sock",),
         )
@@ -1798,11 +1811,13 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             "activity.sqlite3-shm",
             "activity.sqlite3-journal",
         )
-        prove_authoritative_state_absence(
+        prove_authoritative_path_absence(
+            relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=ledger_entries,
         )
-        prove_authoritative_state_absence(
+        prove_authoritative_path_absence(
+            relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=("openusage.sock",),
         )
@@ -1817,11 +1832,13 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _fail("driver_unavailable")
         if registered is not False:
             _fail("driver_unavailable")
-        prove_authoritative_state_absence(
+        prove_authoritative_path_absence(
+            relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=("openusage.sock",),
         )
-        prove_authoritative_state_absence(
+        prove_authoritative_path_absence(
+            relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=ledger_entries,
         )
@@ -2021,9 +2038,32 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         if (
             profile_projection is not None
             and path == profile_projection.state_root
-            and purpose != "fresh_state_root"
+            and purpose not in {"fresh_state_root", "fresh_config_root"}
         ):
             _driver_fail()
+        if purpose == "fresh_config_root":
+            if (
+                profile_projection is None
+                or package_projection is None
+                or path != profile_projection.config_root
+            ):
+                _driver_fail()
+            try:
+                current_home = Path.home()
+            except Exception:
+                _fail("driver_unavailable")
+            if (
+                not isinstance(current_home, Path)
+                or not _valid_native_path(current_home)
+                or current_home != profile_home
+            ):
+                _fail("driver_unavailable")
+            prove_authoritative_path_absence(
+                relative_components=(".config", "openusage-bar"),
+                root_missing=True,
+                entry_names=(),
+            )
+            return NativePathState(False, "missing", 0, None, 0, None)
         if purpose == "fresh_state_root":
             if (
                 profile_projection is None
@@ -2031,7 +2071,8 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                 or path != profile_projection.state_root
             ):
                 _driver_fail()
-            prove_authoritative_state_absence(
+            prove_authoritative_path_absence(
+                relative_components=(".local", "state", "openusage-bar"),
                 root_missing=True,
                 entry_names=(),
             )
