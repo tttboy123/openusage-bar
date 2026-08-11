@@ -3803,11 +3803,6 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 ) as stale_absence:
                     dependencies.inspect_listener("linux", "local")
                 self.assertEqual(str(stale_absence.exception), "driver_failed")
-                with self.assertRaisesRegex(
-                    LifecycleEvidenceError, "driver_unavailable"
-                ) as unavailable:
-                    dependencies.inspect_ledger("linux")
-                self.assertEqual(str(unavailable.exception), "driver_unavailable")
                 self.assertEqual(tree_snapshot(root), before)
 
             with patch(
@@ -3939,6 +3934,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 socket_path.parent.mkdir(parents=True)
                 socket_path.write_bytes(b"not a socket")
                 case_before = tree_snapshot(root)
+                dependencies.inspect_service("linux")
                 with self.assertRaisesRegex(
                     LifecycleEvidenceError, "driver_unavailable"
                 ) as regular_unavailable:
@@ -3951,6 +3947,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
                 socket_path.symlink_to(marker)
                 case_before = tree_snapshot(root)
+                dependencies.inspect_service("linux")
                 with self.assertRaisesRegex(
                     LifecycleEvidenceError, "driver_unavailable"
                 ) as symlink_unavailable:
@@ -3965,6 +3962,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 try:
                     bound_socket.bind(str(socket_path))
                     case_before = tree_snapshot(root)
+                    dependencies.inspect_service("linux")
                     with self.assertRaisesRegex(
                         LifecycleEvidenceError, "driver_unavailable"
                     ) as socket_unavailable:
@@ -3978,6 +3976,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     socket_path.unlink(missing_ok=True)
 
                 case_before = tree_snapshot(root)
+                dependencies.inspect_service("linux")
                 self.assertEqual(
                     dependencies.inspect_listener("linux", "local"),
                     NativeListenerState(False, False),
@@ -3996,6 +3995,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     return real_stat(path, *args, **kwargs)
 
                 case_before = tree_snapshot(root)
+                dependencies.inspect_service("linux")
                 with patch(
                     "scripts.native_lifecycle_evidence.os.stat",
                     side_effect=failed_socket_stat,
@@ -4012,6 +4012,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 runtime_probe.assert_not_called()
 
                 for flag_name in ("O_NOFOLLOW", "O_DIRECTORY"):
+                    dependencies.inspect_service("linux")
                     with self.subTest(flag=flag_name), patch.object(
                         lifecycle_evidence.os,
                         flag_name,
@@ -4039,6 +4040,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     target_is_directory=True,
                 )
                 case_before = tree_snapshot(root)
+                dependencies.inspect_service("linux")
                 with self.assertRaisesRegex(
                     LifecycleEvidenceError, "driver_unavailable"
                 ) as ancestor_unavailable:
@@ -4089,6 +4091,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         swapped = True
                     return real_stat(path, *args, **kwargs)
 
+                dependencies.inspect_service("linux")
                 with patch(
                     "scripts.native_lifecycle_evidence.os.stat",
                     side_effect=swap_before_final_socket_stat,
@@ -4118,14 +4121,6 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 )
                 runtime_probe.assert_not_called()
 
-                with self.assertRaisesRegex(
-                    LifecycleEvidenceError, "driver_unavailable"
-                ) as ledger_unavailable:
-                    dependencies.inspect_ledger("linux")
-                self.assertEqual(
-                    str(ledger_unavailable.exception), "driver_unavailable"
-                )
-
             with patch(
                 "scripts.native_lifecycle_evidence.sys.platform", "linux"
             ), patch(
@@ -4148,6 +4143,607 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 self.assertNotIn(str(root), str(rejected.exception))
                 runtime_probe.assert_not_called()
 
+            reactivated_home = root / "reactivated-authoritative-home"
+            reactivated_home.mkdir()
+            reactivated_authority = LifecycleStatePaths(
+                platform="linux",
+                home=reactivated_home,
+            )
+            case_before = tree_snapshot(root)
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), native_lifecycle_dependencies_for_host() as dependencies, patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=reactivated_authority,
+            ), patch.dict(os.environ, {}, clear=True), patch(
+                "openusage_bar.platform_services.service_is_registered",
+                side_effect=(False, True),
+            ) as service_probe, patch(
+                "openusage_bar.lifecycle_state.current_user_runtime_is_active",
+                side_effect=AssertionError("runtime connectivity is not absence"),
+            ) as runtime_probe:
+                dependencies.profile_paths("linux")
+                dependencies.inspect_service("linux")
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as reactivated:
+                    dependencies.inspect_listener("linux", "local")
+                self.assertEqual(str(reactivated.exception), "driver_unavailable")
+                self.assertEqual(service_probe.call_count, 2)
+                self.assertEqual(
+                    service_probe.call_args_list[0],
+                    service_probe.call_args_list[1],
+                )
+                service_probe.assert_called_with(
+                    platform="linux",
+                    home=reactivated_home,
+                )
+                runtime_probe.assert_not_called()
+            self.assertEqual(tree_snapshot(root), case_before)
+
+            single_use_home = root / "single-use-authoritative-home"
+            single_use_home.mkdir()
+            single_use_authority = LifecycleStatePaths(
+                platform="linux",
+                home=single_use_home,
+            )
+            case_before = tree_snapshot(root)
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), native_lifecycle_dependencies_for_host() as dependencies, patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=single_use_authority,
+            ), patch.dict(os.environ, {}, clear=True), patch(
+                "openusage_bar.platform_services.service_is_registered",
+                side_effect=(False, False),
+            ) as service_probe, patch(
+                "openusage_bar.lifecycle_state.current_user_runtime_is_active",
+                side_effect=AssertionError("runtime connectivity is not absence"),
+            ) as runtime_probe:
+                dependencies.profile_paths("linux")
+                dependencies.inspect_service("linux")
+                self.assertEqual(
+                    dependencies.inspect_listener("linux", "local"),
+                    NativeListenerState(False, False),
+                )
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ) as consumed:
+                    dependencies.inspect_listener("linux", "local")
+                self.assertEqual(str(consumed.exception), "driver_failed")
+                self.assertEqual(service_probe.call_count, 2)
+                runtime_probe.assert_not_called()
+            self.assertEqual(tree_snapshot(root), case_before)
+
+            sandwich_home = root / "sandwich-authoritative-home"
+            sandwich_home.mkdir()
+            sandwich_authority = LifecycleStatePaths(
+                platform="linux",
+                home=sandwich_home,
+            )
+            sandwich_socket = (
+                sandwich_home
+                / ".local"
+                / "state"
+                / "openusage-bar"
+                / "openusage.sock"
+            )
+            service_calls = 0
+            created_socket_facts: tuple[int, int] | None = None
+
+            def create_socket_during_final_service_probe(**kwargs) -> bool:
+                nonlocal service_calls, created_socket_facts
+                self.assertEqual(
+                    kwargs,
+                    {"platform": "linux", "home": sandwich_home},
+                )
+                service_calls += 1
+                if service_calls == 2:
+                    sandwich_socket.parent.mkdir(parents=True)
+                    sandwich_socket.write_bytes(b"created during service recheck")
+                    metadata = sandwich_socket.lstat()
+                    created_socket_facts = (metadata.st_dev, metadata.st_ino)
+                return False
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), native_lifecycle_dependencies_for_host() as dependencies, patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=sandwich_authority,
+            ), patch.dict(os.environ, {}, clear=True), patch(
+                "openusage_bar.platform_services.service_is_registered",
+                side_effect=create_socket_during_final_service_probe,
+            ) as service_probe, patch(
+                "openusage_bar.lifecycle_state.current_user_runtime_is_active",
+                side_effect=AssertionError("runtime connectivity is not absence"),
+            ) as runtime_probe:
+                dependencies.profile_paths("linux")
+                dependencies.inspect_service("linux")
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as sandwich_unavailable:
+                    dependencies.inspect_listener("linux", "local")
+                self.assertEqual(
+                    str(sandwich_unavailable.exception), "driver_unavailable"
+                )
+                self.assertEqual(service_probe.call_count, 2)
+                assert created_socket_facts is not None
+                metadata = sandwich_socket.lstat()
+                self.assertEqual(
+                    (metadata.st_dev, metadata.st_ino),
+                    created_socket_facts,
+                )
+                self.assertEqual(
+                    sandwich_socket.read_bytes(),
+                    b"created during service recheck",
+                )
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ) as consumed:
+                    dependencies.inspect_listener("linux", "local")
+                self.assertEqual(str(consumed.exception), "driver_failed")
+                self.assertEqual(service_probe.call_count, 2)
+                runtime_probe.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_ledger_probe_proves_only_authoritative_absence(
+        self,
+    ) -> None:
+        import stat
+        from unittest.mock import patch
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts import native_lifecycle_evidence as lifecycle_evidence
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeLedgerState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        def tree_snapshot(root: Path) -> tuple[tuple[object, ...], ...]:
+            snapshot: list[tuple[object, ...]] = []
+            for path in (root, *sorted(root.rglob("*"))):
+                metadata = path.lstat()
+                if stat.S_ISREG(metadata.st_mode):
+                    payload: object = path.read_bytes()
+                elif stat.S_ISLNK(metadata.st_mode):
+                    payload = os.readlink(path)
+                else:
+                    payload = None
+                snapshot.append(
+                    (
+                        "." if path == root else path.relative_to(root).as_posix(),
+                        metadata.st_dev,
+                        metadata.st_ino,
+                        metadata.st_mode,
+                        metadata.st_size,
+                        metadata.st_mtime_ns,
+                        metadata.st_ctime_ns,
+                        metadata.st_nlink,
+                        payload,
+                    )
+                )
+            return tuple(snapshot)
+
+        missing = NativeLedgerState(False, None, 0, None, False, 0)
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="oul-") as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            marker = root / "PRIVATE_LEDGER_PROBE_MARKER"
+            marker.write_bytes(b"ledger probe is read-only")
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            ledger_path = (
+                home
+                / ".local"
+                / "state"
+                / "openusage-bar"
+                / "activity.sqlite3"
+            )
+            ledger_family = tuple(
+                ledger_path.parent / name
+                for name in (
+                    "activity.sqlite3",
+                    "activity.sqlite3-wal",
+                    "activity.sqlite3-shm",
+                    "activity.sqlite3-journal",
+                )
+            )
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), native_lifecycle_dependencies_for_host() as dependencies, patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch.dict(os.environ, {}, clear=True), patch(
+                "openusage_bar.platform_services.service_is_registered",
+                return_value=False,
+            ), patch(
+                "openusage_bar.lifecycle_state.current_user_runtime_is_active",
+                side_effect=AssertionError("runtime connectivity is not absence"),
+            ) as runtime_probe:
+                dependencies.profile_paths("linux")
+
+                def refresh_local_absence() -> None:
+                    dependencies.inspect_service("linux")
+                    dependencies.inspect_listener("linux", "local")
+
+                refresh_local_absence()
+
+                before = tree_snapshot(root)
+                self.assertEqual(dependencies.inspect_ledger("linux"), missing)
+                self.assertEqual(tree_snapshot(root), before)
+                with patch(
+                    "scripts.native_lifecycle_evidence.os.open",
+                    side_effect=AssertionError("consumed ledger token must gate first"),
+                ) as os_probe:
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as consumed:
+                        dependencies.inspect_ledger("linux")
+                    self.assertEqual(str(consumed.exception), "driver_failed")
+                    os_probe.assert_not_called()
+
+                for platform in ("win", True):
+                    refresh_local_absence()
+                    with self.subTest(platform=platform), patch(
+                        "scripts.native_lifecycle_evidence.os.open",
+                        side_effect=AssertionError("ledger probe must not start"),
+                    ) as os_probe:
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as rejected:
+                            dependencies.inspect_ledger(platform)
+                        self.assertEqual(str(rejected.exception), "driver_failed")
+                        self.assertNotIn(str(root), str(rejected.exception))
+                        os_probe.assert_not_called()
+
+                ledger_path.parent.mkdir(parents=True)
+                refresh_local_absence()
+                case_before = tree_snapshot(root)
+                self.assertEqual(dependencies.inspect_ledger("linux"), missing)
+                self.assertEqual(tree_snapshot(root), case_before)
+
+                for sidecar in ledger_family[1:]:
+                    sidecar.write_bytes(b"residual SQLite sidecar")
+                    refresh_local_absence()
+                    case_before = tree_snapshot(root)
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as sidecar_unavailable:
+                        dependencies.inspect_ledger("linux")
+                    self.assertEqual(
+                        str(sidecar_unavailable.exception), "driver_unavailable"
+                    )
+                    self.assertEqual(tree_snapshot(root), case_before)
+                    sidecar.unlink()
+
+                ledger_path.write_bytes(b"not authoritative ledger evidence")
+                refresh_local_absence()
+                case_before = tree_snapshot(root)
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as regular_unavailable:
+                    dependencies.inspect_ledger("linux")
+                self.assertEqual(
+                    str(regular_unavailable.exception), "driver_unavailable"
+                )
+                self.assertEqual(tree_snapshot(root), case_before)
+                with patch(
+                    "scripts.native_lifecycle_evidence.os.open",
+                    side_effect=AssertionError(
+                        "failed ledger probe must consume its local token"
+                    ),
+                ) as os_probe:
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as consumed_failure:
+                        dependencies.inspect_ledger("linux")
+                    self.assertEqual(
+                        str(consumed_failure.exception), "driver_failed"
+                    )
+                    os_probe.assert_not_called()
+                ledger_path.unlink()
+
+                ledger_path.symlink_to(marker)
+                refresh_local_absence()
+                case_before = tree_snapshot(root)
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as symlink_unavailable:
+                    dependencies.inspect_ledger("linux")
+                self.assertEqual(
+                    str(symlink_unavailable.exception), "driver_unavailable"
+                )
+                self.assertEqual(tree_snapshot(root), case_before)
+                ledger_path.unlink()
+
+                ledger_path.mkdir()
+                refresh_local_absence()
+                case_before = tree_snapshot(root)
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as directory_unavailable:
+                    dependencies.inspect_ledger("linux")
+                self.assertEqual(
+                    str(directory_unavailable.exception), "driver_unavailable"
+                )
+                self.assertEqual(tree_snapshot(root), case_before)
+                ledger_path.rmdir()
+
+                real_stat = os.stat
+
+                def failed_ledger_stat(path, *args, **kwargs):
+                    if (
+                        path == "activity.sqlite3"
+                        and kwargs.get("dir_fd") is not None
+                        and kwargs.get("follow_symlinks") is False
+                    ):
+                        raise PermissionError("PRIVATE_LEDGER_AUTHORITY")
+                    return real_stat(path, *args, **kwargs)
+
+                case_before = tree_snapshot(root)
+                refresh_local_absence()
+                with patch(
+                    "scripts.native_lifecycle_evidence.os.stat",
+                    side_effect=failed_ledger_stat,
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as stat_unavailable:
+                        dependencies.inspect_ledger("linux")
+                    self.assertEqual(
+                        str(stat_unavailable.exception), "driver_unavailable"
+                    )
+                    self.assertNotIn("PRIVATE_", str(stat_unavailable.exception))
+                self.assertEqual(tree_snapshot(root), case_before)
+
+                for flag_name in ("O_NOFOLLOW", "O_DIRECTORY"):
+                    refresh_local_absence()
+                    with self.subTest(flag=flag_name), patch.object(
+                        lifecycle_evidence.os,
+                        flag_name,
+                        0,
+                    ):
+                        case_before = tree_snapshot(root)
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_unavailable"
+                        ) as flag_unavailable:
+                            dependencies.inspect_ledger("linux")
+                        self.assertEqual(
+                            str(flag_unavailable.exception), "driver_unavailable"
+                        )
+                        self.assertEqual(tree_snapshot(root), case_before)
+
+                real_close = os.close
+                close_failed = False
+
+                def close_then_fail(descriptor: int) -> None:
+                    nonlocal close_failed
+                    real_close(descriptor)
+                    if not close_failed:
+                        close_failed = True
+                        raise OSError("PRIVATE_LEDGER_CLOSE")
+
+                refresh_local_absence()
+                with patch(
+                    "scripts.native_lifecycle_evidence.os.close",
+                    side_effect=close_then_fail,
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as close_unavailable:
+                        dependencies.inspect_ledger("linux")
+                    self.assertEqual(
+                        str(close_unavailable.exception), "driver_unavailable"
+                    )
+                    self.assertNotIn("PRIVATE_", str(close_unavailable.exception))
+                self.assertTrue(close_failed)
+
+                refresh_local_absence()
+                ledger_path.parent.rmdir()
+                ledger_path.parent.parent.rmdir()
+                ledger_path.parent.parent.parent.rmdir()
+                foreign_ancestor = root / "foreign-ledger-state"
+                foreign_ancestor.mkdir()
+                foreign_marker = foreign_ancestor / "activity.sqlite3"
+                foreign_marker.write_bytes(b"foreign ledger remains unchanged")
+                (home / ".local").symlink_to(
+                    foreign_ancestor,
+                    target_is_directory=True,
+                )
+                case_before = tree_snapshot(root)
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as ancestor_unavailable:
+                    dependencies.inspect_ledger("linux")
+                self.assertEqual(
+                    str(ancestor_unavailable.exception), "driver_unavailable"
+                )
+                self.assertEqual(tree_snapshot(root), case_before)
+                (home / ".local").unlink()
+
+                public_state_root = ledger_path.parent
+                public_state_root.mkdir(parents=True)
+                original_state_root = public_state_root.with_name(
+                    "openusage-bar-original"
+                )
+                replacement_seed = root / "replacement-ledger-state"
+                replacement_seed.mkdir()
+                replacement_ledger = replacement_seed / "activity.sqlite3"
+                replacement_ledger.write_bytes(b"replacement ledger authority")
+                swapped = False
+                ledger_stat_calls = 0
+
+                def swap_before_final_ledger_stat(path, *args, **kwargs):
+                    nonlocal ledger_stat_calls, swapped
+                    if (
+                        path == "activity.sqlite3"
+                        and kwargs.get("dir_fd") is not None
+                        and kwargs.get("follow_symlinks") is False
+                    ):
+                        ledger_stat_calls += 1
+                        if not swapped and ledger_stat_calls == 4:
+                            public_state_root.rename(original_state_root)
+                            replacement_seed.rename(public_state_root)
+                            swapped = True
+                    return real_stat(path, *args, **kwargs)
+
+                refresh_local_absence()
+                with patch(
+                    "scripts.native_lifecycle_evidence.os.stat",
+                    side_effect=swap_before_final_ledger_stat,
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as swapped_unavailable:
+                        dependencies.inspect_ledger("linux")
+                    self.assertEqual(
+                        str(swapped_unavailable.exception), "driver_unavailable"
+                    )
+                self.assertTrue(swapped)
+                self.assertEqual(tuple(original_state_root.iterdir()), ())
+                self.assertEqual(
+                    (public_state_root / "activity.sqlite3").read_bytes(),
+                    b"replacement ledger authority",
+                )
+                runtime_probe.assert_not_called()
+
+            for injected_name in ("openusage.sock", "activity.sqlite3-wal"):
+                with self.subTest(final_service_injection=injected_name):
+                    sandwich_home = root / f"sandwich-{injected_name.replace('.', '-')}"
+                    sandwich_state = (
+                        sandwich_home / ".local" / "state" / "openusage-bar"
+                    )
+                    sandwich_state.mkdir(parents=True)
+                    sandwich_authority = LifecycleStatePaths(
+                        platform="linux",
+                        home=sandwich_home,
+                    )
+                    injected_entry = sandwich_state / injected_name
+                    service_calls = 0
+                    injected_identity: tuple[int, int] | None = None
+
+                    def inject_during_ledger_service_recheck(
+                        *, platform: str, home: Path
+                    ) -> bool:
+                        nonlocal service_calls, injected_identity
+                        self.assertEqual(platform, "linux")
+                        self.assertEqual(home, sandwich_home)
+                        service_calls += 1
+                        if service_calls == 3:
+                            injected_entry.write_bytes(
+                                b"created during ledger service recheck"
+                            )
+                            metadata = injected_entry.lstat()
+                            injected_identity = (metadata.st_dev, metadata.st_ino)
+                        return False
+
+                    with patch(
+                        "scripts.native_lifecycle_evidence.sys.platform", "linux"
+                    ), patch(
+                        "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                        return_value="x86_64",
+                    ), native_lifecycle_dependencies_for_host() as dependencies, patch.object(
+                        LifecycleStatePaths,
+                        "for_current_user",
+                        return_value=sandwich_authority,
+                    ), patch.dict(os.environ, {}, clear=True), patch(
+                        "openusage_bar.platform_services.service_is_registered",
+                        side_effect=inject_during_ledger_service_recheck,
+                    ) as service_probe, patch(
+                        "openusage_bar.lifecycle_state.current_user_runtime_is_active",
+                        side_effect=AssertionError(
+                            "runtime connectivity is not absence"
+                        ),
+                    ) as runtime_probe:
+                        dependencies.profile_paths("linux")
+                        dependencies.inspect_service("linux")
+                        dependencies.inspect_listener("linux", "local")
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_unavailable"
+                        ) as changed_during_sandwich:
+                            dependencies.inspect_ledger("linux")
+                        self.assertEqual(
+                            str(changed_during_sandwich.exception),
+                            "driver_unavailable",
+                        )
+                        self.assertEqual(service_probe.call_count, 3)
+                        assert injected_identity is not None
+                        metadata = injected_entry.lstat()
+                        self.assertEqual(
+                            (metadata.st_dev, metadata.st_ino), injected_identity
+                        )
+                        self.assertEqual(
+                            injected_entry.read_bytes(),
+                            b"created during ledger service recheck",
+                        )
+                        with patch(
+                            "scripts.native_lifecycle_evidence.os.open",
+                            side_effect=AssertionError(
+                                "consumed ledger token must gate first"
+                            ),
+                        ) as os_probe:
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ) as consumed:
+                                dependencies.inspect_ledger("linux")
+                            self.assertEqual(
+                                str(consumed.exception), "driver_failed"
+                            )
+                            os_probe.assert_not_called()
+                        self.assertEqual(service_probe.call_count, 3)
+                        runtime_probe.assert_not_called()
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), native_lifecycle_dependencies_for_host() as dependencies, patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch.dict(os.environ, {}, clear=True), patch(
+                "openusage_bar.platform_services.service_is_registered",
+                return_value=False,
+            ) as service_probe, patch(
+                "scripts.native_lifecycle_evidence.os.open",
+                side_effect=AssertionError("ledger probe must not start"),
+            ) as os_probe:
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ):
+                    dependencies.inspect_ledger("linux")
+                dependencies.profile_paths("linux")
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ):
+                    dependencies.inspect_ledger("linux")
+                dependencies.inspect_service("linux")
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ):
+                    dependencies.inspect_ledger("linux")
+                os_probe.assert_not_called()
+                self.assertEqual(service_probe.call_count, 1)
+
     @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_unimplemented_dependencies_are_driver_unavailable(
         self,
@@ -4168,7 +4764,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 LifecycleEvidenceError, "driver_unavailable"
             ) as unavailable:
-                dependencies.inspect_ledger("linux")
+                dependencies.network_events()
             self.assertEqual(str(unavailable.exception), "driver_unavailable")
 
     def test_default_generate_fails_closed_without_a_real_platform_backend(self) -> None:
