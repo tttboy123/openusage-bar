@@ -43,6 +43,31 @@ ARTIFACT_NAMES = {
     ),
 }
 SERVICE_MANAGERS = {"win": "task_scheduler", "linux": "systemd_user"}
+_LINUX_GATEWAY_DEFAULT_PORT = 17823
+_LINUX_NETNS_PATH = "/proc/thread-self/ns/net"
+_LINUX_AF_INET = 2
+_LINUX_AF_INET6 = 10
+_LINUX_NETLINK_FAMILIES = (
+    _LINUX_AF_INET,
+    _LINUX_AF_INET6,
+    _LINUX_AF_INET6,
+    _LINUX_AF_INET,
+)
+_LINUX_NETLINK_SOCK_DIAG = 4
+_LINUX_SOCK_DIAG_BY_FAMILY = 20
+_LINUX_NLM_F_REQUEST_DUMP = 0x301
+_LINUX_NLM_F_MULTI = 0x2
+_LINUX_NLMSG_DONE = 3
+_LINUX_IPPROTO_TCP = 6
+_LINUX_TCP_LISTEN = 10
+_LINUX_TCPF_LISTEN = 1 << _LINUX_TCP_LISTEN
+_LINUX_NLMSG_HEADER_BYTES = 16
+_LINUX_INET_DIAG_MSG_BYTES = 72
+_LINUX_DIAG_RESPONSE_LIMIT = 4 * 1024 * 1024
+_LINUX_DIAG_MESSAGE_LIMIT = 4096
+_LINUX_DIAG_RECV_BYTES = 64 * 1024
+_LINUX_DIAG_DEADLINE_SECONDS = 2.0
+_LINUX_DIAG_OPERATION_TIMEOUT_SECONDS = 1.0
 CHECK_NAMES = (
     "install",
     "firstRun",
@@ -1202,17 +1227,233 @@ class _BoundRunDirectory:
             _driver_fail()
 
 
+def _prove_linux_default_gateway_endpoint_absent() -> None:
+    """Prove no TCP 17823 listener in the calling thread's current netns."""
+
+    try:
+        import math
+        import socket
+        import struct
+        import time
+
+        def current_namespace_identity() -> tuple[int, int, int]:
+            metadata = os.stat(_LINUX_NETNS_PATH)
+            if (
+                type(metadata.st_mode) is not int
+                or not stat.S_ISREG(metadata.st_mode)
+                or type(metadata.st_dev) is not int
+                or metadata.st_dev < 0
+                or type(metadata.st_ino) is not int
+                or metadata.st_ino <= 0
+            ):
+                _fail("driver_unavailable")
+            return (
+                metadata.st_mode,
+                metadata.st_dev,
+                metadata.st_ino,
+            )
+
+        started = time.monotonic()
+        if (
+            type(started) not in {int, float}
+            or not math.isfinite(started)
+        ):
+            _fail("driver_unavailable")
+        deadline = started + _LINUX_DIAG_DEADLINE_SECONDS
+        if not math.isfinite(deadline):
+            _fail("driver_unavailable")
+        last_clock = started
+
+        def deadline_remaining() -> float:
+            nonlocal last_clock
+            current = time.monotonic()
+            if (
+                type(current) not in {int, float}
+                or not math.isfinite(current)
+                or current < last_clock
+            ):
+                _fail("driver_unavailable")
+            last_clock = current
+            remaining = deadline - current
+            if not math.isfinite(remaining) or remaining <= 0:
+                _fail("driver_unavailable")
+            return remaining
+
+        namespace_before = current_namespace_identity()
+        response_bytes = 0
+        response_messages = 0
+        with socket.socket(
+            socket.AF_NETLINK,
+            socket.SOCK_RAW,
+            _LINUX_NETLINK_SOCK_DIAG,
+        ) as diagnostic:
+            diagnostic.bind((0, 0))
+            local_address = diagnostic.getsockname()
+            if (
+                type(local_address) is not tuple
+                or len(local_address) != 2
+                or type(local_address[0]) is not int
+                or not 0 <= local_address[0] <= 0xFFFFFFFF
+                or type(local_address[1]) is not int
+                or local_address[1] != 0
+            ):
+                _fail("driver_unavailable")
+            port_id = local_address[0]
+            for sequence, family in enumerate(
+                _LINUX_NETLINK_FAMILIES,
+                start=1,
+            ):
+                request_body = struct.pack(
+                    "=BBBBI48x",
+                    family,
+                    _LINUX_IPPROTO_TCP,
+                    0,
+                    0,
+                    _LINUX_TCPF_LISTEN,
+                )
+                request = struct.pack(
+                    "=IHHII",
+                    _LINUX_NLMSG_HEADER_BYTES + len(request_body),
+                    _LINUX_SOCK_DIAG_BY_FAMILY,
+                    _LINUX_NLM_F_REQUEST_DUMP,
+                    sequence,
+                    port_id,
+                ) + request_body
+                diagnostic.settimeout(
+                    min(
+                        _LINUX_DIAG_OPERATION_TIMEOUT_SECONDS,
+                        deadline_remaining(),
+                    )
+                )
+                if diagnostic.sendto(request, (0, 0)) != len(request):
+                    _fail("driver_unavailable")
+                done = False
+                while not done:
+                    diagnostic.settimeout(
+                        min(
+                            _LINUX_DIAG_OPERATION_TIMEOUT_SECONDS,
+                            deadline_remaining(),
+                        )
+                    )
+                    received = diagnostic.recvmsg(_LINUX_DIAG_RECV_BYTES)
+                    if type(received) is not tuple or len(received) != 4:
+                        _fail("driver_unavailable")
+                    payload, ancillary, message_flags, source = received
+                    if (
+                        type(payload) is not bytes
+                        or type(ancillary) is not list
+                        or ancillary
+                        or type(source) is not tuple
+                        or len(source) != 2
+                        or type(source[0]) is not int
+                        or source[0] != 0
+                        or type(source[1]) is not int
+                        or source[1] != 0
+                    ):
+                        _fail("driver_unavailable")
+                    response_bytes += len(payload)
+                    if response_bytes > _LINUX_DIAG_RESPONSE_LIMIT:
+                        _fail("driver_unavailable")
+                    if (
+                        type(message_flags) is not int
+                        or message_flags != 0
+                        or not payload
+                    ):
+                        _fail("driver_unavailable")
+                    offset = 0
+                    while offset < len(payload):
+                        response_messages += 1
+                        if response_messages > _LINUX_DIAG_MESSAGE_LIMIT:
+                            _fail("driver_unavailable")
+                        if len(payload) - offset < _LINUX_NLMSG_HEADER_BYTES:
+                            _fail("driver_unavailable")
+                        (
+                            message_length,
+                            message_type,
+                            response_flags,
+                            response_sequence,
+                            response_port_id,
+                        ) = struct.unpack_from("=IHHII", payload, offset)
+                        if (
+                            message_length < _LINUX_NLMSG_HEADER_BYTES
+                            or message_length > len(payload) - offset
+                            or response_flags != _LINUX_NLM_F_MULTI
+                            or response_sequence != sequence
+                            or response_port_id != 0
+                        ):
+                            _fail("driver_unavailable")
+                        aligned_length = (message_length + 3) & ~3
+                        if aligned_length > len(payload) - offset:
+                            _fail("driver_unavailable")
+                        if message_type == _LINUX_NLMSG_DONE:
+                            done_status_valid = (
+                                message_length == _LINUX_NLMSG_HEADER_BYTES
+                                or (
+                                    message_length
+                                    == _LINUX_NLMSG_HEADER_BYTES + 4
+                                    and struct.unpack_from(
+                                        "=i",
+                                        payload,
+                                        offset + _LINUX_NLMSG_HEADER_BYTES,
+                                    )[0]
+                                    == 0
+                                )
+                            )
+                            if (
+                                not done_status_valid
+                                or offset + aligned_length != len(payload)
+                            ):
+                                _fail("driver_unavailable")
+                            done = True
+                        elif message_type == _LINUX_SOCK_DIAG_BY_FAMILY:
+                            if message_length < (
+                                _LINUX_NLMSG_HEADER_BYTES
+                                + _LINUX_INET_DIAG_MSG_BYTES
+                            ):
+                                _fail("driver_unavailable")
+                            message_family = payload[
+                                offset + _LINUX_NLMSG_HEADER_BYTES
+                            ]
+                            connection_state = payload[
+                                offset + _LINUX_NLMSG_HEADER_BYTES + 1
+                            ]
+                            source_port = struct.unpack_from(
+                                "!H",
+                                payload,
+                                offset + _LINUX_NLMSG_HEADER_BYTES + 4,
+                            )[0]
+                            if (
+                                message_family != family
+                                or connection_state != _LINUX_TCP_LISTEN
+                            ):
+                                _fail("driver_unavailable")
+                            if source_port == _LINUX_GATEWAY_DEFAULT_PORT:
+                                _fail("driver_unavailable")
+                        else:
+                            _fail("driver_unavailable")
+                        offset += aligned_length
+        if current_namespace_identity() != namespace_before:
+            _fail("driver_unavailable")
+        deadline_remaining()
+    except LifecycleEvidenceError:
+        raise
+    except Exception:
+        _fail("driver_unavailable")
+
+
 @contextmanager
 def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependencies]:
     """Own the low-level dependency session for the current native host.
 
-    Only the private Linux x86_64 run-directory and audited execution-copy
-    callbacks are active.  Every product observation callback remains
-    unavailable until its independent host probe exists, so this context
-    cannot yet produce lifecycle evidence.  Random quarantine names and
-    identity checks fail closed on detected replacement; they are not a claim
-    of isolation from a concurrently malicious process running as the same
-    user after the final identity check.
+    The partial Linux x86_64 adapter owns a private run directory; audited
+    execution-copy, sentinel, mode, removal, and one recopy; authoritative
+    profile/package projections; absence-only service, local-listener, and
+    ledger facts; and an instantaneous current-netns TCP 17823 absence fact.
+    Generic Gateway state and process/lifecycle callbacks remain unavailable,
+    so the default executor still cannot produce lifecycle evidence.  Random
+    quarantines and identity rechecks detect observed replacements, but are
+    not isolation from a continuously malicious same-UID process after the
+    final check.
     """
 
     try:
@@ -1469,11 +1710,19 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             type(platform) is not str
             or platform != "linux"
             or type(namespace) is not str
-            or namespace not in {"local", "gateway"}
+            or namespace
+            not in {"local", "gateway", "gateway_default_endpoint"}
         ):
             _driver_fail()
-        if namespace == "gateway":
-            _fail("driver_unavailable")
+        if namespace in {"gateway", "gateway_default_endpoint"}:
+            if profile_home is None:
+                _driver_fail()
+            if namespace == "gateway":
+                _fail("driver_unavailable")
+            # Instantaneous TCP 17823 fact in the calling thread's current
+            # network namespace; this is not a generic Gateway-state claim.
+            _prove_linux_default_gateway_endpoint_absent()
+            return NativeListenerState(False, False)
         local_listener_absence_confirmed = False
         if profile_home is None or not service_absence_confirmed:
             _driver_fail()

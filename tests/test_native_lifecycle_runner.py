@@ -3,15 +3,323 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
+import socket as socket_module
+import stat
+import struct
+import sys
 import tempfile
+import time
 import unittest
+from contextlib import ExitStack
 from dataclasses import FrozenInstanceError, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 SOURCE_COMMIT = "a" * 40
+
+_NETLINK_AF = 16
+_NETLINK_RAW = 3
+_NETLINK_SOCK_DIAG = 4
+_NETLINK_DONE = 3
+_NETLINK_DIAG_BY_FAMILY = 20
+_NETLINK_MULTI = 0x2
+_GATEWAY_PORT = 17823
+_UNRELATED_PORT = 17822
+_GATEWAY_FAMILIES = [2, 10, 10, 2]
+
+
+def _netlink_header(
+    message_type: int,
+    *,
+    sequence: int,
+    flags: int = _NETLINK_MULTI,
+    port_id: int = 0,
+    declared_length: int = 16,
+) -> bytes:
+    return struct.pack(
+        "=IHHII",
+        declared_length,
+        message_type,
+        flags,
+        sequence,
+        port_id,
+    )
+
+
+def _netlink_done(
+    sequence: int,
+    *,
+    flags: int = _NETLINK_MULTI,
+    status: int | None = None,
+) -> bytes:
+    if status is None:
+        return _netlink_header(_NETLINK_DONE, sequence=sequence, flags=flags)
+    return (
+        _netlink_header(
+            _NETLINK_DONE,
+            sequence=sequence,
+            flags=flags,
+            declared_length=20,
+        )
+        + struct.pack("=i", status)
+    )
+
+
+def _netlink_diagnostic(
+    family: int,
+    *,
+    sequence: int,
+    port: int = _UNRELATED_PORT,
+    state: int = 10,
+    flags: int = _NETLINK_MULTI,
+) -> bytes:
+    body = bytearray(72)
+    body[0] = family
+    body[1] = state
+    struct.pack_into("!H", body, 4, port)
+    return (
+        _netlink_header(
+            _NETLINK_DIAG_BY_FAMILY,
+            sequence=sequence,
+            flags=flags,
+            declared_length=16 + len(body),
+        )
+        + bytes(body)
+    )
+
+
+def _stable_netns_facts(*, final_inode: int = 41) -> tuple[object, object]:
+    mode = stat.S_IFREG | 0o400
+    return (
+        SimpleNamespace(st_mode=mode, st_dev=31, st_ino=41),
+        SimpleNamespace(st_mode=mode, st_dev=31, st_ino=final_inode),
+    )
+
+
+def _file_snapshot(root: Path) -> tuple[tuple[str, int, bytes], ...]:
+    snapshot: list[tuple[str, int, bytes]] = []
+    for path in sorted(root.rglob("*")):
+        metadata = os.lstat(path)
+        if stat.S_ISREG(metadata.st_mode):
+            snapshot.append(
+                (
+                    path.relative_to(root).as_posix(),
+                    metadata.st_mode,
+                    path.read_bytes(),
+                )
+            )
+    return tuple(snapshot)
+
+
+class _SockDiagSocket:
+    def __init__(
+        self,
+        test: unittest.TestCase,
+        responses,
+        *,
+        port_id: object = 0,
+        groups: object = 0,
+        message_flags: int = 0,
+        ancillary: object = None,
+        source: object = (0, 0),
+        payload_transform=None,
+        send_delta: int = 0,
+        timeout_observer=None,
+        receive_observer=None,
+        require_operation_timeout: bool = False,
+    ) -> None:
+        self.test = test
+        self.responses = responses
+        self.port_id = port_id
+        self.groups = groups
+        self.message_flags = message_flags
+        self.ancillary = [] if ancillary is None else ancillary
+        self.source = source
+        self.payload_transform = payload_transform
+        self.send_delta = send_delta
+        self.timeout_observer = timeout_observer
+        self.receive_observer = receive_observer
+        self.require_operation_timeout = require_operation_timeout
+        self.pending: list[object] = []
+        self.requested_families: list[int] = []
+        self.timeouts: list[float] = []
+        self.armed_timeout: float | None = None
+        self.successful_sends = 0
+        self.send_without_timeout = False
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.closed = True
+
+    def bind(self, address: tuple[int, int]) -> None:
+        self.test.assertEqual(address, (0, 0))
+
+    def settimeout(self, seconds: float) -> None:
+        if self.timeout_observer is not None:
+            self.timeout_observer(seconds)
+        self.timeouts.append(seconds)
+        self.armed_timeout = seconds
+
+    def getsockname(self) -> tuple[object, object]:
+        return self.port_id, self.groups
+
+    def sendto(self, request: bytes, address: tuple[int, int]) -> int:
+        self.test.assertEqual(address, (0, 0))
+        self.test.assertIs(type(request), bytes)
+        length, kind, flags, sequence, _port_id = struct.unpack_from(
+            "=IHHII", request, 0
+        )
+        self.test.assertEqual(length, len(request))
+        self.test.assertEqual(kind, _NETLINK_DIAG_BY_FAMILY)
+        self.test.assertEqual(flags, 0x301)
+        self.test.assertEqual(sequence, len(self.requested_families) + 1)
+        family, protocol, extension, padding = struct.unpack_from(
+            "=BBBB", request, 16
+        )
+        self.test.assertEqual(protocol, 6)
+        self.test.assertEqual((extension, padding), (0, 0))
+        self.test.assertEqual(struct.unpack_from("=I", request, 20)[0], 1 << 10)
+        if self.require_operation_timeout:
+            if self.armed_timeout is None:
+                self.send_without_timeout = True
+            else:
+                self.armed_timeout = None
+        self.successful_sends += 1
+        self.requested_families.append(family)
+        self.pending.extend(self.responses(sequence, family))
+        return len(request) + self.send_delta
+
+    def recvmsg(self, _size: int):
+        self.test.assertTrue(self.pending)
+        if self.require_operation_timeout:
+            self.test.assertIsNotNone(self.armed_timeout)
+            self.armed_timeout = None
+        if self.receive_observer is not None:
+            self.receive_observer()
+        response = self.pending.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        self.test.assertIs(type(response), bytes)
+        payload = response
+        if self.payload_transform is not None:
+            payload = self.payload_transform(payload)
+        return payload, self.ancillary, self.message_flags, self.source
+
+
+class _GatewayHarness:
+    def __init__(
+        self,
+        test: unittest.TestCase,
+        responses,
+        *,
+        netns_facts: tuple[object, ...] | None = None,
+        socket_options: dict[str, object] | None = None,
+        monotonic=None,
+    ) -> None:
+        self.test = test
+        self.responses = responses
+        self.netns_facts = netns_facts or _stable_netns_facts()
+        self.socket_options = socket_options or {}
+        self.monotonic = monotonic
+        self.created: list[_SockDiagSocket] = []
+
+    def __enter__(self):
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            native_lifecycle_dependencies_for_host,
+        )
+
+        self._temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self._temporary.__enter__())
+        self.home = self.root / "authoritative-home"
+        self.home.mkdir()
+        authority = LifecycleStatePaths(platform="linux", home=self.home)
+
+        def socket_factory(
+            family: int, socket_type: int, protocol: int = 0
+        ) -> _SockDiagSocket:
+            self.test.assertEqual(
+                (family, socket_type, protocol),
+                (_NETLINK_AF, _NETLINK_RAW, _NETLINK_SOCK_DIAG),
+            )
+            diagnostic = _SockDiagSocket(
+                self.test,
+                self.responses,
+                **self.socket_options,
+            )
+            self.created.append(diagnostic)
+            return diagnostic
+
+        self._stack = ExitStack()
+        self._stack.enter_context(
+            patch("scripts.native_lifecycle_evidence.sys.platform", "linux")
+        )
+        self._stack.enter_context(
+            patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            )
+        )
+        self._stack.enter_context(
+            patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            )
+        )
+        self._stack.enter_context(patch.dict(os.environ, {}, clear=True))
+        self._stack.enter_context(
+            patch.object(socket_module, "AF_NETLINK", _NETLINK_AF, create=True)
+        )
+        self._stack.enter_context(
+            patch.object(socket_module, "SOCK_RAW", _NETLINK_RAW, create=True)
+        )
+        self._stack.enter_context(
+            patch.object(
+                socket_module,
+                "NETLINK_SOCK_DIAG",
+                _NETLINK_SOCK_DIAG,
+                create=True,
+            )
+        )
+        self._stack.enter_context(
+            patch.object(socket_module, "socket", side_effect=socket_factory)
+        )
+        self.connect_probe = self._stack.enter_context(
+            patch.object(
+                socket_module,
+                "create_connection",
+                side_effect=AssertionError("TCP connect is not listener absence"),
+            )
+        )
+        self.netns_probe = self._stack.enter_context(
+            patch(
+                "scripts.native_lifecycle_evidence.os.stat",
+                side_effect=self.netns_facts,
+            )
+        )
+        if self.monotonic is not None:
+            self._stack.enter_context(
+                patch.object(time, "monotonic", side_effect=self.monotonic)
+            )
+        self.dependencies = self._stack.enter_context(
+            native_lifecycle_dependencies_for_host()
+        )
+        self.dependencies.profile_paths("linux")
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        try:
+            return bool(self._stack.__exit__(exc_type, exc, traceback))
+        finally:
+            self._temporary.__exit__(exc_type, exc, traceback)
 
 
 def _checks() -> dict[str, str]:
@@ -4296,6 +4604,638 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 self.assertEqual(str(consumed.exception), "driver_failed")
                 self.assertEqual(service_probe.call_count, 2)
                 runtime_probe.assert_not_called()
+
+    def test_linux_host_gateway_listener_proves_only_current_netns_absence(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeListenerState,
+        )
+
+        requested = lambda sequence, _family: [_netlink_done(sequence)]
+        with _GatewayHarness(self, requested) as harness:
+            marker = harness.root / "PRIVATE_GATEWAY_LISTENER_MARKER"
+            marker.write_bytes(b"gateway listener probe is read-only")
+            before = _file_snapshot(harness.root)
+
+            with self.assertRaisesRegex(
+                LifecycleEvidenceError, "driver_unavailable"
+            ) as generic_unavailable:
+                harness.dependencies.inspect_listener("linux", "gateway")
+            self.assertEqual(
+                str(generic_unavailable.exception), "driver_unavailable"
+            )
+            self.assertEqual(harness.created, [])
+            self.assertEqual(
+                harness.dependencies.inspect_listener(
+                    "linux", "gateway_default_endpoint"
+                ),
+                NativeListenerState(False, False),
+            )
+
+            self.assertEqual(
+                harness.created[0].requested_families,
+                _GATEWAY_FAMILIES,
+            )
+            self.assertTrue(harness.created[0].closed)
+            self.assertEqual(harness.created[0].pending, [])
+            harness.connect_probe.assert_not_called()
+            self.assertEqual(harness.netns_probe.call_count, 2)
+            self.assertEqual(_file_snapshot(harness.root), before)
+
+    def test_linux_host_gateway_listener_parses_multipart_rows_and_rejects_target_port(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeListenerState,
+        )
+
+        for target_family in (None, 2, 10):
+            with self.subTest(target_family=target_family):
+                def responses(sequence: int, family: int) -> list[object]:
+                    port = (
+                        _GATEWAY_PORT
+                        if family == target_family
+                        else _UNRELATED_PORT
+                    )
+                    return [
+                        _netlink_diagnostic(
+                            family,
+                            sequence=sequence,
+                            port=port,
+                        )
+                        + _netlink_done(sequence)
+                    ]
+
+                with _GatewayHarness(self, responses) as harness:
+                    if target_family is None:
+                        self.assertEqual(
+                            harness.dependencies.inspect_listener(
+                                "linux", "gateway_default_endpoint"
+                            ),
+                            NativeListenerState(False, False),
+                        )
+                    else:
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_unavailable"
+                        ) as unavailable:
+                            harness.dependencies.inspect_listener(
+                                "linux", "gateway_default_endpoint"
+                            )
+                        self.assertEqual(
+                            str(unavailable.exception), "driver_unavailable"
+                        )
+
+                    self.assertEqual(len(harness.created), 1)
+                    self.assertTrue(harness.created[0].closed)
+                    if target_family is None:
+                        self.assertEqual(harness.created[0].pending, [])
+                        self.assertEqual(
+                            harness.created[0].requested_families,
+                            _GATEWAY_FAMILIES,
+                        )
+                        self.assertEqual(harness.netns_probe.call_count, 2)
+
+    def test_linux_host_gateway_listener_requires_stable_current_netns_identity(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeListenerState,
+        )
+
+        namespace_path = "/proc/thread-self/ns/net"
+        responses = lambda sequence, _family: [_netlink_done(sequence)]
+        for case, facts in (
+            ("same", _stable_netns_facts()),
+            ("drift", _stable_netns_facts(final_inode=42)),
+        ):
+            with self.subTest(case=case):
+                with _GatewayHarness(
+                    self,
+                    responses,
+                    netns_facts=facts,
+                ) as harness:
+                    marker = harness.root / "PRIVATE_NETNS_IDENTITY_MARKER"
+                    marker.write_bytes(b"netns identity probe is read-only")
+                    if case == "same":
+                        self.assertEqual(
+                            harness.dependencies.inspect_listener(
+                                "linux", "gateway_default_endpoint"
+                            ),
+                            NativeListenerState(False, False),
+                        )
+                    else:
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_unavailable"
+                        ) as unavailable:
+                            harness.dependencies.inspect_listener(
+                                "linux", "gateway_default_endpoint"
+                            )
+                        self.assertEqual(
+                            str(unavailable.exception), "driver_unavailable"
+                        )
+                        self.assertNotIn("PRIVATE_", str(unavailable.exception))
+                        self.assertNotIn(namespace_path, str(unavailable.exception))
+
+                    self.assertEqual(harness.netns_probe.call_count, 2)
+                    for observed in harness.netns_probe.call_args_list:
+                        self.assertEqual(observed.args, (namespace_path,))
+                        self.assertEqual(observed.kwargs, {})
+                    self.assertEqual(len(harness.created), 1)
+                    self.assertTrue(harness.created[0].closed)
+                    self.assertEqual(harness.created[0].pending, [])
+                    harness.connect_probe.assert_not_called()
+                    self.assertEqual(
+                        marker.read_bytes(),
+                        b"netns identity probe is read-only",
+                    )
+
+    def test_linux_host_gateway_listener_bounds_the_complete_four_family_dump(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        cases = (
+            ("message_cap", (1025, 1024, 1024, 1024), 88),
+            ("byte_cap", (18, 18, 18, 18), 60 * 1024),
+        )
+        for case, rows_per_family, row_length in cases:
+            with self.subTest(case=case):
+                request_index = 0
+
+                def responses(sequence: int, family: int) -> list[object]:
+                    nonlocal request_index
+                    row_count = rows_per_family[request_index]
+                    request_index += 1
+                    diagnostic = _netlink_diagnostic(
+                        family,
+                        sequence=sequence,
+                    )
+                    if row_length == 88:
+                        row = diagnostic
+                    else:
+                        body = diagnostic[16:]
+                        attribute_length = row_length - 16 - len(body)
+                        self.assertEqual(attribute_length % 4, 0)
+                        body += (
+                            struct.pack("=HH", attribute_length, 4)
+                            + b"x" * (attribute_length - 4)
+                        )
+                        row = (
+                            _netlink_header(
+                                _NETLINK_DIAG_BY_FAMILY,
+                                sequence=sequence,
+                                declared_length=row_length,
+                            )
+                            + body
+                        )
+                    rows_per_datagram = max(
+                        1, (64 * 1024 - 16) // len(row)
+                    )
+                    pending: list[object] = []
+                    remaining = row_count
+                    while remaining:
+                        chunk = min(remaining, rows_per_datagram)
+                        payload = row * chunk
+                        self.assertLessEqual(len(payload), 64 * 1024)
+                        pending.append(payload)
+                        remaining -= chunk
+                    pending.append(_netlink_done(sequence))
+                    return pending
+
+                with _GatewayHarness(self, responses) as harness:
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        harness.dependencies.inspect_listener(
+                            "linux", "gateway_default_endpoint"
+                        )
+
+                    self.assertEqual(
+                        str(unavailable.exception), "driver_unavailable"
+                    )
+                    self.assertNotIn(
+                        str(harness.home), str(unavailable.exception)
+                    )
+                    self.assertEqual(len(harness.created), 1)
+                    self.assertTrue(harness.created[0].closed)
+
+    def test_linux_host_gateway_listener_rejects_ambiguous_transport_metadata(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        responses = lambda sequence, _family: [_netlink_done(sequence)]
+        cases = (
+            ("nonzero_groups", {"port_id": 23, "groups": 1}),
+            ("boolean_port_id", {"port_id": True}),
+            ("oversized_port_id", {"port_id": 1 << 32}),
+            ("nonzero_recv_flags", {"port_id": 23, "message_flags": 1}),
+        )
+        for case, socket_options in cases:
+            with self.subTest(case=case):
+                with _GatewayHarness(
+                    self,
+                    responses,
+                    socket_options=socket_options,
+                ) as harness:
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        harness.dependencies.inspect_listener(
+                            "linux", "gateway_default_endpoint"
+                        )
+
+                    self.assertEqual(
+                        str(unavailable.exception), "driver_unavailable"
+                    )
+                    self.assertNotIn(
+                        str(harness.home), str(unavailable.exception)
+                    )
+                    self.assertEqual(len(harness.created), 1)
+                    self.assertTrue(harness.created[0].closed)
+
+    def test_linux_host_gateway_listener_requires_exact_recvmsg_value_types(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        responses = lambda sequence, _family: [_netlink_done(sequence)]
+        cases = (
+            ("bytearray_payload", {"payload_transform": bytearray}),
+            ("tuple_ancillary", {"ancillary": ()}),
+            ("integer_ancillary", {"ancillary": 0}),
+            ("boolean_source_pid", {"source": (False, 0)}),
+            ("boolean_source_groups", {"source": (0, False)}),
+        )
+        for case, socket_options in cases:
+            with self.subTest(case=case):
+                with _GatewayHarness(
+                    self,
+                    responses,
+                    socket_options=socket_options,
+                ) as harness:
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        harness.dependencies.inspect_listener(
+                            "linux", "gateway_default_endpoint"
+                        )
+
+                    self.assertEqual(
+                        str(unavailable.exception), "driver_unavailable"
+                    )
+                    self.assertNotIn(
+                        str(harness.home), str(unavailable.exception)
+                    )
+                    self.assertEqual(len(harness.created), 1)
+                    self.assertTrue(harness.created[0].closed)
+
+    def test_linux_host_gateway_listener_rejects_incomplete_or_hostile_netlink_protocol(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeListenerState,
+        )
+
+        def kernel_done_responses(
+            sequence: int,
+            _family: int,
+        ) -> list[object]:
+            return [_netlink_done(sequence, status=0)]
+
+        with _GatewayHarness(self, kernel_done_responses) as kernel_harness:
+            self.assertEqual(
+                kernel_harness.dependencies.inspect_listener(
+                    "linux", "gateway_default_endpoint"
+                ),
+                NativeListenerState(False, False),
+            )
+            self.assertEqual(
+                kernel_harness.created[0].requested_families,
+                _GATEWAY_FAMILIES,
+            )
+            self.assertTrue(kernel_harness.created[0].closed)
+            self.assertEqual(kernel_harness.created[0].pending, [])
+
+        def responses_for(
+            case: str,
+            sequence: int,
+            family: int,
+        ) -> list[object]:
+            done = _netlink_done(sequence)
+            if case == "dump_interrupted":
+                return [_netlink_done(sequence, flags=0x12)]
+            if case == "done_status_error":
+                return [_netlink_done(sequence, status=-1)]
+            if case == "nlmsg_error":
+                return [_netlink_header(2, sequence=sequence)]
+            if case == "nlmsg_overrun":
+                return [_netlink_header(4, sequence=sequence)]
+            if case == "missing_done":
+                return [
+                    _netlink_diagnostic(family, sequence=sequence),
+                    TimeoutError(),
+                ]
+            if case == "sequence_mismatch":
+                return [_netlink_done(sequence + 1)]
+            if case == "nonzero_pid":
+                return [
+                    _netlink_header(
+                        _NETLINK_DONE,
+                        sequence=sequence,
+                        port_id=1,
+                    )
+                ]
+            if case == "family_mismatch":
+                other_family = 10 if family == 2 else 2
+                return [
+                    _netlink_diagnostic(other_family, sequence=sequence)
+                    + done
+                ]
+            if case == "state_mismatch":
+                return [
+                    _netlink_diagnostic(
+                        family,
+                        sequence=sequence,
+                        state=1,
+                    )
+                    + done
+                ]
+            if case == "length_below_header":
+                return [
+                    _netlink_header(
+                        _NETLINK_DONE,
+                        sequence=sequence,
+                        declared_length=15,
+                    )
+                ]
+            if case == "length_beyond_remaining":
+                return [
+                    _netlink_header(
+                        _NETLINK_DONE,
+                        sequence=sequence,
+                        declared_length=17,
+                    )
+                ]
+            if case == "unaligned_trailing":
+                return [
+                    _netlink_header(
+                        _NETLINK_DIAG_BY_FAMILY,
+                        sequence=sequence,
+                        declared_length=17,
+                    )
+                    + b"x"
+                ]
+            if case == "trailing_after_done":
+                return [done + b"x"]
+            if case == "recv_timeout":
+                return [TimeoutError()]
+            if case == "partial_send":
+                return [done]
+            raise AssertionError(case)
+
+        cases = (
+            "dump_interrupted",
+            "done_status_error",
+            "nlmsg_error",
+            "nlmsg_overrun",
+            "missing_done",
+            "sequence_mismatch",
+            "nonzero_pid",
+            "family_mismatch",
+            "state_mismatch",
+            "length_below_header",
+            "length_beyond_remaining",
+            "unaligned_trailing",
+            "trailing_after_done",
+            "partial_send",
+            "recv_timeout",
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                def responses(sequence: int, family: int) -> list[object]:
+                    return responses_for(case, sequence, family)
+
+                options = {"send_delta": -1} if case == "partial_send" else {}
+                with _GatewayHarness(
+                    self,
+                    responses,
+                    socket_options=options,
+                ) as harness:
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        harness.dependencies.inspect_listener(
+                            "linux", "gateway_default_endpoint"
+                        )
+
+                    self.assertEqual(
+                        str(unavailable.exception), "driver_unavailable"
+                    )
+                    self.assertNotIn(
+                        str(harness.home), str(unavailable.exception)
+                    )
+                    self.assertEqual(len(harness.created), 1)
+                    self.assertTrue(harness.created[0].closed)
+                    harness.connect_probe.assert_not_called()
+
+    def test_linux_host_gateway_listener_has_one_two_second_absolute_deadline(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        class FakeClock:
+            value = 100.0
+
+            def monotonic(self) -> float:
+                return self.value
+
+        clock = FakeClock()
+
+        def observe_timeout(seconds: float) -> None:
+            self.assertIsNot(type(seconds), bool)
+            self.assertGreater(seconds, 0.0)
+            expected = min(1.0, 102.0 - clock.value)
+            self.assertGreater(expected, 0.0)
+            self.assertAlmostEqual(seconds, expected, places=9)
+
+        def observe_receive() -> None:
+            clock.value += 0.3
+
+        def responses(sequence: int, family: int) -> list[object]:
+            return [
+                _netlink_diagnostic(family, sequence=sequence),
+                _netlink_done(sequence),
+            ]
+
+        with _GatewayHarness(
+            self,
+            responses,
+            monotonic=clock.monotonic,
+            socket_options={
+                "timeout_observer": observe_timeout,
+                "receive_observer": observe_receive,
+                "require_operation_timeout": True,
+            },
+        ) as harness:
+            with self.assertRaisesRegex(
+                LifecycleEvidenceError, "driver_unavailable"
+            ) as unavailable:
+                harness.dependencies.inspect_listener(
+                    "linux", "gateway_default_endpoint"
+                )
+
+            self.assertEqual(str(unavailable.exception), "driver_unavailable")
+            self.assertNotIn(str(harness.home), str(unavailable.exception))
+            self.assertEqual(len(harness.created), 1)
+            self.assertTrue(harness.created[0].closed)
+            with self.subTest("every send is covered by the absolute deadline"):
+                self.assertFalse(harness.created[0].send_without_timeout)
+                self.assertGreaterEqual(harness.created[0].successful_sends, 1)
+                self.assertTrue(
+                    any(timeout < 1.0 for timeout in harness.created[0].timeouts)
+                )
+
+    def test_linux_host_gateway_listener_validates_the_clock_through_final_netns_check(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        class FakeClock:
+            def __init__(self, *values: object) -> None:
+                self.values = iter(values)
+
+            def monotonic(self) -> object:
+                return next(self.values)
+
+        responses = lambda sequence, _family: [
+            _netlink_done(sequence, status=0)
+        ]
+        stable_fact = _stable_netns_facts()[0]
+        final_clock_value = [100.0]
+        netns_calls = 0
+
+        def final_netns_crosses_deadline(_path: str) -> object:
+            nonlocal netns_calls
+            netns_calls += 1
+            if netns_calls == 2:
+                final_clock_value[0] = 102.1
+            return stable_fact
+
+        def final_clock() -> float:
+            return final_clock_value[0]
+
+        with _GatewayHarness(
+            self,
+            responses,
+            monotonic=final_clock,
+            netns_facts=final_netns_crosses_deadline,
+        ) as harness:
+            with self.assertRaisesRegex(
+                LifecycleEvidenceError, "driver_unavailable"
+            ) as unavailable:
+                harness.dependencies.inspect_listener(
+                    "linux", "gateway_default_endpoint"
+                )
+            self.assertEqual(str(unavailable.exception), "driver_unavailable")
+            self.assertNotIn(str(harness.home), str(unavailable.exception))
+            self.assertEqual(netns_calls, 2)
+            self.assertEqual(len(harness.created), 1)
+            self.assertTrue(harness.created[0].closed)
+            harness.connect_probe.assert_not_called()
+
+        clock_cases = (
+            ("initial_bool", (True,), 0),
+            ("initial_nan", (float("nan"),), 0),
+            ("initial_infinity", (float("inf"),), 0),
+            ("subsequent_bool", (100.0, True), 1),
+            ("subsequent_nan", (100.0, float("nan")), 1),
+            ("subsequent_infinity", (100.0, float("inf")), 1),
+            ("clock_regression", (100.0, 99.0), 1),
+        )
+        for case, readings, expected_socket_count in clock_cases:
+            with self.subTest(case=case):
+                clock = FakeClock(*readings)
+                with _GatewayHarness(
+                    self,
+                    responses,
+                    monotonic=clock.monotonic,
+                ) as harness:
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        harness.dependencies.inspect_listener(
+                            "linux", "gateway_default_endpoint"
+                        )
+                    self.assertEqual(
+                        str(unavailable.exception), "driver_unavailable"
+                    )
+                    self.assertNotIn(
+                        str(harness.home), str(unavailable.exception)
+                    )
+                    self.assertEqual(
+                        len(harness.created), expected_socket_count
+                    )
+                    self.assertTrue(
+                        all(created.closed for created in harness.created)
+                    )
+                    harness.connect_probe.assert_not_called()
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and platform.machine().casefold() in {"x86_64", "amd64"},
+        "requires a real Linux x64 network namespace",
+    )
+    def test_linux_x64_host_gateway_listener_observes_the_real_kernel_port(
+        self,
+    ) -> None:
+        import socket
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeListenerState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        absent = NativeListenerState(False, False)
+        with native_lifecycle_dependencies_for_host() as dependencies:
+            dependencies.profile_paths("linux")
+            self.assertEqual(
+                dependencies.inspect_listener(
+                    "linux", "gateway_default_endpoint"
+                ),
+                absent,
+            )
+
+            with socket.socket(
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+            ) as listener:
+                listener.bind(("127.0.0.1", 17823))
+                listener.listen(1)
+                self.assertEqual(listener.getsockname(), ("127.0.0.1", 17823))
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as unavailable:
+                    dependencies.inspect_listener(
+                        "linux", "gateway_default_endpoint"
+                    )
+                self.assertEqual(
+                    str(unavailable.exception), "driver_unavailable"
+                )
+
+            self.assertEqual(
+                dependencies.inspect_listener(
+                    "linux", "gateway_default_endpoint"
+                ),
+                absent,
+            )
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_ledger_probe_proves_only_authoritative_absence(
