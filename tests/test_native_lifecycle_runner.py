@@ -55,14 +55,21 @@ def _netlink_done(
     *,
     flags: int = _NETLINK_MULTI,
     status: int | None = None,
+    port_id: int = 0,
 ) -> bytes:
     if status is None:
-        return _netlink_header(_NETLINK_DONE, sequence=sequence, flags=flags)
+        return _netlink_header(
+            _NETLINK_DONE,
+            sequence=sequence,
+            flags=flags,
+            port_id=port_id,
+        )
     return (
         _netlink_header(
             _NETLINK_DONE,
             sequence=sequence,
             flags=flags,
+            port_id=port_id,
             declared_length=20,
         )
         + struct.pack("=i", status)
@@ -76,6 +83,7 @@ def _netlink_diagnostic(
     port: int = _UNRELATED_PORT,
     state: int = 10,
     flags: int = _NETLINK_MULTI,
+    port_id: int = 0,
 ) -> bytes:
     body = bytearray(72)
     body[0] = family
@@ -86,6 +94,7 @@ def _netlink_diagnostic(
             _NETLINK_DIAG_BY_FAMILY,
             sequence=sequence,
             flags=flags,
+            port_id=port_id,
             declared_length=16 + len(body),
         )
         + bytes(body)
@@ -180,6 +189,7 @@ class _SockDiagSocket:
         self.test.assertEqual(kind, _NETLINK_DIAG_BY_FAMILY)
         self.test.assertEqual(flags, 0x301)
         self.test.assertEqual(sequence, len(self.requested_families) + 1)
+        self.test.assertEqual(_port_id, self.port_id)
         family, protocol, extension, padding = struct.unpack_from(
             "=BBBB", request, 16
         )
@@ -4698,6 +4708,64 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         )
                         self.assertEqual(harness.netns_probe.call_count, 2)
 
+    def test_linux_host_gateway_listener_requires_response_headers_to_echo_requester_port_id(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeListenerState,
+        )
+
+        requester_port_id = 23
+        for response_port_id in (requester_port_id, 0, 24):
+            with self.subTest(response_port_id=response_port_id):
+                def responses(sequence: int, family: int) -> list[object]:
+                    return [
+                        _netlink_diagnostic(
+                            family,
+                            sequence=sequence,
+                            port_id=response_port_id,
+                        )
+                        + _netlink_done(
+                            sequence,
+                            status=0,
+                            port_id=response_port_id,
+                        )
+                    ]
+
+                with _GatewayHarness(
+                    self,
+                    responses,
+                    socket_options={"port_id": requester_port_id},
+                ) as harness:
+                    if response_port_id == requester_port_id:
+                        self.assertEqual(
+                            harness.dependencies.inspect_listener(
+                                "linux", "gateway_default_endpoint"
+                            ),
+                            NativeListenerState(False, False),
+                        )
+                        self.assertEqual(
+                            harness.created[0].requested_families,
+                            _GATEWAY_FAMILIES,
+                        )
+                    else:
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_unavailable"
+                        ) as unavailable:
+                            harness.dependencies.inspect_listener(
+                                "linux", "gateway_default_endpoint"
+                            )
+                        self.assertEqual(
+                            str(unavailable.exception), "driver_unavailable"
+                        )
+                        self.assertNotIn(
+                            str(harness.home), str(unavailable.exception)
+                        )
+                    self.assertEqual(len(harness.created), 1)
+                    self.assertTrue(harness.created[0].closed)
+                    harness.connect_probe.assert_not_called()
+
     def test_linux_host_gateway_listener_requires_stable_current_netns_identity(
         self,
     ) -> None:
@@ -4870,6 +4938,8 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             ("integer_ancillary", {"ancillary": 0}),
             ("boolean_source_pid", {"source": (False, 0)}),
             ("boolean_source_groups", {"source": (0, False)}),
+            ("nonzero_source_pid", {"source": (1, 0)}),
+            ("nonzero_source_groups", {"source": (0, 1)}),
         )
         for case, socket_options in cases:
             with self.subTest(case=case):

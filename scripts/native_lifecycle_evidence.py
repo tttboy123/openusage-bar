@@ -1379,7 +1379,7 @@ def _prove_linux_default_gateway_endpoint_absent() -> None:
                             or message_length > len(payload) - offset
                             or response_flags != _LINUX_NLM_F_MULTI
                             or response_sequence != sequence
-                            or response_port_id != 0
+                            or response_port_id != port_id
                         ):
                             _fail("driver_unavailable")
                         aligned_length = (message_length + 3) & ~3
