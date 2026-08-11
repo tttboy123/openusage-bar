@@ -1476,20 +1476,36 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     run_directory: _BoundRunDirectory | None = None
     profile_home: Path | None = None
     profile_projection: NativeProfilePaths | None = None
+    profile_xdg_binding: str | None = None
+    profile_xdg_trusted_root: Path | None = None
+    profile_xdg_runtime_parts: tuple[str, ...] | None = None
     package_projection: NativePackagePaths | None = None
+    runtime_install_absence_fact: NativePathState | None = None
     service_absence_confirmed = False
     local_listener_absence_confirmed = False
 
+    def revoke_runtime_install_absence_fact() -> None:
+        nonlocal runtime_install_absence_fact
+        runtime_install_absence_fact = None
+
     def unavailable(*args: object, **kwargs: object) -> object:
+        revoke_runtime_install_absence_fact()
         del args, kwargs
         _fail("driver_unavailable")
 
     def profile_paths(platform: object) -> NativeProfilePaths:
         nonlocal profile_home, profile_projection, package_projection
+        nonlocal profile_xdg_binding, profile_xdg_trusted_root
+        nonlocal profile_xdg_runtime_parts
+        nonlocal runtime_install_absence_fact
         nonlocal service_absence_confirmed
         nonlocal local_listener_absence_confirmed
         profile_projection = None
+        profile_xdg_binding = None
+        profile_xdg_trusted_root = None
+        profile_xdg_runtime_parts = None
         package_projection = None
+        runtime_install_absence_fact = None
         if type(platform) is not str or platform != "linux":
             _driver_fail()
         try:
@@ -1514,6 +1530,24 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                 else:
                     if stat.S_ISLNK(metadata.st_mode):
                         _driver_fail()
+                trusted_root = data_root
+                while not os.path.lexists(trusted_root):
+                    parent = trusted_root.parent
+                    if parent == trusted_root:
+                        break
+                    trusted_root = parent
+                runtime_path = data_root / "usagehub" / "runtime"
+                try:
+                    runtime_parts = runtime_path.relative_to(
+                        trusted_root
+                    ).parts
+                except ValueError:
+                    _driver_fail()
+                if not runtime_parts:
+                    _driver_fail()
+                profile_xdg_binding = configured
+                profile_xdg_trusted_root = trusted_root
+                profile_xdg_runtime_parts = runtime_parts
             else:
                 data_root = authority.home / ".local" / "share"
             profile = NativeProfilePaths(
@@ -1543,7 +1577,9 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _driver_fail()
 
     def inspect_service(platform: object) -> NativeServiceState:
+        nonlocal runtime_install_absence_fact
         nonlocal service_absence_confirmed, local_listener_absence_confirmed
+        runtime_install_absence_fact = None
         if (
             type(platform) is not str
             or platform != "linux"
@@ -1568,12 +1604,16 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
 
     def prove_authoritative_path_absence(
         *,
+        anchor: Path,
         relative_components: tuple[str, ...],
         root_missing: bool,
         entry_names: tuple[str, ...],
     ) -> None:
         if (
-            profile_home is None
+            not isinstance(anchor, Path)
+            or not anchor.is_absolute()
+            or not str(anchor).isprintable()
+            or ".." in anchor.parts
             or type(relative_components) is not tuple
             or not relative_components
             or any(
@@ -1600,7 +1640,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         descriptors: list[int] = []
         bindings: list[tuple[int, str, tuple[int, int]]] = []
         try:
-            home_entry = profile_home.lstat()
+            home_entry = anchor.lstat()
             directory_flag = getattr(os, "O_DIRECTORY", None)
             nofollow_flag = getattr(os, "O_NOFOLLOW", None)
             if (
@@ -1616,7 +1656,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                 | nofollow_flag
                 | getattr(os, "O_CLOEXEC", 0)
             )
-            home_fd = os.open(profile_home, directory_flags)
+            home_fd = os.open(anchor, directory_flags)
             descriptors.append(home_fd)
             home_opened = os.fstat(home_fd)
             if (
@@ -1670,7 +1710,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                     _fail("driver_unavailable")
 
             def revalidate_public_chain() -> None:
-                final_home = profile_home.lstat()
+                final_home = anchor.lstat()
                 if (
                     stat.S_ISLNK(final_home.st_mode)
                     or not stat.S_ISDIR(final_home.st_mode)
@@ -1749,7 +1789,9 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         platform: object,
         namespace: object,
     ) -> NativeListenerState:
+        nonlocal runtime_install_absence_fact
         nonlocal service_absence_confirmed, local_listener_absence_confirmed
+        runtime_install_absence_fact = None
         if (
             type(platform) is not str
             or platform != "linux"
@@ -1772,6 +1814,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _driver_fail()
         service_absence_confirmed = False
         prove_authoritative_path_absence(
+            anchor=profile_home,
             relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=("openusage.sock",),
@@ -1788,6 +1831,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         if registered is not False:
             _fail("driver_unavailable")
         prove_authoritative_path_absence(
+            anchor=profile_home,
             relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=("openusage.sock",),
@@ -1796,7 +1840,9 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         return NativeListenerState(False, False)
 
     def inspect_ledger(platform: object) -> NativeLedgerState:
+        nonlocal runtime_install_absence_fact
         nonlocal local_listener_absence_confirmed
+        runtime_install_absence_fact = None
         if (
             type(platform) is not str
             or platform != "linux"
@@ -1812,11 +1858,13 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             "activity.sqlite3-journal",
         )
         prove_authoritative_path_absence(
+            anchor=profile_home,
             relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=ledger_entries,
         )
         prove_authoritative_path_absence(
+            anchor=profile_home,
             relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=("openusage.sock",),
@@ -1833,11 +1881,13 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         if registered is not False:
             _fail("driver_unavailable")
         prove_authoritative_path_absence(
+            anchor=profile_home,
             relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=("openusage.sock",),
         )
         prove_authoritative_path_absence(
+            anchor=profile_home,
             relative_components=(".local", "state", "openusage-bar"),
             root_missing=False,
             entry_names=ledger_entries,
@@ -1848,8 +1898,9 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         platform: object,
         profile: object,
     ) -> NativePackagePaths:
-        nonlocal package_projection
+        nonlocal package_projection, runtime_install_absence_fact
         package_projection = None
+        runtime_install_absence_fact = None
         if (
             type(platform) is not str
             or platform != "linux"
@@ -1891,6 +1942,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
 
     def make_run_directory(platform: object, arch: object) -> Path:
         nonlocal run_directory
+        revoke_runtime_install_absence_fact()
         if (
             type(platform) is not str
             or platform != "linux"
@@ -2027,14 +2079,114 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         return candidate
 
     def inspect_path(purpose: object, path: object) -> NativePathState:
+        nonlocal runtime_install_absence_fact
+        pending_runtime_install_fact = runtime_install_absence_fact
+        runtime_install_absence_fact = None
         if run_directory is None:
             _driver_fail()
-        if (
-            type(purpose) is not str
-            or not isinstance(path, Path)
-            or not _valid_native_path(path)
-        ):
+        try:
+            input_is_valid = (
+                type(purpose) is str
+                and isinstance(path, Path)
+                and _valid_native_path(path)
+            )
+        except Exception:
             _driver_fail()
+        if not input_is_valid:
+            _driver_fail()
+        if pending_runtime_install_fact is not None:
+            try:
+                alias_is_exact = (
+                    purpose == "fresh_install_root"
+                    and profile_projection is not None
+                    and package_projection is not None
+                    and package_projection.install_root
+                    == profile_projection.runtime_root
+                    and path == package_projection.install_root
+                )
+            except Exception:
+                _driver_fail()
+            if alias_is_exact is not True:
+                _driver_fail()
+            return pending_runtime_install_fact
+        if purpose == "fresh_install_root":
+            _driver_fail()
+        if purpose == "fresh_runtime_root":
+            if (
+                profile_projection is None
+                or package_projection is None
+                or profile_home is None
+                or package_projection.install_root
+                != profile_projection.runtime_root
+                or path != profile_projection.runtime_root
+            ):
+                _driver_fail()
+            try:
+                current_home = Path.home()
+            except Exception:
+                _fail("driver_unavailable")
+            assert profile_home is not None
+            if (
+                not isinstance(current_home, Path)
+                or not _valid_native_path(current_home)
+                or current_home != profile_home
+            ):
+                _fail("driver_unavailable")
+            current_xdg_binding = os.environ.get("XDG_DATA_HOME")
+            if profile_xdg_binding is None:
+                anchor = profile_home
+                relative_components = (
+                    ".local",
+                    "share",
+                    "usagehub",
+                    "runtime",
+                )
+                expected_runtime_root = anchor.joinpath(*relative_components)
+                if current_xdg_binding not in {None, ""}:
+                    _fail("driver_unavailable")
+            else:
+                if (
+                    current_xdg_binding != profile_xdg_binding
+                    or profile_xdg_trusted_root is None
+                    or profile_xdg_runtime_parts is None
+                ):
+                    _fail("driver_unavailable")
+                try:
+                    current_xdg_root = Path(current_xdg_binding)
+                    current_trusted_root = current_xdg_root
+                    while not os.path.lexists(current_trusted_root):
+                        parent = current_trusted_root.parent
+                        if parent == current_trusted_root:
+                            break
+                        current_trusted_root = parent
+                    current_runtime_parts = (
+                        current_xdg_root / "usagehub" / "runtime"
+                    ).relative_to(current_trusted_root).parts
+                except Exception:
+                    _fail("driver_unavailable")
+                if (
+                    not _valid_native_path(current_xdg_root)
+                    or not current_runtime_parts
+                    or current_trusted_root != profile_xdg_trusted_root
+                    or current_runtime_parts != profile_xdg_runtime_parts
+                ):
+                    _fail("driver_unavailable")
+                anchor = profile_xdg_trusted_root
+                relative_components = profile_xdg_runtime_parts
+                expected_runtime_root = (
+                    current_xdg_root / "usagehub" / "runtime"
+                )
+            if profile_projection.runtime_root != expected_runtime_root:
+                _fail("driver_unavailable")
+            prove_authoritative_path_absence(
+                anchor=anchor,
+                relative_components=relative_components,
+                root_missing=True,
+                entry_names=(),
+            )
+            fact = NativePathState(False, "missing", 0, None, 0, None)
+            runtime_install_absence_fact = fact
+            return fact
         if (
             profile_projection is not None
             and path == profile_projection.state_root
@@ -2059,6 +2211,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             ):
                 _fail("driver_unavailable")
             prove_authoritative_path_absence(
+                anchor=profile_home,
                 relative_components=(".config", "openusage-bar"),
                 root_missing=True,
                 entry_names=(),
@@ -2072,6 +2225,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             ):
                 _driver_fail()
             prove_authoritative_path_absence(
+                anchor=profile_home,
                 relative_components=(".local", "state", "openusage-bar"),
                 root_missing=True,
                 entry_names=(),
@@ -2080,16 +2234,19 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         return run_directory.inspect_path(purpose, path)
 
     def copy_file(source: object, destination: object) -> None:
+        revoke_runtime_install_absence_fact()
         if run_directory is None:
             _driver_fail()
         run_directory.copy_file(source, destination)
 
     def set_file_mode(path: object, mode: object) -> None:
+        revoke_runtime_install_absence_fact()
         if run_directory is None:
             _driver_fail()
         run_directory.set_file_mode(path, mode)
 
     def remove_path(path: object) -> None:
+        revoke_runtime_install_absence_fact()
         if run_directory is None:
             _driver_fail()
         run_directory.remove_path(path)
@@ -2299,13 +2456,23 @@ def _require_fresh_baseline(
         authenticated_ready=False,
     )
     _require_ledger_absent(dependencies.inspect_ledger(platform))
-    for purpose, path in (
-        ("fresh_state_root", profile_paths.state_root),
-        ("fresh_config_root", profile_paths.config_root),
-        ("fresh_runtime_root", profile_paths.runtime_root),
-        ("fresh_task_definition", profile_paths.task_definition),
-        ("fresh_install_root", package_paths.install_root),
-    ):
+    if platform == "linux":
+        baseline_paths = (
+            ("fresh_state_root", profile_paths.state_root),
+            ("fresh_config_root", profile_paths.config_root),
+            ("fresh_runtime_root", profile_paths.runtime_root),
+            ("fresh_install_root", package_paths.install_root),
+            ("fresh_task_definition", profile_paths.task_definition),
+        )
+    else:
+        baseline_paths = (
+            ("fresh_state_root", profile_paths.state_root),
+            ("fresh_config_root", profile_paths.config_root),
+            ("fresh_runtime_root", profile_paths.runtime_root),
+            ("fresh_task_definition", profile_paths.task_definition),
+            ("fresh_install_root", package_paths.install_root),
+        )
+    for purpose, path in baseline_paths:
         _require_missing(dependencies.inspect_path(purpose, path))
     if platform == "win":
         assert package_paths.app is not None

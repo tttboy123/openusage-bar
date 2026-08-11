@@ -124,6 +124,150 @@ def _file_snapshot(root: Path) -> tuple[tuple[str, int, bytes], ...]:
     return tuple(snapshot)
 
 
+def _enter_linux_host_dependencies(
+    stack: ExitStack,
+    authority: object,
+    *,
+    xdg_data_home: Path | None = None,
+) -> tuple[object, Path, object, object]:
+    from openusage_bar.lifecycle_state import LifecycleStatePaths
+    from scripts.native_lifecycle_evidence import (
+        native_lifecycle_dependencies_for_host,
+    )
+
+    stack.enter_context(
+        patch("scripts.native_lifecycle_evidence.sys.platform", "linux")
+    )
+    stack.enter_context(
+        patch(
+            "scripts.native_lifecycle_evidence.host_platform_module.machine",
+            return_value="x86_64",
+        )
+    )
+    stack.enter_context(
+        patch.object(
+            LifecycleStatePaths,
+            "for_current_user",
+            return_value=authority,
+        )
+    )
+    environment = (
+        {} if xdg_data_home is None else {"XDG_DATA_HOME": str(xdg_data_home)}
+    )
+    stack.enter_context(patch.dict(os.environ, environment, clear=True))
+    dependencies = stack.enter_context(native_lifecycle_dependencies_for_host())
+    run_directory = dependencies.make_run_directory("linux", "x64")
+    profile = dependencies.profile_paths("linux")
+    package = dependencies.package_paths("linux", profile)
+    return dependencies, run_directory, profile, package
+
+
+def _native_path_identity(path: Path) -> tuple[int, int, int, int, int]:
+    metadata = path.lstat()
+    return (
+        metadata.st_mode,
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_nlink,
+    )
+
+
+def _prohibit_lifecycle_broad_reads_and_mutation(stack: ExitStack) -> None:
+    for target in (
+        "scripts.native_lifecycle_evidence.os.listdir",
+        "scripts.native_lifecycle_evidence.os.scandir",
+        "scripts.native_lifecycle_evidence.json.load",
+        "scripts.native_lifecycle_evidence.json.loads",
+        "scripts.native_lifecycle_evidence.os.mkdir",
+        "scripts.native_lifecycle_evidence.os.rename",
+        "scripts.native_lifecycle_evidence.os.unlink",
+        "scripts.native_lifecycle_evidence.os.remove",
+        "scripts.native_lifecycle_evidence.os.rmdir",
+        "scripts.native_lifecycle_evidence.os.write",
+    ):
+        stack.enter_context(
+            patch(target, side_effect=AssertionError("broad mutation forbidden"))
+        )
+    stack.enter_context(
+        patch.object(
+            Path,
+            "iterdir",
+            side_effect=AssertionError("directory enumeration forbidden"),
+        )
+    )
+
+
+def _assert_install_alias_rejected_without_probe(
+    test_case: unittest.TestCase,
+    dependencies: object,
+    install_root: Path,
+) -> None:
+    from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+    with patch.object(
+        Path,
+        "home",
+        side_effect=AssertionError("failed proof must not arm alias"),
+    ) as home_probe, patch(
+        "scripts.native_lifecycle_evidence.os.open",
+        side_effect=AssertionError("failed proof must not arm alias"),
+    ) as open_probe, patch(
+        "scripts.native_lifecycle_evidence.os.stat",
+        side_effect=AssertionError("failed proof must not arm alias"),
+    ) as stat_probe:
+        with test_case.assertRaisesRegex(
+            LifecycleEvidenceError, "driver_failed"
+        ) as rejected:
+            dependencies.inspect_path("fresh_install_root", install_root)
+    test_case.assertEqual(str(rejected.exception), "driver_failed")
+    home_probe.assert_not_called()
+    open_probe.assert_not_called()
+    stat_probe.assert_not_called()
+
+
+def _inspect_fresh_runtime_root(
+    test_case: unittest.TestCase,
+    dependencies: object,
+    home: Path,
+    runtime_root: Path,
+) -> object:
+    from scripts.native_lifecycle_evidence import NativePathState
+
+    with patch.object(Path, "home", return_value=home) as home_probe:
+        state = dependencies.inspect_path("fresh_runtime_root", runtime_root)
+    home_probe.assert_called_once_with()
+    test_case.assertEqual(
+        state,
+        NativePathState(False, "missing", 0, None, 0, None),
+    )
+    return state
+
+
+def _consume_install_alias_without_probe(
+    test_case: unittest.TestCase,
+    dependencies: object,
+    install_root: Path,
+    expected_fact: object,
+) -> None:
+    with patch.object(
+        Path,
+        "home",
+        side_effect=AssertionError("alias must not reread authority"),
+    ) as home_probe, patch(
+        "scripts.native_lifecycle_evidence.os.open",
+        side_effect=AssertionError("alias must not reprobe"),
+    ) as open_probe, patch(
+        "scripts.native_lifecycle_evidence.os.stat",
+        side_effect=AssertionError("alias must not reprobe"),
+    ) as stat_probe:
+        install_state = dependencies.inspect_path("fresh_install_root", install_root)
+    test_case.assertIs(install_state, expected_fact)
+    home_probe.assert_not_called()
+    open_probe.assert_not_called()
+    stat_probe.assert_not_called()
+
+
 class _SockDiagSocket:
     def __init__(
         self,
@@ -2740,8 +2884,8 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     "fresh_state_root",
                     "fresh_config_root",
                     "fresh_runtime_root",
-                    "fresh_task_definition",
                     "fresh_install_root",
+                    "fresh_task_definition",
                     "fresh_stable_collector",
                     "fresh_execution_copy",
                     "fresh_sentinel",
@@ -4434,6 +4578,680 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 foreign_marker.read_bytes(), b"foreign remains unchanged"
             )
             self.assertEqual(state_marker.read_bytes(), b"state remains unchanged")
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_runtime_and_install_roots_share_one_fresh_authority_fact(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativePathState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            runtime_parent = home / ".local" / "share" / "usagehub"
+            runtime_parent.mkdir(parents=True)
+            runtime_root = runtime_parent / "runtime"
+            state_marker = home / ".local" / "state" / "marker"
+            state_marker.parent.mkdir(parents=True)
+            state_marker.write_bytes(b"state remains unchanged")
+            config_marker = home / ".config" / "openusage-bar" / "marker"
+            config_marker.parent.mkdir(parents=True)
+            config_marker.write_bytes(b"config remains unchanged")
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            protected_before = (
+                _native_path_identity(home),
+                _native_path_identity(runtime_parent),
+                state_marker.read_bytes(),
+                config_marker.read_bytes(),
+            )
+
+            with self.subTest(case="one proof and one zero-probe alias"), ExitStack() as stack:
+                dependencies, run_directory, profile, package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                self.assertEqual(profile.runtime_root, runtime_root)
+                self.assertEqual(package.install_root, runtime_root)
+                with ExitStack() as probe_stack:
+                    _prohibit_lifecycle_broad_reads_and_mutation(probe_stack)
+                    runtime_state = _inspect_fresh_runtime_root(
+                        self, dependencies, home, profile.runtime_root
+                    )
+                _consume_install_alias_without_probe(
+                    self,
+                    dependencies,
+                    package.install_root,
+                    runtime_state,
+                )
+                self.assertEqual(list(run_directory.iterdir()), [])
+
+            with self.subTest(case="install alias cannot precede runtime proof"), ExitStack() as stack:
+                dependencies, _run_directory, _profile, package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                _assert_install_alias_rejected_without_probe(
+                    self, dependencies, package.install_root
+                )
+
+            protected_after = (
+                _native_path_identity(home),
+                _native_path_identity(runtime_parent),
+                state_marker.read_bytes(),
+                config_marker.read_bytes(),
+            )
+            self.assertEqual(protected_after, protected_before)
+            self.assertFalse(runtime_root.exists())
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            custom_data = root / "authoritative-xdg-data"
+            custom_runtime_parent = custom_data / "usagehub"
+            custom_runtime_parent.mkdir(parents=True)
+            custom_runtime = custom_runtime_parent / "runtime"
+            marker = custom_data / "PRIVATE_XDG_MARKER"
+            marker.write_bytes(b"custom XDG remains unchanged")
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            protected_before = (
+                _native_path_identity(home),
+                _native_path_identity(custom_data),
+                _native_path_identity(custom_runtime_parent),
+                marker.read_bytes(),
+            )
+
+            with self.subTest(case="custom XDG one proof and alias"), ExitStack() as stack:
+                dependencies, _run_directory, profile, package = (
+                    _enter_linux_host_dependencies(
+                        stack,
+                        authority,
+                        xdg_data_home=custom_data,
+                    )
+                )
+                self.assertEqual(profile.runtime_root, custom_runtime)
+                self.assertEqual(package.install_root, custom_runtime)
+                with ExitStack() as probe_stack:
+                    _prohibit_lifecycle_broad_reads_and_mutation(probe_stack)
+                    runtime_state = _inspect_fresh_runtime_root(
+                        self, dependencies, home, profile.runtime_root
+                    )
+                _consume_install_alias_without_probe(
+                    self,
+                    dependencies,
+                    package.install_root,
+                    runtime_state,
+                )
+
+            with self.subTest(case="custom XDG drift clears alias token"), ExitStack() as stack:
+                dependencies, _run_directory, profile, package = (
+                    _enter_linux_host_dependencies(
+                        stack,
+                        authority,
+                        xdg_data_home=custom_data,
+                    )
+                )
+                drifted_data = root / "drifted-xdg-data"
+                with patch.dict(
+                    os.environ,
+                    {"XDG_DATA_HOME": str(drifted_data)},
+                    clear=True,
+                ), patch.object(
+                    Path, "home", return_value=home
+                ) as home_probe, self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as unavailable:
+                    dependencies.inspect_path(
+                        "fresh_runtime_root", profile.runtime_root
+                    )
+                home_probe.assert_called_once_with()
+                self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                self.assertNotIn(str(root), str(unavailable.exception))
+                _assert_install_alias_rejected_without_probe(
+                    self, dependencies, package.install_root
+                )
+
+            protected_after = (
+                _native_path_identity(home),
+                _native_path_identity(custom_data),
+                _native_path_identity(custom_runtime_parent),
+                marker.read_bytes(),
+            )
+            self.assertEqual(protected_after, protected_before)
+            self.assertFalse(custom_runtime.exists())
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_runtime_root_rejects_custom_xdg_symlink_ancestor(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            foreign = root / "PRIVATE_FOREIGN_XDG"
+            foreign.mkdir()
+            marker = foreign / "PRIVATE_XDG_MARKER"
+            marker.write_bytes(b"foreign XDG remains unchanged")
+            ancestor = root / "configured-xdg-parent"
+            ancestor.symlink_to(foreign, target_is_directory=True)
+            configured_xdg = ancestor / "missing-child"
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            foreign_identity = foreign.lstat()
+            ancestor_identity = ancestor.lstat()
+
+            with ExitStack() as stack:
+                dependencies, run_directory, profile, package = (
+                    _enter_linux_host_dependencies(
+                        stack,
+                        authority,
+                        xdg_data_home=configured_xdg,
+                    )
+                )
+                with patch.object(Path, "home", return_value=home):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        dependencies.inspect_path(
+                            "fresh_runtime_root", profile.runtime_root
+                        )
+                self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                self.assertNotIn(str(root), str(unavailable.exception))
+                self.assertNotIn("PRIVATE", str(unavailable.exception))
+
+                _assert_install_alias_rejected_without_probe(
+                    self, dependencies, package.install_root
+                )
+                self.assertEqual(list(run_directory.iterdir()), [])
+
+            self.assertEqual(
+                (foreign.lstat().st_dev, foreign.lstat().st_ino),
+                (foreign_identity.st_dev, foreign_identity.st_ino),
+            )
+            self.assertEqual(
+                (ancestor.lstat().st_dev, ancestor.lstat().st_ino),
+                (ancestor_identity.st_dev, ancestor_identity.st_ino),
+            )
+            self.assertTrue(ancestor.is_symlink())
+            self.assertFalse(configured_xdg.exists())
+            self.assertEqual(marker.read_bytes(), b"foreign XDG remains unchanged")
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_runtime_root_absence_rejects_existing_path_types(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+        )
+
+        for authority_kind in ("default", "custom"):
+            for existing_kind in ("directory", "file", "symlink"):
+                with self.subTest(
+                    authority=authority_kind, existing=existing_kind
+                ), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    home = root / "authoritative-home"
+                    home.mkdir()
+                    custom_data = root / "authoritative-xdg-data"
+                    xdg_data_home: Path | None
+                    if authority_kind == "default":
+                        runtime_parent = home / ".local" / "share" / "usagehub"
+                        xdg_data_home = None
+                    else:
+                        custom_data.mkdir()
+                        runtime_parent = custom_data / "usagehub"
+                        xdg_data_home = custom_data
+                    runtime_parent.mkdir(parents=True)
+                    authority = LifecycleStatePaths(platform="linux", home=home)
+                    foreign = root / "PRIVATE_FOREIGN_RUNTIME"
+                    foreign.mkdir()
+                    foreign_marker = foreign / "PRIVATE_FOREIGN_MARKER"
+                    foreign_marker.write_bytes(b"foreign runtime remains unchanged")
+
+                    with ExitStack() as stack:
+                        dependencies, run_directory, profile, package = (
+                            _enter_linux_host_dependencies(
+                                stack,
+                                authority,
+                                xdg_data_home=xdg_data_home,
+                            )
+                        )
+                        runtime_root = profile.runtime_root
+                        if existing_kind == "directory":
+                            runtime_root.mkdir()
+                            protected_marker = runtime_root / "PRIVATE_RUNTIME_MARKER"
+                            protected_marker.write_bytes(b"directory remains unchanged")
+                        elif existing_kind == "file":
+                            runtime_root.write_bytes(b"file remains unchanged")
+                            protected_marker = runtime_root
+                        else:
+                            runtime_root.symlink_to(foreign, target_is_directory=True)
+                            protected_marker = foreign_marker
+                        before = runtime_root.lstat()
+                        before_payload = protected_marker.read_bytes()
+
+                        with patch.object(Path, "home", return_value=home):
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_unavailable"
+                            ) as unavailable:
+                                dependencies.inspect_path(
+                                    "fresh_runtime_root", runtime_root
+                                )
+                        self.assertEqual(
+                            str(unavailable.exception), "driver_unavailable"
+                        )
+                        self.assertNotIn(str(root), str(unavailable.exception))
+
+                        _assert_install_alias_rejected_without_probe(
+                            self, dependencies, package.install_root
+                        )
+                        after = runtime_root.lstat()
+                        self.assertEqual(
+                            (after.st_dev, after.st_ino, after.st_mode),
+                            (before.st_dev, before.st_ino, before.st_mode),
+                        )
+                        self.assertEqual(protected_marker.read_bytes(), before_payload)
+                        self.assertEqual(list(run_directory.iterdir()), [])
+
+                    self.assertEqual(foreign_marker.read_bytes(), b"foreign runtime remains unchanged")
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_runtime_root_rejects_final_missing_entry_swap(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            custom_data = root / "authoritative-xdg-data"
+            (custom_data / "usagehub").mkdir(parents=True)
+            foreign = root / "PRIVATE_FOREIGN_RUNTIME"
+            foreign.mkdir()
+            marker = foreign / "PRIVATE_FOREIGN_MARKER"
+            marker.write_bytes(b"final swap remains unchanged")
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            with ExitStack() as stack:
+                dependencies, run_directory, profile, package = (
+                    _enter_linux_host_dependencies(
+                        stack,
+                        authority,
+                        xdg_data_home=custom_data,
+                    )
+                )
+                real_stat = os.stat
+                missing_checks = 0
+
+                def swap_before_final_missing(
+                    path: object, *args: object, **kwargs: object
+                ) -> os.stat_result:
+                    nonlocal missing_checks
+                    if (
+                        path == "runtime"
+                        and kwargs.get("dir_fd") is not None
+                        and kwargs.get("follow_symlinks") is False
+                    ):
+                        missing_checks += 1
+                        if missing_checks == 2:
+                            profile.runtime_root.symlink_to(
+                                foreign, target_is_directory=True
+                            )
+                    return real_stat(path, *args, **kwargs)
+
+                with patch.object(Path, "home", return_value=home), patch(
+                    "scripts.native_lifecycle_evidence.os.stat",
+                    side_effect=swap_before_final_missing,
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        dependencies.inspect_path(
+                            "fresh_runtime_root", profile.runtime_root
+                        )
+                self.assertEqual(missing_checks, 2)
+                self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                self.assertNotIn(str(root), str(unavailable.exception))
+                self.assertTrue(profile.runtime_root.is_symlink())
+                self.assertEqual(marker.read_bytes(), b"final swap remains unchanged")
+
+                _assert_install_alias_rejected_without_probe(
+                    self, dependencies, package.install_root
+                )
+                self.assertEqual(list(run_directory.iterdir()), [])
+
+            self.assertEqual(marker.read_bytes(), b"final swap remains unchanged")
+
+    def test_fresh_baseline_consumes_linux_runtime_install_alias_before_task_definition(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import (
+            NativeLedgerState,
+            NativeLifecycleDependencies,
+            NativeListenerState,
+            NativePackagePaths,
+            NativePathState,
+            NativeProfilePaths,
+            NativeServiceState,
+            _require_fresh_baseline,
+        )
+
+        root = Path(tempfile.gettempdir()).resolve() / "fresh-baseline-order"
+        missing = NativePathState(False, "missing", 0, None, 0, None)
+        service_absent = NativeServiceState(False, False, None)
+        listener_absent = NativeListenerState(False, False)
+        ledger_absent = NativeLedgerState(False, None, 0, None, False, 0)
+
+        for target_platform in ("linux", "win"):
+            with self.subTest(platform=target_platform):
+                events: list[tuple[object, ...]] = []
+                profile = NativeProfilePaths(
+                    state_root=root / target_platform / "state",
+                    config_root=root / target_platform / "config",
+                    runtime_root=root / target_platform / "runtime",
+                    task_definition=root / target_platform / "service-definition",
+                )
+                if target_platform == "linux":
+                    package = NativePackagePaths(
+                        install_root=profile.runtime_root,
+                        app=None,
+                        uninstaller=None,
+                        collector=profile.runtime_root / "openusage-collector",
+                    )
+                    expected_purposes = (
+                        "fresh_state_root",
+                        "fresh_config_root",
+                        "fresh_runtime_root",
+                        "fresh_install_root",
+                        "fresh_task_definition",
+                        "fresh_stable_collector",
+                        "fresh_execution_copy",
+                        "fresh_sentinel",
+                    )
+                else:
+                    install_root = root / "win" / "UsageHub"
+                    package = NativePackagePaths(
+                        install_root=install_root,
+                        app=install_root / "UsageHub.exe",
+                        uninstaller=install_root / "Uninstall UsageHub.exe",
+                        collector=(
+                            install_root
+                            / "resources"
+                            / "collector"
+                            / "openusage-collector.exe"
+                        ),
+                    )
+                    expected_purposes = (
+                        "fresh_state_root",
+                        "fresh_config_root",
+                        "fresh_runtime_root",
+                        "fresh_task_definition",
+                        "fresh_install_root",
+                        "fresh_installed_app",
+                        "fresh_installed_uninstaller",
+                        "fresh_installed_collector",
+                        "fresh_execution_copy",
+                        "fresh_sentinel",
+                    )
+
+                def inspect_path(purpose: str, path: Path) -> NativePathState:
+                    events.append(("inspect_path", purpose, path))
+                    return missing
+
+                noop = lambda *args, **kwargs: None
+                dependencies = NativeLifecycleDependencies(
+                    make_run_directory=noop,
+                    inspect_path=inspect_path,
+                    copy_file=noop,
+                    set_file_mode=noop,
+                    remove_path=noop,
+                    start_process=noop,
+                    run_process=noop,
+                    stop_process=noop,
+                    read_registry_value=noop,
+                    profile_paths=noop,
+                    package_paths=noop,
+                    inspect_service=lambda platform: service_absent,
+                    inspect_listener=lambda platform, namespace: listener_absent,
+                    inspect_ledger=lambda platform: ledger_absent,
+                    network_events=noop,
+                    credential_events=noop,
+                    monotonic=noop,
+                    wait=noop,
+                )
+                _require_fresh_baseline(
+                    dependencies,
+                    platform=target_platform,
+                    profile_paths=profile,
+                    package_paths=package,
+                    execution_copy=root / target_platform / "execution-copy",
+                    sentinel=root / target_platform / "sentinel",
+                )
+                self.assertEqual(
+                    tuple(event[1] for event in events),
+                    expected_purposes,
+                )
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_runtime_install_token_is_revoked_by_service_observation(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            NativeServiceState,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            runtime_parent = home / ".local" / "share" / "usagehub"
+            runtime_parent.mkdir(parents=True)
+            runtime_root = runtime_parent / "runtime"
+            marker = home / "PRIVATE_RUNTIME_TOKEN_MARKER"
+            marker.write_bytes(b"token observation is read-only")
+            authority = LifecycleStatePaths(platform="linux", home=home)
+
+            with ExitStack() as stack:
+                dependencies, run_directory, profile, package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                _inspect_fresh_runtime_root(
+                    self, dependencies, home, profile.runtime_root
+                )
+
+                with patch(
+                    "openusage_bar.platform_services.service_is_registered",
+                    return_value=False,
+                ) as service_probe:
+                    self.assertEqual(
+                        dependencies.inspect_service("linux"),
+                        NativeServiceState(False, False, None),
+                    )
+                service_probe.assert_called_once_with(platform="linux", home=home)
+
+                _assert_install_alias_rejected_without_probe(
+                    self, dependencies, package.install_root
+                )
+                self.assertEqual(list(run_directory.iterdir()), [])
+
+            self.assertFalse(runtime_root.exists())
+            self.assertEqual(
+                marker.read_bytes(), b"token observation is read-only"
+            )
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_runtime_install_token_is_revoked_by_other_observations(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+        )
+
+        observations = (
+            ("listener", lambda dependencies: dependencies.inspect_listener("linux", "local")),
+            ("ledger", lambda dependencies: dependencies.inspect_ledger("linux")),
+        )
+        for case, observe in observations:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "authoritative-home"
+                runtime_parent = home / ".local" / "share" / "usagehub"
+                runtime_parent.mkdir(parents=True)
+                runtime_root = runtime_parent / "runtime"
+                marker = home / "PRIVATE_RUNTIME_TOKEN_MARKER"
+                marker.write_bytes(b"failed observation revokes the token")
+                authority = LifecycleStatePaths(platform="linux", home=home)
+
+                with ExitStack() as stack:
+                    dependencies, run_directory, profile, package = (
+                        _enter_linux_host_dependencies(stack, authority)
+                    )
+                    _inspect_fresh_runtime_root(
+                        self, dependencies, home, profile.runtime_root
+                    )
+
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as observation_rejected:
+                        observe(dependencies)
+                    self.assertEqual(
+                        str(observation_rejected.exception), "driver_failed"
+                    )
+
+                    _assert_install_alias_rejected_without_probe(
+                        self, dependencies, package.install_root
+                    )
+                    self.assertEqual(list(run_directory.iterdir()), [])
+
+                self.assertFalse(runtime_root.exists())
+                self.assertEqual(
+                    marker.read_bytes(), b"failed observation revokes the token"
+                )
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_runtime_install_token_is_revoked_by_remaining_callbacks(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        for callback in ("copy_file", "start_process"):
+            with self.subTest(callback=callback), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "authoritative-home"
+                (home / ".local" / "share" / "usagehub").mkdir(parents=True)
+                source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+                source.write_bytes(b"audited callback token source")
+                authority = LifecycleStatePaths(platform="linux", home=home)
+
+                with ExitStack() as stack:
+                    dependencies, run_directory, profile, package = (
+                        _enter_linux_host_dependencies(stack, authority)
+                    )
+                    _inspect_fresh_runtime_root(
+                        self, dependencies, home, profile.runtime_root
+                    )
+                    if callback == "copy_file":
+                        destination = run_directory / source.name
+                        dependencies.copy_file(source, destination)
+                        self.assertEqual(
+                            destination.read_bytes(), b"audited callback token source"
+                        )
+                    else:
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_unavailable"
+                        ) as unavailable:
+                            dependencies.start_process()
+                        self.assertEqual(
+                            str(unavailable.exception), "driver_unavailable"
+                        )
+
+                    _assert_install_alias_rejected_without_probe(
+                        self, dependencies, package.install_root
+                    )
+
+                self.assertFalse(run_directory.exists())
+                self.assertEqual(
+                    source.read_bytes(), b"audited callback token source"
+                )
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_hostile_path_validation_revokes_runtime_install_token(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        class HostilePath(type(Path())):
+            def is_absolute(self) -> bool:
+                raise RuntimeError("PRIVATE_PATH_VALIDATION_FAILURE")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            (home / ".local" / "share" / "usagehub").mkdir(parents=True)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            with ExitStack() as stack:
+                dependencies, run_directory, profile, package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                _inspect_fresh_runtime_root(
+                    self, dependencies, home, profile.runtime_root
+                )
+
+                validation_error: Exception | None = None
+                try:
+                    dependencies.inspect_path(
+                        "fresh_install_root",
+                        HostilePath(str(package.install_root)),
+                    )
+                except Exception as error:
+                    validation_error = error
+
+                alias_error: Exception | None = None
+                alias_result: object | None = None
+                with patch.object(
+                    Path,
+                    "home",
+                    side_effect=AssertionError("revoked token must not read authority"),
+                ) as home_probe, patch(
+                    "scripts.native_lifecycle_evidence.os.open",
+                    side_effect=AssertionError("revoked token must not reprobe"),
+                ) as open_probe, patch(
+                    "scripts.native_lifecycle_evidence.os.stat",
+                    side_effect=AssertionError("revoked token must not reprobe"),
+                ) as stat_probe:
+                    try:
+                        alias_result = dependencies.inspect_path(
+                            "fresh_install_root", package.install_root
+                        )
+                    except Exception as error:
+                        alias_error = error
+
+                home_probe.assert_not_called()
+                open_probe.assert_not_called()
+                stat_probe.assert_not_called()
+                self.assertIsNone(alias_result)
+                self.assertIs(type(alias_error), LifecycleEvidenceError)
+                assert alias_error is not None
+                self.assertEqual(str(alias_error), "driver_failed")
+                self.assertIs(type(validation_error), LifecycleEvidenceError)
+                assert validation_error is not None
+                self.assertEqual(str(validation_error), "driver_failed")
+                self.assertNotIn("PRIVATE", str(validation_error))
+                self.assertEqual(list(run_directory.iterdir()), [])
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_profile_paths_are_a_pure_authoritative_projection(
