@@ -698,6 +698,10 @@ class _BoundRunDirectory:
     identity: tuple[int, int]
     execution_copy: _BoundRunFile | None = None
     sentinel: _BoundRunFile | None = None
+    execution_generation: int = 0
+    authoritative_source: Path | None = None
+    authoritative_source_signature: tuple[int, ...] | None = None
+    authoritative_source_sha256: str | None = None
 
     def _validate_child_path(self, path: object) -> Path:
         if (
@@ -715,12 +719,19 @@ class _BoundRunDirectory:
         if purpose not in {
             "fresh_execution_copy",
             "execution_copy",
+            "preserve_execution_copy",
+            "delete_execution_copy",
             "fresh_sentinel",
             "sentinel",
         }:
             _fail("driver_unavailable")
         child = self._validate_child_path(path)
-        if purpose in {"fresh_execution_copy", "execution_copy"}:
+        if purpose in {
+            "fresh_execution_copy",
+            "execution_copy",
+            "preserve_execution_copy",
+            "delete_execution_copy",
+        }:
             if ARTIFACT_NAMES["linux"].fullmatch(child.name) is None:
                 _driver_fail()
             bound = self.execution_copy
@@ -728,8 +739,24 @@ class _BoundRunDirectory:
             if child.name != "outside-product-sentinel.bin":
                 _driver_fail()
             bound = self.sentinel
-        if purpose in {"fresh_execution_copy", "fresh_sentinel"}:
+        if purpose in {
+            "fresh_execution_copy",
+            "preserve_execution_copy",
+            "delete_execution_copy",
+            "fresh_sentinel",
+        }:
             if bound is not None:
+                _driver_fail()
+            if (
+                purpose == "fresh_execution_copy"
+                and self.execution_generation != 0
+            ) or (
+                purpose == "preserve_execution_copy"
+                and self.execution_generation != 1
+            ) or (
+                purpose == "delete_execution_copy"
+                and self.execution_generation != 2
+            ):
                 _driver_fail()
             try:
                 os.stat(
@@ -800,7 +827,10 @@ class _BoundRunDirectory:
             child.name == source.name
             and ARTIFACT_NAMES["linux"].fullmatch(child.name) is not None
         ):
-            if self.execution_copy is not None:
+            if (
+                self.execution_copy is not None
+                or self.execution_generation >= 2
+            ):
                 _driver_fail()
             role = "execution_copy"
         elif child.name == "outside-product-sentinel.bin":
@@ -836,12 +866,24 @@ class _BoundRunDirectory:
         ):
             _driver_fail()
         before_signature, before_sha256 = _snapshot_external_file(source)
-        if role == "sentinel":
+        if role == "execution_copy" and self.execution_generation == 1:
+            if (
+                self.authoritative_source is None
+                or resolved_source != self.authoritative_source
+                or before_signature != self.authoritative_source_signature
+                or before_sha256 != self.authoritative_source_sha256
+            ):
+                _driver_fail()
+        elif role == "sentinel":
             execution = self.execution_copy
             if (
                 execution is None
                 or before_signature[2] != execution.size_bytes
                 or before_sha256 != execution.sha256
+                or self.authoritative_source is None
+                or resolved_source != self.authoritative_source
+                or before_signature != self.authoritative_source_signature
+                or before_sha256 != self.authoritative_source_sha256
             ):
                 _driver_fail()
         source_fd: int | None = None
@@ -943,6 +985,12 @@ class _BoundRunDirectory:
                 _driver_fail()
             bound.size_bytes = destination_size
             bound.sha256 = destination_sha256
+            if role == "execution_copy":
+                if self.execution_generation == 0:
+                    self.authoritative_source = resolved_source
+                    self.authoritative_source_signature = before_signature
+                    self.authoritative_source_sha256 = before_sha256
+                self.execution_generation += 1
         except LifecycleEvidenceError:
             raise
         except Exception:
@@ -1015,6 +1063,20 @@ class _BoundRunDirectory:
         ):
             _driver_fail()
         bound.mode = 0o700
+
+    def remove_path(self, path: object) -> None:
+        child = self._validate_child_path(path)
+        bound = self.execution_copy
+        if (
+            bound is None
+            or child.name != bound.name
+            or bound.mode != 0o700
+            or self.execution_generation not in {1, 2}
+        ):
+            _driver_fail()
+        self.inspect_path("execution_copy", child)
+        self._cleanup_bound_file(bound)
+        self.execution_copy = None
 
     def _cleanup_bound_file(self, bound: _BoundRunFile) -> None:
         quarantine = f".{bound.name}.quarantine-{secrets.token_hex(16)}"
@@ -1324,12 +1386,17 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _driver_fail()
         run_directory.set_file_mode(path, mode)
 
+    def remove_path(path: object) -> None:
+        if run_directory is None:
+            _driver_fail()
+        run_directory.remove_path(path)
+
     dependencies = NativeLifecycleDependencies(
         make_run_directory=make_run_directory,
         inspect_path=inspect_path,
         copy_file=copy_file,
         set_file_mode=set_file_mode,
-        remove_path=unavailable,
+        remove_path=remove_path,
         start_process=unavailable,
         run_process=unavailable,
         stop_process=unavailable,

@@ -1002,6 +1002,297 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             self.assertEqual(source.read_bytes(), source_bytes)
 
     @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_linux_host_remove_and_recopy_execution_preserves_the_tracked_sentinel(
+        self,
+    ) -> None:
+        import stat
+        from unittest.mock import patch
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativePathState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        source_bytes = b"audited recopy payload"
+        source_sha256 = (
+            "f9beaa1eae256454fb28d29257796ca45d03d422e3f8bd3c1c7870d8ef0cfee5"
+        )
+        missing = NativePathState(False, "missing", 0, None, 0, None)
+
+        def signature(path: Path) -> tuple[int, ...]:
+            metadata = path.lstat()
+            return (
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_size,
+                metadata.st_mode,
+                metadata.st_mtime_ns,
+                metadata.st_ctime_ns,
+                metadata.st_nlink,
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source.write_bytes(source_bytes)
+            source.chmod(0o644)
+            source_signature = signature(source)
+            alternate_same_root = root / "alternate-same"
+            alternate_same_root.mkdir()
+            alternate_same = alternate_same_root / source.name
+            alternate_same.write_bytes(source_bytes)
+            alternate_same.chmod(0o644)
+            alternate_mutated_root = root / "alternate-mutated"
+            alternate_mutated_root.mkdir()
+            alternate_mutated = alternate_mutated_root / source.name
+            alternate_mutated.write_bytes(b"mutated recopy payload")
+            alternate_mutated.chmod(0o644)
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ):
+                with native_lifecycle_dependencies_for_host() as dependencies:
+                    premature_root = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    premature_execution = premature_root / source.name
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as premature:
+                        dependencies.remove_path(premature_execution)
+                    self.assertEqual(str(premature.exception), "driver_failed")
+                    self.assertNotIn(
+                        str(premature_root), str(premature.exception)
+                    )
+                    self.assertFalse(premature_execution.exists())
+                self.assertFalse(premature_root.exists())
+
+                run_directory: Path | None = None
+                execution_copy: Path | None = None
+                sentinel: Path | None = None
+                with native_lifecycle_dependencies_for_host() as dependencies:
+                    run_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    execution_copy = run_directory / source.name
+                    sentinel = run_directory / "outside-product-sentinel.bin"
+                    dependencies.copy_file(source, execution_copy)
+                    dependencies.set_file_mode(execution_copy, 0o700)
+                    first_execution_metadata = execution_copy.lstat()
+                    first_execution_id = (
+                        f"{first_execution_metadata.st_dev}:"
+                        f"{first_execution_metadata.st_ino}"
+                    )
+                    first_execution_state = NativePathState(
+                        True,
+                        "file",
+                        len(source_bytes),
+                        source_sha256,
+                        0o700,
+                        first_execution_id,
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "execution_copy", execution_copy
+                        ),
+                        first_execution_state,
+                    )
+                    dependencies.copy_file(source, sentinel)
+                    sentinel_metadata = sentinel.lstat()
+                    sentinel_state = NativePathState(
+                        True,
+                        "file",
+                        len(source_bytes),
+                        source_sha256,
+                        0o600,
+                        (
+                            f"{sentinel_metadata.st_dev}:"
+                            f"{sentinel_metadata.st_ino}"
+                        ),
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path("sentinel", sentinel),
+                        sentinel_state,
+                    )
+
+                    wrong = run_directory / "wrong-execution.AppImage"
+                    relative = Path(source.name)
+                    invalid_remove_paths = (
+                        wrong,
+                        relative,
+                        source,
+                        sentinel,
+                        run_directory,
+                    )
+                    for invalid_path in invalid_remove_paths:
+                        with self.subTest(remove=str(invalid_path)):
+                            execution_before = signature(execution_copy)
+                            sentinel_before = signature(sentinel)
+                            source_before = signature(source)
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ) as rejected:
+                                dependencies.remove_path(invalid_path)
+                            self.assertEqual(
+                                str(rejected.exception), "driver_failed"
+                            )
+                            self.assertNotIn(
+                                str(root), str(rejected.exception)
+                            )
+                            self.assertEqual(
+                                signature(execution_copy), execution_before
+                            )
+                            self.assertEqual(signature(sentinel), sentinel_before)
+                            self.assertEqual(signature(source), source_before)
+                            self.assertFalse(wrong.exists())
+                            self.assertFalse(relative.exists())
+
+                    self.assertIsNone(
+                        dependencies.remove_path(execution_copy)
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "preserve_execution_copy", execution_copy
+                        ),
+                        missing,
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path("sentinel", sentinel),
+                        sentinel_state,
+                    )
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as duplicate_remove:
+                        dependencies.remove_path(execution_copy)
+                    self.assertEqual(
+                        str(duplicate_remove.exception), "driver_failed"
+                    )
+                    self.assertFalse(execution_copy.exists())
+
+                    for alternate in (alternate_same, alternate_mutated):
+                        with self.subTest(source=str(alternate)):
+                            alternate_before = signature(alternate)
+                            sentinel_before = signature(sentinel)
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ) as rejected_source:
+                                dependencies.copy_file(
+                                    alternate, execution_copy
+                                )
+                            self.assertEqual(
+                                str(rejected_source.exception), "driver_failed"
+                            )
+                            self.assertNotIn(
+                                str(root), str(rejected_source.exception)
+                            )
+                            self.assertFalse(execution_copy.exists())
+                            self.assertEqual(
+                                signature(alternate), alternate_before
+                            )
+                            self.assertEqual(signature(sentinel), sentinel_before)
+
+                    self.assertIsNone(
+                        dependencies.copy_file(source, execution_copy)
+                    )
+                    second_unpromoted = execution_copy.lstat()
+                    self.assertEqual(
+                        stat.S_IMODE(second_unpromoted.st_mode), 0o600
+                    )
+                    self.assertNotEqual(
+                        (
+                            second_unpromoted.st_dev,
+                            second_unpromoted.st_ino,
+                        ),
+                        (
+                            first_execution_metadata.st_dev,
+                            first_execution_metadata.st_ino,
+                        ),
+                    )
+                    self.assertNotEqual(
+                        (
+                            second_unpromoted.st_dev,
+                            second_unpromoted.st_ino,
+                        ),
+                        (sentinel_metadata.st_dev, sentinel_metadata.st_ino),
+                    )
+                    self.assertNotEqual(
+                        (
+                            second_unpromoted.st_dev,
+                            second_unpromoted.st_ino,
+                        ),
+                        (source_signature[0], source_signature[1]),
+                    )
+                    second_file_id = (
+                        f"{second_unpromoted.st_dev}:"
+                        f"{second_unpromoted.st_ino}"
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "execution_copy", execution_copy
+                        ),
+                        NativePathState(
+                            True,
+                            "file",
+                            len(source_bytes),
+                            source_sha256,
+                            0o600,
+                            second_file_id,
+                        ),
+                    )
+                    dependencies.set_file_mode(execution_copy, 0o700)
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "execution_copy", execution_copy
+                        ),
+                        NativePathState(
+                            True,
+                            "file",
+                            len(source_bytes),
+                            source_sha256,
+                            0o700,
+                            second_file_id,
+                        ),
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path("sentinel", sentinel),
+                        sentinel_state,
+                    )
+
+                    self.assertIsNone(
+                        dependencies.remove_path(execution_copy)
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path(
+                            "delete_execution_copy", execution_copy
+                        ),
+                        missing,
+                    )
+                    self.assertEqual(
+                        dependencies.inspect_path("sentinel", sentinel),
+                        sentinel_state,
+                    )
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as third_copy:
+                        dependencies.copy_file(source, execution_copy)
+                    self.assertEqual(str(third_copy.exception), "driver_failed")
+                    self.assertFalse(execution_copy.exists())
+
+                assert run_directory is not None
+                assert execution_copy is not None
+                assert sentinel is not None
+                self.assertFalse(execution_copy.exists())
+                self.assertFalse(sentinel.exists())
+                self.assertFalse(run_directory.exists())
+
+            self.assertEqual(signature(source), source_signature)
+            self.assertEqual(source.read_bytes(), source_bytes)
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_copy_rejects_a_source_inside_the_owned_run_directory(
         self,
     ) -> None:
