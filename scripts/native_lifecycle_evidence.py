@@ -1230,13 +1230,14 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
 
     run_directory: _BoundRunDirectory | None = None
     profile_home: Path | None = None
+    service_absence_confirmed = False
 
     def unavailable(*args: object, **kwargs: object) -> object:
         del args, kwargs
         _fail("driver_unavailable")
 
     def profile_paths(platform: object) -> NativeProfilePaths:
-        nonlocal profile_home
+        nonlocal profile_home, service_absence_confirmed
         if type(platform) is not str or platform != "linux":
             _driver_fail()
         try:
@@ -1280,6 +1281,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             if profile_home is not None and profile_home != authority.home:
                 _driver_fail()
             profile_home = authority.home
+            service_absence_confirmed = False
             return profile
         except LifecycleEvidenceError:
             raise
@@ -1287,12 +1289,14 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _driver_fail()
 
     def inspect_service(platform: object) -> NativeServiceState:
+        nonlocal service_absence_confirmed
         if (
             type(platform) is not str
             or platform != "linux"
             or profile_home is None
         ):
             _driver_fail()
+        service_absence_confirmed = False
         try:
             from openusage_bar.platform_services import service_is_registered
 
@@ -1304,7 +1308,138 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _fail("driver_unavailable")
         if registered is not False:
             _fail("driver_unavailable")
+        service_absence_confirmed = True
         return NativeServiceState(False, False, None)
+
+    def inspect_listener(
+        platform: object,
+        namespace: object,
+    ) -> NativeListenerState:
+        if (
+            type(platform) is not str
+            or platform != "linux"
+            or type(namespace) is not str
+            or namespace not in {"local", "gateway"}
+        ):
+            _driver_fail()
+        if namespace == "gateway":
+            _fail("driver_unavailable")
+        if profile_home is None or not service_absence_confirmed:
+            _driver_fail()
+
+        descriptors: list[int] = []
+        bindings: list[tuple[int, str, tuple[int, int]]] = []
+        try:
+            home_entry = profile_home.lstat()
+            directory_flag = getattr(os, "O_DIRECTORY", None)
+            nofollow_flag = getattr(os, "O_NOFOLLOW", None)
+            if (
+                type(directory_flag) is not int
+                or directory_flag == 0
+                or type(nofollow_flag) is not int
+                or nofollow_flag == 0
+            ):
+                _fail("driver_unavailable")
+            directory_flags = (
+                os.O_RDONLY
+                | directory_flag
+                | nofollow_flag
+                | getattr(os, "O_CLOEXEC", 0)
+            )
+            home_fd = os.open(profile_home, directory_flags)
+            descriptors.append(home_fd)
+            home_opened = os.fstat(home_fd)
+            if (
+                stat.S_ISLNK(home_entry.st_mode)
+                or not stat.S_ISDIR(home_entry.st_mode)
+                or not stat.S_ISDIR(home_opened.st_mode)
+                or (home_entry.st_dev, home_entry.st_ino)
+                != (home_opened.st_dev, home_opened.st_ino)
+            ):
+                _fail("driver_unavailable")
+            home_identity = (home_opened.st_dev, home_opened.st_ino)
+
+            current_fd = home_fd
+            missing_parent_fd: int | None = None
+            missing_name: str | None = None
+            for component in (".local", "state", "openusage-bar"):
+                try:
+                    child_fd = os.open(
+                        component,
+                        directory_flags,
+                        dir_fd=current_fd,
+                    )
+                except FileNotFoundError:
+                    missing_parent_fd = current_fd
+                    missing_name = component
+                    break
+                descriptors.append(child_fd)
+                child = os.fstat(child_fd)
+                if not stat.S_ISDIR(child.st_mode):
+                    _fail("driver_unavailable")
+                bindings.append(
+                    (
+                        current_fd,
+                        component,
+                        (child.st_dev, child.st_ino),
+                    )
+                )
+                current_fd = child_fd
+            else:
+                try:
+                    os.stat(
+                        "openusage.sock",
+                        dir_fd=current_fd,
+                        follow_symlinks=False,
+                    )
+                except FileNotFoundError:
+                    missing_parent_fd = current_fd
+                    missing_name = "openusage.sock"
+                else:
+                    _fail("driver_unavailable")
+
+            final_home = profile_home.lstat()
+            if (
+                stat.S_ISLNK(final_home.st_mode)
+                or not stat.S_ISDIR(final_home.st_mode)
+                or (final_home.st_dev, final_home.st_ino) != home_identity
+            ):
+                _fail("driver_unavailable")
+            for parent_fd, component, identity in bindings:
+                current = os.stat(
+                    component,
+                    dir_fd=parent_fd,
+                    follow_symlinks=False,
+                )
+                if (
+                    not stat.S_ISDIR(current.st_mode)
+                    or (current.st_dev, current.st_ino) != identity
+                ):
+                    _fail("driver_unavailable")
+            assert missing_parent_fd is not None
+            assert missing_name is not None
+            try:
+                os.stat(
+                    missing_name,
+                    dir_fd=missing_parent_fd,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                return NativeListenerState(False, False)
+            _fail("driver_unavailable")
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _fail("driver_unavailable")
+        finally:
+            close_failed = False
+            for descriptor in reversed(descriptors):
+                try:
+                    os.close(descriptor)
+                except Exception:
+                    close_failed = True
+            if close_failed:
+                _fail("driver_unavailable")
 
     def package_paths(
         platform: object,
@@ -1516,7 +1651,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         profile_paths=profile_paths,
         package_paths=package_paths,
         inspect_service=inspect_service,
-        inspect_listener=unavailable,
+        inspect_listener=inspect_listener,
         inspect_ledger=unavailable,
         network_events=unavailable,
         credential_events=unavailable,

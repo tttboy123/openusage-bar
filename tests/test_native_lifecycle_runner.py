@@ -3798,15 +3798,16 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                             platform="linux", home=authority.home
                         )
 
-                for callback, arguments in (
-                    (dependencies.inspect_listener, ("linux", "local")),
-                    (dependencies.inspect_ledger, ("linux",)),
-                ):
-                    with self.assertRaisesRegex(
-                        LifecycleEvidenceError, "driver_unavailable"
-                    ) as unavailable:
-                        callback(*arguments)
-                    self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ) as stale_absence:
+                    dependencies.inspect_listener("linux", "local")
+                self.assertEqual(str(stale_absence.exception), "driver_failed")
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as unavailable:
+                    dependencies.inspect_ledger("linux")
+                self.assertEqual(str(unavailable.exception), "driver_unavailable")
                 self.assertEqual(tree_snapshot(root), before)
 
             with patch(
@@ -3830,6 +3831,323 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
             self.assertEqual(tree_snapshot(root), before)
 
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_local_listener_probe_proves_only_authoritative_absence(
+        self,
+    ) -> None:
+        import socket
+        import stat
+        from unittest.mock import patch
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts import native_lifecycle_evidence as lifecycle_evidence
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeListenerState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        def tree_snapshot(root: Path) -> tuple[tuple[object, ...], ...]:
+            snapshot: list[tuple[object, ...]] = []
+            for path in (root, *sorted(root.rglob("*"))):
+                metadata = path.lstat()
+                if stat.S_ISREG(metadata.st_mode):
+                    payload: object = path.read_bytes()
+                elif stat.S_ISLNK(metadata.st_mode):
+                    payload = os.readlink(path)
+                else:
+                    payload = None
+                snapshot.append(
+                    (
+                        "." if path == root else path.relative_to(root).as_posix(),
+                        metadata.st_dev,
+                        metadata.st_ino,
+                        metadata.st_mode,
+                        metadata.st_size,
+                        metadata.st_mtime_ns,
+                        metadata.st_ctime_ns,
+                        metadata.st_nlink,
+                        payload,
+                    )
+                )
+            return tuple(snapshot)
+
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="oul-") as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            marker = root / "PRIVATE_LISTENER_PROBE_MARKER"
+            marker.write_bytes(b"listener probe is read-only")
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            socket_path = (
+                home
+                / ".local"
+                / "state"
+                / "openusage-bar"
+                / "openusage.sock"
+            )
+            before = tree_snapshot(root)
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), native_lifecycle_dependencies_for_host() as dependencies, patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch.dict(os.environ, {}, clear=True), patch(
+                "openusage_bar.platform_services.service_is_registered",
+                return_value=False,
+            ), patch(
+                "openusage_bar.lifecycle_state.current_user_runtime_is_active",
+                side_effect=AssertionError("runtime connectivity is not absence"),
+            ) as runtime_probe:
+                dependencies.profile_paths("linux")
+                dependencies.inspect_service("linux")
+
+                self.assertEqual(
+                    dependencies.inspect_listener("linux", "local"),
+                    NativeListenerState(False, False),
+                )
+                runtime_probe.assert_not_called()
+                self.assertEqual(tree_snapshot(root), before)
+
+                for platform, namespace in (
+                    ("win", "local"),
+                    (True, "local"),
+                    ("linux", "private"),
+                    ("linux", True),
+                ):
+                    with self.subTest(platform=platform, namespace=namespace):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as rejected:
+                            dependencies.inspect_listener(platform, namespace)
+                        self.assertEqual(str(rejected.exception), "driver_failed")
+                        self.assertNotIn(str(root), str(rejected.exception))
+                        runtime_probe.assert_not_called()
+
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as unavailable:
+                    dependencies.inspect_listener("linux", "gateway")
+                self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                runtime_probe.assert_not_called()
+
+                socket_path.parent.mkdir(parents=True)
+                socket_path.write_bytes(b"not a socket")
+                case_before = tree_snapshot(root)
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as regular_unavailable:
+                    dependencies.inspect_listener("linux", "local")
+                self.assertEqual(
+                    str(regular_unavailable.exception), "driver_unavailable"
+                )
+                self.assertEqual(tree_snapshot(root), case_before)
+                socket_path.unlink()
+
+                socket_path.symlink_to(marker)
+                case_before = tree_snapshot(root)
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as symlink_unavailable:
+                    dependencies.inspect_listener("linux", "local")
+                self.assertEqual(
+                    str(symlink_unavailable.exception), "driver_unavailable"
+                )
+                self.assertEqual(tree_snapshot(root), case_before)
+                socket_path.unlink()
+
+                bound_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                try:
+                    bound_socket.bind(str(socket_path))
+                    case_before = tree_snapshot(root)
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as socket_unavailable:
+                        dependencies.inspect_listener("linux", "local")
+                    self.assertEqual(
+                        str(socket_unavailable.exception), "driver_unavailable"
+                    )
+                    self.assertEqual(tree_snapshot(root), case_before)
+                finally:
+                    bound_socket.close()
+                    socket_path.unlink(missing_ok=True)
+
+                case_before = tree_snapshot(root)
+                self.assertEqual(
+                    dependencies.inspect_listener("linux", "local"),
+                    NativeListenerState(False, False),
+                )
+                self.assertEqual(tree_snapshot(root), case_before)
+
+                real_stat = os.stat
+
+                def failed_socket_stat(path, *args, **kwargs):
+                    if (
+                        path == "openusage.sock"
+                        and kwargs.get("dir_fd") is not None
+                        and kwargs.get("follow_symlinks") is False
+                    ):
+                        raise PermissionError("PRIVATE_SOCKET_AUTHORITY")
+                    return real_stat(path, *args, **kwargs)
+
+                case_before = tree_snapshot(root)
+                with patch(
+                    "scripts.native_lifecycle_evidence.os.stat",
+                    side_effect=failed_socket_stat,
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as lstat_unavailable:
+                        dependencies.inspect_listener("linux", "local")
+                    self.assertEqual(
+                        str(lstat_unavailable.exception), "driver_unavailable"
+                    )
+                    self.assertNotIn("PRIVATE_", str(lstat_unavailable.exception))
+                self.assertEqual(tree_snapshot(root), case_before)
+                runtime_probe.assert_not_called()
+
+                for flag_name in ("O_NOFOLLOW", "O_DIRECTORY"):
+                    with self.subTest(flag=flag_name), patch.object(
+                        lifecycle_evidence.os,
+                        flag_name,
+                        0,
+                    ):
+                        case_before = tree_snapshot(root)
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_unavailable"
+                        ) as flag_unavailable:
+                            dependencies.inspect_listener("linux", "local")
+                        self.assertEqual(
+                            str(flag_unavailable.exception), "driver_unavailable"
+                        )
+                        self.assertEqual(tree_snapshot(root), case_before)
+
+                socket_path.parent.rmdir()
+                socket_path.parent.parent.rmdir()
+                socket_path.parent.parent.parent.rmdir()
+                foreign_ancestor = root / "foreign-listener-state"
+                foreign_ancestor.mkdir()
+                foreign_marker = foreign_ancestor / "PRIVATE_FOREIGN_SOCKET"
+                foreign_marker.write_bytes(b"foreign ancestor remains unchanged")
+                (home / ".local").symlink_to(
+                    foreign_ancestor,
+                    target_is_directory=True,
+                )
+                case_before = tree_snapshot(root)
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as ancestor_unavailable:
+                    dependencies.inspect_listener("linux", "local")
+                self.assertEqual(
+                    str(ancestor_unavailable.exception), "driver_unavailable"
+                )
+                self.assertEqual(tree_snapshot(root), case_before)
+                (home / ".local").unlink()
+                runtime_probe.assert_not_called()
+
+                public_listener_root = socket_path.parent
+                public_listener_root.mkdir(parents=True)
+                original_listener_root = public_listener_root.with_name(
+                    "openusage-bar-original"
+                )
+                replacement_seed = root / "replacement-openusage-bar"
+                replacement_seed.mkdir()
+                replacement_socket = replacement_seed / "openusage.sock"
+                replacement_socket.write_bytes(b"replacement socket authority")
+                swapped = False
+                swapped_facts: dict[str, tuple[int, int]] = {}
+
+                def swap_before_final_socket_stat(path, *args, **kwargs):
+                    nonlocal swapped
+                    if (
+                        not swapped
+                        and path == "openusage.sock"
+                        and kwargs.get("dir_fd") is not None
+                        and kwargs.get("follow_symlinks") is False
+                    ):
+                        public_listener_root.rename(original_listener_root)
+                        replacement_seed.rename(public_listener_root)
+                        original_metadata = original_listener_root.lstat()
+                        replacement_metadata = public_listener_root.lstat()
+                        swapped_facts.update(
+                            {
+                                "original": (
+                                    original_metadata.st_dev,
+                                    original_metadata.st_ino,
+                                ),
+                                "replacement": (
+                                    replacement_metadata.st_dev,
+                                    replacement_metadata.st_ino,
+                                ),
+                            }
+                        )
+                        swapped = True
+                    return real_stat(path, *args, **kwargs)
+
+                with patch(
+                    "scripts.native_lifecycle_evidence.os.stat",
+                    side_effect=swap_before_final_socket_stat,
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as swapped_unavailable:
+                        dependencies.inspect_listener("linux", "local")
+                    self.assertEqual(
+                        str(swapped_unavailable.exception), "driver_unavailable"
+                    )
+                self.assertTrue(swapped)
+                original_metadata = original_listener_root.lstat()
+                replacement_metadata = public_listener_root.lstat()
+                self.assertEqual(
+                    (original_metadata.st_dev, original_metadata.st_ino),
+                    swapped_facts["original"],
+                )
+                self.assertEqual(
+                    (replacement_metadata.st_dev, replacement_metadata.st_ino),
+                    swapped_facts["replacement"],
+                )
+                self.assertEqual(tuple(original_listener_root.iterdir()), ())
+                self.assertEqual(
+                    (public_listener_root / "openusage.sock").read_bytes(),
+                    b"replacement socket authority",
+                )
+                runtime_probe.assert_not_called()
+
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as ledger_unavailable:
+                    dependencies.inspect_ledger("linux")
+                self.assertEqual(
+                    str(ledger_unavailable.exception), "driver_unavailable"
+                )
+
+            with patch(
+                "scripts.native_lifecycle_evidence.sys.platform", "linux"
+            ), patch(
+                "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                return_value="x86_64",
+            ), native_lifecycle_dependencies_for_host() as dependencies, patch.object(
+                LifecycleStatePaths,
+                "for_current_user",
+                return_value=authority,
+            ), patch.dict(os.environ, {}, clear=True), patch(
+                "openusage_bar.lifecycle_state.current_user_runtime_is_active",
+                side_effect=AssertionError("runtime connectivity is not absence"),
+            ) as runtime_probe:
+                dependencies.profile_paths("linux")
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ) as rejected:
+                    dependencies.inspect_listener("linux", "local")
+                self.assertEqual(str(rejected.exception), "driver_failed")
+                self.assertNotIn(str(root), str(rejected.exception))
+                runtime_probe.assert_not_called()
+
     @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_unimplemented_dependencies_are_driver_unavailable(
         self,
@@ -3850,7 +4168,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 LifecycleEvidenceError, "driver_unavailable"
             ) as unavailable:
-                dependencies.inspect_listener("linux", "local")
+                dependencies.inspect_ledger("linux")
             self.assertEqual(str(unavailable.exception), "driver_unavailable")
 
     def test_default_generate_fails_closed_without_a_real_platform_backend(self) -> None:
