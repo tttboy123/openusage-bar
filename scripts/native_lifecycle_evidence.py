@@ -739,7 +739,11 @@ class _BoundRunDirectory:
         return path
 
     def inspect_path(self, purpose: object, path: object) -> NativePathState:
-        if type(purpose) is not str:
+        if (
+            type(purpose) is not str
+            or not isinstance(path, Path)
+            or not _valid_native_path(path)
+        ):
             _driver_fail()
         if purpose not in {
             "fresh_execution_copy",
@@ -1471,6 +1475,8 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
 
     run_directory: _BoundRunDirectory | None = None
     profile_home: Path | None = None
+    profile_projection: NativeProfilePaths | None = None
+    package_projection: NativePackagePaths | None = None
     service_absence_confirmed = False
     local_listener_absence_confirmed = False
 
@@ -1479,8 +1485,11 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         _fail("driver_unavailable")
 
     def profile_paths(platform: object) -> NativeProfilePaths:
-        nonlocal profile_home, service_absence_confirmed
+        nonlocal profile_home, profile_projection, package_projection
+        nonlocal service_absence_confirmed
         nonlocal local_listener_absence_confirmed
+        profile_projection = None
+        package_projection = None
         if type(platform) is not str or platform != "linux":
             _driver_fail()
         try:
@@ -1524,6 +1533,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             if profile_home is not None and profile_home != authority.home:
                 _driver_fail()
             profile_home = authority.home
+            profile_projection = profile
             service_absence_confirmed = False
             local_listener_absence_confirmed = False
             return profile
@@ -1556,11 +1566,16 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         service_absence_confirmed = True
         return NativeServiceState(False, False, None)
 
-    def prove_state_entries_missing(entry_names: tuple[str, ...]) -> None:
+    def prove_authoritative_state_absence(
+        *,
+        root_missing: bool,
+        entry_names: tuple[str, ...],
+    ) -> None:
         if (
             profile_home is None
+            or type(root_missing) is not bool
             or type(entry_names) is not tuple
-            or not entry_names
+            or root_missing == bool(entry_names)
             or any(
                 type(name) is not str
                 or not name
@@ -1630,6 +1645,8 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                 )
                 current_fd = child_fd
             else:
+                if root_missing:
+                    _fail("driver_unavailable")
                 for entry_name in entry_names:
                     try:
                         os.stat(
@@ -1676,6 +1693,8 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                 else:
                     _fail("driver_unavailable")
             else:
+                if root_missing:
+                    _fail("driver_unavailable")
                 for entry_name in entry_names:
                     try:
                         os.stat(
@@ -1687,6 +1706,20 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                         continue
                     _fail("driver_unavailable")
             revalidate_public_chain()
+            if root_missing:
+                assert missing_parent_fd is not None
+                assert missing_name is not None
+                revalidate_public_chain()
+                try:
+                    os.stat(
+                        missing_name,
+                        dir_fd=missing_parent_fd,
+                        follow_symlinks=False,
+                    )
+                except FileNotFoundError:
+                    pass
+                else:
+                    _fail("driver_unavailable")
         except LifecycleEvidenceError:
             raise
         except Exception:
@@ -1727,7 +1760,10 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         if profile_home is None or not service_absence_confirmed:
             _driver_fail()
         service_absence_confirmed = False
-        prove_state_entries_missing(("openusage.sock",))
+        prove_authoritative_state_absence(
+            root_missing=False,
+            entry_names=("openusage.sock",),
+        )
         try:
             from openusage_bar.platform_services import service_is_registered
 
@@ -1739,7 +1775,10 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _fail("driver_unavailable")
         if registered is not False:
             _fail("driver_unavailable")
-        prove_state_entries_missing(("openusage.sock",))
+        prove_authoritative_state_absence(
+            root_missing=False,
+            entry_names=("openusage.sock",),
+        )
         local_listener_absence_confirmed = True
         return NativeListenerState(False, False)
 
@@ -1759,8 +1798,14 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             "activity.sqlite3-shm",
             "activity.sqlite3-journal",
         )
-        prove_state_entries_missing(ledger_entries)
-        prove_state_entries_missing(("openusage.sock",))
+        prove_authoritative_state_absence(
+            root_missing=False,
+            entry_names=ledger_entries,
+        )
+        prove_authoritative_state_absence(
+            root_missing=False,
+            entry_names=("openusage.sock",),
+        )
         try:
             from openusage_bar.platform_services import service_is_registered
 
@@ -1772,14 +1817,22 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _fail("driver_unavailable")
         if registered is not False:
             _fail("driver_unavailable")
-        prove_state_entries_missing(("openusage.sock",))
-        prove_state_entries_missing(ledger_entries)
+        prove_authoritative_state_absence(
+            root_missing=False,
+            entry_names=("openusage.sock",),
+        )
+        prove_authoritative_state_absence(
+            root_missing=False,
+            entry_names=ledger_entries,
+        )
         return NativeLedgerState(False, None, 0, None, False, 0)
 
     def package_paths(
         platform: object,
         profile: object,
     ) -> NativePackagePaths:
+        nonlocal package_projection
+        package_projection = None
         if (
             type(platform) is not str
             or platform != "linux"
@@ -1805,12 +1858,15 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             else:
                 if stat.S_ISLNK(metadata.st_mode):
                     _driver_fail()
-            return NativePackagePaths(
+            package = NativePackagePaths(
                 install_root=profile.runtime_root,
                 app=None,
                 uninstaller=None,
                 collector=profile.runtime_root / "openusage-collector",
             )
+            if profile_projection is not None and profile == profile_projection:
+                package_projection = package
+            return package
         except LifecycleEvidenceError:
             raise
         except Exception:
@@ -1956,6 +2012,30 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     def inspect_path(purpose: object, path: object) -> NativePathState:
         if run_directory is None:
             _driver_fail()
+        if (
+            type(purpose) is not str
+            or not isinstance(path, Path)
+            or not _valid_native_path(path)
+        ):
+            _driver_fail()
+        if (
+            profile_projection is not None
+            and path == profile_projection.state_root
+            and purpose != "fresh_state_root"
+        ):
+            _driver_fail()
+        if purpose == "fresh_state_root":
+            if (
+                profile_projection is None
+                or package_projection is None
+                or path != profile_projection.state_root
+            ):
+                _driver_fail()
+            prove_authoritative_state_absence(
+                root_missing=True,
+                entry_names=(),
+            )
+            return NativePathState(False, "missing", 0, None, 0, None)
         return run_directory.inspect_path(purpose, path)
 
     def copy_file(source: object, destination: object) -> None:

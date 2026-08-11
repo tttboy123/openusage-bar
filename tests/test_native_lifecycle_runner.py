@@ -3815,6 +3815,268 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             self.assertEqual(tree_snapshot(root), before)
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_inspect_path_proves_only_fresh_authoritative_state_root_absent(
+        self,
+    ) -> None:
+        import stat
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativePathState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        def tree_snapshot(root: Path) -> tuple[tuple[object, ...], ...]:
+            snapshot: list[tuple[object, ...]] = []
+            for path in (root, *sorted(root.rglob("*"))):
+                metadata = path.lstat()
+                relative = "." if path == root else path.relative_to(root).as_posix()
+                if stat.S_ISLNK(metadata.st_mode):
+                    payload: object = os.readlink(path)
+                elif stat.S_ISREG(metadata.st_mode):
+                    payload = path.read_bytes()
+                else:
+                    payload = None
+                snapshot.append(
+                    (
+                        relative,
+                        stat.S_IFMT(metadata.st_mode),
+                        stat.S_IMODE(metadata.st_mode),
+                        metadata.st_dev,
+                        metadata.st_ino,
+                        metadata.st_size,
+                        metadata.st_nlink,
+                        payload,
+                    )
+                )
+            return tuple(snapshot)
+
+        def enter_dependencies(authority: LifecycleStatePaths, stack: ExitStack):
+            stack.enter_context(
+                patch("scripts.native_lifecycle_evidence.sys.platform", "linux")
+            )
+            stack.enter_context(
+                patch(
+                    "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                    return_value="x86_64",
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    LifecycleStatePaths,
+                    "for_current_user",
+                    return_value=authority,
+                )
+            )
+            stack.enter_context(patch.dict(os.environ, {}, clear=True))
+            dependencies = stack.enter_context(
+                native_lifecycle_dependencies_for_host()
+            )
+            run_directory = dependencies.make_run_directory("linux", "x64")
+            return dependencies, run_directory
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            expected_state_root = home / ".local" / "state" / "openusage-bar"
+
+            with ExitStack() as stack:
+                dependencies, _run_directory = enter_dependencies(authority, stack)
+                with patch(
+                    "scripts.native_lifecycle_evidence.os.open",
+                    side_effect=AssertionError("order rejection must not probe"),
+                ) as open_probe, patch(
+                    "scripts.native_lifecycle_evidence.os.stat",
+                    side_effect=AssertionError("order rejection must not probe"),
+                ) as stat_probe:
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as rejected:
+                        dependencies.inspect_path(
+                            "fresh_state_root", expected_state_root
+                        )
+                self.assertEqual(str(rejected.exception), "driver_failed")
+                open_probe.assert_not_called()
+                stat_probe.assert_not_called()
+
+            before = tree_snapshot(root)
+            with ExitStack() as stack:
+                dependencies, _run_directory = enter_dependencies(authority, stack)
+                profile = dependencies.profile_paths("linux")
+                dependencies.package_paths("linux", profile)
+                for purpose, path in (
+                    ("fresh_config_root", profile.state_root),
+                    ("fresh_state_root", root / "foreign-state"),
+                    (True, profile.state_root),
+                ):
+                    with self.subTest(purpose=purpose, path=path), patch(
+                        "scripts.native_lifecycle_evidence.os.open",
+                        side_effect=AssertionError("invalid request must not probe"),
+                    ) as open_probe, patch(
+                        "scripts.native_lifecycle_evidence.os.stat",
+                        side_effect=AssertionError("invalid request must not probe"),
+                    ) as stat_probe:
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as rejected:
+                            dependencies.inspect_path(purpose, path)
+                        self.assertEqual(str(rejected.exception), "driver_failed")
+                        self.assertNotIn(str(root), str(rejected.exception))
+                        open_probe.assert_not_called()
+                        stat_probe.assert_not_called()
+
+                private_comparisons: list[str] = []
+
+                class HostileNonPath:
+                    def __eq__(self, _other: object) -> bool:
+                        private_comparisons.append("PRIVATE_EQ_SIDE_EFFECT")
+                        raise RuntimeError("PRIVATE_EQ_ERROR")
+
+                with self.subTest(case="hostile non-Path is rejected before equality"), patch(
+                    "scripts.native_lifecycle_evidence.os.open",
+                    side_effect=AssertionError("non-Path must not probe"),
+                ) as open_probe, patch(
+                    "scripts.native_lifecycle_evidence.os.stat",
+                    side_effect=AssertionError("non-Path must not probe"),
+                ) as stat_probe:
+                    observed: BaseException | None = None
+                    try:
+                        dependencies.inspect_path(
+                            "fresh_state_root", HostileNonPath()
+                        )
+                    except BaseException as error:
+                        observed = error
+                    self.assertEqual(private_comparisons, [])
+                    self.assertIsInstance(observed, LifecycleEvidenceError)
+                    assert observed is not None
+                    self.assertEqual(str(observed), "driver_failed")
+                    self.assertNotIn("PRIVATE_", str(observed))
+                    open_probe.assert_not_called()
+                    stat_probe.assert_not_called()
+
+                self.assertEqual(
+                    dependencies.inspect_path(
+                        "fresh_state_root", profile.state_root
+                    ),
+                    NativePathState(False, "missing", 0, None, 0, None),
+                )
+            self.assertEqual(tree_snapshot(root), before)
+
+        for existing_kind in ("directory", "file", "symlink"):
+            with self.subTest(existing_kind=existing_kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "authoritative-home"
+                home.mkdir()
+                authority = LifecycleStatePaths(platform="linux", home=home)
+                state_root = home / ".local" / "state" / "openusage-bar"
+                state_root.parent.mkdir(parents=True)
+                if existing_kind == "directory":
+                    state_root.mkdir()
+                elif existing_kind == "file":
+                    state_root.write_bytes(b"PRIVATE_EXISTING_STATE")
+                else:
+                    foreign = root / "PRIVATE_FOREIGN_STATE"
+                    foreign.mkdir()
+                    (foreign / "marker").write_bytes(b"foreign unchanged")
+                    state_root.symlink_to(foreign, target_is_directory=True)
+                before = tree_snapshot(root)
+
+                with ExitStack() as stack:
+                    dependencies, _run_directory = enter_dependencies(authority, stack)
+                    profile = dependencies.profile_paths("linux")
+                    dependencies.package_paths("linux", profile)
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as unavailable:
+                        dependencies.inspect_path(
+                            "fresh_state_root", profile.state_root
+                        )
+                    self.assertEqual(
+                        str(unavailable.exception), "driver_unavailable"
+                    )
+                    self.assertNotIn(str(root), str(unavailable.exception))
+                    self.assertNotIn("PRIVATE_", str(unavailable.exception))
+                self.assertEqual(tree_snapshot(root), before)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            state_parent = home / ".local" / "state"
+            state_parent.mkdir(parents=True)
+            state_root = state_parent / "openusage-bar"
+            foreign = root / "PRIVATE_FOREIGN_STATE"
+            foreign.mkdir()
+            foreign_marker = foreign / "marker"
+            foreign_marker.write_bytes(b"foreign remains unchanged")
+            config_marker = home / ".config" / "openusage-bar" / "marker"
+            config_marker.parent.mkdir(parents=True)
+            config_marker.write_bytes(b"config remains unchanged")
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            local_identity = (
+                (home / ".local").lstat().st_dev,
+                (home / ".local").lstat().st_ino,
+            )
+            state_parent_identity = (
+                state_parent.lstat().st_dev,
+                state_parent.lstat().st_ino,
+            )
+            real_lstat = Path.lstat
+            lstat_calls = 0
+            swapped = False
+
+            def swap_at_final_public_chain(
+                path: Path,
+                *args: object,
+                **kwargs: object,
+            ):
+                nonlocal lstat_calls, swapped
+                lstat_calls += 1
+                if lstat_calls == 4 and path == home:
+                    state_root.symlink_to(foreign, target_is_directory=True)
+                    swapped = True
+                return real_lstat(path, *args, **kwargs)
+
+            with ExitStack() as stack:
+                dependencies, run_directory = enter_dependencies(authority, stack)
+                profile = dependencies.profile_paths("linux")
+                dependencies.package_paths("linux", profile)
+                with patch.object(
+                    Path,
+                    "lstat",
+                    autospec=True,
+                    side_effect=swap_at_final_public_chain,
+                ), self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as unavailable:
+                    dependencies.inspect_path(
+                        "fresh_state_root", profile.state_root
+                    )
+                self.assertTrue(swapped)
+                self.assertEqual(lstat_calls, 4)
+                self.assertEqual(str(unavailable.exception), "driver_unavailable")
+                self.assertNotIn(str(root), str(unavailable.exception))
+                self.assertNotIn("PRIVATE_", str(unavailable.exception))
+                self.assertEqual(list(run_directory.iterdir()), [])
+
+            self.assertTrue(state_root.is_symlink())
+            self.assertEqual(os.readlink(state_root), str(foreign))
+            self.assertEqual(
+                ((home / ".local").lstat().st_dev, (home / ".local").lstat().st_ino),
+                local_identity,
+            )
+            self.assertEqual(
+                (state_parent.lstat().st_dev, state_parent.lstat().st_ino),
+                state_parent_identity,
+            )
+            self.assertEqual(
+                foreign_marker.read_bytes(), b"foreign remains unchanged"
+            )
+            self.assertEqual(config_marker.read_bytes(), b"config remains unchanged")
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_profile_paths_are_a_pure_authoritative_projection(
         self,
     ) -> None:
