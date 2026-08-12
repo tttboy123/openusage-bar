@@ -17,11 +17,12 @@ endpoint; it does not prove custom Gateway endpoints absent.
 
 The production generator is deliberately fail-closed. It accepts no client
 supplied pass/fail JSON and creates no report unless its built-in external
-platform driver performs and observes the complete lifecycle. The current
-repository has only the validator, artifact binding, canonical writer/verifier,
-and packaged-collector absolute service-command seam. The external Windows and
-Linux install/delete/privacy driver is not active yet, so this document is a
-contract foundation rather than hosted lifecycle evidence.
+platform driver performs and observes the complete lifecycle. Linux lifecycle
+mutation is reachable through an identity-bound start/stop process lease and
+the preserve/delete rollback transactions. The privacy event authority remains
+unavailable, however, so the built-in Linux driver cannot produce a lifecycle
+report. This document remains a contract foundation rather than hosted
+lifecycle evidence.
 
 An optional `nativeLifecycleEvidence` object may be embedded in a Windows x64
 or Linux x64 `native-ci-evidence-v1` document after the lifecycle report is

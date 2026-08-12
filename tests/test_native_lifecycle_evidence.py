@@ -91,6 +91,13 @@ class NativeLifecycleEvidenceTests(unittest.TestCase):
         )
         self.assertIn("canonical default Gateway endpoint", documentation)
         self.assertIn("does not prove custom Gateway endpoints absent", documentation)
+        self.assertIn("Linux lifecycle mutation is reachable", documentation)
+        self.assertIn("privacy event authority remains unavailable", documentation)
+        self.assertIn("cannot produce a lifecycle report", documentation)
+        self.assertNotIn(
+            "Linux install/delete/privacy driver is not active yet",
+            documentation,
+        )
 
     def test_state_delete_does_not_expand_local_or_gateway_http_namespaces(self) -> None:
         from openusage_bar.gateway.api import GatewayRouter
