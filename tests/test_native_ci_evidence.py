@@ -2589,6 +2589,16 @@ class NativeCiEvidenceTests(unittest.TestCase):
                     f"appimage_preserve_uninstall_failed category={category}",
                     preserve,
                 )
+        for cleanup_category in (
+            "manager",
+            "account",
+            "root-identity",
+            "root-remove",
+        ):
+            self.assertIn(
+                f"appimage_preserve_cleanup_failed category={cleanup_category}",
+                preserve,
+            )
         self.assertIn("sudo /bin/rm -f", preserve)
         self.assertIn(
             'test "$(/usr/bin/stat --format=\'%d:%i\' "$preserve_root")" '

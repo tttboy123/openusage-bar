@@ -960,10 +960,16 @@ jobs:
           cleanup_preserve() {
             cleanup_failed=0
             if [[ -n "$current_uid" ]]; then
-              sudo systemctl stop "user@$current_uid.service" || cleanup_failed=1
+              if ! sudo systemctl stop "user@$current_uid.service"; then
+                printf "%s\n" "appimage_preserve_cleanup_failed category=manager" >&2
+                cleanup_failed=1
+              fi
             fi
             if [[ "$preserve_user_created" == "1" ]]; then
-              sudo userdel "$preserve_user" >/dev/null 2>&1 || cleanup_failed=1
+              if ! sudo userdel "$preserve_user" >/dev/null 2>&1; then
+                printf "%s\n" "appimage_preserve_cleanup_failed category=account" >&2
+                cleanup_failed=1
+              fi
             fi
             sudo /bin/rm -f \
               "$preserve_execution" \
@@ -971,9 +977,13 @@ jobs:
               "$collector_stdout" \
               "$collector_stderr" || cleanup_failed=1
             if ! test "$(/usr/bin/stat --format='%d:%i' "$preserve_root")" = "$preserve_root_identity"; then
+              printf "%s\n" "appimage_preserve_cleanup_failed category=root-identity" >&2
               cleanup_failed=1
             else
-              sudo /bin/rm -rf --one-file-system "$preserve_root" || cleanup_failed=1
+              if ! sudo /bin/rm -rf --one-file-system "$preserve_root"; then
+                printf "%s\n" "appimage_preserve_cleanup_failed category=root-remove" >&2
+                cleanup_failed=1
+              fi
             fi
             return "$cleanup_failed"
           }
