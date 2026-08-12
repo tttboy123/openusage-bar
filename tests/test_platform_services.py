@@ -958,6 +958,27 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                         )
                         self.assertNotIn("PRIVATE", str(unavailable.exception))
 
+                for unsafe_mode in (0o660, 0o666, 0o755):
+                    with self.subTest(private_socket_mode=oct(unsafe_mode)):
+                        manager_calls.clear()
+                        harness.manager_stdout = absence_stdout
+                        harness.private_metadata = harness._socket_metadata(
+                            harness.systemd_metadata.st_ino + 1000,
+                            unsafe_mode,
+                        )
+                        with self.assertRaises(
+                            platform_services.ServiceCommandError
+                        ) as unavailable:
+                            read_current_user_collector_service_absence_state()
+                        self.assertEqual(manager_calls, [])
+                        self.assertEqual(
+                            str(unavailable.exception),
+                            "service activation command failed",
+                        )
+                harness.private_metadata = harness._socket_metadata(
+                    harness.systemd_metadata.st_ino + 1000, 0o700
+                )
+
         with tempfile.TemporaryDirectory() as directory:
             harness = _LinuxServiceReaderHarness(self, Path(directory))
             harness.unit.unlink()
