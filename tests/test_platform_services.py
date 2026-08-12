@@ -845,6 +845,257 @@ class PlatformServicesRenderTests(unittest.TestCase):
 
 
 class PlatformServicesBehaviorTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "requires native Linux authority facts")
+    def test_linux_service_absence_state_proves_only_one_stable_negative_manager_fact(
+        self,
+    ):
+        from openusage_bar.platform_services import (
+            LinuxCollectorServiceAbsenceState,
+            read_current_user_collector_service_absence_state,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            harness = _LinuxServiceReaderHarness(self, Path(directory))
+            harness.unit.unlink()
+            absence_stdout = (
+                "Job=\n"
+                "ControlPID=0\n"
+                "MainPID=0\n"
+                "DropInPaths=\n"
+                "Id=openusage-bar.service\n"
+                "FragmentPath=\n"
+                "ActiveState=inactive\n"
+                "LoadState=not-found\n"
+                "NeedDaemonReload=no\n"
+                "UnitFileState=\n"
+                "SubState=dead\n"
+            ).encode("utf-8")
+            manager_calls: list[bytes] = []
+            negative_command = [
+                *harness.manager_command[:-1],
+                "--property=ControlPID",
+                "--property=Job",
+                "--all",
+                harness.manager_command[-1],
+            ]
+
+            def negative_manager(command, **kwargs):
+                self.assertEqual(command, negative_command)
+                self.assertEqual(
+                    kwargs,
+                    {
+                        "shell": False,
+                        "stdin": platform_services.subprocess.DEVNULL,
+                        "stdout": platform_services.subprocess.PIPE,
+                        "stderr": platform_services.subprocess.DEVNULL,
+                        "timeout": 5,
+                        "stdout_limit": 64 * 1024,
+                        "stderr_limit": 0,
+                        "check": False,
+                        "env": harness.session_env,
+                        "pass_fds": (
+                            harness.runtime_fd,
+                            harness.systemd_fd,
+                        ),
+                    },
+                )
+                manager_calls.append(harness.manager_stdout)
+                return platform_services.subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=harness.manager_stdout,
+                    stderr=b"",
+                )
+
+            with harness.patched(manager_side_effect=negative_manager):
+                harness.manager_stdout = absence_stdout
+                self.assertEqual(
+                    read_current_user_collector_service_absence_state(),
+                    LinuxCollectorServiceAbsenceState(
+                        unit_missing=True,
+                        unit_id="openusage-bar.service",
+                        load_state="not-found",
+                        active_state="inactive",
+                        sub_state="dead",
+                        unit_file_state=None,
+                        main_pid=0,
+                        control_pid=0,
+                        job=None,
+                        fragment_path=None,
+                        drop_in_paths=(),
+                        needs_reload=False,
+                    ),
+                )
+                self.assertEqual(manager_calls, [absence_stdout, absence_stdout])
+
+                hostile_states = (
+                    absence_stdout.replace(
+                        b"LoadState=not-found\n",
+                        b"LoadState=loaded\n",
+                    ).replace(
+                        b"FragmentPath=\n",
+                        f"FragmentPath={harness.unit}\n".encode(),
+                    ),
+                    absence_stdout.replace(
+                        b"ActiveState=inactive\n",
+                        b"ActiveState=activating\n",
+                    ),
+                )
+                for hostile_stdout in hostile_states:
+                    with self.subTest(stdout=hostile_stdout):
+                        manager_calls.clear()
+                        harness.manager_stdout = hostile_stdout
+                        with self.assertRaises(
+                            platform_services.ServiceCommandError
+                        ) as unavailable:
+                            read_current_user_collector_service_absence_state()
+                        self.assertEqual(
+                            str(unavailable.exception),
+                            "service activation command failed",
+                        )
+                        self.assertNotIn("PRIVATE", str(unavailable.exception))
+
+        with tempfile.TemporaryDirectory() as directory:
+            harness = _LinuxServiceReaderHarness(self, Path(directory))
+            harness.unit.unlink()
+            absence_stdout = (
+                "Job=\n"
+                "ControlPID=0\n"
+                "MainPID=0\n"
+                "DropInPaths=\n"
+                "Id=openusage-bar.service\n"
+                "FragmentPath=\n"
+                "ActiveState=inactive\n"
+                "LoadState=not-found\n"
+                "NeedDaemonReload=no\n"
+                "UnitFileState=\n"
+                "SubState=dead\n"
+            ).encode("utf-8")
+            negative_command = [
+                *harness.manager_command[:-1],
+                "--property=ControlPID",
+                "--property=Job",
+                "--all",
+                harness.manager_command[-1],
+            ]
+            manager_calls = 0
+            concurrent_unit_bytes = b"PRIVATE_CONCURRENT_UNIT"
+
+            def create_unit_after_second_manager(command, **kwargs):
+                nonlocal manager_calls
+                self.assertEqual(command, negative_command)
+                self.assertEqual(
+                    kwargs["pass_fds"],
+                    (harness.runtime_fd, harness.systemd_fd),
+                )
+                manager_calls += 1
+                if manager_calls == 2:
+                    harness.unit.write_bytes(concurrent_unit_bytes)
+                    harness.unit.chmod(0o600)
+                return platform_services.subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=absence_stdout,
+                    stderr=b"",
+                )
+
+            with harness.patched(
+                manager_side_effect=create_unit_after_second_manager
+            ):
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as concurrent:
+                    read_current_user_collector_service_absence_state()
+
+            self.assertEqual(manager_calls, 2)
+            self.assertEqual(
+                str(concurrent.exception),
+                "service activation command failed",
+            )
+            self.assertNotIn("PRIVATE", str(concurrent.exception))
+            self.assertTrue(harness.unit.is_file())
+            unit_metadata = harness.unit.lstat()
+            self.assertTrue(stat.S_ISREG(unit_metadata.st_mode))
+            self.assertEqual(harness.unit.read_bytes(), concurrent_unit_bytes)
+            for event in ("peer_close", "systemd_close", "runtime_close"):
+                self.assertIn(event, harness.events)
+
+        with tempfile.TemporaryDirectory() as directory:
+            harness = _LinuxServiceReaderHarness(self, Path(directory))
+            harness.unit.unlink()
+            harness.home.chmod(0o777)
+            manager_calls: list[tuple[object, ...]] = []
+
+            def forbidden_manager(*args, **kwargs):
+                manager_calls.append((args, kwargs))
+                return platform_services.subprocess.CompletedProcess(
+                    args[0],
+                    0,
+                    stdout=(
+                        b"Job=\nControlPID=0\nMainPID=0\nDropInPaths=\n"
+                        b"Id=openusage-bar.service\nFragmentPath=\n"
+                        b"ActiveState=inactive\nLoadState=not-found\n"
+                        b"NeedDaemonReload=no\nUnitFileState=\nSubState=dead\n"
+                    ),
+                    stderr=b"",
+                )
+
+            class MissingOpenAt2:
+                restype = None
+
+                def __call__(self, *args):
+                    del args
+                    return -1
+
+            fake_libc = type(
+                "FakeLibc",
+                (),
+                {"syscall": MissingOpenAt2()},
+            )()
+
+            with harness.patched(manager_side_effect=forbidden_manager), patch.object(
+                platform_services.os,
+                "uname",
+                return_value=type("Uname", (), {"sysname": "Linux"})(),
+            ), patch.object(
+                platform_services.ctypes,
+                "CDLL",
+                return_value=fake_libc,
+            ), patch.object(
+                platform_services.ctypes,
+                "set_errno",
+            ), patch.object(
+                platform_services.ctypes,
+                "get_errno",
+                return_value=errno.ENOENT,
+            ), patch.object(
+                platform_services.os,
+                "O_PATH",
+                0x200000,
+                create=True,
+            ), patch.object(
+                platform_services.os,
+                "O_CLOEXEC",
+                0x80000,
+                create=True,
+            ), patch.object(
+                platform_services.os,
+                "O_NOFOLLOW",
+                0x20000,
+                create=True,
+            ):
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as unsafe_home:
+                    read_current_user_collector_service_absence_state()
+
+            self.assertEqual(
+                str(unsafe_home.exception),
+                "service activation command failed",
+            )
+            self.assertNotIn(str(harness.home), str(unsafe_home.exception))
+            self.assertEqual(manager_calls, [])
+
     def test_linux_service_state_binds_manager_process_and_unit_facts(self):
         with tempfile.TemporaryDirectory() as directory:
             harness = _LinuxServiceReaderHarness(

@@ -9,6 +9,8 @@ surface activation errors without hiding secrets.
 from __future__ import annotations
 
 import hashlib
+import ctypes
+import errno
 import os
 import secrets
 import shutil
@@ -48,6 +50,11 @@ _LINUX_SERVICE_PROPERTIES = (
     "DropInPaths",
     "NeedDaemonReload",
     "MainPID",
+)
+_LINUX_SERVICE_ABSENCE_PROPERTIES = (
+    *_LINUX_SERVICE_PROPERTIES,
+    "ControlPID",
+    "Job",
 )
 _TRUSTED_SYSTEMCTL_PATHS = frozenset({"/usr/bin/systemctl"})
 _LINUX_SOL_SOCKET = 1
@@ -133,6 +140,50 @@ class LinuxCollectorServiceState:
             or not self.process_argv_nul.endswith(b"\0")
         ):
             raise ValueError("Linux collector service state invalid")
+
+
+@dataclass(frozen=True, repr=False)
+class LinuxCollectorServiceAbsenceState:
+    """Closed negative fact reported by one trusted current-user manager."""
+
+    unit_missing: bool
+    unit_id: str
+    load_state: str
+    active_state: str
+    sub_state: str
+    unit_file_state: str | None
+    main_pid: int
+    control_pid: int
+    job: str | None
+    fragment_path: Path | None
+    drop_in_paths: tuple[Path, ...]
+    needs_reload: bool
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.unit_missing) is not bool
+            or self.unit_missing is not True
+            or type(self.unit_id) is not str
+            or self.unit_id != SYSTEMD_UNIT_NAME
+            or type(self.load_state) is not str
+            or self.load_state != "not-found"
+            or type(self.active_state) is not str
+            or self.active_state != "inactive"
+            or type(self.sub_state) is not str
+            or self.sub_state != "dead"
+            or self.unit_file_state is not None
+            or type(self.main_pid) is not int
+            or self.main_pid != 0
+            or type(self.control_pid) is not int
+            or self.control_pid != 0
+            or self.job is not None
+            or self.fragment_path is not None
+            or type(self.drop_in_paths) is not tuple
+            or self.drop_in_paths != ()
+            or type(self.needs_reload) is not bool
+            or self.needs_reload is not False
+        ):
+            raise ValueError("Linux collector service absence state invalid")
 
 
 @dataclass(frozen=True)
@@ -780,6 +831,141 @@ def read_current_user_collector_service_state() -> LinuxCollectorServiceState:
             raise ServiceCommandError()
 
 
+def read_current_user_collector_service_absence_state(
+) -> LinuxCollectorServiceAbsenceState:
+    """Read one stable negative fact from the trusted Linux user manager."""
+
+    if not sys.platform.startswith("linux") or os.name == "nt":
+        raise ServiceCommandError()
+    runtime_descriptor: int | None = None
+    systemctl_binding: _BoundLinuxExecutable | None = None
+    manager_peer: _BoundLinuxManagerPeer | None = None
+    try:
+        configured_xdg_home = os.environ.get("XDG_CONFIG_HOME")
+        if configured_xdg_home not in {None, ""}:
+            raise ServiceCommandError()
+        from .lifecycle_state import LifecycleStatePaths
+
+        authority = LifecycleStatePaths.for_current_user(platform="linux")
+        home = authority.home
+        if not isinstance(home, Path) or not home.is_absolute():
+            raise ServiceCommandError()
+        unit = home / ".config" / "systemd" / "user" / SYSTEMD_UNIT_NAME
+        systemctl = shutil.which("systemctl")
+        if systemctl not in _TRUSTED_SYSTEMCTL_PATHS:
+            raise ServiceCommandError()
+        current_uid = os.getuid()
+        runtime_descriptor = _open_linux_user_runtime_directory(current_uid)
+        runtime_identity = _linux_file_signature(os.fstat(runtime_descriptor))
+        manager_peer = _bind_linux_systemd_private_peer(
+            runtime_descriptor, current_uid
+        )
+        manager_environment = {
+            "HOME": str(home),
+            "XDG_RUNTIME_DIR": f"/proc/self/fd/{runtime_descriptor}",
+            "DBUS_SESSION_BUS_ADDRESS": (
+                "unix:path=/proc/self/fd/"
+                f"{manager_peer.directory_descriptor}/private"
+            ),
+            "LC_ALL": "C",
+            "LANG": "C",
+            "SYSTEMD_COLORS": "0",
+            "PAGER": "cat",
+        }
+        manager_identity_before = _read_linux_process_identity(manager_peer.pid)
+        if manager_identity_before[2] != 1:
+            raise ServiceCommandError()
+        manager_cgroup_before = _read_linux_systemd_manager_cgroup(
+            manager_peer.pid, current_uid
+        )
+        manager_executable_before = _read_linux_systemd_manager_executable(
+            manager_peer.pid
+        )
+        manager_cmdline_before = _read_linux_systemd_manager_cmdline(
+            manager_peer.pid
+        )
+        systemctl_binding = _bind_linux_systemctl_executable(systemctl)
+        _prove_linux_service_unit_missing(home, unit)
+        manager_before = _read_linux_service_manager_absence_state(
+            systemctl,
+            manager_environment,
+            (runtime_descriptor, manager_peer.directory_descriptor),
+        )
+        manager_after = _read_linux_service_manager_absence_state(
+            systemctl,
+            manager_environment,
+            (runtime_descriptor, manager_peer.directory_descriptor),
+        )
+        _prove_linux_service_unit_missing(home, unit)
+        manager_identity_after = _read_linux_process_identity(manager_peer.pid)
+        manager_cgroup_after = _read_linux_systemd_manager_cgroup(
+            manager_peer.pid, current_uid
+        )
+        manager_executable_after = _read_linux_systemd_manager_executable(
+            manager_peer.pid
+        )
+        manager_cmdline_after = _read_linux_systemd_manager_cmdline(
+            manager_peer.pid
+        )
+        if (
+            manager_after != manager_before
+            or _linux_file_signature(os.fstat(runtime_descriptor))
+            != runtime_identity
+            or manager_identity_after != manager_identity_before
+            or manager_cgroup_after != manager_cgroup_before
+            or manager_executable_after != manager_executable_before
+            or manager_cmdline_after != manager_cmdline_before
+        ):
+            raise ServiceCommandError()
+        _revalidate_linux_systemd_private_peer(manager_peer, current_uid)
+        _revalidate_linux_systemctl_executable(systemctl_binding)
+        return LinuxCollectorServiceAbsenceState(
+            unit_missing=True,
+            unit_id=manager_before["Id"],
+            load_state=manager_before["LoadState"],
+            active_state=manager_before["ActiveState"],
+            sub_state=manager_before["SubState"],
+            unit_file_state=None,
+            main_pid=0,
+            control_pid=0,
+            job=None,
+            fragment_path=None,
+            drop_in_paths=(),
+            needs_reload=False,
+        )
+    except ServiceCommandError:
+        raise
+    except Exception as error:
+        raise ServiceCommandError() from error
+    finally:
+        close_failed = False
+        if manager_peer is not None:
+            try:
+                manager_peer.connection.close()
+            except Exception:
+                close_failed = True
+            try:
+                os.close(manager_peer.directory_descriptor)
+            except OSError:
+                close_failed = True
+        if systemctl_binding is not None:
+            for descriptor in (
+                systemctl_binding.executable_descriptor,
+                systemctl_binding.parent_descriptor,
+            ):
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    close_failed = True
+        if runtime_descriptor is not None:
+            try:
+                os.close(runtime_descriptor)
+            except OSError:
+                close_failed = True
+        if close_failed:
+            raise ServiceCommandError()
+
+
 def _root_owned_directory(metadata: os.stat_result) -> bool:
     return (
         stat.S_ISDIR(metadata.st_mode)
@@ -1220,10 +1406,197 @@ def _read_linux_service_unit(home: Path, unit: Path) -> tuple[str, bytes]:
             raise ServiceCommandError()
 
 
-def _read_linux_service_manager_state(
+class _LinuxOpenHow(ctypes.Structure):
+    _fields_ = (
+        ("flags", ctypes.c_uint64),
+        ("mode", ctypes.c_uint64),
+        ("resolve", ctypes.c_uint64),
+    )
+
+
+def _prove_linux_service_unit_missing(home: Path, unit: Path) -> None:
+    """Prove the canonical unit is absent without following any symlink."""
+
+    canonical = home / ".config" / "systemd" / "user" / SYSTEMD_UNIT_NAME
+    if unit != canonical or not home.is_absolute():
+        raise ServiceCommandError()
+    try:
+        active_kernel = os.uname().sysname
+    except Exception as error:
+        raise ServiceCommandError() from error
+    if active_kernel == "Linux":
+        open_path = getattr(os, "O_PATH", 0)
+        close_on_exec = getattr(os, "O_CLOEXEC", 0)
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        directory_flag = getattr(os, "O_DIRECTORY", 0)
+        if (
+            not open_path
+            or not close_on_exec
+            or not nofollow
+            or not directory_flag
+        ):
+            raise ServiceCommandError()
+        how = _LinuxOpenHow(
+            flags=open_path | nofollow | close_on_exec,
+            mode=0,
+            resolve=0x04,  # RESOLVE_NO_SYMLINKS
+        )
+        home_descriptor: int | None = None
+        failed = False
+        try:
+            home_public_before = os.stat(home, follow_symlinks=False)
+            home_descriptor = os.open(
+                home,
+                os.O_RDONLY | directory_flag | nofollow | close_on_exec,
+            )
+            home_opened = os.fstat(home_descriptor)
+            home_signature = _linux_file_signature(home_opened)
+            if (
+                not stat.S_ISDIR(home_opened.st_mode)
+                or home_opened.st_uid != os.getuid()
+                or stat.S_IMODE(home_opened.st_mode) & 0o022
+                or _linux_file_signature(home_public_before) != home_signature
+            ):
+                raise ServiceCommandError()
+            libc = ctypes.CDLL(None, use_errno=True)
+            syscall = libc.syscall
+            syscall.restype = ctypes.c_long
+            ctypes.set_errno(0)
+            result = syscall(
+                ctypes.c_long(437),  # __NR_openat2 on supported Linux arches
+                ctypes.c_int(home_descriptor),
+                ctypes.c_char_p(
+                    b".config/systemd/user/" + os.fsencode(SYSTEMD_UNIT_NAME)
+                ),
+                ctypes.byref(how),
+                ctypes.c_size_t(ctypes.sizeof(how)),
+            )
+            observed_errno = ctypes.get_errno()
+            home_public_after = os.stat(home, follow_symlinks=False)
+            if (
+                result >= 0
+                or observed_errno != errno.ENOENT
+                or _linux_file_signature(home_public_after) != home_signature
+                or _linux_file_signature(os.fstat(home_descriptor))
+                != home_signature
+            ):
+                if result >= 0:
+                    try:
+                        os.close(int(result))
+                    except OSError:
+                        failed = True
+                raise ServiceCommandError()
+        except ServiceCommandError:
+            failed = True
+        except Exception:
+            failed = True
+        finally:
+            if home_descriptor is not None:
+                try:
+                    os.close(home_descriptor)
+                except OSError:
+                    failed = True
+        if failed:
+            raise ServiceCommandError()
+        return
+
+    directory_flag = getattr(os, "O_DIRECTORY", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not directory_flag or not nofollow:
+        raise ServiceCommandError()
+    flags = os.O_RDONLY | directory_flag | nofollow | getattr(
+        os, "O_CLOEXEC", 0
+    )
+    descriptors: list[int] = []
+    bindings: list[tuple[int, str, tuple[int, ...]]] = []
+    missing_parent: int | None = None
+    missing_name: str | None = None
+    try:
+        home_public = os.stat(home, follow_symlinks=False)
+        home_descriptor = os.open(home, flags)
+        descriptors.append(home_descriptor)
+        home_opened = os.fstat(home_descriptor)
+        home_signature = _linux_file_signature(home_opened)
+        if (
+            not stat.S_ISDIR(home_opened.st_mode)
+            or home_opened.st_uid != os.getuid()
+            or stat.S_IMODE(home_opened.st_mode) & 0o022
+            or _linux_file_signature(home_public) != home_signature
+        ):
+            raise ServiceCommandError()
+        parent = home_descriptor
+        for name in (".config", "systemd", "user"):
+            try:
+                public = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                missing_parent = parent
+                missing_name = name
+                break
+            child = os.open(name, flags, dir_fd=parent)
+            descriptors.append(child)
+            opened = os.fstat(child)
+            signature = _linux_file_signature(opened)
+            if (
+                not stat.S_ISDIR(opened.st_mode)
+                or opened.st_uid != os.getuid()
+                or stat.S_IMODE(opened.st_mode) & 0o022
+                or _linux_file_signature(public) != signature
+            ):
+                raise ServiceCommandError()
+            bindings.append((parent, name, signature))
+            parent = child
+        if missing_parent is None:
+            missing_parent = parent
+            missing_name = SYSTEMD_UNIT_NAME
+            try:
+                os.stat(
+                    missing_name,
+                    dir_fd=missing_parent,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                pass
+            else:
+                raise ServiceCommandError()
+        if _linux_file_signature(os.stat(home, follow_symlinks=False)) != home_signature:
+            raise ServiceCommandError()
+        for parent, name, signature in bindings:
+            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if _linux_file_signature(current) != signature:
+                raise ServiceCommandError()
+        try:
+            os.stat(
+                missing_name,
+                dir_fd=missing_parent,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            pass
+        else:
+            raise ServiceCommandError()
+    except ServiceCommandError:
+        raise
+    except Exception as error:
+        raise ServiceCommandError() from error
+    finally:
+        close_failed = False
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                close_failed = True
+        if close_failed:
+            raise ServiceCommandError()
+
+
+def _read_linux_service_manager_properties(
     executable: str,
     environment: dict[str, str],
     pass_fds: tuple[int, ...],
+    *,
+    properties: tuple[str, ...],
+    include_all: bool,
+    empty_properties: frozenset[str],
 ) -> dict[str, str]:
     if executable not in _TRUSTED_SYSTEMCTL_PATHS:
         raise ServiceCommandError()
@@ -1232,9 +1605,11 @@ def _read_linux_service_manager_state(
         "--user",
         "show",
         SYSTEMD_UNIT_NAME,
-        *[f"--property={name}" for name in _LINUX_SERVICE_PROPERTIES],
-        "--no-pager",
+        *[f"--property={name}" for name in properties],
     ]
+    if include_all:
+        command.append("--all")
+    command.append("--no-pager")
     try:
         from .bounded_process import BoundedProcessError, run_bounded
 
@@ -1265,22 +1640,38 @@ def _read_linux_service_manager_state(
         lines = completed.stdout.decode("utf-8").splitlines()
     except UnicodeError as error:
         raise ServiceCommandError() from error
-    if len(lines) != len(_LINUX_SERVICE_PROPERTIES):
+    if len(lines) != len(properties):
         raise ServiceCommandError()
     values: dict[str, str] = {}
     for line in lines:
         name, separator, value = line.partition("=")
         if (
             separator != "="
-            or name not in _LINUX_SERVICE_PROPERTIES
-            or (not value and name != "DropInPaths")
+            or name not in properties
+            or (not value and name not in empty_properties)
             or any(not character.isprintable() for character in value)
             or name in values
         ):
             raise ServiceCommandError()
         values[name] = value
-    if set(values) != set(_LINUX_SERVICE_PROPERTIES):
+    if set(values) != set(properties):
         raise ServiceCommandError()
+    return values
+
+
+def _read_linux_service_manager_state(
+    executable: str,
+    environment: dict[str, str],
+    pass_fds: tuple[int, ...],
+) -> dict[str, str]:
+    values = _read_linux_service_manager_properties(
+        executable,
+        environment,
+        pass_fds,
+        properties=_LINUX_SERVICE_PROPERTIES,
+        include_all=False,
+        empty_properties=frozenset({"DropInPaths"}),
+    )
     if values["DropInPaths"]:
         raise ServiceCommandError()
     if values["NeedDaemonReload"] not in {"yes", "no"}:
@@ -1290,6 +1681,38 @@ def _read_linux_service_manager_state(
         raise ServiceCommandError()
     pid = int(pid_text)
     if pid <= 0 or str(pid) != pid_text:
+        raise ServiceCommandError()
+    return values
+
+
+def _read_linux_service_manager_absence_state(
+    executable: str,
+    environment: dict[str, str],
+    pass_fds: tuple[int, ...],
+) -> dict[str, str]:
+    values = _read_linux_service_manager_properties(
+        executable,
+        environment,
+        pass_fds,
+        properties=_LINUX_SERVICE_ABSENCE_PROPERTIES,
+        include_all=True,
+        empty_properties=frozenset(
+            {"UnitFileState", "FragmentPath", "DropInPaths", "Job"}
+        ),
+    )
+    if values != {
+        "Id": SYSTEMD_UNIT_NAME,
+        "LoadState": "not-found",
+        "ActiveState": "inactive",
+        "SubState": "dead",
+        "UnitFileState": "",
+        "FragmentPath": "",
+        "DropInPaths": "",
+        "NeedDaemonReload": "no",
+        "MainPID": "0",
+        "ControlPID": "0",
+        "Job": "",
+    }:
         raise ServiceCommandError()
     return values
 
