@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform as host_platform_module
 import re
@@ -20,6 +21,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1528,9 +1530,10 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     profile/package projections; absence-only service, local-listener, and
     ledger facts; and an instantaneous current-netns TCP 17823 absence fact.
     Only the bound preserve and second-generation delete-data ``run_process``
-    transactions are enabled; Generic Gateway state, start/stop, and other
-    lifecycle callbacks remain unavailable, so the default executor still
-    cannot produce lifecycle evidence.  Random
+    transactions and a closed monotonic/wait clock are enabled; Generic
+    Gateway state, start/stop, and other lifecycle callbacks remain
+    unavailable, so the default executor still cannot produce lifecycle
+    evidence.  Random
     quarantines and identity rechecks detect observed replacements, but are
     not isolation from a continuously malicious same-UID process after the
     final check.
@@ -1563,6 +1566,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     process_rollback_unproven = False
     product_rollback_unproven = False
     preserve_uninstall_token: tuple[object, ...] | None = None
+    last_monotonic: float | None = None
 
     def revoke_runtime_install_absence_fact() -> None:
         nonlocal runtime_install_absence_fact
@@ -1578,10 +1582,42 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         revoke_service_presence_observation()
         preserve_uninstall_token = None
 
-    def unavailable(*args: object, **kwargs: object) -> object:
+    def revoke_all_observation_facts() -> None:
+        nonlocal service_absence_confirmed, local_listener_absence_confirmed
         revoke_transient_observation_facts()
+        service_absence_confirmed = False
+        local_listener_absence_confirmed = False
+
+    def unavailable(*args: object, **kwargs: object) -> object:
+        revoke_all_observation_facts()
         del args, kwargs
         _fail("driver_unavailable")
+
+    def monotonic() -> float:
+        nonlocal last_monotonic
+        revoke_all_observation_facts()
+        try:
+            observed = time.monotonic()
+        except Exception:
+            _fail("driver_unavailable")
+        if (
+            type(observed) is not float
+            or not math.isfinite(observed)
+            or observed < 0.0
+            or (last_monotonic is not None and observed < last_monotonic)
+        ):
+            _fail("driver_unavailable")
+        last_monotonic = observed
+        return observed
+
+    def wait(seconds: object) -> None:
+        revoke_all_observation_facts()
+        if type(seconds) is not float or seconds != _READY_WAIT_SECONDS:
+            _fail("driver_unavailable")
+        try:
+            time.sleep(seconds)
+        except Exception:
+            _fail("driver_unavailable")
 
     def mark_process_rollback_unproven() -> None:
         nonlocal process_rollback_unproven, product_rollback_unproven
@@ -2784,8 +2820,8 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         inspect_ledger=inspect_ledger,
         network_events=unavailable,
         credential_events=unavailable,
-        monotonic=unavailable,
-        wait=unavailable,
+        monotonic=monotonic,
+        wait=wait,
     )
     try:
         object.__setattr__(dependencies, "_owns_run_directory_cleanup", True)

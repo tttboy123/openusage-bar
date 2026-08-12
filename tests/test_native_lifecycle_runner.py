@@ -2255,6 +2255,162 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         child.unlink()
                     run_directory.rmdir()
 
+    @unittest.skipIf(os.name == "nt", "requires native Linux host semantics")
+    def test_linux_host_clock_callbacks_are_closed_and_monotonic(self) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "authoritative-home"
+            home.mkdir()
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            clock_values = [10.0, 10.25, 10.25, 10.5, 10.4]
+            sleep_calls: list[float] = []
+
+            with ExitStack() as stack:
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.Path.home",
+                        return_value=home,
+                    )
+                )
+                dependencies, _run_directory, _profile, _package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                with patch(
+                    "scripts.native_lifecycle_evidence.time.monotonic",
+                    side_effect=lambda: clock_values.pop(0),
+                ), patch(
+                    "scripts.native_lifecycle_evidence.time.sleep",
+                    side_effect=sleep_calls.append,
+                ):
+                    self.assertEqual(dependencies.monotonic(), 10.0)
+                    self.assertIsNone(dependencies.wait(0.25))
+                    self.assertEqual(dependencies.monotonic(), 10.25)
+                    self.assertIsNone(dependencies.wait(0.25))
+                    self.assertEqual(dependencies.monotonic(), 10.25)
+                    self.assertEqual(dependencies.monotonic(), 10.5)
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as regressed:
+                        dependencies.monotonic()
+                    self.assertEqual(
+                        str(regressed.exception), "driver_unavailable"
+                    )
+                    self.assertEqual(sleep_calls, [0.25, 0.25])
+
+                    for invalid in (True, 0, -1.0, float("nan"), float("inf")):
+                        with self.subTest(invalid=invalid):
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError,
+                                "driver_unavailable",
+                            ):
+                                    dependencies.wait(invalid)
+                    self.assertEqual(sleep_calls, [0.25, 0.25])
+
+                for invalid_clock in (
+                    True,
+                    1,
+                    -1.0,
+                    float("nan"),
+                    float("inf"),
+                    float("-inf"),
+                    RuntimeError("PRIVATE_CLOCK"),
+                ):
+                    with self.subTest(clock=repr(invalid_clock)), patch(
+                        "scripts.native_lifecycle_evidence.time.monotonic",
+                        side_effect=(
+                            invalid_clock
+                            if isinstance(invalid_clock, Exception)
+                            else None
+                        ),
+                        return_value=(
+                            0.0
+                            if isinstance(invalid_clock, Exception)
+                            else invalid_clock
+                        ),
+                    ):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_unavailable"
+                        ) as invalid:
+                            dependencies.monotonic()
+                        self.assertNotIn("PRIVATE", str(invalid.exception))
+
+                with patch(
+                    "scripts.native_lifecycle_evidence.time.sleep",
+                    side_effect=RuntimeError("PRIVATE_SLEEP"),
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_unavailable"
+                    ) as sleep_failed:
+                        dependencies.wait(0.25)
+                    self.assertNotIn("PRIVATE", str(sleep_failed.exception))
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux host semantics")
+    def test_linux_host_clock_callbacks_revoke_absence_observation_chains(
+        self,
+    ) -> None:
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeListenerState,
+            NativeServiceState,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "authoritative-home"
+            (home / ".local" / "state" / "openusage-bar").mkdir(parents=True)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            with ExitStack() as stack:
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.Path.home",
+                        return_value=home,
+                    )
+                )
+                registered = stack.enter_context(
+                    patch(
+                        "openusage_bar.platform_services.service_is_registered",
+                        return_value=False,
+                    )
+                )
+                dependencies, _run_directory, _profile, _package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                with patch(
+                    "scripts.native_lifecycle_evidence.time.monotonic",
+                    return_value=1.0,
+                ):
+                    self.assertEqual(
+                        dependencies.inspect_service("linux"),
+                        NativeServiceState(False, False, None),
+                    )
+                    self.assertEqual(dependencies.monotonic(), 1.0)
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ):
+                        dependencies.inspect_listener("linux", "local")
+
+                self.assertEqual(
+                    dependencies.inspect_service("linux"),
+                    NativeServiceState(False, False, None),
+                )
+                self.assertEqual(
+                    dependencies.inspect_listener("linux", "local"),
+                    NativeListenerState(False, False),
+                )
+                with patch(
+                    "scripts.native_lifecycle_evidence.time.sleep",
+                    return_value=None,
+                ):
+                    self.assertIsNone(dependencies.wait(0.25))
+                calls_before = registered.call_count
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ):
+                    dependencies.inspect_ledger("linux")
+                self.assertEqual(registered.call_count, calls_before)
+
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_preserve_completion_reproves_socket_absence_after_service_sandwich(
         self,
