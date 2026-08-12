@@ -666,7 +666,10 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
 
     def test_runner_observes_one_ready_advise_epoch_and_always_stops(self) -> None:
         from openusage_bar.gateway.egress import GatewayEgressAttemptCounters
-        from openusage_bar.gateway.server import GatewayAdviseHealthState
+        from openusage_bar.gateway.server import (
+            GatewayAdviseHealthState,
+            GatewayFixedUnknownAdviceState,
+        )
         from scripts.canary_gateway_egress_topology import (
             GatewayEgressTopologySummary,
             run_gateway_egress_topology_canary,
@@ -680,6 +683,15 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
             mode="advise",
             should_send=True,
             responses=False,
+        )
+        advice = GatewayFixedUnknownAdviceState(
+            decision="defer",
+            confidence=0.5,
+            reason="quota_unknown",
+            defer_until=None,
+            quota_remaining=None,
+            burn_rate_per_minute=None,
+            predicted_exhaustion_minutes=None,
         )
 
         class Lease:
@@ -710,6 +722,10 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
                 side_effect=lambda **_kwargs: events.append("counters") or counters,
             ),
             patch(
+                "scripts.canary_gateway_egress_topology.read_gateway_fixed_unknown_advice_state",
+                side_effect=lambda **_kwargs: events.append("fixed-advice") or advice,
+            ),
+            patch(
                 "scripts.canary_gateway_egress_topology.evaluate_gateway_egress_attempt_window",
                 side_effect=lambda **_kwargs: events.append("evaluate")
                 or GatewayEgressTopologySummary(True),
@@ -731,6 +747,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
                 "token",
                 "health",
                 "counters",
+                "fixed-advice",
                 "health",
                 "counters",
                 "evaluate",
@@ -780,6 +797,80 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
 
         self.assertEqual((raised.exception.stage, events), ("token", ["close"]))
         self.assertNotIn("PRIVATE", str(raised.exception))
+
+    def test_runner_rejects_a_mutated_fixed_advice_fact_before_final_counter(self) -> None:
+        from openusage_bar.gateway.egress import GatewayEgressAttemptCounters
+        from openusage_bar.gateway.server import (
+            GatewayAdviseHealthState,
+            GatewayFixedUnknownAdviceState,
+        )
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            run_gateway_egress_topology_canary,
+        )
+
+        events: list[str] = []
+        counters = GatewayEgressAttemptCounters("a" * 64, 17, 5)
+        advice = GatewayFixedUnknownAdviceState(
+            "defer", 0.5, "quota_unknown", None, None, None, None
+        )
+        equality_calls: list[str] = []
+
+        class EqualToAnything:
+            def __eq__(self, _other: object) -> bool:
+                equality_calls.append("PRIVATE_EQUALITY")
+                return True
+
+        object.__setattr__(advice, "decision", EqualToAnything())
+        health = GatewayAdviseHealthState(
+            "gateway.openusage/v1", "ok", "advise", True, False
+        )
+
+        class Lease:
+            def leader_has_exited(self) -> bool:
+                return False
+
+            def read_token(self) -> str:
+                return "g" * 48
+
+            def stop(self) -> None:
+                events.append("stop")
+
+            def close(self) -> None:
+                events.append("close")
+
+        with (
+            patch(
+                "scripts.canary_gateway_egress_topology._start_gateway_process_lease",
+                return_value=Lease(),
+            ),
+            patch(
+                "scripts.canary_gateway_egress_topology.read_gateway_advise_health_state",
+                return_value=health,
+            ),
+            patch(
+                "scripts.canary_gateway_egress_topology.read_gateway_egress_attempt_counters",
+                side_effect=lambda **_kwargs: events.append("counter") or counters,
+            ),
+            patch(
+                "scripts.canary_gateway_egress_topology.read_gateway_fixed_unknown_advice_state",
+                return_value=advice,
+            ),
+        ):
+            with self.assertRaisesRegex(
+                GatewayEgressTopologyCanaryError,
+                r"^Gateway egress topology canary failed$",
+            ):
+                run_gateway_egress_topology_canary(
+                    collector="/PRIVATE/openusage-collector",
+                    config_path="/PRIVATE/gateway.json",
+                    token_path="/PRIVATE/gateway.token",
+                    port=17823,
+                    environment=self._closed_environment(),
+                )
+
+        self.assertEqual(events, ["counter", "close"])
+        self.assertEqual(equality_calls, [])
 
     def test_readiness_deadline_is_checked_after_successful_health(self) -> None:
         from openusage_bar.gateway.server import GatewayAdviseHealthState

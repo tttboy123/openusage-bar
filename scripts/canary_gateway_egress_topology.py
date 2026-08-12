@@ -2,9 +2,12 @@
 """Closed evaluator for an authenticated Gateway egress-attempt window.
 
 This is not native lifecycle or release evidence.  It describes only logical
-provider-egress attempts exposed by one authenticated endpoint process epoch;
-it does not attribute that endpoint to a service or PID and does not cover the
-Observer, other processes, DNS, sockets, HTTP success, or credential stores.
+provider-egress attempts exposed by one authenticated endpoint process epoch.
+It includes one fixed synthetic Should-Send evaluation, which may change
+Gateway rate-limit/cache/trace memory state.  It does not attribute the endpoint
+to a service or PID and does not cover the Observer daemon, Local API v1, real
+Providers/accounts, other processes, DNS, sockets, HTTP success, or credential
+stores.
 """
 
 from __future__ import annotations
@@ -22,8 +25,10 @@ from typing import TextIO
 from openusage_bar.gateway.egress import GatewayEgressAttemptCounters
 from openusage_bar.gateway.server import (
     GatewayAdviseHealthState,
+    GatewayFixedUnknownAdviceState,
     read_gateway_advise_health_state,
     read_gateway_egress_attempt_counters,
+    read_gateway_fixed_unknown_advice_state,
 )
 
 
@@ -51,8 +56,6 @@ _STAGE_EXIT_CODES = {
     "stop": 15,
     "cleanup": 16,
 }
-
-
 class GatewayEgressTopologyCanaryError(RuntimeError):
     """A fixed, value-free diagnostic failure."""
 
@@ -77,6 +80,28 @@ class GatewayEgressTopologySummary:
 
     def __repr__(self) -> str:
         return "<GatewayEgressTopologySummary closed>"
+
+
+def _is_fixed_unknown_advice(value: object) -> bool:
+    if type(value) is not GatewayFixedUnknownAdviceState:
+        return False
+    fields = (
+        value.decision,
+        value.confidence,
+        value.reason,
+        value.defer_until,
+        value.quota_remaining,
+        value.burn_rate_per_minute,
+        value.predicted_exhaustion_minutes,
+    )
+    if (
+        type(fields[0]) is not str
+        or type(fields[1]) is not float
+        or type(fields[2]) is not str
+        or any(field is not None for field in fields[3:])
+    ):
+        return False
+    return fields[:3] == ("defer", 0.5, "quota_unknown")
 
 
 def _file_signature(metadata: os.stat_result) -> tuple[int, ...]:
@@ -703,6 +728,12 @@ def run_gateway_egress_topology_canary(
             port=port,
             bearer_token=token,
         )
+        advice = read_gateway_fixed_unknown_advice_state(
+            port=port,
+            bearer_token=token,
+        )
+        if not _is_fixed_unknown_advice(advice):
+            raise GatewayEgressTopologyCanaryError
         health = read_gateway_advise_health_state(
             port=port,
             bearer_token=token,

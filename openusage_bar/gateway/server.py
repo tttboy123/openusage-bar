@@ -75,6 +75,37 @@ class GatewayAdviseHealthState:
         return "<GatewayAdviseHealthState closed>"
 
 
+@dataclass(frozen=True, repr=False)
+class GatewayFixedUnknownAdviceState:
+    """Closed response for one fixed synthetic Should-Send evaluation."""
+
+    decision: str
+    confidence: float
+    reason: str
+    defer_until: None
+    quota_remaining: None
+    burn_rate_per_minute: None
+    predicted_exhaustion_minutes: None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.decision) is not str
+            or type(self.confidence) is not float
+            or type(self.reason) is not str
+            or self.decision != "defer"
+            or self.confidence != 0.5
+            or self.reason != "quota_unknown"
+            or self.defer_until is not None
+            or self.quota_remaining is not None
+            or self.burn_rate_per_minute is not None
+            or self.predicted_exhaustion_minutes is not None
+        ):
+            raise ValueError("Gateway fixed advice state invalid")
+
+    def __repr__(self) -> str:
+        return "<GatewayFixedUnknownAdviceState closed>"
+
+
 class _Router(Protocol):
     def dispatch(
         self, method: str, path: str, body: bytes
@@ -1247,17 +1278,79 @@ def read_gateway_advise_health_state(
         raise RuntimeError("Gateway health unavailable") from None
 
 
+def read_gateway_fixed_unknown_advice_state(
+    *,
+    port: int,
+    bearer_token: str,
+) -> GatewayFixedUnknownAdviceState:
+    """Run one authenticated, bounded fixed synthetic Should-Send evaluation."""
+
+    request = json.dumps(
+        {
+            "provider": "synthetic-canary",
+            "model": "unknown-capacity",
+            "estimated_tokens": 1,
+            "window": "5m",
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    try:
+        payload = _read_gateway_json(
+            port=port,
+            bearer_token=bearer_token,
+            target="/gateway/v1/should-send",
+            method="POST",
+            body=request,
+        )
+        if set(payload) != {
+            "decision",
+            "confidence",
+            "reason",
+            "defer_until",
+            "details",
+        }:
+            raise RuntimeError
+        details = payload["details"]
+        if type(details) is not dict or set(details) != {
+            "quota_remaining",
+            "burn_rate_per_min",
+            "predicted_exhaustion_minutes",
+        }:
+            raise RuntimeError
+        return GatewayFixedUnknownAdviceState(
+            decision=payload["decision"],
+            confidence=payload["confidence"],
+            reason=payload["reason"],
+            defer_until=payload["defer_until"],
+            quota_remaining=details["quota_remaining"],
+            burn_rate_per_minute=details["burn_rate_per_min"],
+            predicted_exhaustion_minutes=details[
+                "predicted_exhaustion_minutes"
+            ],
+        )
+    except Exception:
+        raise RuntimeError("Gateway fixed advice unavailable") from None
+
+
 def _read_gateway_json(
     *,
     port: int,
     bearer_token: str,
     target: str,
+    method: str = "GET",
+    body: bytes = b"",
 ) -> dict[str, object]:
 
     if (
         type(port) is not int
         or not 1 <= port <= 65535
         or type(bearer_token) is not str
+        or type(method) is not str
+        or method not in {"GET", "POST"}
+        or type(body) is not bytes
+        or (method == "GET" and body)
+        or len(body) > 4096
     ):
         raise RuntimeError
     client: socket.socket | None = None
@@ -1298,13 +1391,20 @@ def _read_gateway_json(
             ("127.0.0.1", port),
             timeout=remaining_timeout(),
         )
+        content_headers = (
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            if method == "POST"
+            else ""
+        )
         request = (
-            f"GET {target} HTTP/1.1\r\n"
+            f"{method} {target} HTTP/1.1\r\n"
             f"Host: 127.0.0.1:{port}\r\n"
             "Accept: application/json\r\n"
             f"Authorization: Bearer {token}\r\n"
+            f"{content_headers}"
             "Connection: close\r\n\r\n"
-        ).encode("ascii")
+        ).encode("ascii") + body
         client.settimeout(remaining_timeout())
         client.sendall(request)
         response = bytearray()
@@ -1395,8 +1495,10 @@ def _unique_json_object(
 
 __all__ = [
     "GatewayAdviseHealthState",
+    "GatewayFixedUnknownAdviceState",
     "GatewayHTTPServer",
     "create_gateway_server",
-    "read_gateway_egress_attempt_counters",
     "read_gateway_advise_health_state",
+    "read_gateway_egress_attempt_counters",
+    "read_gateway_fixed_unknown_advice_state",
 ]

@@ -161,6 +161,123 @@ def request(
 
 
 class GatewayRouterTests(unittest.TestCase):
+    def test_private_fixed_advice_reader_accepts_only_exact_unknown_fact(self) -> None:
+        from openusage_bar.gateway import server as gateway_server
+        from openusage_bar.gateway.server import (
+            GatewayFixedUnknownAdviceState,
+            read_gateway_fixed_unknown_advice_state,
+        )
+
+        self.assertIn("GatewayFixedUnknownAdviceState", gateway_server.__all__)
+        self.assertIn(
+            "read_gateway_fixed_unknown_advice_state",
+            gateway_server.__all__,
+        )
+        self.assertFalse(any(name.startswith("_") for name in gateway_server.__all__))
+
+        def unknown_policy(request: ShouldSendRequest) -> ShouldSendDecision:
+            self.assertEqual(
+                request,
+                ShouldSendRequest(
+                    "synthetic-canary",
+                    "unknown-capacity",
+                    1,
+                    "5m",
+                ),
+            )
+            return ShouldSendDecision(
+                decision=Decision.DEFER,
+                confidence=0.5,
+                reason="quota_unknown",
+                defer_until=None,
+                quota_remaining=None,
+                burn_rate_per_minute=None,
+                predicted_exhaustion_minutes=None,
+            )
+
+        router = GatewayRouter(
+            mode=GatewayMode.ADVISE,
+            policy=unknown_policy,
+            proxy=None,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            server = create_gateway_server(
+                router,
+                port=0,
+                bearer_token=GATEWAY_TOKEN,
+                token_path=Path(directory) / "gateway.token",
+            )
+            thread = start(server)
+            try:
+                observed = read_gateway_fixed_unknown_advice_state(
+                    port=server.server_address[1],
+                    bearer_token=GATEWAY_TOKEN,
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
+        self.assertEqual(
+            observed,
+            GatewayFixedUnknownAdviceState(
+                decision="defer",
+                confidence=0.5,
+                reason="quota_unknown",
+                defer_until=None,
+                quota_remaining=None,
+                burn_rate_per_minute=None,
+                predicted_exhaustion_minutes=None,
+            ),
+        )
+
+    def test_private_fixed_advice_reader_rejects_semantic_drift(self) -> None:
+        from openusage_bar.gateway.server import (
+            read_gateway_fixed_unknown_advice_state,
+        )
+
+        canonical: dict[str, object] = {
+            "decision": "defer",
+            "confidence": 0.5,
+            "reason": "quota_unknown",
+            "defer_until": None,
+            "details": {
+                "quota_remaining": None,
+                "burn_rate_per_min": None,
+                "predicted_exhaustion_minutes": None,
+            },
+        }
+        hostile_payloads = {
+            "missing": {key: value for key, value in canonical.items() if key != "reason"},
+            "extra": {**canonical, "PRIVATE_EXTRA": "PRIVATE_VALUE"},
+            "decision": {**canonical, "decision": "yes"},
+            "confidence-type": {**canonical, "confidence": 1},
+            "details": {
+                **canonical,
+                "details": {
+                    "quota_remaining": None,
+                    "burn_rate_per_min": None,
+                    "predicted_exhaustion_minutes": None,
+                    "PRIVATE_EXTRA": None,
+                },
+            },
+        }
+
+        for name, payload in hostile_payloads.items():
+            with self.subTest(name=name), patch(
+                "openusage_bar.gateway.server._read_gateway_json",
+                return_value=payload,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"^Gateway fixed advice unavailable$",
+                ) as raised:
+                    read_gateway_fixed_unknown_advice_state(
+                        port=17823,
+                        bearer_token="PRIVATE_TOKEN",
+                    )
+                self.assertNotIn("PRIVATE", str(raised.exception))
+
     def test_private_gateway_health_reader_accepts_only_exact_advise_fact(self) -> None:
         from openusage_bar.gateway.server import (
             GatewayAdviseHealthState,
