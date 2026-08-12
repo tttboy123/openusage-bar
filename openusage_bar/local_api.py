@@ -81,6 +81,11 @@ class LocalAPIObservationError(RuntimeError):
             "authority",
             "authority-home",
             "authority-local",
+            "authority-local-open",
+            "authority-local-type",
+            "authority-local-identity",
+            "authority-local-owner",
+            "authority-local-writable",
             "authority-state",
             "authority-root",
             "socket",
@@ -568,11 +573,16 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
                 "state": "authority-state",
                 "openusage-bar": "authority-root",
             }[name]
-            child_descriptor = os.open(
-                name,
-                flags,
-                dir_fd=parent_descriptor,
-            )
+            try:
+                child_descriptor = os.open(
+                    name,
+                    flags,
+                    dir_fd=parent_descriptor,
+                )
+            except Exception:
+                if name == ".local":
+                    failure_stage = "authority-local-open"
+                raise
             directory_descriptors.append(child_descriptor)
             opened = os.fstat(child_descriptor)
             public = os.stat(
@@ -580,14 +590,24 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
                 dir_fd=parent_descriptor,
                 follow_symlinks=False,
             )
-            if (
+            if name == ".local" and (
                 stat.S_ISLNK(public.st_mode)
                 or not stat.S_ISDIR(public.st_mode)
                 or not stat.S_ISDIR(opened.st_mode)
-                or directory_signature(public) != directory_signature(opened)
-                or opened.st_uid != current_uid
-                or stat.S_IMODE(opened.st_mode) & 0o022 != 0
             ):
+                failure_stage = "authority-local-type"
+                raise LocalAPIObservationError
+            if directory_signature(public) != directory_signature(opened):
+                if name == ".local":
+                    failure_stage = "authority-local-identity"
+                raise LocalAPIObservationError
+            if opened.st_uid != current_uid:
+                if name == ".local":
+                    failure_stage = "authority-local-owner"
+                raise LocalAPIObservationError
+            if stat.S_IMODE(opened.st_mode) & 0o022 != 0:
+                if name == ".local":
+                    failure_stage = "authority-local-writable"
                 raise LocalAPIObservationError
             bindings.append(
                 (parent_descriptor, name, directory_signature(opened))

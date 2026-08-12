@@ -1119,6 +1119,11 @@ jobs:
                   30) topology_category="runtime-before-local-authority-local" ;;
                   31) topology_category="runtime-before-local-authority-state" ;;
                   32) topology_category="runtime-before-local-authority-root" ;;
+                  33) topology_category="runtime-before-local-authority-local-open" ;;
+                  34) topology_category="runtime-before-local-authority-local-type" ;;
+                  35) topology_category="runtime-before-local-authority-local-identity" ;;
+                  36) topology_category="runtime-before-local-authority-local-owner" ;;
+                  37) topology_category="runtime-before-local-authority-local-writable" ;;
                 esac
                 printf "%s\n" "appimage_observer_topology_failed category=$topology_category" >&2
                 exit 1
