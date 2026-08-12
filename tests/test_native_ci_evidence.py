@@ -2567,12 +2567,12 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 self.assertNotIn(private_output_probe, preserve)
         self.assertIn('sudo systemctl stop "user@$current_uid.service"', preserve)
         self.assertIn(
-            'sudo userdel --remove "$preserve_user" >/dev/null 2>&1',
+            'sudo userdel "$preserve_user" >/dev/null 2>&1',
             preserve,
         )
         self.assertLess(
             preserve.index('sudo systemctl stop "user@$current_uid.service"'),
-            preserve.index('sudo userdel --remove "$preserve_user"'),
+            preserve.index('sudo userdel "$preserve_user"'),
         )
         self.assertNotIn("sudo rmdir", preserve)
         for wrapper_status, category in (

@@ -963,7 +963,7 @@ jobs:
               sudo systemctl stop "user@$current_uid.service" || cleanup_failed=1
             fi
             if [[ "$preserve_user_created" == "1" ]]; then
-              sudo userdel --remove "$preserve_user" >/dev/null 2>&1 || cleanup_failed=1
+              sudo userdel "$preserve_user" >/dev/null 2>&1 || cleanup_failed=1
             fi
             sudo /bin/rm -f \
               "$preserve_execution" \
