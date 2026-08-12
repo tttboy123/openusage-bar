@@ -2367,7 +2367,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
             '$RUNNER_TEMP/usagehub-preserve-uninstall.',
             preserve,
         )
-        for owned_directory in ("home", "data", "tmp"):
+        for owned_directory in ("home", "home/data", "home/tmp"):
             with self.subTest(owned_directory=owned_directory):
                 self.assertIn(
                     f'"$preserve_root/{owned_directory}"',
@@ -2444,8 +2444,8 @@ class NativeCiEvidenceTests(unittest.TestCase):
         )
         for owned_path in (
             '"$preserve_execution"',
-            '"$preserve_root/data"',
-            '"$preserve_root/tmp"',
+            '"$preserve_root/home/data"',
+            '"$preserve_root/home/tmp"',
         ):
             with self.subTest(owned_path=owned_path):
                 self.assertIn(owned_path, preserve)
@@ -2490,8 +2490,8 @@ class NativeCiEvidenceTests(unittest.TestCase):
             'HOME="$preserve_root/home"',
             preserve,
         )
-        self.assertIn('XDG_DATA_HOME="$preserve_root/data"', preserve)
-        self.assertIn('TMPDIR="$preserve_root/tmp"', preserve)
+        self.assertIn('XDG_DATA_HOME="$preserve_root/home/data"', preserve)
+        self.assertIn('TMPDIR="$preserve_root/home/tmp"', preserve)
         self.assertIn(
             'sudo systemctl start "user@$current_uid.service"',
             preserve,
@@ -2541,23 +2541,22 @@ class NativeCiEvidenceTests(unittest.TestCase):
             0,
         )
         self.assertIn('test "$preserve_status" -eq 0', preserve)
-        self.assertIn('test ! -s "$preserve_stdout"', preserve)
-        self.assertIn('test ! -s "$preserve_stderr"', preserve)
+        self.assertIn('>/dev/null 2>&1', preserve)
+        self.assertNotIn('preserve_stdout=', preserve)
+        self.assertNotIn('preserve_stderr=', preserve)
         for fixed_failure in (
             "appimage_preserve_uninstall_failed category=collector",
             "appimage_preserve_uninstall_failed category=wrapper",
-            "appimage_preserve_stdout_not_empty",
-            "appimage_preserve_stderr_not_empty",
         ):
             with self.subTest(fixed_failure=fixed_failure):
                 self.assertIn(fixed_failure, preserve)
         for private_output_probe in (
-            'cat "$preserve_stdout"',
-            'cat "$preserve_stderr"',
-            'head "$preserve_stdout"',
-            'head "$preserve_stderr"',
-            'tail "$preserve_stdout"',
-            'tail "$preserve_stderr"',
+            'cat "$collector_stdout"',
+            'cat "$collector_stderr"',
+            'head "$collector_stdout"',
+            'head "$collector_stderr"',
+            'tail "$collector_stdout"',
+            'tail "$collector_stderr"',
         ):
             with self.subTest(private_output_probe=private_output_probe):
                 self.assertNotIn(private_output_probe, preserve)

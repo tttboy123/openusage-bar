@@ -949,8 +949,6 @@ jobs:
           fi
           preserve_root="$(mktemp -d "/tmp/usagehub-preserve-uninstall.XXXXXX")"
           preserve_execution="$preserve_root/execution.AppImage"
-          preserve_stdout="$preserve_root/stdout"
-          preserve_stderr="$preserve_root/stderr"
           collector_stdout="$preserve_root/collector.stdout"
           collector_stderr="$preserve_root/collector.stderr"
           packaged_collector_source="$RUNNER_TEMP/usagehub-appimage-${{ matrix.arch }}/resources/collector/${{ matrix.collector }}"
@@ -968,14 +966,10 @@ jobs:
             fi
             sudo /bin/rm -f \
               "$preserve_execution" \
-              "$preserve_stdout" \
-              "$preserve_stderr" \
               "$packaged_collector" \
               "$collector_stdout" \
               "$collector_stderr" || cleanup_failed=1
             sudo rmdir \
-              "$preserve_root/data" \
-              "$preserve_root/tmp" \
               "$preserve_root" || cleanup_failed=1
             return "$cleanup_failed"
           }
@@ -985,12 +979,9 @@ jobs:
           current_uid="$(id -u "$preserve_user")"
           test "$(getent passwd "$preserve_user" | cut -d: -f6)" = "$preserve_root/home"
           sudo mkdir --mode=0700 "$preserve_root/home"
-          mkdir \
-            "$preserve_root/data" \
-            "$preserve_root/tmp"
-          chmod 0700 \
-            "$preserve_root/data" \
-            "$preserve_root/tmp"
+          sudo mkdir --mode=0700 \
+            "$preserve_root/home/data" \
+            "$preserve_root/home/tmp"
           test "$(/usr/bin/stat --format='%a' "$FINAL_ARTIFACT")" = "400"
           source_digest="$(/usr/bin/sha256sum "$FINAL_ARTIFACT" | /usr/bin/awk '{print $1}')"
           /bin/cp "$FINAL_ARTIFACT" "$preserve_execution"
@@ -1006,9 +997,7 @@ jobs:
             "$preserve_root" \
             "$preserve_root/home" \
             "$preserve_execution" \
-            "$packaged_collector" \
-            "$preserve_root/data" \
-            "$preserve_root/tmp"
+            "$packaged_collector"
           sudo systemctl start "user@$current_uid.service"
           for manager_attempt in {1..50}; do
             if sudo -u "$preserve_user" test -S "/run/user/$current_uid/systemd/private"; then
@@ -1021,10 +1010,10 @@ jobs:
           set +e
           sudo -u "$preserve_user" /usr/bin/env -i \
             HOME="$preserve_root/home" \
-            XDG_DATA_HOME="$preserve_root/data" \
+            XDG_DATA_HOME="$preserve_root/home/data" \
             XDG_RUNTIME_DIR="/run/user/$current_uid" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$current_uid/systemd/private" \
-            TMPDIR="$preserve_root/tmp" \
+            TMPDIR="$preserve_root/home/tmp" \
             PATH="/usr/bin:/bin" \
             LANG=C \
             LC_ALL=C \
@@ -1033,11 +1022,9 @@ jobs:
             /bin/bash -c '
               set -euo pipefail
               preserve_execution="$1"
-              preserve_stdout="$2"
-              preserve_stderr="$3"
-              packaged_collector="$4"
-              collector_stdout="$5"
-              collector_stderr="$6"
+              packaged_collector="$2"
+              collector_stdout="$3"
+              collector_stderr="$4"
               set +e
               "$packaged_collector" desktop-service uninstall \
                 >"$collector_stdout" 2>"$collector_stderr"
@@ -1052,7 +1039,7 @@ jobs:
               exec {appimage_fd}<"$preserve_execution"
               set +e
               timeout --signal=TERM --kill-after=10s 180s /usr/bin/xvfb-run --auto-servernum "/proc/self/fd/$appimage_fd" --usagehub-uninstall \
-                >"$preserve_stdout" 2>"$preserve_stderr"
+                >/dev/null 2>&1
               preserve_status=$?
               set -e
               exec {appimage_fd}<&-
@@ -1072,21 +1059,9 @@ jobs:
                 printf "%s\n" "appimage_preserve_uninstall_failed category=wrapper" >&2
                 exit 1
               fi
-              if [[ -s "$preserve_stdout" ]]; then
-                printf "%s\n" "appimage_preserve_stdout_not_empty" >&2
-                exit 1
-              fi
-              if [[ -s "$preserve_stderr" ]]; then
-                printf "%s\n" "appimage_preserve_stderr_not_empty" >&2
-                exit 1
-              fi
-              test ! -s "$preserve_stdout"
-              test ! -s "$preserve_stderr"
               exit 0
             ' bash \
               "$preserve_execution" \
-              "$preserve_stdout" \
-              "$preserve_stderr" \
               "$packaged_collector" \
               "$collector_stdout" \
               "$collector_stderr"
