@@ -905,13 +905,14 @@ def read_current_user_collector_service_absence_state(
         manager_cgroup_before = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
-        stage = "manager-binary-readlink"
-        manager_executable_before = _read_linux_systemd_manager_executable(
-            manager_peer.pid
-        )
         stage = "manager-provenance"
         manager_cmdline_before = _read_linux_systemd_manager_cmdline(
             manager_peer.pid
+        )
+        stage = "manager-binary-readlink"
+        manager_executable_before = _read_linux_systemd_manager_executable(
+            manager_peer.pid,
+            unreadable_executable_cmdline=manager_cmdline_before,
         )
         stage = "systemctl-binding"
         systemctl_binding = _bind_linux_systemctl_executable(systemctl)
@@ -935,13 +936,14 @@ def read_current_user_collector_service_absence_state(
         manager_cgroup_after = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
-        stage = "manager-binary-readlink"
-        manager_executable_after = _read_linux_systemd_manager_executable(
-            manager_peer.pid
-        )
         stage = "manager-provenance"
         manager_cmdline_after = _read_linux_systemd_manager_cmdline(
             manager_peer.pid
+        )
+        stage = "manager-binary-readlink"
+        manager_executable_after = _read_linux_systemd_manager_executable(
+            manager_peer.pid,
+            unreadable_executable_cmdline=manager_cmdline_after,
         )
         stage = "sandwich"
         if (
@@ -1309,13 +1311,26 @@ def _revalidate_linux_systemd_private_peer(
 
 def _read_linux_systemd_manager_executable(
     manager_pid: int,
+    *,
+    unreadable_executable_cmdline: bytes | None = None,
 ) -> tuple[str, tuple[int, ...]]:
     proc_executable = f"/proc/{manager_pid}/exe"
+    readlink_denied = False
     try:
         raw_path = os.readlink(proc_executable)
+    except PermissionError:
+        readlink_denied = True
+        if unreadable_executable_cmdline not in {
+            b"/usr/lib/systemd/systemd\0--user\0",
+            b"/lib/systemd/systemd\0--user\0",
+        }:
+            raise ServiceCommandError(stage="manager-binary-readlink")
+        raw_path = unreadable_executable_cmdline.split(b"\0", 1)[0].decode(
+            "ascii"
+        )
     except Exception as error:
         raise ServiceCommandError(stage="manager-binary-readlink") from error
-    if raw_path != "/usr/lib/systemd/systemd":
+    if not readlink_denied and raw_path != "/usr/lib/systemd/systemd":
         raise ServiceCommandError(stage="manager-binary-path-value")
     try:
         proc_metadata = os.stat(proc_executable)

@@ -252,6 +252,7 @@ class _LinuxServiceReaderHarness:
         self.real_open = os.open
         self.real_stat = os.stat
         self.real_readlink = os.readlink
+        self.manager_exe_readlink_denied = False
         self.real_fstat = os.fstat
         self.real_close = os.close
 
@@ -540,6 +541,9 @@ class _LinuxServiceReaderHarness:
             self.events.append("proc_exe")
             return str(self.collector)
         if raw == f"/proc/{self.peer_pid}/exe":
+            if self.manager_exe_readlink_denied:
+                self.events.append("peer_exe_permission_denied")
+                raise PermissionError("PRIVATE_MANAGER_EXE")
             self.events.append("peer_exe")
             return "/usr/lib/systemd/systemd"
         return self.real_readlink(path, *args, **kwargs)
@@ -930,6 +934,45 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                     ),
                 )
                 self.assertEqual(manager_calls, [absence_stdout, absence_stdout])
+
+                manager_calls.clear()
+                harness.manager_exe_readlink_denied = True
+                peer_exe_stats_before = harness.events.count("peer_exe_stat")
+                peer_public_exe_stats_before = harness.events.count(
+                    "peer_public_exe_stat"
+                )
+                self.assertEqual(
+                    read_current_user_collector_service_absence_state(),
+                    LinuxCollectorServiceAbsenceState(
+                        unit_missing=True,
+                        unit_id="openusage-bar.service",
+                        load_state="not-found",
+                        active_state="inactive",
+                        sub_state="dead",
+                        unit_file_state=None,
+                        main_pid=0,
+                        control_pid=0,
+                        job=None,
+                        fragment_path=None,
+                        drop_in_paths=(),
+                        needs_reload=False,
+                    ),
+                )
+                self.assertEqual(manager_calls, [absence_stdout, absence_stdout])
+                self.assertEqual(
+                    harness.events.count("peer_exe_permission_denied"), 2
+                )
+                self.assertEqual(
+                    harness.events.count("peer_exe_stat")
+                    - peer_exe_stats_before,
+                    2,
+                )
+                self.assertEqual(
+                    harness.events.count("peer_public_exe_stat")
+                    - peer_public_exe_stats_before,
+                    2,
+                )
+                harness.manager_exe_readlink_denied = False
 
                 hostile_states = (
                     absence_stdout.replace(
