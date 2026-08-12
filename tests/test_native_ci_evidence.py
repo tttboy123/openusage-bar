@@ -2534,10 +2534,38 @@ class NativeCiEvidenceTests(unittest.TestCase):
         )
         self.assertIn('test ! -s "$service_absence_stdout"', preserve)
         self.assertIn('test ! -s "$service_absence_stderr"', preserve)
+        for status, category in (
+            (10, "authority"),
+            (11, "runtime-peer"),
+            (12, "manager-provenance"),
+            (13, "binary-binding"),
+            (14, "unit-absence"),
+            (15, "manager-query"),
+            (16, "sandwich"),
+            (17, "cleanup"),
+        ):
+            with self.subTest(service_absence_category=category):
+                self.assertIn(
+                    f'{status}) service_absence_category="{category}"',
+                    preserve,
+                )
+                self.assertIn(
+                    'category=service-absence-$service_absence_category',
+                    preserve,
+                )
         self.assertIn(
-            "appimage_preserve_uninstall_failed category=service-absence",
-            preserve,
+            'service_absence_category="unknown"', preserve
         )
+        for private_reader in (
+            'cat "$service_absence_stdout"',
+            'cat "$service_absence_stderr"',
+            'head "$service_absence_stdout"',
+            'head "$service_absence_stderr"',
+            'tail "$service_absence_stdout"',
+            'tail "$service_absence_stderr"',
+        ):
+            with self.subTest(private_reader=private_reader):
+                self.assertNotIn(private_reader, preserve)
         self.assertIn(
             '>"$collector_stdout" 2>"$collector_stderr"',
             preserve,

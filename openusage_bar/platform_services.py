@@ -59,14 +59,34 @@ _LINUX_SERVICE_ABSENCE_PROPERTIES = (
 _TRUSTED_SYSTEMCTL_PATHS = frozenset({"/usr/bin/systemctl"})
 _LINUX_SOL_SOCKET = 1
 _LINUX_SO_PEERCRED = 17
+_LINUX_SERVICE_ABSENCE_STAGES = frozenset(
+    {
+        "authority",
+        "runtime-peer",
+        "manager-provenance",
+        "binary-binding",
+        "unit-absence",
+        "manager-query",
+        "sandwich",
+        "cleanup",
+    }
+)
 
 
 class ServiceCommandError(RuntimeError):
     """A path-free service-manager command failure."""
 
-    def __init__(self, *, returncode: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        returncode: int | None = None,
+        stage: str | None = None,
+    ) -> None:
+        if stage is not None and stage not in _LINUX_SERVICE_ABSENCE_STAGES:
+            raise ValueError("service command stage invalid")
         super().__init__("service activation command failed")
         self.returncode = returncode
+        self.stage = stage
 
 
 @dataclass(frozen=True, repr=False)
@@ -836,10 +856,11 @@ def read_current_user_collector_service_absence_state(
     """Read one stable negative fact from the trusted Linux user manager."""
 
     if not sys.platform.startswith("linux") or os.name == "nt":
-        raise ServiceCommandError()
+        raise ServiceCommandError(stage="authority")
     runtime_descriptor: int | None = None
     systemctl_binding: _BoundLinuxExecutable | None = None
     manager_peer: _BoundLinuxManagerPeer | None = None
+    stage = "authority"
     try:
         configured_xdg_home = os.environ.get("XDG_CONFIG_HOME")
         if configured_xdg_home not in {None, ""}:
@@ -855,6 +876,7 @@ def read_current_user_collector_service_absence_state(
         if systemctl not in _TRUSTED_SYSTEMCTL_PATHS:
             raise ServiceCommandError()
         current_uid = os.getuid()
+        stage = "runtime-peer"
         runtime_descriptor = _open_linux_user_runtime_directory(current_uid)
         runtime_identity = _linux_file_signature(os.fstat(runtime_descriptor))
         manager_peer = _bind_linux_systemd_private_peer(
@@ -872,20 +894,26 @@ def read_current_user_collector_service_absence_state(
             "SYSTEMD_COLORS": "0",
             "PAGER": "cat",
         }
+        stage = "manager-provenance"
         manager_identity_before = _read_linux_process_identity(manager_peer.pid)
         if manager_identity_before[2] != 1:
             raise ServiceCommandError()
         manager_cgroup_before = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
+        stage = "binary-binding"
         manager_executable_before = _read_linux_systemd_manager_executable(
             manager_peer.pid
         )
+        stage = "manager-provenance"
         manager_cmdline_before = _read_linux_systemd_manager_cmdline(
             manager_peer.pid
         )
+        stage = "binary-binding"
         systemctl_binding = _bind_linux_systemctl_executable(systemctl)
+        stage = "unit-absence"
         _prove_linux_service_unit_missing(home, unit)
+        stage = "manager-query"
         manager_before = _read_linux_service_manager_absence_state(
             systemctl,
             manager_environment,
@@ -896,17 +924,22 @@ def read_current_user_collector_service_absence_state(
             manager_environment,
             (runtime_descriptor, manager_peer.directory_descriptor),
         )
+        stage = "unit-absence"
         _prove_linux_service_unit_missing(home, unit)
+        stage = "manager-provenance"
         manager_identity_after = _read_linux_process_identity(manager_peer.pid)
         manager_cgroup_after = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
+        stage = "binary-binding"
         manager_executable_after = _read_linux_systemd_manager_executable(
             manager_peer.pid
         )
+        stage = "manager-provenance"
         manager_cmdline_after = _read_linux_systemd_manager_cmdline(
             manager_peer.pid
         )
+        stage = "sandwich"
         if (
             manager_after != manager_before
             or _linux_file_signature(os.fstat(runtime_descriptor))
@@ -933,10 +966,12 @@ def read_current_user_collector_service_absence_state(
             drop_in_paths=(),
             needs_reload=False,
         )
-    except ServiceCommandError:
-        raise
+    except ServiceCommandError as error:
+        if error.stage is not None:
+            raise
+        raise ServiceCommandError(stage=stage) from error
     except Exception as error:
-        raise ServiceCommandError() from error
+        raise ServiceCommandError(stage=stage) from error
     finally:
         close_failed = False
         if manager_peer is not None:
@@ -963,7 +998,7 @@ def read_current_user_collector_service_absence_state(
             except OSError:
                 close_failed = True
         if close_failed:
-            raise ServiceCommandError()
+            raise ServiceCommandError(stage="cleanup")
 
 
 def _root_owned_directory(metadata: os.stat_result) -> bool:

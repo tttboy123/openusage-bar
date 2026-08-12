@@ -68,6 +68,46 @@ class LinuxServiceAbsenceCanaryTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), "")
         self.assertEqual(stderr.getvalue(), "")
 
+    def test_main_maps_only_closed_reader_stages_to_private_status_codes(self):
+        from openusage_bar.platform_services import ServiceCommandError
+        from scripts.canary_linux_service_absence import main
+
+        stages = (
+            "authority",
+            "runtime-peer",
+            "manager-provenance",
+            "binary-binding",
+            "unit-absence",
+            "manager-query",
+            "sandwich",
+            "cleanup",
+        )
+        for offset, stage in enumerate(stages, start=10):
+            with self.subTest(stage=stage):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with (
+                    patch(
+                        "openusage_bar.platform_services."
+                        "read_current_user_collector_service_absence_state",
+                        side_effect=ServiceCommandError(stage=stage),
+                    ),
+                    redirect_stdout(stdout),
+                    redirect_stderr(stderr),
+                ):
+                    result = main(())
+
+                self.assertEqual(result, offset)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue(), "")
+
+        with self.assertRaises(ValueError):
+            ServiceCommandError(stage="PRIVATE")
+        self.assertEqual(
+            str(ServiceCommandError(stage="manager-query")),
+            "service activation command failed",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,18 @@ from __future__ import annotations
 import sys
 
 
+_STAGE_STATUS = {
+    "authority": 10,
+    "runtime-peer": 11,
+    "manager-provenance": 12,
+    "binary-binding": 13,
+    "unit-absence": 14,
+    "manager-query": 15,
+    "sandwich": 16,
+    "cleanup": 17,
+}
+
+
 def main(arguments: tuple[str, ...] | list[str] | None = None) -> int:
     """Return only a closed status code; never render observation details."""
 
@@ -36,7 +48,16 @@ def main(arguments: tuple[str, ...] | list[str] | None = None) -> int:
             or after != before
         ):
             return 1
-    except Exception:
+    except Exception as error:
+        try:
+            from openusage_bar.platform_services import ServiceCommandError
+
+            if type(error) is ServiceCommandError:
+                status = _STAGE_STATUS.get(error.stage)
+                if status is not None:
+                    return status
+        except Exception:
+            pass
         return 1
     return 0
 
