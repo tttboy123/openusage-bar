@@ -299,6 +299,7 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
 
     def test_stable_direct_child_produces_only_closed_boolean_summary(self):
         from scripts.canary_onefile_local_api import (
+            OnefileDirectChildTopology,
             OnefileLocalAPISummary,
             OnefileProcessFacts,
             evaluate_onefile_local_api_peer,
@@ -383,10 +384,10 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            tuple(field.name for field in fields(OnefileLocalAPISummary)),
+            tuple(field.name for field in fields(OnefileDirectChildTopology)),
             ("stable_direct_child",),
         )
-        self.assertEqual(summary, OnefileLocalAPISummary(True))
+        self.assertEqual(summary, OnefileDirectChildTopology(True))
         self.assertEqual(events, [parent_pid, child_pid, child_pid, parent_pid])
         with self.assertRaises(FrozenInstanceError):
             summary.stable_direct_child = False
@@ -395,6 +396,20 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
         self.assertNotIn(service_cgroup, rendered)
         self.assertNotIn(str(parent_pid), rendered)
         self.assertNotIn(str(child_pid), rendered)
+
+        self.assertEqual(
+            tuple(field.name for field in fields(OnefileLocalAPISummary)),
+            (
+                "local_api_health_transaction_succeeded",
+                "stable_direct_child",
+                "shared_client_boundary_attempts_zero",
+            ),
+        )
+        closed_summary = OnefileLocalAPISummary(True, True, True)
+        self.assertIs(closed_summary.local_api_health_transaction_succeeded, True)
+        self.assertIs(closed_summary.stable_direct_child, True)
+        self.assertIs(closed_summary.shared_client_boundary_attempts_zero, True)
+        self.assertNotIn("PRIVATE", repr(closed_summary))
 
     def test_unstable_or_foreign_child_facts_fail_closed_without_raw_output(self):
         from scripts.canary_onefile_local_api import (
@@ -996,7 +1011,7 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                 self.assertEqual(cached_reader(child_pid), child_facts)
                 self.assertEqual(cached_reader(parent_pid), parent_facts)
                 events.append("evaluate")
-                return OnefileLocalAPISummary(True)
+                return canary.OnefileDirectChildTopology(True)
 
             boundary_fact = SharedClientBoundaryAttemptCounters("a" * 64, 0, 0)
 
@@ -1172,7 +1187,7 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                     ],
                 )
                 self.assertIsNone(cleanup_error)
-                self.assertEqual(summary, OnefileLocalAPISummary(True))
+                self.assertEqual(summary, OnefileLocalAPISummary(True, True, True))
                 self.assertFalse(os.path.lexists(run_root))
             finally:
                 for server in servers:
@@ -1589,7 +1604,7 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                 self.assertEqual(read_process_facts(child_pid), child_facts)
                 self.assertEqual(read_process_facts(child_pid), child_facts)
                 self.assertEqual(read_process_facts(parent_pid), parent_facts)
-                return OnefileLocalAPISummary(True)
+                return canary.OnefileDirectChildTopology(True)
 
             with ExitStack() as stack:
                 stack.enter_context(patch.object(canary.sys, "platform", "linux"))
@@ -1654,7 +1669,7 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                 ["term", "wait1", "probe_gone", "wait2", "remove"],
             )
             self.assertIsNone(cleanup_error)
-            self.assertEqual(summary, OnefileLocalAPISummary(True))
+            self.assertEqual(summary, OnefileLocalAPISummary(True, True, True))
             self.assertFalse(os.path.lexists(run_root))
 
     def test_run_onefile_local_api_canary_never_deletes_a_swapped_run_root(self):
@@ -1998,7 +2013,7 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                 self.assertEqual(cached_reader(child_pid), facts(child_pid))
                 self.assertEqual(cached_reader(child_pid), facts(child_pid))
                 self.assertEqual(cached_reader(parent_pid), facts(parent_pid))
-                return OnefileLocalAPISummary(True)
+                return canary.OnefileDirectChildTopology(True)
 
             def group_gone(pid, selected_signal):
                 self.assertEqual(pid, parent_pid)
@@ -2124,7 +2139,7 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
         with patch.object(
             canary,
             "run_onefile_local_api_canary",
-            return_value=OnefileLocalAPISummary(True),
+            return_value=OnefileLocalAPISummary(True, True, True),
         ) as runner:
             self.assertEqual(
                 invoke(("--collector", collector)),

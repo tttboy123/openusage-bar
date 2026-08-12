@@ -745,7 +745,9 @@ def run_gateway_egress_topology_canary(
         observer = run_onefile_local_api_canary(collector)
         if (
             type(observer) is not OnefileLocalAPISummary
+            or observer.local_api_health_transaction_succeeded is not True
             or observer.stable_direct_child is not True
+            or observer.shared_client_boundary_attempts_zero is not True
         ):
             raise GatewayEgressTopologyCanaryError
         stage = "counter-window"

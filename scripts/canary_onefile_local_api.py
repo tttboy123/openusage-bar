@@ -125,11 +125,26 @@ class OnefileProcessFacts:
 
 
 @dataclass(frozen=True)
-class OnefileLocalAPISummary:
+class OnefileDirectChildTopology:
     stable_direct_child: bool
 
     def __post_init__(self) -> None:
         if self.stable_direct_child is not True:
+            raise ValueError("onefile direct-child topology invalid")
+
+
+@dataclass(frozen=True, repr=False)
+class OnefileLocalAPISummary:
+    local_api_health_transaction_succeeded: bool
+    stable_direct_child: bool
+    shared_client_boundary_attempts_zero: bool
+
+    def __post_init__(self) -> None:
+        if (
+            self.local_api_health_transaction_succeeded is not True
+            or self.stable_direct_child is not True
+            or self.shared_client_boundary_attempts_zero is not True
+        ):
             raise ValueError("onefile Local API summary invalid")
 
 
@@ -372,7 +387,7 @@ def evaluate_onefile_local_api_peer(
     parent_pid: int,
     peer_credentials: bytes,
     read_process_facts: Callable[[int], OnefileProcessFacts],
-) -> OnefileLocalAPISummary:
+) -> OnefileDirectChildTopology:
     """Require one stable, exact direct child without exposing raw facts."""
 
     try:
@@ -415,7 +430,7 @@ def evaluate_onefile_local_api_peer(
             or child_before.argv_nul != parent_before.argv_nul
         ):
             raise OnefileLocalAPICanaryError
-        return OnefileLocalAPISummary(True)
+        return OnefileDirectChildTopology(True)
     except OnefileLocalAPICanaryError:
         raise
     except Exception:
@@ -748,17 +763,23 @@ def run_onefile_local_api_canary(collector: str) -> OnefileLocalAPISummary:
                 raise OnefileLocalAPICanaryError
             return facts
 
-        observed = evaluate_onefile_local_api_peer(
+        topology = evaluate_onefile_local_api_peer(
             parent_pid=process.pid,
             peer_credentials=peer_before,
             read_process_facts=read_cached_facts,
         )
+        if (
+            type(topology) is not OnefileDirectChildTopology
+            or topology.stable_direct_child is not True
+        ):
+            raise OnefileLocalAPICanaryError
         try:
             next(cached_facts)
         except StopIteration:
             pass
         else:
             raise OnefileLocalAPICanaryError
+        observed = OnefileLocalAPISummary(True, True, True)
         remaining_timeout()
     except Exception:
         failed = True
@@ -1099,7 +1120,9 @@ def main(arguments: tuple[str, ...] | list[str] | None = None) -> int:
         summary = run_onefile_local_api_canary(selected[1])
         if (
             type(summary) is not OnefileLocalAPISummary
+            or summary.local_api_health_transaction_succeeded is not True
             or summary.stable_direct_child is not True
+            or summary.shared_client_boundary_attempts_zero is not True
         ):
             raise OnefileLocalAPICanaryError
     except Exception:

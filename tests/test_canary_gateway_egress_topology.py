@@ -731,7 +731,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
                 side_effect=lambda observed_collector: events.append(
                     f"onefile:{observed_collector}"
                 )
-                or OnefileLocalAPISummary(True),
+                or OnefileLocalAPISummary(True, True, True),
             ),
             patch(
                 "scripts.canary_gateway_egress_topology.evaluate_gateway_egress_attempt_window",
@@ -775,6 +775,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
             GatewayEgressTopologyCanaryError,
             run_gateway_egress_topology_canary,
         )
+        from scripts.canary_onefile_local_api import OnefileLocalAPISummary
 
         counters = GatewayEgressAttemptCounters("a" * 64, 17, 5)
         health = GatewayAdviseHealthState(
@@ -784,9 +785,20 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
             "defer", 0.5, "quota_unknown", None, None, None, None
         )
 
+        hostile_summaries = []
+        for field_name in (
+            "local_api_health_transaction_succeeded",
+            "stable_direct_child",
+            "shared_client_boundary_attempts_zero",
+        ):
+            summary = OnefileLocalAPISummary(True, True, True)
+            object.__setattr__(summary, field_name, False)
+            hostile_summaries.append((f"mutated-{field_name}", summary))
+
         for name, workload_result in (
             ("wrong-type", object()),
             ("private-error", RuntimeError("PRIVATE_OBSERVER_FAILURE")),
+            *hostile_summaries,
         ):
             events: list[str] = []
 
