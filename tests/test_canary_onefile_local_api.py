@@ -26,6 +26,226 @@ from unittest.mock import patch
     "POSIX Unix-socket canary contracts",
 )
 class OnefileLocalAPICanaryTests(unittest.TestCase):
+    def test_private_boundary_reader_rejects_an_untrusted_or_expired_snapshot(self):
+        from scripts.canary_onefile_local_api import (
+            OnefileLocalAPICanaryError,
+            read_onefile_shared_client_boundary_snapshot,
+        )
+
+        payload = json.dumps(
+            {
+                "apiVersion": "local-api-internal-diagnostics/v1",
+                "object": "sharedClientBoundaryAttempts",
+                "processEpochSha256": "a" * 64,
+                "boundedHttpOpenAttempts": 0,
+                "headlessKeychainGetAttempts": 0,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        response = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: application/json; charset=utf-8\r\n"
+            b"Cache-Control: no-store\r\n"
+            b"X-Content-Type-Options: nosniff\r\n"
+            b"Connection: close\r\n"
+            + f"Content-Length: {len(payload)}\r\n\r\n".encode("ascii")
+            + payload
+        )
+
+        for label, peer, remaining_values, wire_response in (
+            (
+                "zero_pid",
+                struct.pack("=3i", 0, os.getuid(), os.getgid()),
+                [0.5] * 10,
+                response,
+            ),
+            (
+                "expired_after_eof",
+                struct.pack("=3i", 4312, os.getuid(), os.getgid()),
+                [0.5] * 5,
+                response,
+            ),
+            (
+                "expired_after_close",
+                struct.pack("=3i", 4312, os.getuid(), os.getgid()),
+                [0.5] * 8,
+                response,
+            ),
+            (
+                "invalid_header_name",
+                struct.pack("=3i", 4312, os.getuid(), os.getgid()),
+                [0.5] * 10,
+                response.replace(
+                    b"Content-Type:",
+                    b"Bad Name: x\r\nContent-Type:",
+                    1,
+                ),
+            ),
+            (
+                "invalid_header_value",
+                struct.pack("=3i", 4312, os.getuid(), os.getgid()),
+                [0.5] * 10,
+                response.replace(
+                    b"Content-Type: application/json",
+                    b"Content-Type:\x0bapplication/json",
+                    1,
+                ),
+            ),
+        ):
+            with self.subTest(label=label):
+                chunks = iter((wire_response[:31], wire_response[31:], b""))
+                timeouts = iter(remaining_values)
+                events: list[str] = []
+
+                class Client:
+                    def settimeout(self, _timeout: float) -> None:
+                        pass
+
+                    def connect(self, _path: str) -> None:
+                        pass
+
+                    def getsockopt(
+                        self, _level: int, _option: int, _size: int
+                    ) -> bytes:
+                        return peer
+
+                    def sendall(self, _request: bytes) -> None:
+                        pass
+
+                    def recv(self, _size: int) -> bytes:
+                        return next(chunks)
+
+                    def close(self) -> None:
+                        events.append("close")
+
+                with patch(
+                    "scripts.canary_onefile_local_api.socket.socket",
+                    return_value=Client(),
+                ):
+                    with self.assertRaisesRegex(
+                        OnefileLocalAPICanaryError,
+                        "^onefile Local API canary failed$",
+                    ):
+                        read_onefile_shared_client_boundary_snapshot(
+                            "/PRIVATE/openusage.sock",
+                            remaining_timeout=lambda: next(timeouts),
+                        )
+
+                self.assertEqual(events, ["close"])
+
+    def test_private_boundary_reader_rejects_unclosed_timeout_values(self):
+        from scripts.canary_onefile_local_api import (
+            OnefileLocalAPICanaryError,
+            read_onefile_shared_client_boundary_snapshot,
+        )
+
+        for value in (True, float("nan"), float("inf"), 0.0, -0.1, 1.01):
+            with self.subTest(value=value):
+                events: list[str] = []
+
+                class Client:
+                    def close(self) -> None:
+                        events.append("close")
+
+                with patch(
+                    "scripts.canary_onefile_local_api.socket.socket",
+                    return_value=Client(),
+                ):
+                    with self.assertRaisesRegex(
+                        OnefileLocalAPICanaryError,
+                        "^onefile Local API canary failed$",
+                    ):
+                        read_onefile_shared_client_boundary_snapshot(
+                            "/PRIVATE/openusage.sock",
+                            remaining_timeout=lambda: value,
+                        )
+
+                self.assertEqual(events, ["close"])
+
+    def test_private_boundary_reader_binds_one_unix_peer_and_strict_snapshot(self):
+        from openusage_bar.shared_client_boundary import (
+            SharedClientBoundaryAttemptCounters,
+        )
+        from scripts.canary_onefile_local_api import (
+            read_onefile_shared_client_boundary_snapshot,
+        )
+
+        peer = struct.pack("=3i", 4312, os.getuid(), os.getgid())
+        payload = json.dumps(
+            {
+                "apiVersion": "local-api-internal-diagnostics/v1",
+                "object": "sharedClientBoundaryAttempts",
+                "processEpochSha256": "a" * 64,
+                "boundedHttpOpenAttempts": 0,
+                "headlessKeychainGetAttempts": 0,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        response = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: application/json; charset=utf-8\r\n"
+            b"Cache-Control: no-store\r\n"
+            b"X-Content-Type-Options: nosniff\r\n"
+            b"Connection: close\r\n"
+            + f"Content-Length: {len(payload)}\r\n\r\n".encode("ascii")
+            + payload
+        )
+        chunks = iter((response[:31], response[31:], b""))
+        events: list[str] = []
+
+        class Client:
+            def settimeout(self, timeout: float) -> None:
+                self_outer.assertEqual(timeout, 0.5)
+
+            def connect(self, path: str) -> None:
+                self_outer.assertEqual(path, "/PRIVATE/openusage.sock")
+                events.append("connect")
+
+            def getsockopt(self, level: int, option: int, size: int) -> bytes:
+                self_outer.assertEqual((level, option, size), (1, 17, 12))
+                events.append("peer")
+                return peer
+
+            def sendall(self, request: bytes) -> None:
+                self_outer.assertEqual(
+                    request,
+                    b"GET /_internal/v1/shared-client-boundary-attempts HTTP/1.1\r\n"
+                    b"Host: localhost\r\nAccept: application/json\r\n"
+                    b"Connection: close\r\n\r\n",
+                )
+                events.append("send")
+
+            def recv(self, size: int) -> bytes:
+                self_outer.assertEqual(size, 65_536)
+                value = next(chunks)
+                events.append("recv")
+                return value
+
+            def close(self) -> None:
+                events.append("close")
+
+        self_outer = self
+        with patch(
+            "scripts.canary_onefile_local_api.socket.socket",
+            return_value=Client(),
+        ):
+            observed_peer, counters = read_onefile_shared_client_boundary_snapshot(
+                "/PRIVATE/openusage.sock",
+                remaining_timeout=lambda: 0.5,
+            )
+
+        self.assertEqual(observed_peer, peer)
+        self.assertEqual(
+            counters,
+            SharedClientBoundaryAttemptCounters("a" * 64, 0, 0),
+        )
+        self.assertEqual(
+            events,
+            ["connect", "peer", "send", "recv", "recv", "recv", "peer", "close"],
+        )
+
     def test_stable_direct_child_produces_only_closed_boolean_summary(self):
         from scripts.canary_onefile_local_api import (
             OnefileLocalAPISummary,
