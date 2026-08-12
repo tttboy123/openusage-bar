@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import io
+import json
 import os
 import runpy
 import signal
@@ -581,6 +582,9 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
             class Process:
                 pid = parent_pid
 
+                def __init__(self):
+                    self.wait_calls = 0
+
                 def poll(self):
                     events.append("poll")
                     return None
@@ -589,8 +593,14 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                     self_outer.assertTrue(terminated[0])
                     self_outer.assertGreater(timeout, 0.0)
                     self_outer.assertLessEqual(timeout, 2.0)
-                    events.append("wait")
-                    return 0
+                    self.wait_calls += 1
+                    events.append(f"wait{self.wait_calls}")
+                    if self.wait_calls == 1:
+                        raise subprocess.TimeoutExpired(
+                            (collector,), timeout
+                        )
+                    self_outer.assertEqual(self.wait_calls, 2)
+                    return -9
 
             process = Process()
             real_socket = socket.socket
@@ -720,9 +730,22 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                     terminated[0] = True
                     events.append("term")
                     return None
+                if selected_signal == signal.SIGKILL:
+                    events.append("kill")
+                    return None
                 self.assertEqual(selected_signal, 0)
+                if "kill" not in events:
+                    events.append("probe_alive")
+                    return None
                 events.append("probe_gone")
                 raise ProcessLookupError
+
+            real_rmtree = canary.shutil.rmtree
+
+            def remove_run_root(path):
+                self.assertEqual(path, run_root + ".owned-cleanup")
+                events.append("remove")
+                return real_rmtree(path)
 
             try:
                 with ExitStack() as stack:
@@ -763,14 +786,22 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                         patch.object(canary.os, "killpg", side_effect=terminate_group)
                     )
                     kill = stack.enter_context(patch.object(canary.os, "kill"))
+                    stack.enter_context(
+                        patch.object(
+                            canary.shutil,
+                            "rmtree",
+                            side_effect=remove_run_root,
+                        )
+                    )
 
+                    cleanup_error = None
+                    summary = None
                     try:
                         summary = run_onefile_local_api_canary(collector)
-                    except OnefileLocalAPICanaryError:
+                    except OnefileLocalAPICanaryError as error:
+                        cleanup_error = error
                         self.assertEqual(inherited_environment_accesses, [])
-                        raise
 
-                self.assertEqual(summary, OnefileLocalAPISummary(True))
                 popen.assert_called_once()
                 socket_factory.assert_called_once_with(
                     socket.AF_UNIX,
@@ -799,12 +830,13 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                     [
                         ((parent_pid, signal.SIGTERM), {}),
                         ((parent_pid, 0), {}),
+                        ((parent_pid, signal.SIGKILL), {}),
+                        ((parent_pid, 0), {}),
                     ],
                 )
                 kill.assert_not_called()
                 self.assertTrue(client.closed)
                 self.assertEqual(client.peer_reads, 2)
-                self.assertFalse(os.path.lexists(run_root))
                 collector_after = os.lstat(collector)
                 self.assertEqual(
                     (
@@ -839,10 +871,17 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                         "client_close",
                         "poll",
                         "term",
-                        "wait",
+                        "wait1",
+                        "probe_alive",
+                        "kill",
+                        "wait2",
                         "probe_gone",
+                        "remove",
                     ],
                 )
+                self.assertIsNone(cleanup_error)
+                self.assertEqual(summary, OnefileLocalAPISummary(True))
+                self.assertFalse(os.path.lexists(run_root))
             finally:
                 for server in servers:
                     server.close()
@@ -1090,6 +1129,225 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                     "remove_run_root",
                 ],
             )
+            self.assertFalse(os.path.lexists(run_root))
+
+    def test_run_onefile_local_api_canary_reaps_the_leader_after_a_gone_group_probe(self):
+        import scripts.canary_onefile_local_api as canary
+        from scripts.canary_onefile_local_api import (
+            OnefileLocalAPICanaryError,
+            OnefileLocalAPISummary,
+            OnefileProcessFacts,
+            run_onefile_local_api_canary,
+        )
+
+        with tempfile.TemporaryDirectory(prefix="canary-gone-probe-", dir="/tmp") as outer:
+            collector = os.path.join(outer, "openusage-collector")
+            with open(collector, "wb") as output:
+                output.write(b"audited onefile collector")
+            os.chmod(collector, 0o700)
+            run_root = os.path.join(outer, "owned-run")
+            os.mkdir(run_root, 0o700)
+            socket_path = os.path.join(run_root, "openusage.sock")
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(socket_path)
+            os.chmod(socket_path, 0o600)
+            parent_pid = 4300
+            child_pid = 4312
+            events: list[str] = []
+            collector_metadata = os.lstat(collector)
+            cgroup = (
+                "0::/user.slice/"
+                f"user-{os.getuid()}.slice/user@{os.getuid()}.service/"
+                "app.slice/openusage-bar.service\n"
+            )
+
+            def process_facts(*, pid, ppid, start_time):
+                return OnefileProcessFacts(
+                    pid=pid,
+                    uid=os.getuid(),
+                    gid=os.getgid(),
+                    ppid=ppid,
+                    start_time_ticks=start_time,
+                    cgroup=cgroup,
+                    executable_dev=collector_metadata.st_dev,
+                    executable_ino=collector_metadata.st_ino,
+                    executable_size_bytes=collector_metadata.st_size,
+                    executable_mode=collector_metadata.st_mode,
+                    executable_mtime_ns=collector_metadata.st_mtime_ns,
+                    executable_ctime_ns=collector_metadata.st_ctime_ns,
+                    executable_nlink=collector_metadata.st_nlink,
+                    argv_nul=b"/audited/openusage-collector\0daemon\0",
+                )
+
+            parent_facts = process_facts(
+                pid=parent_pid,
+                ppid=1,
+                start_time=1000,
+            )
+            child_facts = process_facts(
+                pid=child_pid,
+                ppid=parent_pid,
+                start_time=1001,
+            )
+            fact_reads = iter(
+                (parent_facts, child_facts, child_facts, parent_facts)
+            )
+
+            class Process:
+                pid = parent_pid
+
+                def __init__(self):
+                    self.wait_calls = 0
+
+                def poll(self):
+                    return None
+
+                def wait(self, *, timeout):
+                    self_outer.assertGreater(timeout, 0.0)
+                    self_outer.assertLessEqual(timeout, 2.0)
+                    self.wait_calls += 1
+                    events.append(f"wait{self.wait_calls}")
+                    if self.wait_calls == 1:
+                        raise subprocess.TimeoutExpired((collector,), timeout)
+                    self_outer.assertEqual(self.wait_calls, 2)
+                    return -15
+
+            process = Process()
+            body = json.dumps(
+                {
+                    "schemaVersion": "1.0",
+                    "dataRevision": 0,
+                    "generatedAt": "2026-08-12T00:00:00Z",
+                    "sources": [],
+                    "health": {"ok": True, "status": "ok"},
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
+            response = (
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: application/json; charset=utf-8\r\n"
+                + f"Content-Length: {len(body)}\r\n".encode("ascii")
+                + b"Connection: close\r\n\r\n"
+                + body
+            )
+
+            class Client:
+                def __init__(self):
+                    self.peer_reads = 0
+                    self.chunks = iter((response, b""))
+
+                def settimeout(self, timeout):
+                    self_outer.assertGreater(timeout, 0.0)
+
+                def connect(self, _address):
+                    return None
+
+                def getsockopt(self, level, option, size):
+                    self_outer.assertEqual((level, option, size), (1, 17, 12))
+                    self.peer_reads += 1
+                    return struct.pack("=3i", child_pid, os.getuid(), os.getgid())
+
+                def sendall(self, request):
+                    self_outer.assertIn(b"GET /v1/health", request)
+
+                def recv(self, size):
+                    self_outer.assertEqual(size, 65_536)
+                    return next(self.chunks)
+
+                def close(self):
+                    pass
+
+            self_outer = self
+
+            def group_signal(pid, selected_signal):
+                self.assertEqual(pid, parent_pid)
+                if selected_signal == signal.SIGTERM:
+                    events.append("term")
+                    return None
+                self.assertEqual(selected_signal, 0)
+                events.append("probe_gone")
+                raise ProcessLookupError
+
+            real_rmtree = canary.shutil.rmtree
+
+            def remove_run_root(path):
+                self.assertEqual(path, run_root + ".owned-cleanup")
+                events.append("remove")
+                return real_rmtree(path)
+
+            clock = [100.0]
+
+            def monotonic():
+                value = clock[0]
+                clock[0] += 0.05
+                return value
+
+            def evaluate_gone_probe(
+                *, parent_pid, peer_credentials, read_process_facts
+            ):
+                self.assertEqual(parent_pid, process.pid)
+                self.assertEqual(
+                    peer_credentials,
+                    struct.pack("=3i", child_pid, os.getuid(), os.getgid()),
+                )
+                self.assertEqual(read_process_facts(parent_pid), parent_facts)
+                self.assertEqual(read_process_facts(child_pid), child_facts)
+                self.assertEqual(read_process_facts(child_pid), child_facts)
+                self.assertEqual(read_process_facts(parent_pid), parent_facts)
+                return OnefileLocalAPISummary(True)
+
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(canary.sys, "platform", "linux"))
+                stack.enter_context(
+                    patch.object(canary.platform, "machine", return_value="x86_64")
+                )
+                stack.enter_context(
+                    patch.object(canary.tempfile, "mkdtemp", return_value=run_root)
+                )
+                stack.enter_context(
+                    patch.object(canary.subprocess, "Popen", return_value=process)
+                )
+                stack.enter_context(
+                    patch.object(canary.socket, "socket", return_value=Client())
+                )
+                stack.enter_context(
+                    patch.object(canary.time, "monotonic", side_effect=monotonic)
+                )
+                stack.enter_context(patch.object(canary.time, "sleep"))
+                stack.enter_context(
+                    patch.object(canary.os, "killpg", side_effect=group_signal)
+                )
+                stack.enter_context(
+                    patch.object(canary.shutil, "rmtree", side_effect=remove_run_root)
+                )
+                stack.enter_context(
+                    patch.object(
+                        canary,
+                        "evaluate_onefile_local_api_peer",
+                        side_effect=evaluate_gone_probe,
+                    )
+                )
+                stack.enter_context(
+                    patch.object(
+                        canary,
+                        "read_linux_process_facts",
+                        side_effect=fact_reads,
+                    )
+                )
+                cleanup_error = None
+                try:
+                    summary = run_onefile_local_api_canary(collector)
+                except OnefileLocalAPICanaryError as error:
+                    cleanup_error = error
+                    summary = None
+            server.close()
+
+            self.assertEqual(
+                events,
+                ["term", "wait1", "probe_gone", "wait2", "remove"],
+            )
+            self.assertIsNone(cleanup_error)
+            self.assertEqual(summary, OnefileLocalAPISummary(True))
             self.assertFalse(os.path.lexists(run_root))
 
     def test_run_onefile_local_api_canary_never_deletes_a_swapped_run_root(self):

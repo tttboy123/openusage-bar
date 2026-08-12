@@ -523,6 +523,8 @@ def run_onefile_local_api_canary(collector: str) -> OnefileLocalAPISummary:
                 if type(wait_status) is not int:
                     raise OnefileLocalAPICanaryError
                 leader_reaped = True
+            except subprocess.TimeoutExpired:
+                pass
             except Exception:
                 failed = True
             if not group_missing:
@@ -537,47 +539,56 @@ def run_onefile_local_api_canary(collector: str) -> OnefileLocalAPISummary:
                         os.killpg(process.pid, signal.SIGKILL)
                     except Exception:
                         failed = True
-                    try:
-                        cleanup_started = time.monotonic()
-                    except Exception:
-                        failed = True
-                        cleanup_started = None
-                    if cleanup_started is None or (
-                        isinstance(cleanup_started, bool)
-                        or not isinstance(cleanup_started, (int, float))
-                        or not math.isfinite(cleanup_started)
-                    ):
-                        failed = True
-                    else:
-                        cleanup_deadline = float(cleanup_started) + 2.0
-                        cleanup_last = float(cleanup_started)
-                        while True:
-                            try:
-                                os.killpg(process.pid, 0)
-                            except ProcessLookupError:
-                                group_missing = True
-                                break
-                            except Exception:
-                                failed = True
-                                break
-                            current = time.monotonic()
-                            if (
-                                isinstance(current, bool)
-                                or not isinstance(current, (int, float))
-                                or not math.isfinite(current)
-                                or float(current) < cleanup_last
-                                or float(current) >= cleanup_deadline
-                            ):
-                                failed = True
-                                break
-                            cleanup_last = float(current)
-                            try:
-                                time.sleep(
-                                    min(0.05, cleanup_deadline - cleanup_last)
-                                )
-                            except Exception:
-                                failed = True
-                                break
+            if not leader_reaped:
+                try:
+                    wait_status = process.wait(timeout=2.0)
+                    if type(wait_status) is not int:
+                        raise OnefileLocalAPICanaryError
+                    leader_reaped = True
+                except Exception:
+                    failed = True
+            if not group_missing:
+                try:
+                    cleanup_started = time.monotonic()
+                except Exception:
+                    failed = True
+                    cleanup_started = None
+                if cleanup_started is None or (
+                    isinstance(cleanup_started, bool)
+                    or not isinstance(cleanup_started, (int, float))
+                    or not math.isfinite(cleanup_started)
+                ):
+                    failed = True
+                else:
+                    cleanup_deadline = float(cleanup_started) + 2.0
+                    cleanup_last = float(cleanup_started)
+                    while True:
+                        try:
+                            os.killpg(process.pid, 0)
+                        except ProcessLookupError:
+                            group_missing = True
+                            break
+                        except Exception:
+                            failed = True
+                            break
+                        current = time.monotonic()
+                        if (
+                            isinstance(current, bool)
+                            or not isinstance(current, (int, float))
+                            or not math.isfinite(current)
+                            or float(current) < cleanup_last
+                            or float(current) >= cleanup_deadline
+                        ):
+                            failed = True
+                            break
+                        cleanup_last = float(current)
+                        try:
+                            time.sleep(
+                                min(0.05, cleanup_deadline - cleanup_last)
+                            )
+                        except Exception:
+                            failed = True
+                            break
             process_group_clean = (
                 leader_observed and leader_reaped and group_missing
             )
