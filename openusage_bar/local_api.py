@@ -75,7 +75,19 @@ class APIProblem(Exception):
 class LocalAPIObservationError(RuntimeError):
     """A path-free failure to observe the current-user Local API."""
 
-    def __init__(self) -> None:
+    def __init__(self, stage: str = "unknown") -> None:
+        if stage not in {
+            "unknown",
+            "authority",
+            "socket",
+            "connect-peer",
+            "proc",
+            "http",
+            "revalidate",
+            "cleanup",
+        }:
+            stage = "unknown"
+        self.stage = stage
         super().__init__("Local API observation failed")
 
 
@@ -228,6 +240,7 @@ def _stat_linux_canonical_local_socket(home: Path) -> os.stat_result:
     # nofollow semantics by reopening the fixed chain component by component.
     descriptors: list[int] = []
     failed = False
+    failure_stage = "authority"
     metadata = None
     try:
         directory_flag = getattr(os, "O_DIRECTORY", 0)
@@ -481,6 +494,7 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
     directory_descriptors: list[int] = []
     client: socket.socket | None = None
     failed = False
+    failure_stage = "authority"
     observed: LinuxLocalAPIState | None = None
 
     def directory_signature(metadata: os.stat_result) -> tuple[int, ...]:
@@ -579,6 +593,7 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
         ):
             raise LocalAPIObservationError
 
+        failure_stage = "socket"
         socket_before = os.stat(
             "openusage.sock",
             dir_fd=state_root_descriptor,
@@ -617,6 +632,7 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
             last_time = float(current)
             return float(min(1.0, deadline - last_time))
 
+        failure_stage = "connect-peer"
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.settimeout(remaining_timeout())
         client.connect(
@@ -633,6 +649,7 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
         ):
             raise LocalAPIObservationError
 
+        failure_stage = "proc"
         close_on_exec = getattr(os, "O_CLOEXEC", 0)
         if close_on_exec == 0:
             raise LocalAPIObservationError
@@ -666,6 +683,7 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
         )
         remaining_timeout()
 
+        failure_stage = "http"
         request = (
             b"GET /v1/health HTTP/1.1\r\n"
             b"Host: localhost\r\n"
@@ -707,6 +725,7 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
         status_code, payload = _parse_local_api_health_response(
             bytes(response)
         )
+        failure_stage = "revalidate"
         home_after = os.stat(authority.home, follow_symlinks=False)
         if directory_signature(home_after) != directory_signature(home_opened):
             raise LocalAPIObservationError
@@ -762,13 +781,15 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
                 client.close()
             except Exception:
                 failed = True
+                failure_stage = "cleanup"
         for descriptor in reversed(directory_descriptors):
             try:
                 os.close(descriptor)
             except Exception:
                 failed = True
+                failure_stage = "cleanup"
     if failed or observed is None:
-        raise LocalAPIObservationError
+        raise LocalAPIObservationError(failure_stage)
     return observed
 
 

@@ -45,6 +45,13 @@ class LinuxObserverTopologyCanaryError(RuntimeError):
             "runtime-before-ui-exited",
             "runtime-before-service",
             "runtime-before-local",
+            "runtime-before-local-authority",
+            "runtime-before-local-socket",
+            "runtime-before-local-connect-peer",
+            "runtime-before-local-proc",
+            "runtime-before-local-http",
+            "runtime-before-local-revalidate",
+            "runtime-before-local-cleanup",
             "runtime-before-service-after",
             "runtime-before-mapping",
             "stop",
@@ -272,7 +279,20 @@ def _observe_runtime() -> tuple[
         raise LinuxObserverTopologyCanaryError("runtime-before-service") from None
     try:
         local_state = read_current_user_local_api_state()
-    except Exception:
+    except Exception as error:
+        stage = getattr(error, "stage", "unknown")
+        if stage in {
+            "authority",
+            "socket",
+            "connect-peer",
+            "proc",
+            "http",
+            "revalidate",
+            "cleanup",
+        }:
+            raise LinuxObserverTopologyCanaryError(
+                f"runtime-before-local-{stage}"
+            ) from None
         raise LinuxObserverTopologyCanaryError("runtime-before-local") from None
     try:
         service_after = read_current_user_collector_service_state()
@@ -715,6 +735,13 @@ def main(arguments: tuple[str, ...] | None = None) -> int:
             "runtime-before-local": 19,
             "runtime-before-service-after": 20,
             "runtime-before-mapping": 21,
+            "runtime-before-local-authority": 22,
+            "runtime-before-local-socket": 23,
+            "runtime-before-local-connect-peer": 24,
+            "runtime-before-local-proc": 25,
+            "runtime-before-local-http": 26,
+            "runtime-before-local-revalidate": 27,
+            "runtime-before-local-cleanup": 28,
             "stop": 13,
             "runtime-after": 14,
             "preserve": 15,

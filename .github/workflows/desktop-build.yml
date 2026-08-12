@@ -1108,6 +1108,13 @@ jobs:
                   19) topology_category="runtime-before-local" ;;
                   20) topology_category="runtime-before-service-after" ;;
                   21) topology_category="runtime-before-mapping" ;;
+                  22) topology_category="runtime-before-local-authority" ;;
+                  23) topology_category="runtime-before-local-socket" ;;
+                  24) topology_category="runtime-before-local-connect-peer" ;;
+                  25) topology_category="runtime-before-local-proc" ;;
+                  26) topology_category="runtime-before-local-http" ;;
+                  27) topology_category="runtime-before-local-revalidate" ;;
+                  28) topology_category="runtime-before-local-cleanup" ;;
                 esac
                 printf "%s\n" "appimage_observer_topology_failed category=$topology_category" >&2
                 exit 1
