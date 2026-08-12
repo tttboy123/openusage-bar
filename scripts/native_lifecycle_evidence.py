@@ -1230,6 +1230,26 @@ class _BoundRunDirectory:
         if cleanup_failed:
             _driver_fail()
 
+    def abandon(self) -> None:
+        """Close held descriptors without mutating an unproven live root."""
+
+        cleanup_failed = False
+        for bound in (self.sentinel, self.execution_copy):
+            if bound is not None:
+                try:
+                    os.close(bound.descriptor)
+                except Exception:
+                    cleanup_failed = True
+        self.sentinel = None
+        self.execution_copy = None
+        for descriptor in (self.directory_fd, self.parent_fd):
+            try:
+                os.close(descriptor)
+            except Exception:
+                cleanup_failed = True
+        if cleanup_failed:
+            _driver_fail()
+
 
 def _prove_linux_default_gateway_endpoint_absent() -> None:
     """Prove no TCP 17823 listener in the calling thread's current netns."""
@@ -1484,6 +1504,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     service_absence_confirmed = False
     service_presence_observation: object | None = None
     local_listener_absence_confirmed = False
+    process_rollback_unproven = False
 
     def revoke_runtime_install_absence_fact() -> None:
         nonlocal runtime_install_absence_fact
@@ -1501,6 +1522,14 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         revoke_transient_observation_facts()
         del args, kwargs
         _fail("driver_unavailable")
+
+    def mark_process_rollback_unproven() -> None:
+        nonlocal process_rollback_unproven
+        process_rollback_unproven = True
+
+    def mark_process_rollback_proven() -> None:
+        nonlocal process_rollback_unproven
+        process_rollback_unproven = False
 
     def profile_paths(platform: object) -> NativeProfilePaths:
         nonlocal profile_home, profile_projection, package_projection
@@ -2509,10 +2538,23 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         wait=unavailable,
     )
     try:
+        object.__setattr__(
+            dependencies,
+            "_mark_process_rollback_unproven",
+            mark_process_rollback_unproven,
+        )
+        object.__setattr__(
+            dependencies,
+            "_mark_process_rollback_proven",
+            mark_process_rollback_proven,
+        )
         yield dependencies
     finally:
         if run_directory is not None:
-            run_directory.cleanup()
+            if process_rollback_unproven:
+                run_directory.abandon()
+            else:
+                run_directory.cleanup()
 
 
 class PlatformLifecycleDriver(Protocol):
@@ -3202,54 +3244,75 @@ def _wait_for_linux_observer(
     _driver_fail()
 
 
-def _linux_observe_install(
+def _start_linux_install(
     dependencies: NativeLifecycleDependencies,
     *,
     execution_copy: Path,
-    profile_paths: NativeProfilePaths,
-) -> tuple[object, NativeLedgerState, NativePathState]:
-    stable_collector = profile_paths.runtime_root / "openusage-collector"
-    api_socket = profile_paths.state_root / "openusage.sock"
+) -> object:
     try:
         handle = dependencies.start_process((str(execution_copy),))
     except Exception:
         _driver_fail()
     if handle is None:
         _driver_fail()
-    try:
-        _wait_for_linux_observer(
-            dependencies,
-            collector=stable_collector,
-            api_socket=api_socket,
-        )
-        _require_listener(
-            dependencies.inspect_listener("linux", "gateway"),
-            active=False,
-            authenticated_ready=False,
-        )
-        ledger = _require_ledger_present(dependencies.inspect_ledger("linux"))
-        collector_state = _require_file(
-            dependencies.inspect_path("stable_collector", stable_collector),
-            executable=True,
-        )
-        for purpose, path in (
-            ("gateway_token", profile_paths.state_root / "gateway.token"),
-            ("gateway_cache", profile_paths.state_root / "gateway-cache.sqlite3"),
-            (
-                "gateway_telemetry",
-                profile_paths.state_root / "gateway-telemetry.sqlite3",
-            ),
-        ):
-            _require_missing(dependencies.inspect_path(purpose, path))
-        return handle, ledger, collector_state
-    except Exception as error:
+    marker = getattr(dependencies, "_mark_process_rollback_unproven", None)
+    if marker is not None:
         try:
-            dependencies.stop_process(handle)
+            marker()
         except Exception:
-            pass
-        if isinstance(error, LifecycleEvidenceError):
-            raise
-        _driver_fail()
+            try:
+                dependencies.stop_process(handle)
+            except Exception:
+                pass
+            _driver_fail()
+    return handle
+
+
+def _stop_linux_install(
+    dependencies: NativeLifecycleDependencies,
+    handle: object,
+) -> None:
+    dependencies.stop_process(handle)
+    marker = getattr(dependencies, "_mark_process_rollback_proven", None)
+    if marker is not None:
+        try:
+            marker()
+        except Exception:
+            _driver_fail()
+
+
+def _linux_observe_install(
+    dependencies: NativeLifecycleDependencies,
+    *,
+    profile_paths: NativeProfilePaths,
+) -> tuple[NativeLedgerState, NativePathState]:
+    stable_collector = profile_paths.runtime_root / "openusage-collector"
+    api_socket = profile_paths.state_root / "openusage.sock"
+    _wait_for_linux_observer(
+        dependencies,
+        collector=stable_collector,
+        api_socket=api_socket,
+    )
+    _require_listener(
+        dependencies.inspect_listener("linux", "gateway"),
+        active=False,
+        authenticated_ready=False,
+    )
+    ledger = _require_ledger_present(dependencies.inspect_ledger("linux"))
+    collector_state = _require_file(
+        dependencies.inspect_path("stable_collector", stable_collector),
+        executable=True,
+    )
+    for purpose, path in (
+        ("gateway_token", profile_paths.state_root / "gateway.token"),
+        ("gateway_cache", profile_paths.state_root / "gateway-cache.sqlite3"),
+        (
+            "gateway_telemetry",
+            profile_paths.state_root / "gateway-telemetry.sqlite3",
+        ),
+    ):
+        _require_missing(dependencies.inspect_path(purpose, path))
+    return ledger, collector_state
 
 
 def _linux_native_lifecycle(
@@ -3290,12 +3353,15 @@ def _linux_native_lifecycle(
         dependencies.copy_file(artifact, sentinel)
         stable_collector = package_paths.collector
 
-        active_handle, initial_ledger, initial_collector = _linux_observe_install(
+        active_handle = _start_linux_install(
             dependencies,
             execution_copy=execution_copy,
+        )
+        initial_ledger, initial_collector = _linux_observe_install(
+            dependencies,
             profile_paths=profile_paths,
         )
-        dependencies.stop_process(active_handle)
+        _stop_linux_install(dependencies, active_handle)
         active_handle = None
 
         _require_process_success(
@@ -3364,9 +3430,12 @@ def _linux_native_lifecycle(
         )
         if second_execution.size_bytes != execution_state.size_bytes:
             _driver_fail()
-        active_handle, second_ledger, second_collector = _linux_observe_install(
+        active_handle = _start_linux_install(
             dependencies,
             execution_copy=execution_copy,
+        )
+        second_ledger, second_collector = _linux_observe_install(
+            dependencies,
             profile_paths=profile_paths,
         )
         if second_ledger != initial_ledger or (
@@ -3379,7 +3448,7 @@ def _linux_native_lifecycle(
             initial_collector.mode,
         ):
             _driver_fail()
-        dependencies.stop_process(active_handle)
+        _stop_linux_install(dependencies, active_handle)
         active_handle = None
 
         _require_process_success(
@@ -3450,19 +3519,20 @@ def _linux_native_lifecycle(
     except Exception:
         _driver_fail()
     finally:
-        primary_failed = sys.exc_info()[0] is not None
         cleanup_failed = False
         if active_handle is not None:
             try:
-                dependencies.stop_process(active_handle)
+                _stop_linux_install(dependencies, active_handle)
             except Exception:
                 cleanup_failed = True
-        if run_directory is not None:
+            else:
+                active_handle = None
+        if run_directory is not None and active_handle is None:
             try:
                 dependencies.remove_path(run_directory)
             except Exception:
                 cleanup_failed = True
-        if cleanup_failed and not primary_failed:
+        if cleanup_failed:
             _driver_fail()
 
 

@@ -5855,6 +5855,561 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             ["copy_file", "remove_path"],
         )
 
+    def test_linux_executor_preserves_the_private_run_directory_when_started_process_rollback_is_unproven(
+        self,
+    ) -> None:
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeLedgerState,
+            NativeLifecycleDependencies,
+            NativeLifecycleExecutor,
+            NativeListenerState,
+            NativePackagePaths,
+            NativePathState,
+            NativeProfilePaths,
+            NativeServiceState,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "OpenUsage-Bar.AppImage"
+            artifact_bytes = b"audited executable artifact"
+            artifact.write_bytes(artifact_bytes)
+            artifact_sha256 = hashlib.sha256(artifact_bytes).hexdigest()
+            run_directory = root / "private-run"
+            execution_copy = run_directory / artifact.name
+            sentinel = run_directory / "outside-product-sentinel.bin"
+            profile = NativeProfilePaths(
+                state_root=root / "state",
+                config_root=root / "config",
+                runtime_root=root / "runtime",
+                task_definition=root / "openusage-bar.service",
+            )
+            package = NativePackagePaths(
+                install_root=profile.runtime_root,
+                app=None,
+                uninstaller=None,
+                collector=profile.runtime_root / "openusage-collector",
+            )
+            missing = NativePathState(False, "missing", 0, None, 0, None)
+            events: list[tuple[object, ...]] = []
+            created_identities: dict[Path, tuple[int, int, bytes]] = {}
+            process_handle = object()
+            stop_is_uncertain = [True]
+
+            def make_run_directory(platform: str, arch: str) -> Path:
+                self.assertEqual((platform, arch), ("linux", "x64"))
+                run_directory.mkdir(mode=0o700)
+                return run_directory
+
+            def inspect_path(purpose: str, path: Path) -> NativePathState:
+                events.append(("inspect_path", purpose, path))
+                if purpose != "execution_copy":
+                    return missing
+                metadata = path.lstat()
+                return NativePathState(
+                    True,
+                    "file",
+                    metadata.st_size,
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                    stat.S_IMODE(metadata.st_mode),
+                    f"{metadata.st_dev}:{metadata.st_ino}",
+                )
+
+            def copy_file(source: Path, destination: Path) -> None:
+                self.assertEqual(source, artifact)
+                self.assertIn(destination, {execution_copy, sentinel})
+                destination.write_bytes(source.read_bytes())
+                destination.chmod(0o600)
+                metadata = destination.lstat()
+                created_identities[destination] = (
+                    metadata.st_dev,
+                    metadata.st_ino,
+                    destination.read_bytes(),
+                )
+                events.append(("copy_file", destination))
+
+            def set_file_mode(path: Path, mode: int) -> None:
+                self.assertEqual((path, mode), (execution_copy, 0o700))
+                path.chmod(mode)
+                events.append(("set_file_mode", path, mode))
+
+            def start_process(argv: tuple[str, ...]) -> object:
+                self.assertEqual(argv, (str(execution_copy),))
+                events.append(("start_process", process_handle))
+                return process_handle
+
+            def monotonic() -> float:
+                events.append(("monotonic",))
+                raise LifecycleEvidenceError("driver_unavailable")
+
+            def stop_process(handle: object) -> None:
+                self.assertIs(handle, process_handle)
+                events.append(("stop_process", handle))
+                if stop_is_uncertain[0]:
+                    raise RuntimeError("PRIVATE_STOP_UNCERTAIN")
+
+            def remove_path(path: Path) -> None:
+                events.append(("remove_path", path))
+                if path == run_directory:
+                    for child in run_directory.iterdir():
+                        child.unlink()
+                    run_directory.rmdir()
+
+            dependencies = NativeLifecycleDependencies(
+                make_run_directory=make_run_directory,
+                inspect_path=inspect_path,
+                copy_file=copy_file,
+                set_file_mode=set_file_mode,
+                remove_path=remove_path,
+                start_process=start_process,
+                run_process=lambda *args: None,
+                stop_process=stop_process,
+                read_registry_value=lambda *args: None,
+                profile_paths=lambda platform: profile,
+                package_paths=lambda platform, observed_profile: package,
+                inspect_service=lambda platform: NativeServiceState(
+                    False, False, None
+                ),
+                inspect_listener=lambda platform, namespace: NativeListenerState(
+                    False, False
+                ),
+                inspect_ledger=lambda platform: NativeLedgerState(
+                    False, None, 0, None, False, 0
+                ),
+                network_events=lambda: (),
+                credential_events=lambda: (),
+                monotonic=monotonic,
+                wait=lambda seconds: None,
+            )
+            executor = NativeLifecycleExecutor(
+                dependencies=dependencies,
+                host_platform="linux",
+                host_machine="x86_64",
+            )
+            report = root / "native-lifecycle-report.json"
+
+            with self.assertRaisesRegex(
+                LifecycleEvidenceError, "driver_failed"
+            ) as failed:
+                executor.execute(
+                    platform="linux",
+                    arch="x64",
+                    artifact=artifact,
+                    artifact_sha256=artifact_sha256,
+                )
+
+            self.assertEqual(str(failed.exception), "driver_failed")
+            self.assertNotIn("PRIVATE", str(failed.exception))
+            critical_events = [
+                event[0]
+                for event in events
+                if event[0] in {
+                    "start_process",
+                    "monotonic",
+                    "stop_process",
+                }
+            ]
+            self.assertEqual(
+                critical_events,
+                ["start_process", "monotonic", "stop_process"],
+            )
+            self.assertEqual(
+                [event for event in events if event[0] == "remove_path"],
+                [],
+            )
+            self.assertTrue(run_directory.is_dir())
+            self.assertEqual(set(created_identities), {execution_copy, sentinel})
+            for path, expected in created_identities.items():
+                metadata = path.lstat()
+                self.assertEqual(
+                    (metadata.st_dev, metadata.st_ino, path.read_bytes()),
+                    expected,
+                )
+            self.assertFalse(report.exists())
+
+            for child in run_directory.iterdir():
+                child.unlink()
+            run_directory.rmdir()
+            stop_is_uncertain[0] = False
+            events.clear()
+            created_identities.clear()
+
+            with self.assertRaisesRegex(
+                LifecycleEvidenceError, "driver_failed"
+            ) as stopped:
+                executor.execute(
+                    platform="linux",
+                    arch="x64",
+                    artifact=artifact,
+                    artifact_sha256=artifact_sha256,
+                )
+
+            self.assertEqual(str(stopped.exception), "driver_failed")
+            self.assertNotIn("PRIVATE", str(stopped.exception))
+            self.assertEqual(
+                [
+                    event[0]
+                    for event in events
+                    if event[0] in {
+                        "start_process",
+                        "monotonic",
+                        "stop_process",
+                    }
+                ],
+                ["start_process", "monotonic", "stop_process"],
+            )
+            self.assertEqual(
+                [event for event in events if event[0] == "remove_path"],
+                [("remove_path", run_directory)],
+            )
+            self.assertFalse(run_directory.exists())
+            self.assertFalse(execution_copy.exists())
+            self.assertFalse(sentinel.exists())
+            self.assertFalse(report.exists())
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_context_preserves_the_private_run_directory_when_started_process_rollback_is_unproven(
+        self,
+    ) -> None:
+        from dataclasses import replace
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeLedgerState,
+            NativeLifecycleExecutor,
+            NativeListenerState,
+            NativePackagePaths,
+            NativePathState,
+            NativeProfilePaths,
+            NativeServiceState,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        for rollback_proven in (False, True):
+            with self.subTest(rollback_proven=rollback_proven), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "authoritative-home"
+                (home / ".local" / "share" / "usagehub").mkdir(parents=True)
+                authority = LifecycleStatePaths(platform="linux", home=home)
+                artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+                artifact_bytes = b"audited host-context artifact"
+                artifact.write_bytes(artifact_bytes)
+                artifact_sha256 = hashlib.sha256(artifact_bytes).hexdigest()
+                missing = NativePathState(False, "missing", 0, None, 0, None)
+                events: list[tuple[object, ...]] = []
+                run_path: list[Path] = []
+                process_handle = object()
+
+                with patch(
+                    "scripts.native_lifecycle_evidence.sys.platform", "linux"
+                ), patch(
+                    "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                    return_value="x86_64",
+                ), patch.object(
+                    LifecycleStatePaths,
+                    "for_current_user",
+                    return_value=authority,
+                ), patch(
+                    "scripts.native_lifecycle_evidence.Path.home",
+                    return_value=home,
+                ), patch.dict(
+                    os.environ,
+                    {},
+                    clear=True,
+                ), native_lifecycle_dependencies_for_host() as host_dependencies:
+                    real_make_run_directory = host_dependencies.make_run_directory
+                    real_inspect_path = host_dependencies.inspect_path
+                    real_copy_file = host_dependencies.copy_file
+                    real_set_file_mode = host_dependencies.set_file_mode
+
+                    def make_run_directory(platform: str, arch: str) -> Path:
+                        selected = real_make_run_directory(platform, arch)
+                        run_path.append(selected)
+                        return selected
+
+                    def inspect_path(purpose: str, path: Path) -> NativePathState:
+                        events.append(("inspect_path", purpose))
+                        if purpose in {
+                            "fresh_execution_copy",
+                            "fresh_sentinel",
+                            "execution_copy",
+                        }:
+                            return real_inspect_path(purpose, path)
+                        return missing
+
+                    def copy_file(source: Path, destination: Path) -> None:
+                        events.append(("copy_file", destination.name))
+                        real_copy_file(source, destination)
+
+                    def set_file_mode(path: Path, mode: int) -> None:
+                        events.append(("set_file_mode", path.name, mode))
+                        real_set_file_mode(path, mode)
+
+                    def start_process(argv: tuple[str, ...]) -> object:
+                        self.assertEqual(
+                            argv,
+                            (str(run_path[0] / artifact.name),),
+                        )
+                        events.append(("start_process", process_handle))
+                        return process_handle
+
+                    def monotonic() -> float:
+                        events.append(("monotonic",))
+                        raise LifecycleEvidenceError("driver_unavailable")
+
+                    def stop_process(handle: object) -> None:
+                        self.assertIs(handle, process_handle)
+                        events.append(("stop_process", handle))
+                        if not rollback_proven:
+                            raise RuntimeError("PRIVATE_STOP_UNCERTAIN")
+
+                    dependencies = replace(
+                        host_dependencies,
+                        make_run_directory=make_run_directory,
+                        inspect_path=inspect_path,
+                        copy_file=copy_file,
+                        set_file_mode=set_file_mode,
+                        start_process=start_process,
+                        stop_process=stop_process,
+                        monotonic=monotonic,
+                        inspect_service=lambda platform: NativeServiceState(
+                            False, False, None
+                        ),
+                        inspect_listener=lambda platform, namespace: NativeListenerState(
+                            False, False
+                        ),
+                        inspect_ledger=lambda platform: NativeLedgerState(
+                            False, None, 0, None, False, 0
+                        ),
+                    )
+                    object.__setattr__(
+                        dependencies,
+                        "_mark_process_rollback_unproven",
+                        getattr(
+                            host_dependencies,
+                            "_mark_process_rollback_unproven",
+                        ),
+                    )
+                    object.__setattr__(
+                        dependencies,
+                        "_mark_process_rollback_proven",
+                        getattr(
+                            host_dependencies,
+                            "_mark_process_rollback_proven",
+                        ),
+                    )
+                    executor = NativeLifecycleExecutor(
+                        dependencies=dependencies,
+                        host_platform="linux",
+                        host_machine="x86_64",
+                    )
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as failed:
+                        executor.execute(
+                            platform="linux",
+                            arch="x64",
+                            artifact=artifact,
+                            artifact_sha256=artifact_sha256,
+                        )
+                    self.assertEqual(str(failed.exception), "driver_failed")
+                    self.assertNotIn("PRIVATE", str(failed.exception))
+                    self.assertEqual(
+                        [
+                            event[0]
+                            for event in events
+                            if event[0] in {
+                                "start_process",
+                                "monotonic",
+                                "stop_process",
+                            }
+                        ],
+                        ["start_process", "monotonic", "stop_process"],
+                        msg=repr(events),
+                    )
+                    self.assertEqual(len(run_path), 1)
+                    execution_copy = run_path[0] / artifact.name
+                    sentinel = run_path[0] / "outside-product-sentinel.bin"
+                    before_exit = {
+                        path: (
+                            path.lstat().st_dev,
+                            path.lstat().st_ino,
+                            path.read_bytes(),
+                        )
+                        for path in (execution_copy, sentinel)
+                    }
+
+                if rollback_proven:
+                    self.assertFalse(run_path[0].exists())
+                    self.assertFalse(execution_copy.exists())
+                    self.assertFalse(sentinel.exists())
+                else:
+                    try:
+                        self.assertTrue(run_path[0].is_dir())
+                        for path, expected in before_exit.items():
+                            metadata = path.lstat()
+                            self.assertEqual(
+                                (
+                                    metadata.st_dev,
+                                    metadata.st_ino,
+                                    path.read_bytes(),
+                                ),
+                                expected,
+                            )
+                    finally:
+                        if run_path[0].exists():
+                            for child in run_path[0].iterdir():
+                                child.unlink()
+                            run_path[0].rmdir()
+                self.assertFalse((root / "native-lifecycle-report.json").exists())
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_context_abandons_every_held_descriptor_without_mutating_an_unproven_run_directory(
+        self,
+    ) -> None:
+        import scripts.native_lifecycle_evidence as lifecycle_evidence
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact.write_bytes(b"audited abandon descriptor artifact")
+            real_open = lifecycle_evidence.os.open
+            real_close = lifecycle_evidence.os.close
+            real_rename = lifecycle_evidence.os.rename
+            real_unlink = lifecycle_evidence.os.unlink
+            opened: set[int] = set()
+            closed: set[int] = set()
+            active: set[int] = set()
+            abandon_phase = [False]
+            abandon_close_attempts: list[int] = []
+            abandon_mutations: list[str] = []
+            fail_descriptor: list[int | None] = [None]
+
+            def tracked_open(*args, **kwargs):
+                descriptor = real_open(*args, **kwargs)
+                opened.add(descriptor)
+                active.add(descriptor)
+                return descriptor
+
+            def tracked_close(descriptor):
+                if abandon_phase[0]:
+                    abandon_close_attempts.append(descriptor)
+                    real_close(descriptor)
+                    closed.add(descriptor)
+                    active.discard(descriptor)
+                    if descriptor == fail_descriptor[0]:
+                        raise OSError("PRIVATE_ABANDON_CLOSE")
+                    return None
+                real_close(descriptor)
+                closed.add(descriptor)
+                active.discard(descriptor)
+                return None
+
+            def tracked_rename(*args, **kwargs):
+                if abandon_phase[0]:
+                    abandon_mutations.append("rename")
+                    raise AssertionError("abandon must not rename")
+                return real_rename(*args, **kwargs)
+
+            def tracked_unlink(*args, **kwargs):
+                if abandon_phase[0]:
+                    abandon_mutations.append("unlink")
+                    raise AssertionError("abandon must not unlink")
+                return real_unlink(*args, **kwargs)
+
+            context = native_lifecycle_dependencies_for_host()
+            run_directory = None
+            execution_copy = None
+            sentinel = None
+            try:
+                with (
+                    patch.object(lifecycle_evidence.sys, "platform", "linux"),
+                    patch.object(
+                        lifecycle_evidence.host_platform_module,
+                        "machine",
+                        return_value="x86_64",
+                    ),
+                    patch.object(
+                        lifecycle_evidence.os,
+                        "open",
+                        side_effect=tracked_open,
+                    ),
+                    patch.object(
+                        lifecycle_evidence.os,
+                        "close",
+                        side_effect=tracked_close,
+                    ),
+                    patch.object(
+                        lifecycle_evidence.os,
+                        "rename",
+                        side_effect=tracked_rename,
+                    ),
+                    patch.object(
+                        lifecycle_evidence.os,
+                        "unlink",
+                        side_effect=tracked_unlink,
+                    ),
+                ):
+                    dependencies = context.__enter__()
+                    run_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    execution_copy = run_directory / artifact.name
+                    sentinel = run_directory / "outside-product-sentinel.bin"
+                    dependencies.inspect_path(
+                        "fresh_execution_copy", execution_copy
+                    )
+                    dependencies.inspect_path("fresh_sentinel", sentinel)
+                    dependencies.copy_file(artifact, execution_copy)
+                    dependencies.set_file_mode(execution_copy, 0o700)
+                    dependencies.copy_file(artifact, sentinel)
+                    getattr(
+                        dependencies,
+                        "_mark_process_rollback_unproven",
+                    )()
+                    held = set(active)
+                    self.assertEqual(len(held), 4)
+                    fail_descriptor[0] = min(held)
+                    before = {
+                        path: (
+                            path.lstat().st_dev,
+                            path.lstat().st_ino,
+                            path.read_bytes(),
+                        )
+                        for path in (execution_copy, sentinel)
+                    }
+                    abandon_phase[0] = True
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as failed:
+                        context.__exit__(None, None, None)
+
+                self.assertEqual(str(failed.exception), "driver_failed")
+                self.assertNotIn("PRIVATE", str(failed.exception))
+                self.assertEqual(set(abandon_close_attempts), held)
+                self.assertEqual(len(abandon_close_attempts), len(held))
+                self.assertEqual(abandon_mutations, [])
+                self.assertTrue(run_directory.is_dir())
+                for path, expected in before.items():
+                    metadata = path.lstat()
+                    self.assertEqual(
+                        (metadata.st_dev, metadata.st_ino, path.read_bytes()),
+                        expected,
+                    )
+            finally:
+                abandon_phase[0] = False
+                if run_directory is not None and run_directory.exists():
+                    for child in run_directory.iterdir():
+                        child.unlink()
+                    run_directory.rmdir()
+
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_runtime_install_token_is_revoked_by_service_observation(
         self,
