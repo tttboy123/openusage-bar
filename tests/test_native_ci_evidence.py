@@ -2574,6 +2574,22 @@ class NativeCiEvidenceTests(unittest.TestCase):
             preserve.index('sudo systemctl stop "user@$current_uid.service"'),
             preserve.index('sudo userdel "$preserve_user"'),
         )
+        self.assertIn(
+            'sudo loginctl terminate-user "$current_uid" >/dev/null 2>&1',
+            preserve,
+        )
+        self.assertIn(
+            'if ! /usr/bin/pgrep --uid "$current_uid" >/dev/null 2>&1; then',
+            preserve,
+        )
+        self.assertIn(
+            'if /usr/bin/pgrep --uid "$current_uid" >/dev/null 2>&1; then',
+            preserve,
+        )
+        self.assertLess(
+            preserve.index('sudo loginctl terminate-user "$current_uid"'),
+            preserve.index('sudo userdel "$preserve_user"'),
+        )
         self.assertNotIn("sudo rmdir", preserve)
         for wrapper_status, category in (
             (2, "wrapper-request"),
@@ -2591,6 +2607,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 )
         for cleanup_category in (
             "manager",
+            "process",
             "account",
             "root-identity",
             "root-remove",

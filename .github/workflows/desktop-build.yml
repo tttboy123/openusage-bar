@@ -964,6 +964,17 @@ jobs:
                 printf "%s\n" "appimage_preserve_cleanup_failed category=manager" >&2
                 cleanup_failed=1
               fi
+              sudo loginctl terminate-user "$current_uid" >/dev/null 2>&1 || true
+              for process_attempt in {1..50}; do
+                if ! /usr/bin/pgrep --uid "$current_uid" >/dev/null 2>&1; then
+                  break
+                fi
+                sleep 0.2
+              done
+              if /usr/bin/pgrep --uid "$current_uid" >/dev/null 2>&1; then
+                printf "%s\n" "appimage_preserve_cleanup_failed category=process" >&2
+                cleanup_failed=1
+              fi
             fi
             if [[ "$preserve_user_created" == "1" ]]; then
               if ! sudo userdel "$preserve_user" >/dev/null 2>&1; then
