@@ -2472,10 +2472,26 @@ class NativeCiEvidenceTests(unittest.TestCase):
         collector_invocation = preserve.index(
             '"$packaged_collector" desktop-service uninstall'
         )
+        absence_canary = preserve.index(
+            "/usr/bin/python3 -m scripts.canary_linux_service_absence"
+        )
         wrapper_binding = preserve.index(
             'exec {appimage_fd}<"$preserve_execution"'
         )
-        self.assertLess(collector_invocation, wrapper_binding)
+        self.assertLess(collector_invocation, absence_canary)
+        self.assertLess(absence_canary, wrapper_binding)
+        self.assertIn('service_absence_stdout="$5"', preserve)
+        self.assertIn('service_absence_stderr="$6"', preserve)
+        self.assertIn(
+            '>"$service_absence_stdout" 2>"$service_absence_stderr"',
+            preserve,
+        )
+        self.assertIn('test ! -s "$service_absence_stdout"', preserve)
+        self.assertIn('test ! -s "$service_absence_stderr"', preserve)
+        self.assertIn(
+            "appimage_preserve_uninstall_failed category=service-absence",
+            preserve,
+        )
         self.assertIn(
             '>"$collector_stdout" 2>"$collector_stderr"',
             preserve,
@@ -2558,10 +2574,16 @@ class NativeCiEvidenceTests(unittest.TestCase):
         for private_output_probe in (
             'cat "$collector_stdout"',
             'cat "$collector_stderr"',
+            'cat "$service_absence_stdout"',
+            'cat "$service_absence_stderr"',
             'head "$collector_stdout"',
             'head "$collector_stderr"',
+            'head "$service_absence_stdout"',
+            'head "$service_absence_stderr"',
             'tail "$collector_stdout"',
             'tail "$collector_stderr"',
+            'tail "$service_absence_stdout"',
+            'tail "$service_absence_stderr"',
         ):
             with self.subTest(private_output_probe=private_output_probe):
                 self.assertNotIn(private_output_probe, preserve)
@@ -2652,6 +2674,26 @@ class NativeCiEvidenceTests(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, preserve)
+
+        contracts_start = source.index(
+            "- name: Run portable Observer and Gateway contracts"
+        )
+        contracts_end = source.index("- name: Run native Windows Job contracts")
+        contracts = source[contracts_start:contracts_end]
+        self.assertIn("tests.test_canary_linux_service_absence", contracts)
+
+        push = source[source.index("  push:\n"):source.index("  pull_request:\n")]
+        pull_request = source[
+            source.index("  pull_request:\n"):source.index("\npermissions:")
+        ]
+        for event, block in (("push", push), ("pull_request", pull_request)):
+            with self.subTest(event=event):
+                self.assertIn(
+                    '- "scripts/canary_linux_service_absence.py"', block
+                )
+                self.assertIn(
+                    '- "tests/test_canary_linux_service_absence.py"', block
+                )
 
     def test_onefile_canary_documents_its_ephemeral_nonclaim_boundary(self):
         script = (ROOT / "scripts/canary_onefile_local_api.py").read_text(

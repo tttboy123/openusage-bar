@@ -40,6 +40,7 @@ on:
       - "scripts/distribution_trust_posture.py"
       - "scripts/native_ci_evidence.py"
       - "scripts/native_lifecycle_evidence.py"
+      - "scripts/canary_linux_service_absence.py"
       - "scripts/observer_source_native_evidence.py"
       - "scripts/release_handoff.py"
       - "scripts/measure_gateway_performance.py"
@@ -70,6 +71,7 @@ on:
       - "tests/test_managed_collector.py"
       - "tests/test_native_ci_evidence.py"
       - "tests/test_native_lifecycle_evidence.py"
+      - "tests/test_canary_linux_service_absence.py"
       - "tests/test_native_lifecycle_runner.py"
       - "tests/test_observer_source_native_evidence.py"
       - "tests/test_release_handoff.py"
@@ -125,6 +127,7 @@ on:
       - "scripts/distribution_trust_posture.py"
       - "scripts/native_ci_evidence.py"
       - "scripts/native_lifecycle_evidence.py"
+      - "scripts/canary_linux_service_absence.py"
       - "scripts/observer_source_native_evidence.py"
       - "scripts/release_handoff.py"
       - "scripts/measure_gateway_performance.py"
@@ -155,6 +158,7 @@ on:
       - "tests/test_managed_collector.py"
       - "tests/test_native_ci_evidence.py"
       - "tests/test_native_lifecycle_evidence.py"
+      - "tests/test_canary_linux_service_absence.py"
       - "tests/test_native_lifecycle_runner.py"
       - "tests/test_observer_source_native_evidence.py"
       - "tests/test_release_handoff.py"
@@ -369,6 +373,7 @@ jobs:
             tests.test_managed_collector \
             tests.test_native_ci_evidence \
             tests.test_native_lifecycle_evidence \
+            tests.test_canary_linux_service_absence \
             tests.test_native_lifecycle_runner \
             tests.test_observer_source_native_evidence \
             tests.test_openusage_settings_entrypoint \
@@ -952,6 +957,8 @@ jobs:
           preserve_execution="$preserve_root/execution.AppImage"
           collector_stdout="$preserve_root/collector.stdout"
           collector_stderr="$preserve_root/collector.stderr"
+          service_absence_stdout="$preserve_root/service-absence.stdout"
+          service_absence_stderr="$preserve_root/service-absence.stderr"
           packaged_collector_source="$RUNNER_TEMP/usagehub-appimage-${{ matrix.arch }}/resources/collector/${{ matrix.collector }}"
           packaged_collector="$preserve_root/openusage-collector"
           test -x "$packaged_collector_source"
@@ -1047,6 +1054,9 @@ jobs:
               packaged_collector="$2"
               collector_stdout="$3"
               collector_stderr="$4"
+              service_absence_stdout="$5"
+              service_absence_stderr="$6"
+              project_root="$7"
               set +e
               "$packaged_collector" desktop-service uninstall \
                 >"$collector_stdout" 2>"$collector_stderr"
@@ -1058,6 +1068,18 @@ jobs:
               fi
               test ! -s "$collector_stdout"
               test ! -s "$collector_stderr"
+              cd "$project_root"
+              set +e
+              /usr/bin/python3 -m scripts.canary_linux_service_absence \
+                >"$service_absence_stdout" 2>"$service_absence_stderr"
+              service_absence_status=$?
+              set -e
+              if [[ "$service_absence_status" -ne 0 || -s "$service_absence_stdout" || -s "$service_absence_stderr" ]]; then
+                printf "%s\n" "appimage_preserve_uninstall_failed category=service-absence" >&2
+                exit 1
+              fi
+              test ! -s "$service_absence_stdout"
+              test ! -s "$service_absence_stderr"
               exec {appimage_fd}<"$preserve_execution"
               set +e
               timeout --signal=TERM --kill-after=10s 180s /usr/bin/xvfb-run --auto-servernum "/proc/self/fd/$appimage_fd" --usagehub-uninstall \
@@ -1086,7 +1108,10 @@ jobs:
               "$preserve_execution" \
               "$packaged_collector" \
               "$collector_stdout" \
-              "$collector_stderr"
+              "$collector_stderr" \
+              "$service_absence_stdout" \
+              "$service_absence_stderr" \
+              "$GITHUB_WORKSPACE"
           preserve_status=$?
           set -e
           test "$preserve_status" -eq 0
