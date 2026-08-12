@@ -2377,6 +2377,12 @@ class NativeCiEvidenceTests(unittest.TestCase):
             'preserve_execution="$preserve_root/execution.AppImage"',
             preserve,
         )
+        self.assertIn(
+            'packaged_collector="$RUNNER_TEMP/usagehub-appimage-'
+            '${{ matrix.arch }}/resources/collector/${{ matrix.collector }}"',
+            preserve,
+        )
+        self.assertIn('test -x "$packaged_collector"', preserve)
         self.assertIn('/bin/cp "$FINAL_ARTIFACT" "$preserve_execution"', preserve)
         self.assertIn(
             '/usr/bin/cmp -s "$FINAL_ARTIFACT" "$preserve_execution"',
@@ -2433,6 +2439,27 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 self.assertIn(owned_path, preserve)
         self.assertIn('sudo -u "$preserve_user" /usr/bin/env -i', preserve)
         self.assertIn('/bin/bash -c', preserve)
+        collector_invocation = preserve.index(
+            '"$packaged_collector" desktop-service uninstall'
+        )
+        wrapper_binding = preserve.index(
+            'exec {appimage_fd}<"$preserve_execution"'
+        )
+        self.assertLess(collector_invocation, wrapper_binding)
+        self.assertIn(
+            '>"$collector_stdout" 2>"$collector_stderr"',
+            preserve,
+        )
+        self.assertIn('test ! -s "$collector_stdout"', preserve)
+        self.assertIn('test ! -s "$collector_stderr"', preserve)
+        self.assertIn(
+            "appimage_preserve_uninstall_failed category=collector",
+            preserve,
+        )
+        self.assertIn(
+            "appimage_preserve_uninstall_failed category=wrapper",
+            preserve,
+        )
         self.assertIn('exec {appimage_fd}<"$preserve_execution"', preserve)
         self.assertIn(
             'HOME="$preserve_root/home"',
@@ -2482,7 +2509,8 @@ class NativeCiEvidenceTests(unittest.TestCase):
         self.assertIn('test ! -s "$preserve_stdout"', preserve)
         self.assertIn('test ! -s "$preserve_stderr"', preserve)
         for fixed_failure in (
-            "appimage_preserve_command_failed",
+            "appimage_preserve_uninstall_failed category=collector",
+            "appimage_preserve_uninstall_failed category=wrapper",
             "appimage_preserve_stdout_not_empty",
             "appimage_preserve_stderr_not_empty",
         ):
@@ -2516,6 +2544,10 @@ class NativeCiEvidenceTests(unittest.TestCase):
             "XDG_CONFIG_HOME",
             "DISPLAY",
             '"$preserve_root/config"',
+            'cat "$collector_stdout"',
+            'cat "$collector_stderr"',
+            'cat "$preserve_stdout"',
+            'cat "$preserve_stderr"',
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, preserve)

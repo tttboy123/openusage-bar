@@ -951,6 +951,10 @@ jobs:
           preserve_execution="$preserve_root/execution.AppImage"
           preserve_stdout="$preserve_root/stdout"
           preserve_stderr="$preserve_root/stderr"
+          collector_stdout="$preserve_root/collector.stdout"
+          collector_stderr="$preserve_root/collector.stderr"
+          packaged_collector="$RUNNER_TEMP/usagehub-appimage-${{ matrix.arch }}/resources/collector/${{ matrix.collector }}"
+          test -x "$packaged_collector"
           preserve_user_created=0
           current_uid=""
           cleanup_preserve() {
@@ -964,7 +968,9 @@ jobs:
             sudo /bin/rm -f \
               "$preserve_execution" \
               "$preserve_stdout" \
-              "$preserve_stderr" || cleanup_failed=1
+              "$preserve_stderr" \
+              "$collector_stdout" \
+              "$collector_stderr" || cleanup_failed=1
             sudo rmdir \
               "$preserve_root/home" \
               "$preserve_root/data" \
@@ -1022,6 +1028,20 @@ jobs:
               preserve_execution="$1"
               preserve_stdout="$2"
               preserve_stderr="$3"
+              packaged_collector="$4"
+              collector_stdout="$5"
+              collector_stderr="$6"
+              set +e
+              "$packaged_collector" desktop-service uninstall \
+                >"$collector_stdout" 2>"$collector_stderr"
+              collector_status=$?
+              set -e
+              if [[ "$collector_status" -ne 0 || -s "$collector_stdout" || -s "$collector_stderr" ]]; then
+                printf 'appimage_preserve_uninstall_failed category=collector\n' >&2
+                exit 1
+              fi
+              test ! -s "$collector_stdout"
+              test ! -s "$collector_stderr"
               exec {appimage_fd}<"$preserve_execution"
               set +e
               timeout --signal=TERM --kill-after=10s 180s "/proc/self/fd/$appimage_fd" --usagehub-uninstall \
@@ -1030,7 +1050,7 @@ jobs:
               set -e
               exec {appimage_fd}<&-
               if [[ "$preserve_status" -ne 0 ]]; then
-                printf 'appimage_preserve_command_failed\n' >&2
+                printf 'appimage_preserve_uninstall_failed category=wrapper\n' >&2
                 exit 1
               fi
               if [[ -s "$preserve_stdout" ]]; then
@@ -1044,7 +1064,13 @@ jobs:
               test ! -s "$preserve_stdout"
               test ! -s "$preserve_stderr"
               exit 0
-            ' bash "$preserve_execution" "$preserve_stdout" "$preserve_stderr"
+            ' bash \
+              "$preserve_execution" \
+              "$preserve_stdout" \
+              "$preserve_stderr" \
+              "$packaged_collector" \
+              "$collector_stdout" \
+              "$collector_stderr"
           preserve_status=$?
           set -e
           test "$preserve_status" -eq 0
