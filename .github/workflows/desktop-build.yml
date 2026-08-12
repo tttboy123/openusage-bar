@@ -1029,9 +1029,21 @@ jobs:
               preserve_status=$?
               set -e
               exec {appimage_fd}<&-
+              if [[ "$preserve_status" -ne 0 ]]; then
+                printf 'appimage_preserve_command_failed\n' >&2
+                exit 1
+              fi
+              if [[ -s "$preserve_stdout" ]]; then
+                printf 'appimage_preserve_stdout_not_empty\n' >&2
+                exit 1
+              fi
+              if [[ -s "$preserve_stderr" ]]; then
+                printf 'appimage_preserve_stderr_not_empty\n' >&2
+                exit 1
+              fi
               test ! -s "$preserve_stdout"
               test ! -s "$preserve_stderr"
-              exit "$preserve_status"
+              exit 0
             ' bash "$preserve_execution" "$preserve_stdout" "$preserve_stderr"
           preserve_status=$?
           set -e

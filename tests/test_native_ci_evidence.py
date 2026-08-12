@@ -2481,6 +2481,23 @@ class NativeCiEvidenceTests(unittest.TestCase):
         self.assertIn('test "$preserve_status" -eq 0', preserve)
         self.assertIn('test ! -s "$preserve_stdout"', preserve)
         self.assertIn('test ! -s "$preserve_stderr"', preserve)
+        for fixed_failure in (
+            "appimage_preserve_command_failed",
+            "appimage_preserve_stdout_not_empty",
+            "appimage_preserve_stderr_not_empty",
+        ):
+            with self.subTest(fixed_failure=fixed_failure):
+                self.assertIn(fixed_failure, preserve)
+        for private_output_probe in (
+            'cat "$preserve_stdout"',
+            'cat "$preserve_stderr"',
+            'head "$preserve_stdout"',
+            'head "$preserve_stderr"',
+            'tail "$preserve_stdout"',
+            'tail "$preserve_stderr"',
+        ):
+            with self.subTest(private_output_probe=private_output_probe):
+                self.assertNotIn(private_output_probe, preserve)
         self.assertIn('sudo systemctl stop "user@$current_uid.service"', preserve)
         self.assertIn('sudo userdel "$preserve_user"', preserve)
         self.assertIn("sudo /bin/rm -f", preserve)
