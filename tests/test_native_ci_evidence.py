@@ -2616,13 +2616,20 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 f"appimage_preserve_cleanup_failed category={cleanup_category}",
                 preserve,
             )
-        self.assertIn("sudo /bin/rm -f", preserve)
         self.assertIn(
             'test "$(/usr/bin/stat --format=\'%d:%i\' "$preserve_root")" '
             '= "$preserve_root_identity"',
             preserve,
         )
         self.assertIn('sudo /bin/rm -rf --one-file-system "$preserve_root"', preserve)
+        self.assertNotIn('sudo /bin/rm -f', preserve)
+        self.assertLess(
+            preserve.index(
+                'test "$(/usr/bin/stat --format=\'%d:%i\' "$preserve_root")" '
+                '= "$preserve_root_identity"'
+            ),
+            preserve.index('sudo /bin/rm -rf --one-file-system "$preserve_root"'),
+        )
         self.assertNotIn("sudo rmdir", preserve)
         self.assertIn(
             'final_source_digest="$(/usr/bin/sha256sum "$FINAL_ARTIFACT"',

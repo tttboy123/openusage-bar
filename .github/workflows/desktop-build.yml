@@ -982,11 +982,6 @@ jobs:
                 cleanup_failed=1
               fi
             fi
-            sudo /bin/rm -f \
-              "$preserve_execution" \
-              "$packaged_collector" \
-              "$collector_stdout" \
-              "$collector_stderr" || cleanup_failed=1
             if ! test "$(/usr/bin/stat --format='%d:%i' "$preserve_root")" = "$preserve_root_identity"; then
               printf "%s\n" "appimage_preserve_cleanup_failed category=root-identity" >&2
               cleanup_failed=1
