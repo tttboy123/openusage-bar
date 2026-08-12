@@ -1103,6 +1103,11 @@ jobs:
                   14) topology_category="runtime-after" ;;
                   15) topology_category="preserve" ;;
                   16) topology_category="final-absence" ;;
+                  17) topology_category="runtime-before-ui-exited" ;;
+                  18) topology_category="runtime-before-service" ;;
+                  19) topology_category="runtime-before-local" ;;
+                  20) topology_category="runtime-before-service-after" ;;
+                  21) topology_category="runtime-before-mapping" ;;
                 esac
                 printf "%s\n" "appimage_observer_topology_failed category=$topology_category" >&2
                 exit 1

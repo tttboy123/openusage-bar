@@ -42,6 +42,11 @@ class LinuxObserverTopologyCanaryError(RuntimeError):
             "initial-absence",
             "launch",
             "runtime-before",
+            "runtime-before-ui-exited",
+            "runtime-before-service",
+            "runtime-before-local",
+            "runtime-before-service-after",
+            "runtime-before-mapping",
             "stop",
             "runtime-after",
             "preserve",
@@ -202,6 +207,17 @@ class _AppImageProcessLease:
         except Exception:
             raise LinuxObserverTopologyCanaryError from None
 
+    def leader_has_exited(self) -> bool:
+        try:
+            status = os.waitid(
+                os.P_PID,
+                self._process.pid,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+            )
+        except Exception:
+            raise LinuxObserverTopologyCanaryError from None
+        return status is not None and status.si_pid == self._process.pid
+
     def close(self) -> None:
         if self._closed:
             return
@@ -250,23 +266,34 @@ def _observe_runtime() -> tuple[
     LinuxLocalAPIState,
     LinuxCollectorServiceState,
 ]:
-    service_before = read_current_user_collector_service_state()
-    local_state = read_current_user_local_api_state()
-    service_after = read_current_user_collector_service_state()
+    try:
+        service_before = read_current_user_collector_service_state()
+    except Exception:
+        raise LinuxObserverTopologyCanaryError("runtime-before-service") from None
+    try:
+        local_state = read_current_user_local_api_state()
+    except Exception:
+        raise LinuxObserverTopologyCanaryError("runtime-before-local") from None
+    try:
+        service_after = read_current_user_collector_service_state()
+    except Exception:
+        raise LinuxObserverTopologyCanaryError(
+            "runtime-before-service-after"
+        ) from None
     if (
         type(service_before) is not LinuxCollectorServiceState
         or type(local_state) is not LinuxLocalAPIState
         or type(service_after) is not LinuxCollectorServiceState
         or service_after != service_before
     ):
-        raise LinuxObserverTopologyCanaryError
+        raise LinuxObserverTopologyCanaryError("runtime-before-mapping")
 
     current_uid = os.getuid()
     current_gid = os.getgid()
     current_home = pwd.getpwuid(current_uid).pw_dir
     data_home = os.environ.get("XDG_DATA_HOME")
     if type(data_home) is not str or not os.path.isabs(data_home):
-        raise LinuxObserverTopologyCanaryError
+        raise LinuxObserverTopologyCanaryError("runtime-before-mapping")
     expected_collector = os.path.join(
         data_home,
         "usagehub",
@@ -553,7 +580,9 @@ def _run_preserve_uninstall(appimage: str) -> None:
         raise LinuxObserverTopologyCanaryError
 
 
-def _wait_for_runtime() -> tuple[
+def _wait_for_runtime(
+    lease: _AppImageProcessLease | None = None,
+) -> tuple[
     LinuxCollectorServiceState,
     LinuxLocalAPIState,
     LinuxCollectorServiceState,
@@ -567,10 +596,16 @@ def _wait_for_runtime() -> tuple[
         raise LinuxObserverTopologyCanaryError
     deadline = float(started) + _READINESS_SECONDS
     last = float(started)
+    last_stage = "runtime-before"
     while True:
         try:
             return _observe_runtime()
-        except Exception:
+        except LinuxObserverTopologyCanaryError as error:
+            last_stage = error.stage
+            if lease is not None and lease.leader_has_exited():
+                raise LinuxObserverTopologyCanaryError(
+                    "runtime-before-ui-exited"
+                ) from None
             current = time.monotonic()
             if (
                 isinstance(current, bool)
@@ -579,7 +614,7 @@ def _wait_for_runtime() -> tuple[
                 or float(current) < last
                 or float(current) >= deadline
             ):
-                raise LinuxObserverTopologyCanaryError from None
+                raise LinuxObserverTopologyCanaryError(last_stage) from None
             last = float(current)
             time.sleep(min(0.1, deadline - last))
 
@@ -616,7 +651,9 @@ def run_linux_observer_topology_canary(
             raise LinuxObserverTopologyCanaryError("launch") from None
         with lease_context as lease:
             try:
-                runtime_before = _wait_for_runtime()
+                runtime_before = _wait_for_runtime(lease)
+            except LinuxObserverTopologyCanaryError:
+                raise
             except Exception:
                 raise LinuxObserverTopologyCanaryError("runtime-before") from None
             try:
@@ -673,6 +710,11 @@ def main(arguments: tuple[str, ...] | None = None) -> int:
             "initial-absence": 10,
             "launch": 11,
             "runtime-before": 12,
+            "runtime-before-ui-exited": 17,
+            "runtime-before-service": 18,
+            "runtime-before-local": 19,
+            "runtime-before-service-after": 20,
+            "runtime-before-mapping": 21,
             "stop": 13,
             "runtime-after": 14,
             "preserve": 15,
