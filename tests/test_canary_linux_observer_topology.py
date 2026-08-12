@@ -7,10 +7,12 @@ import stat
 import subprocess
 import tempfile
 import unittest
-import pwd
 from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
 from unittest.mock import patch
+
+if os.name != "nt":
+    import pwd
 
 
 @unittest.skipUnless(

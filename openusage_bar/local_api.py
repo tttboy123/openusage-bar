@@ -10,13 +10,11 @@ from __future__ import annotations
 
 import errno
 import ctypes
-import grp
 import hashlib
 import hmac
 import json
 import math
 import os
-import pwd
 import re
 import secrets
 import socket
@@ -33,6 +31,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Collection
 from urllib.parse import parse_qsl, urlsplit
+
+if os.name != "nt":
+    import grp
+    import pwd
 
 from .capabilities import registry as default_registry
 from .config import ID_PATTERN

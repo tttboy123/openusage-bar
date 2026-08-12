@@ -2493,15 +2493,16 @@ class NativeCiEvidenceTests(unittest.TestCase):
         inner_start = preserve.index("/bin/bash -c '") + len("/bin/bash -c '")
         inner_end = preserve.index("\n            ' bash", inner_start)
         inner_script = preserve[inner_start:inner_end]
-        syntax_check = subprocess.run(
-            ["/bin/bash", "-n"],
-            input=inner_script,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        self.assertEqual(syntax_check.returncode, 0)
+        if os.name != "nt":
+            syntax_check = subprocess.run(
+                ["/bin/bash", "-n"],
+                input=inner_script,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(syntax_check.returncode, 0)
         self.assertNotIn("printf '", inner_script)
         collector_invocation = preserve.index(
             '"$packaged_collector" desktop-service uninstall'
