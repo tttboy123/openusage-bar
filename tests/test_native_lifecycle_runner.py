@@ -1192,6 +1192,9 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
         import subprocess
 
         from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from openusage_bar.platform_services import (
+            LinuxCollectorServiceAbsenceState,
+        )
         from scripts.native_lifecycle_evidence import (
             LifecycleEvidenceError,
             NativePathState,
@@ -1203,6 +1206,10 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             home = root / "authoritative-home"
             home.mkdir()
             authority = LifecycleStatePaths(platform="linux", home=home)
+            state_root = home / ".local" / "state" / "openusage-bar"
+            state_root.mkdir(parents=True)
+            runtime_parent = home / ".local" / "share" / "usagehub"
+            runtime_parent.mkdir(parents=True)
             artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
             artifact_bytes = b"audited preserve-uninstall artifact"
             artifact.write_bytes(artifact_bytes)
@@ -1219,6 +1226,8 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     _enter_linux_host_dependencies(stack, authority)
                 )
                 self.assertEqual(package.install_root, profile.runtime_root)
+                self.assertEqual(package.collector.parent, profile.runtime_root)
+                self.assertEqual(profile.runtime_root.parent, runtime_parent)
                 execution_copy = run_directory / artifact.name
                 sentinel = run_directory / "outside-product-sentinel.bin"
                 self.assertEqual(
@@ -1245,9 +1254,11 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 identities = _file_snapshot(run_directory)
                 runner_calls: list[tuple[tuple[str, ...], float]] = []
                 runner_outcomes: list[object] = []
+                transaction_events: list[str] = []
 
                 def bounded_runner(argv, *, timeout, **kwargs):
                     runner_calls.append((tuple(argv), timeout))
+                    transaction_events.append("bounded")
                     self.assertRegex(argv[0], r"\A/proc/self/fd/[0-9]+\Z")
                     self.assertEqual(argv[1:], ("--usagehub-uninstall",))
                     self.assertEqual(
@@ -1528,10 +1539,77 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     )()
                     getattr(dependencies, "_mark_process_rollback_proven")()
                     before_success_calls = len(runner_calls)
-                    self.assertEqual(
-                        dependencies.run_process(preserve_argv, 180.0),
-                        NativeProcessResult(0, b"", b"", False),
+                    service_absent = LinuxCollectorServiceAbsenceState(
+                        unit_missing=True,
+                        unit_id="openusage-bar.service",
+                        load_state="not-found",
+                        active_state="inactive",
+                        sub_state="dead",
+                        unit_file_state=None,
+                        main_pid=0,
+                        control_pid=0,
+                        job=None,
+                        fragment_path=None,
+                        drop_in_paths=(),
+                        needs_reload=False,
                     )
+                    service_reads = 0
+
+                    def read_service_absence():
+                        nonlocal service_reads
+                        service_reads += 1
+                        transaction_events.append(f"service{service_reads}")
+                        return service_absent
+
+                    real_stat = os.stat
+
+                    def trace_transaction_missing(path, *args, **kwargs):
+                        raw_path = os.fspath(path)
+                        if (
+                            raw_path in {"openusage.sock", "runtime"}
+                            and type(kwargs.get("dir_fd")) is int
+                            and kwargs.get("follow_symlinks") is False
+                        ):
+                            try:
+                                return real_stat(path, *args, **kwargs)
+                            except FileNotFoundError:
+                                transaction_events.append(
+                                    "socket_missing"
+                                    if raw_path == "openusage.sock"
+                                    else "runtime_missing"
+                                )
+                                raise
+                        return real_stat(path, *args, **kwargs)
+
+                    transaction_events.clear()
+                    with patch(
+                        "openusage_bar.platform_services.read_current_user_collector_service_absence_state",
+                        side_effect=read_service_absence,
+                    ), patch(
+                        "scripts.native_lifecycle_evidence.os.stat",
+                        side_effect=trace_transaction_missing,
+                    ):
+                        self.assertEqual(
+                            dependencies.run_process(preserve_argv, 180.0),
+                            NativeProcessResult(0, b"", b"", False),
+                        )
+                    self.assertEqual(
+                        transaction_events,
+                        [
+                            "bounded",
+                            "service1",
+                            "socket_missing",
+                            "socket_missing",
+                            "runtime_missing",
+                            "runtime_missing",
+                            "service2",
+                            "socket_missing",
+                            "socket_missing",
+                            "runtime_missing",
+                            "runtime_missing",
+                        ],
+                    )
+                    self.assertEqual(service_reads, 2)
                     self.assertEqual(
                         len(runner_calls), before_success_calls + 1
                     )
@@ -1551,13 +1629,60 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         _file_snapshot(run_directory), identities
                     )
 
+                    getattr(
+                        dependencies, "_mark_process_rollback_unproven"
+                    )()
+                    getattr(dependencies, "_mark_process_rollback_proven")()
+                    hostile_service_reads = 0
+                    before_hostile_service_calls = len(runner_calls)
+
+                    def fail_second_service_read():
+                        nonlocal hostile_service_reads
+                        hostile_service_reads += 1
+                        if hostile_service_reads == 2:
+                            raise RuntimeError(
+                                "PRIVATE_SERVICE_ABSENCE_DRIFT"
+                            )
+                        return service_absent
+
+                    with patch(
+                        "openusage_bar.platform_services.read_current_user_collector_service_absence_state",
+                        side_effect=fail_second_service_read,
+                    ):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as uncertain_service:
+                            dependencies.run_process(
+                                preserve_argv, 180.0
+                            )
+                    self.assertEqual(
+                        str(uncertain_service.exception), "driver_failed"
+                    )
+                    self.assertNotIn(
+                        "PRIVATE", str(uncertain_service.exception)
+                    )
+                    self.assertEqual(hostile_service_reads, 2)
+                    self.assertEqual(
+                        len(runner_calls), before_hostile_service_calls + 1
+                    )
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ):
+                        dependencies.run_process(preserve_argv, 180.0)
+                    self.assertEqual(
+                        len(runner_calls), before_hostile_service_calls + 1
+                    )
+                    self.assertEqual(
+                        _file_snapshot(run_directory), identities
+                    )
+
                     with self.assertRaisesRegex(
                         LifecycleEvidenceError, "driver_failed"
                     ) as repeated:
                         dependencies.run_process(preserve_argv, 180.0)
                     self.assertEqual(str(repeated.exception), "driver_failed")
                     self.assertEqual(
-                        len(runner_calls), before_success_calls + 1
+                        len(runner_calls), before_hostile_service_calls + 1
                     )
                     self.assertEqual(
                         _file_snapshot(run_directory),
@@ -1710,6 +1835,378 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     for child in candidate.iterdir():
                         child.unlink()
                     candidate.rmdir()
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_completed_preserve_transaction_releases_private_run_root(
+        self,
+    ) -> None:
+        import subprocess
+
+        import scripts.native_lifecycle_evidence as lifecycle_evidence
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from openusage_bar.platform_services import (
+            LinuxCollectorServiceAbsenceState,
+        )
+        from scripts.native_lifecycle_evidence import NativeProcessResult
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            (home / ".local" / "state" / "openusage-bar").mkdir(
+                parents=True
+            )
+            (home / ".local" / "share" / "usagehub").mkdir(parents=True)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact.write_bytes(b"audited completed preserve artifact")
+            service_absent = LinuxCollectorServiceAbsenceState(
+                unit_missing=True,
+                unit_id="openusage-bar.service",
+                load_state="not-found",
+                active_state="inactive",
+                sub_state="dead",
+                unit_file_state=None,
+                main_pid=0,
+                control_pid=0,
+                job=None,
+                fragment_path=None,
+                drop_in_paths=(),
+                needs_reload=False,
+            )
+            events: list[str] = []
+            service_reads = 0
+            real_prepare = (
+                lifecycle_evidence._BoundRunDirectory.prepare_preserve_uninstall
+            )
+
+            def prepare(bound, token):
+                events.append("bind")
+                return real_prepare(bound, token)
+
+            def bounded_runner(argv, **kwargs):
+                del kwargs
+                events.append("bounded")
+                return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+            def read_service_absence():
+                nonlocal service_reads
+                service_reads += 1
+                events.append(f"service{service_reads}")
+                return service_absent
+
+            with ExitStack() as stack:
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.Path.home",
+                        return_value=home,
+                    )
+                )
+                dependencies, run_directory, profile, package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                execution_copy = run_directory / artifact.name
+                sentinel = run_directory / "outside-product-sentinel.bin"
+                dependencies.copy_file(artifact, execution_copy)
+                dependencies.set_file_mode(execution_copy, 0o700)
+                dependencies.inspect_path("execution_copy", execution_copy)
+                dependencies.copy_file(artifact, sentinel)
+                dependencies.inspect_path("sentinel", sentinel)
+                getattr(dependencies, "_mark_process_rollback_unproven")()
+                getattr(dependencies, "_mark_process_rollback_proven")()
+
+                with patch.object(
+                    lifecycle_evidence._BoundRunDirectory,
+                    "prepare_preserve_uninstall",
+                    new=prepare,
+                ), patch(
+                    "openusage_bar.bounded_process.run_bounded",
+                    side_effect=bounded_runner,
+                ), patch(
+                    "openusage_bar.platform_services.read_current_user_collector_service_absence_state",
+                    side_effect=read_service_absence,
+                ):
+                    self.assertEqual(
+                        dependencies.run_process(
+                            (
+                                str(execution_copy),
+                                "--usagehub-uninstall",
+                            ),
+                            180.0,
+                        ),
+                        NativeProcessResult(0, b"", b"", False),
+                    )
+                self.assertEqual(
+                    events,
+                    [
+                        "bind",
+                        "bounded",
+                        "bind",
+                        "service1",
+                        "service2",
+                        "bind",
+                    ],
+                )
+                self.assertEqual(service_reads, 2)
+                self.assertFalse(
+                    hasattr(dependencies, "_mark_product_rollback_proven")
+                )
+                self.assertEqual(package.collector.parent, profile.runtime_root)
+
+            self.assertFalse(execution_copy.exists())
+            self.assertFalse(sentinel.exists())
+            self.assertFalse(run_directory.exists())
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_preserve_completion_reproves_socket_absence_after_service_sandwich(
+        self,
+    ) -> None:
+        import subprocess
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from openusage_bar.platform_services import (
+            LinuxCollectorServiceAbsenceState,
+        )
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            state_root = home / ".local" / "state" / "openusage-bar"
+            state_root.mkdir(parents=True)
+            (home / ".local" / "share" / "usagehub").mkdir(parents=True)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact.write_bytes(b"audited preserve race artifact")
+            socket_path = state_root / "openusage.sock"
+            socket_bytes = b"PRIVATE_CONCURRENT_SOCKET_ENTRY"
+            service_absent = LinuxCollectorServiceAbsenceState(
+                unit_missing=True,
+                unit_id="openusage-bar.service",
+                load_state="not-found",
+                active_state="inactive",
+                sub_state="dead",
+                unit_file_state=None,
+                main_pid=0,
+                control_pid=0,
+                job=None,
+                fragment_path=None,
+                drop_in_paths=(),
+                needs_reload=False,
+            )
+            service_reads = 0
+            run_directory: Path | None = None
+            execution_copy: Path | None = None
+            sentinel: Path | None = None
+            before_exit: tuple[tuple[str, int, bytes], ...] = ()
+
+            try:
+                with ExitStack() as stack:
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence.Path.home",
+                            return_value=home,
+                        )
+                    )
+                    dependencies, run_directory, _profile, _package = (
+                        _enter_linux_host_dependencies(stack, authority)
+                    )
+                    execution_copy = run_directory / artifact.name
+                    sentinel = (
+                        run_directory / "outside-product-sentinel.bin"
+                    )
+                    dependencies.copy_file(artifact, execution_copy)
+                    dependencies.set_file_mode(execution_copy, 0o700)
+                    dependencies.inspect_path(
+                        "execution_copy", execution_copy
+                    )
+                    dependencies.copy_file(artifact, sentinel)
+                    dependencies.inspect_path("sentinel", sentinel)
+                    before_exit = _file_snapshot(run_directory)
+                    getattr(
+                        dependencies, "_mark_process_rollback_unproven"
+                    )()
+                    getattr(
+                        dependencies, "_mark_process_rollback_proven"
+                    )()
+
+                    def create_socket_during_second_service_read():
+                        nonlocal service_reads
+                        service_reads += 1
+                        if service_reads == 2:
+                            socket_path.write_bytes(socket_bytes)
+                        return service_absent
+
+                    with patch(
+                        "openusage_bar.bounded_process.run_bounded",
+                        side_effect=lambda argv, **kwargs: (
+                            subprocess.CompletedProcess(argv, 0, b"", b"")
+                        ),
+                    ), patch(
+                        "openusage_bar.platform_services.read_current_user_collector_service_absence_state",
+                        side_effect=create_socket_during_second_service_read,
+                    ):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as concurrent_socket:
+                            dependencies.run_process(
+                                (
+                                    str(execution_copy),
+                                    "--usagehub-uninstall",
+                                ),
+                                180.0,
+                            )
+                    self.assertEqual(service_reads, 2)
+                    self.assertEqual(
+                        str(concurrent_socket.exception), "driver_failed"
+                    )
+                    self.assertNotIn(
+                        "PRIVATE", str(concurrent_socket.exception)
+                    )
+
+                assert run_directory is not None
+                self.assertTrue(run_directory.is_dir())
+                self.assertEqual(_file_snapshot(run_directory), before_exit)
+                self.assertTrue(socket_path.is_file())
+                socket_metadata = socket_path.lstat()
+                self.assertTrue(stat.S_ISREG(socket_metadata.st_mode))
+                self.assertEqual(socket_path.read_bytes(), socket_bytes)
+            finally:
+                if socket_path.exists():
+                    socket_path.unlink()
+                if run_directory is not None and run_directory.exists():
+                    for child in run_directory.iterdir():
+                        child.unlink()
+                    run_directory.rmdir()
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_preserve_completion_reproves_runtime_absence_after_service_sandwich(
+        self,
+    ) -> None:
+        import subprocess
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from openusage_bar.platform_services import (
+            LinuxCollectorServiceAbsenceState,
+        )
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            (home / ".local" / "state" / "openusage-bar").mkdir(
+                parents=True
+            )
+            runtime_parent = home / ".local" / "share" / "usagehub"
+            runtime_parent.mkdir(parents=True)
+            runtime_root = runtime_parent / "runtime"
+            runtime_marker = runtime_root / "PRIVATE_CONCURRENT_RUNTIME"
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact.write_bytes(b"audited preserve runtime race artifact")
+            service_absent = LinuxCollectorServiceAbsenceState(
+                unit_missing=True,
+                unit_id="openusage-bar.service",
+                load_state="not-found",
+                active_state="inactive",
+                sub_state="dead",
+                unit_file_state=None,
+                main_pid=0,
+                control_pid=0,
+                job=None,
+                fragment_path=None,
+                drop_in_paths=(),
+                needs_reload=False,
+            )
+            service_reads = 0
+            run_directory: Path | None = None
+            before_exit: tuple[tuple[str, int, bytes], ...] = ()
+
+            try:
+                with ExitStack() as stack:
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence.Path.home",
+                            return_value=home,
+                        )
+                    )
+                    dependencies, run_directory, profile, package = (
+                        _enter_linux_host_dependencies(stack, authority)
+                    )
+                    self.assertEqual(profile.runtime_root, runtime_root)
+                    self.assertEqual(package.collector.parent, runtime_root)
+                    execution_copy = run_directory / artifact.name
+                    sentinel = (
+                        run_directory / "outside-product-sentinel.bin"
+                    )
+                    dependencies.copy_file(artifact, execution_copy)
+                    dependencies.set_file_mode(execution_copy, 0o700)
+                    dependencies.inspect_path(
+                        "execution_copy", execution_copy
+                    )
+                    dependencies.copy_file(artifact, sentinel)
+                    dependencies.inspect_path("sentinel", sentinel)
+                    before_exit = _file_snapshot(run_directory)
+                    getattr(
+                        dependencies, "_mark_process_rollback_unproven"
+                    )()
+                    getattr(
+                        dependencies, "_mark_process_rollback_proven"
+                    )()
+
+                    def create_runtime_during_second_service_read():
+                        nonlocal service_reads
+                        service_reads += 1
+                        if service_reads == 2:
+                            runtime_root.mkdir(mode=0o700)
+                            runtime_marker.write_bytes(
+                                b"foreign runtime remains"
+                            )
+                        return service_absent
+
+                    with patch(
+                        "openusage_bar.bounded_process.run_bounded",
+                        side_effect=lambda argv, **kwargs: (
+                            subprocess.CompletedProcess(argv, 0, b"", b"")
+                        ),
+                    ), patch(
+                        "openusage_bar.platform_services.read_current_user_collector_service_absence_state",
+                        side_effect=create_runtime_during_second_service_read,
+                    ):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as concurrent_runtime:
+                            dependencies.run_process(
+                                (
+                                    str(execution_copy),
+                                    "--usagehub-uninstall",
+                                ),
+                                180.0,
+                            )
+                    self.assertEqual(service_reads, 2)
+                    self.assertEqual(
+                        str(concurrent_runtime.exception), "driver_failed"
+                    )
+                    self.assertNotIn(
+                        "PRIVATE", str(concurrent_runtime.exception)
+                    )
+
+                assert run_directory is not None
+                self.assertTrue(run_directory.is_dir())
+                self.assertEqual(_file_snapshot(run_directory), before_exit)
+                runtime_metadata = runtime_root.lstat()
+                self.assertTrue(stat.S_ISDIR(runtime_metadata.st_mode))
+                self.assertEqual(
+                    runtime_marker.read_bytes(), b"foreign runtime remains"
+                )
+            finally:
+                if runtime_marker.exists():
+                    runtime_marker.unlink()
+                if runtime_root.exists():
+                    runtime_root.rmdir()
+                if run_directory is not None and run_directory.exists():
+                    for child in run_directory.iterdir():
+                        child.unlink()
+                    run_directory.rmdir()
 
     @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_set_file_mode_promotes_only_the_owned_execution_copy_to_0700(

@@ -1527,8 +1527,10 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     execution-copy, sentinel, mode, removal, and one recopy; authoritative
     profile/package projections; absence-only service, local-listener, and
     ledger facts; and an instantaneous current-netns TCP 17823 absence fact.
-    Generic Gateway state and process/lifecycle callbacks remain unavailable,
-    so the default executor still cannot produce lifecycle evidence.  Random
+    Only the bound preserve-uninstall ``run_process`` transaction is enabled;
+    Generic Gateway state, start/stop, and other lifecycle callbacks remain
+    unavailable, so the default executor still cannot produce lifecycle
+    evidence.  Random
     quarantines and identity rechecks detect observed replacements, but are
     not isolation from a continuously malicious same-UID process after the
     final check.
@@ -2583,7 +2585,8 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         run_directory.remove_path(path)
 
     def run_process(argv: object, timeout: object) -> NativeProcessResult:
-        nonlocal preserve_uninstall_token
+        nonlocal preserve_uninstall_token, product_rollback_unproven
+        invocation_completed = False
         token = preserve_uninstall_token
         preserve_uninstall_token = None
         revoke_runtime_install_absence_fact()
@@ -2641,8 +2644,89 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             )
             if type(completed.returncode) is not int or completed.returncode != 0:
                 _driver_fail()
+            invocation_completed = True
             run_directory.prepare_preserve_uninstall(token)
+            from openusage_bar.platform_services import (
+                LinuxCollectorServiceAbsenceState,
+                read_current_user_collector_service_absence_state,
+            )
+
+            service_absence_before = (
+                read_current_user_collector_service_absence_state()
+            )
+            if profile_home is None:
+                _driver_fail()
+            prove_authoritative_path_absence(
+                anchor=profile_home,
+                relative_components=(
+                    ".local",
+                    "state",
+                    "openusage-bar",
+                ),
+                root_missing=False,
+                entry_names=("openusage.sock",),
+            )
+            (
+                runtime_trusted_root,
+                runtime_parts,
+                _runtime_root,
+            ) = current_runtime_authority()
+            if (
+                profile_projection is None
+                or package_projection is None
+                or _runtime_root != profile_projection.runtime_root
+                or package_projection.collector.parent != _runtime_root
+            ):
+                _driver_fail()
+            prove_authoritative_path_absence(
+                anchor=runtime_trusted_root,
+                relative_components=runtime_parts,
+                root_missing=True,
+                entry_names=(),
+            )
+            service_absence_after = (
+                read_current_user_collector_service_absence_state()
+            )
+            if (
+                type(service_absence_before)
+                is not LinuxCollectorServiceAbsenceState
+                or type(service_absence_after)
+                is not LinuxCollectorServiceAbsenceState
+                or service_absence_after != service_absence_before
+            ):
+                _driver_fail()
+            prove_authoritative_path_absence(
+                anchor=profile_home,
+                relative_components=(
+                    ".local",
+                    "state",
+                    "openusage-bar",
+                ),
+                root_missing=False,
+                entry_names=("openusage.sock",),
+            )
+            (
+                final_runtime_trusted_root,
+                final_runtime_parts,
+                final_runtime_root,
+            ) = current_runtime_authority()
+            if (
+                final_runtime_root != _runtime_root
+                or final_runtime_trusted_root != runtime_trusted_root
+                or final_runtime_parts != runtime_parts
+            ):
+                _driver_fail()
+            prove_authoritative_path_absence(
+                anchor=final_runtime_trusted_root,
+                relative_components=final_runtime_parts,
+                root_missing=True,
+                entry_names=(),
+            )
+            run_directory.prepare_preserve_uninstall(token)
+            product_rollback_unproven = False
         except LifecycleEvidenceError:
+            if invocation_completed:
+                _driver_fail()
             raise
         except Exception:
             _driver_fail()
