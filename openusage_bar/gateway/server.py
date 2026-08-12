@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol
 
 from ..windows_file_security import native_windows_file_security
+from .egress import gateway_egress_attempt_counters
 
 
 MAX_BODY_BYTES = 4 * 1024 * 1024
@@ -36,6 +37,7 @@ DEFAULT_REQUEST_DEADLINE = 15.0
 RUNTIME_CAPABILITY_MEDIA_TYPE = (
     "application/vnd.openusage.runtime-capability+json"
 )
+_EGRESS_DIAGNOSTIC_PATH = "/_internal/v1/gateway-egress-attempts"
 _CONTROL = frozenset(range(0x20)) | {0x7F}
 _HEADER_NAME_BYTES = frozenset(
     b"!#$%&'*+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ^_`abcdefghijklmnopqrstuvwxyz|~"
@@ -652,8 +654,27 @@ class _GatewayHandler(BaseHTTPRequestHandler):
                 False,
             )
             return
+        if self.path == _EGRESS_DIAGNOSTIC_PATH and self.command != "GET":
+            self._send_problem(
+                HTTPStatus.METHOD_NOT_ALLOWED,
+                "method_not_allowed",
+                "Method is not allowed.",
+                False,
+            )
+            return
         try:
-            if (
+            if self.command == "GET" and self.path == _EGRESS_DIAGNOSTIC_PATH:
+                counters = gateway_egress_attempt_counters()
+                status = HTTPStatus.OK
+                payload = {
+                    "apiVersion": "gateway-internal-diagnostics/v1",
+                    "object": "gateway.egressAttempts",
+                    "providerNetworkAttempts": counters.provider_network_attempts,
+                    "providerCredentialReadAttempts": (
+                        counters.provider_credential_read_attempts
+                    ),
+                }
+            elif (
                 self.command == "GET"
                 and self.path == "/gateway/v1/health"
                 and self._accepts_runtime_capability()

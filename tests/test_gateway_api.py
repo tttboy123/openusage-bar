@@ -161,6 +161,87 @@ def request(
 
 
 class GatewayRouterTests(unittest.TestCase):
+    def test_internal_egress_counters_require_bearer_and_never_expand_public_routes(
+        self,
+    ) -> None:
+        from openusage_bar.gateway.egress import gateway_egress_attempt_counters
+
+        target = "/_internal/v1/gateway-egress-attempts"
+        router = GatewayRouter(mode=GatewayMode.OBSERVE, policy=None, proxy=None)
+        direct_status, direct_payload = router.dispatch("GET", target, b"")
+        self.assertEqual(direct_status, 404)
+        assert_problem(self, direct_payload, "not_found", False)
+        expected = gateway_egress_attempt_counters()
+
+        with tempfile.TemporaryDirectory() as directory:
+            server = create_gateway_server(
+                router,
+                port=0,
+                bearer_token=GATEWAY_TOKEN,
+                token_path=Path(directory) / "gateway.token",
+            )
+            thread = start(server)
+            port = server.server_address[1]
+            try:
+                status, _, unauthorized = request(
+                    port,
+                    GATEWAY_TOKEN,
+                    target,
+                    authorize=False,
+                )
+                self.assertEqual(status, 401)
+                assert_problem(
+                    self, unauthorized, "authentication_required", False
+                )
+                status, headers, payload = request(port, GATEWAY_TOKEN, target)
+                wrong_method, _, wrong_method_payload = request(
+                    port,
+                    GATEWAY_TOKEN,
+                    target,
+                    method="POST",
+                    payload=b"{}",
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(wrong_method, 405)
+        assert_problem(
+            self,
+            wrong_method_payload,
+            "method_not_allowed",
+            False,
+        )
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertEqual(
+            payload,
+            {
+                "apiVersion": "gateway-internal-diagnostics/v1",
+                "object": "gateway.egressAttempts",
+                "providerNetworkAttempts": expected.provider_network_attempts,
+                "providerCredentialReadAttempts": (
+                    expected.provider_credential_read_attempts
+                ),
+            },
+        )
+        self.assertEqual(
+            set(payload),
+            {
+                "apiVersion",
+                "object",
+                "providerNetworkAttempts",
+                "providerCredentialReadAttempts",
+            },
+        )
+        schema = json.loads(
+            (ROOT / "openusage_bar/resources/gateway-api-v1.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertNotIn(target, json.dumps(schema))
+
     def test_health_exposes_only_mode_accurate_public_capabilities(self) -> None:
         cases = (
             (GatewayMode.OBSERVE, policy, proxy, "disabled", False, False),
