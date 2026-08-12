@@ -5855,6 +5855,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             ["copy_file", "remove_path"],
         )
 
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_executor_preserves_the_private_run_directory_when_started_process_rollback_is_unproven(
         self,
     ) -> None:
@@ -9346,6 +9347,92 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
             self.assertFalse(output.exists())
             self.assertNotIn(str(root), str(raised.exception))
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_default_host_factory_owns_failed_baseline_cleanup(self) -> None:
+        import scripts.native_lifecycle_evidence as lifecycle_evidence
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            generate_lifecycle_evidence,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact.write_bytes(b"audited default-host artifact")
+            output = root / "native-lifecycle-report.json"
+            cleanup_paths: list[Path] = []
+            driver_remove_paths: list[Path] = []
+            real_cleanup = lifecycle_evidence._BoundRunDirectory.cleanup
+            real_remove_path = lifecycle_evidence._BoundRunDirectory.remove_path
+
+            def tracked_cleanup(bound) -> None:
+                cleanup_paths.append(bound.path)
+                real_cleanup(bound)
+
+            def tracked_remove_path(bound, path) -> None:
+                driver_remove_paths.append(path)
+                real_remove_path(bound, path)
+
+            def unavailable_gateway_baseline() -> None:
+                raise LifecycleEvidenceError("driver_unavailable")
+
+            with (
+                patch.object(lifecycle_evidence.sys, "platform", "linux"),
+                patch.object(
+                    lifecycle_evidence.host_platform_module,
+                    "machine",
+                    return_value="x86_64",
+                ),
+                patch.object(
+                    LifecycleStatePaths,
+                    "for_current_user",
+                    return_value=authority,
+                ),
+                patch.object(lifecycle_evidence.Path, "home", return_value=home),
+                patch.dict(os.environ, {}, clear=True),
+                patch(
+                    "openusage_bar.platform_services.service_is_registered",
+                    return_value=False,
+                ),
+                patch.object(
+                    lifecycle_evidence,
+                    "_prove_linux_default_gateway_endpoint_absent",
+                    side_effect=unavailable_gateway_baseline,
+                ),
+                patch.object(
+                    lifecycle_evidence._BoundRunDirectory,
+                    "cleanup",
+                    new=tracked_cleanup,
+                ),
+                patch.object(
+                    lifecycle_evidence._BoundRunDirectory,
+                    "remove_path",
+                    new=tracked_remove_path,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_unavailable"
+                ) as unavailable:
+                    generate_lifecycle_evidence(
+                        platform="linux",
+                        arch="x64",
+                        artifact=artifact,
+                        source_commit=SOURCE_COMMIT,
+                        output=output,
+                    )
+
+            self.assertEqual(str(unavailable.exception), "driver_unavailable")
+            self.assertNotIn(str(root), str(unavailable.exception))
+            self.assertEqual(len(cleanup_paths), 1)
+            self.assertFalse(cleanup_paths[0].exists())
+            self.assertEqual(driver_remove_paths, [])
+            self.assertFalse(output.exists())
 
     def test_validator_rejects_a_failed_lifecycle_check(self) -> None:
         from scripts.native_lifecycle_evidence import (
