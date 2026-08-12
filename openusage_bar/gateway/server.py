@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol
 
 from ..windows_file_security import native_windows_file_security
-from .egress import gateway_egress_attempt_counters
+from .egress import GatewayEgressAttemptCounters, gateway_egress_attempt_counters
 
 
 MAX_BODY_BYTES = 4 * 1024 * 1024
@@ -1091,4 +1091,168 @@ def create_gateway_server(
     )
 
 
-__all__ = ["GatewayHTTPServer", "create_gateway_server"]
+def read_gateway_egress_attempt_counters(
+    *,
+    port: int,
+    bearer_token: str,
+) -> GatewayEgressAttemptCounters:
+    """Read one authenticated, bounded private Gateway counter snapshot."""
+
+    if (
+        type(port) is not int
+        or not 1 <= port <= 65535
+        or type(bearer_token) is not str
+    ):
+        raise RuntimeError("Gateway egress counters unavailable")
+    client: socket.socket | None = None
+    result: GatewayEgressAttemptCounters | None = None
+    failed = False
+    try:
+        token = _validate_token(bearer_token)
+        started_raw = time.monotonic()
+        if (
+            type(started_raw) not in {int, float}
+            or not math.isfinite(started_raw)
+            or started_raw < 0
+        ):
+            raise RuntimeError
+        started = float(started_raw)
+        deadline = started + 2.0
+        if not math.isfinite(deadline):
+            raise RuntimeError
+        last_clock = started
+
+        def remaining_timeout() -> float:
+            nonlocal last_clock
+            current_raw = time.monotonic()
+            if (
+                type(current_raw) not in {int, float}
+                or not math.isfinite(current_raw)
+                or current_raw < last_clock
+            ):
+                raise RuntimeError
+            current = float(current_raw)
+            last_clock = current
+            remaining = deadline - current
+            if not math.isfinite(remaining) or remaining <= 0.0:
+                raise RuntimeError
+            return min(1.0, remaining)
+
+        client = socket.create_connection(
+            ("127.0.0.1", port),
+            timeout=remaining_timeout(),
+        )
+        request = (
+            f"GET {_EGRESS_DIAGNOSTIC_PATH} HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{port}\r\n"
+            "Accept: application/json\r\n"
+            f"Authorization: Bearer {token}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii")
+        client.settimeout(remaining_timeout())
+        client.sendall(request)
+        response = bytearray()
+        while True:
+            client.settimeout(remaining_timeout())
+            chunk = client.recv(8192)
+            if type(chunk) is not bytes:
+                raise RuntimeError
+            if not chunk:
+                break
+            response.extend(chunk)
+            if len(response) > 20_480:
+                raise RuntimeError
+        remaining_timeout()
+        payload_bytes = _parse_gateway_egress_counter_response(bytes(response))
+        payload = json.loads(
+            payload_bytes.decode("utf-8", "strict"),
+            object_pairs_hook=_unique_json_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
+        )
+        if (
+            type(payload) is not dict
+            or set(payload)
+            != {
+                "apiVersion",
+                "object",
+                "providerNetworkAttempts",
+                "providerCredentialReadAttempts",
+            }
+            or payload["apiVersion"] != "gateway-internal-diagnostics/v1"
+            or payload["object"] != "gateway.egressAttempts"
+        ):
+            raise RuntimeError
+        result = GatewayEgressAttemptCounters(
+            payload["providerNetworkAttempts"],
+            payload["providerCredentialReadAttempts"],
+        )
+    except Exception:
+        failed = True
+    finally:
+        try:
+            if client is not None:
+                client.close()
+        except Exception:
+            failed = True
+    if failed or result is None:
+        raise RuntimeError("Gateway egress counters unavailable") from None
+    return result
+
+
+def _parse_gateway_egress_counter_response(response: bytes) -> bytes:
+    if type(response) is not bytes or len(response) > 20_480:
+        raise RuntimeError
+    separator = response.find(b"\r\n\r\n")
+    if separator < 0 or separator > 16_384:
+        raise RuntimeError
+    try:
+        lines = response[:separator].decode("ascii", "strict").split("\r\n")
+    except UnicodeDecodeError:
+        raise RuntimeError from None
+    if not lines or len(lines) > 65 or lines[0] != "HTTP/1.1 200 OK":
+        raise RuntimeError
+    headers: dict[str, str] = {}
+    for line in lines[1:]:
+        if ":" not in line:
+            raise RuntimeError
+        name, value = line.split(":", 1)
+        normalized = name.strip().casefold()
+        if not normalized or normalized in headers:
+            raise RuntimeError
+        headers[normalized] = value.strip()
+    length = headers.get("content-length")
+    if (
+        "transfer-encoding" in headers
+        or length is None
+        or not length.isascii()
+        or not length.isdecimal()
+        or length != str(int(length))
+        or headers.get("content-type")
+        != "application/json; charset=utf-8"
+        or headers.get("cache-control") != "no-store"
+        or headers.get("x-content-type-options") != "nosniff"
+        or headers.get("connection", "").casefold() != "close"
+    ):
+        raise RuntimeError
+    body = response[separator + 4 :]
+    if int(length) != len(body) or len(body) > 4096:
+        raise RuntimeError
+    return body
+
+
+def _unique_json_object(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError
+        result[key] = value
+    return result
+
+
+__all__ = [
+    "GatewayHTTPServer",
+    "create_gateway_server",
+    "read_gateway_egress_attempt_counters",
+]

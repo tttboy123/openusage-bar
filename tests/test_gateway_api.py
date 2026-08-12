@@ -164,7 +164,11 @@ class GatewayRouterTests(unittest.TestCase):
     def test_internal_egress_counters_require_bearer_and_never_expand_public_routes(
         self,
     ) -> None:
-        from openusage_bar.gateway.egress import gateway_egress_attempt_counters
+        from openusage_bar.gateway.egress import (
+            GatewayEgressAttemptCounters,
+            gateway_egress_attempt_counters,
+        )
+        from openusage_bar.gateway.server import read_gateway_egress_attempt_counters
 
         target = "/_internal/v1/gateway-egress-attempts"
         router = GatewayRouter(mode=GatewayMode.OBSERVE, policy=None, proxy=None)
@@ -194,6 +198,52 @@ class GatewayRouterTests(unittest.TestCase):
                     self, unauthorized, "authentication_required", False
                 )
                 status, headers, payload = request(port, GATEWAY_TOKEN, target)
+                observed = read_gateway_egress_attempt_counters(
+                    port=port,
+                    bearer_token=GATEWAY_TOKEN,
+                )
+                real_create_connection = socket.create_connection
+
+                class CloseFailureSocket:
+                    def __init__(self, wrapped: socket.socket) -> None:
+                        self.wrapped = wrapped
+
+                    def __getattr__(self, name: str) -> object:
+                        return getattr(self.wrapped, name)
+
+                    def close(self) -> None:
+                        self.wrapped.close()
+                        raise OSError("PRIVATE_CLOSE_FAILURE")
+
+                def create_close_failure(
+                    address: tuple[str, int],
+                    timeout: float,
+                ) -> CloseFailureSocket:
+                    return CloseFailureSocket(
+                        real_create_connection(address, timeout=timeout)
+                    )
+
+                with patch.object(
+                    gateway_server_module.socket,
+                    "create_connection",
+                    side_effect=create_close_failure,
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Gateway egress counters unavailable",
+                    ) as close_unavailable:
+                        read_gateway_egress_attempt_counters(
+                            port=port,
+                            bearer_token=GATEWAY_TOKEN,
+                        )
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Gateway egress counters unavailable",
+                ) as unavailable:
+                    read_gateway_egress_attempt_counters(
+                        port=port,
+                        bearer_token="x" * 48,
+                    )
                 wrong_method, _, wrong_method_payload = request(
                     port,
                     GATEWAY_TOKEN,
@@ -207,6 +257,23 @@ class GatewayRouterTests(unittest.TestCase):
                 thread.join(2)
 
         self.assertEqual(status, 200)
+        self.assertEqual(
+            str(unavailable.exception),
+            "Gateway egress counters unavailable",
+        )
+        self.assertNotIn("x" * 48, repr(unavailable.exception))
+        self.assertEqual(
+            str(close_unavailable.exception),
+            "Gateway egress counters unavailable",
+        )
+        self.assertNotIn("PRIVATE_CLOSE_FAILURE", repr(close_unavailable.exception))
+        self.assertEqual(
+            observed,
+            GatewayEgressAttemptCounters(
+                expected.provider_network_attempts,
+                expected.provider_credential_read_attempts,
+            ),
+        )
         self.assertEqual(wrong_method, 405)
         assert_problem(
             self,
@@ -241,6 +308,205 @@ class GatewayRouterTests(unittest.TestCase):
             )
         )
         self.assertNotIn(target, json.dumps(schema))
+
+    def test_gateway_egress_counter_reader_rejects_wrong_media_type(self) -> None:
+        from openusage_bar.gateway.server import read_gateway_egress_attempt_counters
+
+        payload = json.dumps(
+            {
+                "apiVersion": "gateway-internal-diagnostics/v1",
+                "object": "gateway.egressAttempts",
+                "providerNetworkAttempts": 0,
+                "providerCredentialReadAttempts": 0,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+
+        def serve_once() -> None:
+            client, _ = listener.accept()
+            try:
+                client.recv(4096)
+                client.sendall(
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: text/plain\r\n"
+                    + f"Content-Length: {len(payload)}\r\n".encode("ascii")
+                    + b"Cache-Control: no-store\r\n"
+                    b"X-Content-Type-Options: nosniff\r\n"
+                    b"Connection: close\r\n\r\n"
+                    + payload
+                )
+            finally:
+                client.close()
+                listener.close()
+
+        thread = threading.Thread(target=serve_once, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Gateway egress counters unavailable",
+            ):
+                read_gateway_egress_attempt_counters(
+                    port=port,
+                    bearer_token=GATEWAY_TOKEN,
+                )
+        finally:
+            thread.join(2)
+
+    def test_gateway_egress_counter_reader_rejects_ambiguous_framing(self) -> None:
+        from openusage_bar.gateway.server import read_gateway_egress_attempt_counters
+
+        payload = json.dumps(
+            {
+                "apiVersion": "gateway-internal-diagnostics/v1",
+                "object": "gateway.egressAttempts",
+                "providerNetworkAttempts": 0,
+                "providerCredentialReadAttempts": 0,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+
+        def serve_once() -> None:
+            client, _ = listener.accept()
+            try:
+                client.recv(4096)
+                client.sendall(
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: application/json; charset=utf-8\r\n"
+                    + f"Content-Length: {len(payload)}\r\n".encode("ascii")
+                    + f"Content-Length: {len(payload)}\r\n".encode("ascii")
+                    + b"Cache-Control: no-store\r\n"
+                    b"X-Content-Type-Options: nosniff\r\n"
+                    b"Connection: close\r\n\r\n"
+                    + payload
+                )
+            finally:
+                client.close()
+                listener.close()
+
+        thread = threading.Thread(target=serve_once, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Gateway egress counters unavailable",
+            ):
+                read_gateway_egress_attempt_counters(
+                    port=port,
+                    bearer_token=GATEWAY_TOKEN,
+                )
+        finally:
+            thread.join(2)
+
+    def test_gateway_egress_counter_reader_has_one_absolute_deadline(self) -> None:
+        from openusage_bar.gateway.server import read_gateway_egress_attempt_counters
+
+        payload = json.dumps(
+            {
+                "apiVersion": "gateway-internal-diagnostics/v1",
+                "object": "gateway.egressAttempts",
+                "providerNetworkAttempts": 0,
+                "providerCredentialReadAttempts": 0,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        headers = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: application/json; charset=utf-8\r\n"
+            + f"Content-Length: {len(payload)}\r\n".encode("ascii")
+            + b"Cache-Control: no-store\r\n"
+            b"X-Content-Type-Options: nosniff\r\n"
+            b"Connection: close\r\n\r\n"
+        )
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+
+        def serve_slowly() -> None:
+            client, _ = listener.accept()
+            try:
+                client.recv(4096)
+                time.sleep(1.05)
+                client.sendall(headers)
+                time.sleep(1.05)
+                try:
+                    client.sendall(payload)
+                except BrokenPipeError:
+                    pass
+            finally:
+                client.close()
+                listener.close()
+
+        thread = threading.Thread(target=serve_slowly, daemon=True)
+        thread.start()
+        started = time.monotonic()
+        try:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Gateway egress counters unavailable",
+            ):
+                read_gateway_egress_attempt_counters(
+                    port=port,
+                    bearer_token=GATEWAY_TOKEN,
+                )
+        finally:
+            thread.join(3)
+        self.assertLess(time.monotonic() - started, 2.5)
+
+    def test_gateway_egress_counter_reader_rejects_clock_regression(self) -> None:
+        from openusage_bar.gateway.server import read_gateway_egress_attempt_counters
+
+        created: list[object] = []
+
+        class FakeSocket:
+            def __init__(self) -> None:
+                self.closed = False
+                created.append(self)
+
+            def settimeout(self, _timeout: float) -> None:
+                return None
+
+            def sendall(self, _request: bytes) -> None:
+                return None
+
+            def recv(self, _size: int) -> bytes:
+                return b""
+
+            def close(self) -> None:
+                self.closed = True
+
+        clock = iter((100.0, 99.0))
+        with (
+            patch.object(
+                gateway_server_module.time,
+                "monotonic",
+                side_effect=lambda: next(clock),
+            ),
+            patch.object(
+                gateway_server_module.socket,
+                "create_connection",
+                side_effect=lambda *_args, **_kwargs: FakeSocket(),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Gateway egress counters unavailable",
+            ):
+                read_gateway_egress_attempt_counters(
+                    port=17823,
+                    bearer_token=GATEWAY_TOKEN,
+                )
+
+        self.assertEqual(created, [])
 
     def test_health_exposes_only_mode_accurate_public_capabilities(self) -> None:
         cases = (
