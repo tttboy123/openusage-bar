@@ -1960,6 +1960,302 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             self.assertFalse(run_directory.exists())
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_delete_data_runs_only_for_the_second_bound_execution_generation(
+        self,
+    ) -> None:
+        import subprocess
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from openusage_bar.platform_services import (
+            LinuxCollectorServiceAbsenceState,
+        )
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativeProcessResult,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            state_root = home / ".local" / "state" / "openusage-bar"
+            config_root = home / ".config" / "openusage-bar"
+            runtime_parent = home / ".local" / "share" / "usagehub"
+            state_root.mkdir(parents=True)
+            config_root.mkdir(parents=True)
+            runtime_parent.mkdir(parents=True)
+            (state_root / "activity.sqlite3").write_bytes(b"PRIVATE_LEDGER")
+            (config_root / "settings.json").write_bytes(b"PRIVATE_CONFIG")
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact.write_bytes(b"audited delete-data artifact")
+            service_absent = LinuxCollectorServiceAbsenceState(
+                unit_missing=True,
+                unit_id="openusage-bar.service",
+                load_state="not-found",
+                active_state="inactive",
+                sub_state="dead",
+                unit_file_state=None,
+                main_pid=0,
+                control_pid=0,
+                job=None,
+                fragment_path=None,
+                drop_in_paths=(),
+                needs_reload=False,
+                manager_executable_authority="live-inode",
+            )
+            runner_calls: list[tuple[str, ...]] = []
+            events: list[str] = []
+
+            with ExitStack() as stack:
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.Path.home",
+                        return_value=home,
+                    )
+                )
+                dependencies, run_directory, profile, package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                execution_copy = run_directory / artifact.name
+                sentinel = run_directory / "outside-product-sentinel.bin"
+                dependencies.copy_file(artifact, execution_copy)
+                dependencies.set_file_mode(execution_copy, 0o700)
+                dependencies.copy_file(artifact, sentinel)
+                dependencies.remove_path(execution_copy)
+                dependencies.copy_file(artifact, execution_copy)
+                dependencies.set_file_mode(execution_copy, 0o700)
+                before = _file_snapshot(run_directory)
+                delete_argv = (
+                    str(execution_copy),
+                    "--usagehub-uninstall",
+                    "--delete-data",
+                )
+
+                def bounded_runner(argv, *, timeout, **kwargs):
+                    runner_calls.append(tuple(argv))
+                    events.append("bounded")
+                    self.assertRegex(argv[0], r"\A/proc/self/fd/[0-9]+\Z")
+                    self.assertEqual(
+                        argv[1:],
+                        ("--usagehub-uninstall", "--delete-data"),
+                    )
+                    self.assertEqual(timeout, 180.0)
+                    self.assertEqual(kwargs["shell"], False)
+                    self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+                    self.assertEqual(kwargs["stdout"], subprocess.DEVNULL)
+                    self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
+                    self.assertEqual(kwargs["check"], False)
+                    self.assertEqual(
+                        kwargs["env"],
+                        {
+                            "HOME": str(home),
+                            "PATH": "/usr/bin:/bin",
+                            "LANG": "C",
+                            "LC_ALL": "C",
+                            "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
+                        },
+                    )
+                    self.assertEqual(
+                        kwargs["pass_fds"],
+                        (int(argv[0].rsplit("/", 1)[1]),),
+                    )
+                    (state_root / "activity.sqlite3").unlink()
+                    state_root.rmdir()
+                    (config_root / "settings.json").unlink()
+                    config_root.rmdir()
+                    return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+                def read_service_absence():
+                    events.append("service")
+                    return service_absent
+
+                with patch(
+                    "openusage_bar.bounded_process.run_bounded",
+                    side_effect=bounded_runner,
+                ), patch(
+                    "openusage_bar.platform_services.read_current_user_collector_service_absence_state",
+                    side_effect=read_service_absence,
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ):
+                        dependencies.run_process(delete_argv, 180.0)
+                    self.assertEqual(runner_calls, [])
+                    self.assertEqual(_file_snapshot(run_directory), before)
+
+                    getattr(dependencies, "_mark_process_rollback_unproven")()
+                    getattr(dependencies, "_mark_process_rollback_proven")()
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ):
+                        dependencies.run_process(
+                            (
+                                str(execution_copy),
+                                "--usagehub-uninstall",
+                            ),
+                            180.0,
+                        )
+                    self.assertEqual(runner_calls, [])
+
+                    getattr(dependencies, "_mark_process_rollback_unproven")()
+                    getattr(dependencies, "_mark_process_rollback_proven")()
+                    self.assertEqual(
+                        dependencies.run_process(delete_argv, 180.0),
+                        NativeProcessResult(0, b"", b"", False),
+                    )
+
+                self.assertEqual(events, ["bounded", "service", "service"])
+                self.assertEqual(len(runner_calls), 1)
+                self.assertEqual(package.collector.parent, profile.runtime_root)
+                self.assertFalse(state_root.exists())
+                self.assertFalse(config_root.exists())
+
+            self.assertFalse(execution_copy.exists())
+            self.assertFalse(sentinel.exists())
+            self.assertFalse(run_directory.exists())
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_delete_data_reproves_all_roots_after_service_sandwich(
+        self,
+    ) -> None:
+        import subprocess
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from openusage_bar.platform_services import (
+            LinuxCollectorServiceAbsenceState,
+        )
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        for selected_root in ("state", "config", "runtime"):
+            with self.subTest(root=selected_root), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._assert_linux_delete_data_rejects_recreated_root(
+                    root=root,
+                    selected_root=selected_root,
+                    authority_type=LifecycleStatePaths,
+                    service_absence_type=LinuxCollectorServiceAbsenceState,
+                    lifecycle_error_type=LifecycleEvidenceError,
+                    subprocess_module=subprocess,
+                )
+
+    def _assert_linux_delete_data_rejects_recreated_root(
+        self,
+        *,
+        root: Path,
+        selected_root: str,
+        authority_type,
+        service_absence_type,
+        lifecycle_error_type,
+        subprocess_module,
+    ) -> None:
+            home = root / "authoritative-home"
+            state_parent = home / ".local" / "state"
+            config_parent = home / ".config"
+            runtime_parent = home / ".local" / "share" / "usagehub"
+            state_parent.mkdir(parents=True)
+            config_parent.mkdir(parents=True)
+            runtime_parent.mkdir(parents=True)
+            authority = authority_type(platform="linux", home=home)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact.write_bytes(b"audited delete-data race artifact")
+            service_absent = service_absence_type(
+                unit_missing=True,
+                unit_id="openusage-bar.service",
+                load_state="not-found",
+                active_state="inactive",
+                sub_state="dead",
+                unit_file_state=None,
+                main_pid=0,
+                control_pid=0,
+                job=None,
+                fragment_path=None,
+                drop_in_paths=(),
+                needs_reload=False,
+                manager_executable_authority="live-inode",
+            )
+            run_directory: Path | None = None
+            recreated = {
+                "state": state_parent / "openusage-bar",
+                "config": config_parent / "openusage-bar",
+                "runtime": runtime_parent / "runtime",
+            }[selected_root]
+            marker = recreated / "PRIVATE_MARKER"
+            service_reads = 0
+
+            try:
+                with ExitStack() as stack:
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence.Path.home",
+                            return_value=home,
+                        )
+                    )
+                    dependencies, run_directory, _profile, _package = (
+                        _enter_linux_host_dependencies(stack, authority)
+                    )
+                    execution_copy = run_directory / artifact.name
+                    sentinel = run_directory / "outside-product-sentinel.bin"
+                    dependencies.copy_file(artifact, execution_copy)
+                    dependencies.set_file_mode(execution_copy, 0o700)
+                    dependencies.copy_file(artifact, sentinel)
+                    dependencies.remove_path(execution_copy)
+                    dependencies.copy_file(artifact, execution_copy)
+                    dependencies.set_file_mode(execution_copy, 0o700)
+                    before = _file_snapshot(run_directory)
+                    getattr(dependencies, "_mark_process_rollback_unproven")()
+                    getattr(dependencies, "_mark_process_rollback_proven")()
+
+                    def bounded_runner(argv, **kwargs):
+                        del kwargs
+                        return subprocess_module.CompletedProcess(
+                            argv, 0, b"", b""
+                        )
+
+                    def recreate_state_after_second_service_read():
+                        nonlocal service_reads
+                        service_reads += 1
+                        if service_reads == 2:
+                            recreated.mkdir()
+                            marker.write_bytes(b"PRIVATE_CONCURRENT_STATE")
+                        return service_absent
+
+                    with patch(
+                        "openusage_bar.bounded_process.run_bounded",
+                        side_effect=bounded_runner,
+                    ), patch(
+                        "openusage_bar.platform_services.read_current_user_collector_service_absence_state",
+                        side_effect=recreate_state_after_second_service_read,
+                    ):
+                        with self.assertRaisesRegex(
+                            lifecycle_error_type, "driver_failed"
+                        ) as failed:
+                            dependencies.run_process(
+                                (
+                                    str(execution_copy),
+                                    "--usagehub-uninstall",
+                                    "--delete-data",
+                                ),
+                                180.0,
+                            )
+                    self.assertEqual(service_reads, 2)
+                    self.assertEqual(str(failed.exception), "driver_failed")
+                    self.assertNotIn("PRIVATE", str(failed.exception))
+
+                assert run_directory is not None
+                self.assertTrue(run_directory.is_dir())
+                self.assertEqual(_file_snapshot(run_directory), before)
+                self.assertEqual(marker.read_bytes(), b"PRIVATE_CONCURRENT_STATE")
+            finally:
+                if marker.exists():
+                    marker.unlink()
+                if recreated.exists():
+                    recreated.rmdir()
+                if run_directory is not None and run_directory.exists():
+                    for child in run_directory.iterdir():
+                        child.unlink()
+                    run_directory.rmdir()
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_preserve_completion_reproves_socket_absence_after_service_sandwich(
         self,
     ) -> None:

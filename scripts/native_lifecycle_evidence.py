@@ -1527,10 +1527,10 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     execution-copy, sentinel, mode, removal, and one recopy; authoritative
     profile/package projections; absence-only service, local-listener, and
     ledger facts; and an instantaneous current-netns TCP 17823 absence fact.
-    Only the bound preserve-uninstall ``run_process`` transaction is enabled;
-    Generic Gateway state, start/stop, and other lifecycle callbacks remain
-    unavailable, so the default executor still cannot produce lifecycle
-    evidence.  Random
+    Only the bound preserve and second-generation delete-data ``run_process``
+    transactions are enabled; Generic Gateway state, start/stop, and other
+    lifecycle callbacks remain unavailable, so the default executor still
+    cannot produce lifecycle evidence.  Random
     quarantines and identity rechecks detect observed replacements, but are
     not isolation from a continuously malicious same-UID process after the
     final check.
@@ -2596,18 +2596,29 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         execution = run_directory.execution_copy
         if execution is None:
             _driver_fail()
-        expected = (
+        preserve_request = (
             str(run_directory.path / execution.name),
             "--usagehub-uninstall",
         )
+        delete_request = preserve_request + ("--delete-data",)
         if (
             type(argv) is not tuple
-            or len(argv) != 2
             or any(type(value) is not str for value in argv)
-            or argv[0] != expected[0]
-            or argv[1] != expected[1]
             or type(timeout) is not float
             or timeout != 180.0
+        ):
+            _driver_fail()
+        if argv == preserve_request:
+            expected_generation = 1
+        elif argv == delete_request:
+            expected_generation = 2
+        else:
+            _driver_fail()
+        if (
+            type(token) is not tuple
+            or not token
+            or type(token[0]) is not int
+            or token[0] != expected_generation
         ):
             _driver_fail()
         current_runtime_authority()
@@ -2632,7 +2643,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             from openusage_bar.bounded_process import run_bounded
 
             completed = run_bounded(
-                (held_executable, "--usagehub-uninstall"),
+                (held_executable, *argv[1:]),
                 timeout=180.0,
                 shell=False,
                 stdin=subprocess.DEVNULL,
@@ -2656,16 +2667,49 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             )
             if profile_home is None:
                 _driver_fail()
-            prove_authoritative_path_absence(
-                anchor=profile_home,
-                relative_components=(
-                    ".local",
-                    "state",
-                    "openusage-bar",
-                ),
-                root_missing=False,
-                entry_names=("openusage.sock",),
-            )
+
+            def prove_product_paths_absent() -> None:
+                try:
+                    configured_xdg_config_after = os.environ.get(
+                        "XDG_CONFIG_HOME"
+                    )
+                except Exception:
+                    _fail("driver_unavailable")
+                if configured_xdg_config_after not in {None, ""}:
+                    _fail("driver_unavailable")
+                if expected_generation == 1:
+                    prove_authoritative_path_absence(
+                        anchor=profile_home,
+                        relative_components=(
+                            ".local",
+                            "state",
+                            "openusage-bar",
+                        ),
+                        root_missing=False,
+                        entry_names=("openusage.sock",),
+                    )
+                else:
+                    prove_authoritative_path_absence(
+                        anchor=profile_home,
+                        relative_components=(
+                            ".local",
+                            "state",
+                            "openusage-bar",
+                        ),
+                        root_missing=True,
+                        entry_names=(),
+                    )
+                    prove_authoritative_path_absence(
+                        anchor=profile_home,
+                        relative_components=(
+                            ".config",
+                            "openusage-bar",
+                        ),
+                        root_missing=True,
+                        entry_names=(),
+                    )
+
+            prove_product_paths_absent()
             (
                 runtime_trusted_root,
                 runtime_parts,
@@ -2695,16 +2739,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                 or service_absence_after != service_absence_before
             ):
                 _driver_fail()
-            prove_authoritative_path_absence(
-                anchor=profile_home,
-                relative_components=(
-                    ".local",
-                    "state",
-                    "openusage-bar",
-                ),
-                root_missing=False,
-                entry_names=("openusage.sock",),
-            )
+            prove_product_paths_absent()
             (
                 final_runtime_trusted_root,
                 final_runtime_parts,
