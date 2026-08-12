@@ -161,6 +161,109 @@ def request(
 
 
 class GatewayRouterTests(unittest.TestCase):
+    def test_private_gateway_health_reader_accepts_only_exact_advise_fact(self) -> None:
+        from openusage_bar.gateway.server import (
+            GatewayAdviseHealthState,
+            read_gateway_advise_health_state,
+        )
+
+        router = GatewayRouter(mode=GatewayMode.ADVISE, policy=policy, proxy=None)
+        with tempfile.TemporaryDirectory() as directory:
+            server = create_gateway_server(
+                router,
+                port=0,
+                bearer_token=GATEWAY_TOKEN,
+                token_path=Path(directory) / "gateway.token",
+            )
+            thread = start(server)
+            port = server.server_address[1]
+            try:
+                observed = read_gateway_advise_health_state(
+                    port=port,
+                    bearer_token=GATEWAY_TOKEN,
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
+        self.assertEqual(
+            observed,
+            GatewayAdviseHealthState(
+                api_version="gateway.openusage/v1",
+                status="ok",
+                mode="advise",
+                should_send=True,
+                responses=False,
+            ),
+        )
+
+        class HostileString(str):
+            def __eq__(self, _other: object) -> bool:
+                raise AssertionError("PRIVATE_HEALTH_STRING")
+
+            def __ne__(self, _other: object) -> bool:
+                raise AssertionError("PRIVATE_HEALTH_STRING")
+
+        valid = {
+            "api_version": "gateway.openusage/v1",
+            "status": "ok",
+            "mode": "advise",
+            "should_send": True,
+            "responses": False,
+        }
+        for field in ("api_version", "status", "mode"):
+            with self.subTest(hostile_field=field):
+                candidate = dict(valid)
+                candidate[field] = HostileString(candidate[field])
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r"^Gateway health state invalid$",
+                ):
+                    GatewayAdviseHealthState(**candidate)
+
+        for field, value in (
+            ("mode", "gateway"),
+            ("status", "disabled"),
+            ("should_send", False),
+            ("responses", True),
+        ):
+            with self.subTest(invalid_field=field):
+                candidate = dict(valid)
+                candidate[field] = value
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r"^Gateway health state invalid$",
+                ):
+                    GatewayAdviseHealthState(**candidate)
+
+        gateway_router = GatewayRouter(
+            mode=GatewayMode.GATEWAY,
+            policy=policy,
+            proxy=None,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            server = create_gateway_server(
+                gateway_router,
+                port=0,
+                bearer_token=GATEWAY_TOKEN,
+                token_path=Path(directory) / "gateway.token",
+            )
+            thread = start(server)
+            try:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"^Gateway health unavailable$",
+                ):
+                    read_gateway_advise_health_state(
+                        port=server.server_address[1],
+                        bearer_token=GATEWAY_TOKEN,
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
     def test_internal_egress_counters_require_bearer_and_never_expand_public_routes(
         self,
     ) -> None:

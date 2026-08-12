@@ -16,6 +16,7 @@ import socket
 import stat
 import threading
 import time
+from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -43,6 +44,35 @@ _HEADER_NAME_BYTES = frozenset(
     b"!#$%&'*+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ^_`abcdefghijklmnopqrstuvwxyz|~"
 )
 _WINDOWS_FILE_SECURITY = native_windows_file_security()
+
+
+@dataclass(frozen=True, repr=False)
+class GatewayAdviseHealthState:
+    """Closed authenticated health projection for an advise-mode Gateway."""
+
+    api_version: str
+    status: str
+    mode: str
+    should_send: bool
+    responses: bool
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.api_version) is not str
+            or type(self.status) is not str
+            or type(self.mode) is not str
+            or self.api_version != "gateway.openusage/v1"
+            or self.status != "ok"
+            or self.mode != "advise"
+            or type(self.should_send) is not bool
+            or self.should_send is not True
+            or type(self.responses) is not bool
+            or (self.mode == "advise" and self.responses is not False)
+        ):
+            raise ValueError("Gateway health state invalid")
+
+    def __repr__(self) -> str:
+        return "<GatewayAdviseHealthState closed>"
 
 
 class _Router(Protocol):
@@ -1099,14 +1129,81 @@ def read_gateway_egress_attempt_counters(
 ) -> GatewayEgressAttemptCounters:
     """Read one authenticated, bounded private Gateway counter snapshot."""
 
+    try:
+        payload = _read_gateway_json(
+            port=port,
+            bearer_token=bearer_token,
+            target=_EGRESS_DIAGNOSTIC_PATH,
+        )
+        if (
+            set(payload)
+            != {
+                "apiVersion",
+                "object",
+                "processEpochSha256",
+                "providerNetworkAttempts",
+                "providerCredentialReadAttempts",
+            }
+            or payload["apiVersion"] != "gateway-internal-diagnostics/v1"
+            or payload["object"] != "gateway.egressAttempts"
+        ):
+            raise RuntimeError
+        return GatewayEgressAttemptCounters(
+            payload["processEpochSha256"],
+            payload["providerNetworkAttempts"],
+            payload["providerCredentialReadAttempts"],
+        )
+    except Exception:
+        raise RuntimeError("Gateway egress counters unavailable") from None
+
+
+def read_gateway_advise_health_state(
+    *,
+    port: int,
+    bearer_token: str,
+) -> GatewayAdviseHealthState:
+    """Read one authenticated, bounded public advise health projection."""
+
+    try:
+        payload = _read_gateway_json(
+            port=port,
+            bearer_token=bearer_token,
+            target="/gateway/v1/health",
+        )
+        if set(payload) != {"apiVersion", "status", "mode", "capabilities"}:
+            raise RuntimeError
+        capabilities = payload["capabilities"]
+        if type(capabilities) is not dict or set(capabilities) != {
+            "shouldSend",
+            "responses",
+        }:
+            raise RuntimeError
+        return GatewayAdviseHealthState(
+            api_version=payload["apiVersion"],
+            status=payload["status"],
+            mode=payload["mode"],
+            should_send=capabilities["shouldSend"],
+            responses=capabilities["responses"],
+        )
+    except Exception:
+        raise RuntimeError("Gateway health unavailable") from None
+
+
+def _read_gateway_json(
+    *,
+    port: int,
+    bearer_token: str,
+    target: str,
+) -> dict[str, object]:
+
     if (
         type(port) is not int
         or not 1 <= port <= 65535
         or type(bearer_token) is not str
     ):
-        raise RuntimeError("Gateway egress counters unavailable")
+        raise RuntimeError
     client: socket.socket | None = None
-    result: GatewayEgressAttemptCounters | None = None
+    result: dict[str, object] | None = None
     failed = False
     try:
         token = _validate_token(bearer_token)
@@ -1144,7 +1241,7 @@ def read_gateway_egress_attempt_counters(
             timeout=remaining_timeout(),
         )
         request = (
-            f"GET {_EGRESS_DIAGNOSTIC_PATH} HTTP/1.1\r\n"
+            f"GET {target} HTTP/1.1\r\n"
             f"Host: 127.0.0.1:{port}\r\n"
             "Accept: application/json\r\n"
             f"Authorization: Bearer {token}\r\n"
@@ -1164,31 +1261,15 @@ def read_gateway_egress_attempt_counters(
             if len(response) > 20_480:
                 raise RuntimeError
         remaining_timeout()
-        payload_bytes = _parse_gateway_egress_counter_response(bytes(response))
+        payload_bytes = _parse_gateway_json_response(bytes(response))
         payload = json.loads(
             payload_bytes.decode("utf-8", "strict"),
             object_pairs_hook=_unique_json_object,
             parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
         )
-        if (
-            type(payload) is not dict
-            or set(payload)
-            != {
-                "apiVersion",
-                "object",
-                "processEpochSha256",
-                "providerNetworkAttempts",
-                "providerCredentialReadAttempts",
-            }
-            or payload["apiVersion"] != "gateway-internal-diagnostics/v1"
-            or payload["object"] != "gateway.egressAttempts"
-        ):
+        if type(payload) is not dict:
             raise RuntimeError
-        result = GatewayEgressAttemptCounters(
-            payload["processEpochSha256"],
-            payload["providerNetworkAttempts"],
-            payload["providerCredentialReadAttempts"],
-        )
+        result = payload
     except Exception:
         failed = True
     finally:
@@ -1198,11 +1279,11 @@ def read_gateway_egress_attempt_counters(
         except Exception:
             failed = True
     if failed or result is None:
-        raise RuntimeError("Gateway egress counters unavailable") from None
+        raise RuntimeError
     return result
 
 
-def _parse_gateway_egress_counter_response(response: bytes) -> bytes:
+def _parse_gateway_json_response(response: bytes) -> bytes:
     if type(response) is not bytes or len(response) > 20_480:
         raise RuntimeError
     separator = response.find(b"\r\n\r\n")
@@ -1255,7 +1336,9 @@ def _unique_json_object(
 
 
 __all__ = [
+    "GatewayAdviseHealthState",
     "GatewayHTTPServer",
     "create_gateway_server",
     "read_gateway_egress_attempt_counters",
+    "read_gateway_advise_health_state",
 ]
