@@ -2324,6 +2324,172 @@ class NativeCiEvidenceTests(unittest.TestCase):
         self.assertNotIn("onefile", upload.casefold())
         self.assertNotIn("stableDirectChild", upload)
 
+    def test_workflow_runs_linux_x64_audited_appimage_preserve_uninstall_from_held_fd(
+        self,
+    ):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        select_marker = "- name: Select audited final artifact"
+        preserve_marker = "- name: Run audited AppImage preserve uninstall"
+        evidence_marker = "- name: Generate native CI evidence"
+
+        self.assertEqual(source.count(preserve_marker), 1)
+        select_start = source.index(select_marker)
+        preserve_start = source.index(preserve_marker)
+        evidence_start = source.index(evidence_marker)
+        self.assertLess(select_start, preserve_start)
+        self.assertLess(preserve_start, evidence_start)
+
+        preserve_end = source.index("\n      - name:", preserve_start + 1)
+        preserve = source[preserve_start:preserve_end]
+        self.assertIn(
+            "if: matrix.platform == 'linux' && matrix.arch == 'x64'",
+            preserve,
+        )
+        self.assertIn("shell: bash", preserve)
+        self.assertIn(
+            "FINAL_ARTIFACT: ${{ steps.audited_artifact.outputs.path }}",
+            preserve,
+        )
+        self.assertIn("set -euo pipefail", preserve)
+        user_preflight = preserve.index('preserve_user="usagehub-preserve"')
+        absent_preflight = preserve.index(
+            'if id "$preserve_user" >/dev/null 2>&1; then'
+        )
+        root_creation = preserve.index('preserve_root="$(mktemp -d ')
+        self.assertLess(user_preflight, absent_preflight)
+        self.assertLess(absent_preflight, root_creation)
+        self.assertIn(
+            'preserve_root="$(mktemp -d '
+            '"$RUNNER_TEMP/usagehub-preserve-uninstall.XXXXXX")"',
+            preserve,
+        )
+        for owned_directory in ("home", "data", "tmp"):
+            with self.subTest(owned_directory=owned_directory):
+                self.assertIn(
+                    f'"$preserve_root/{owned_directory}"',
+                    preserve,
+                )
+        self.assertIn(
+            'preserve_execution="$preserve_root/execution.AppImage"',
+            preserve,
+        )
+        self.assertIn('/bin/cp "$FINAL_ARTIFACT" "$preserve_execution"', preserve)
+        self.assertIn(
+            '/usr/bin/cmp -s "$FINAL_ARTIFACT" "$preserve_execution"',
+            preserve,
+        )
+        self.assertIn(
+            'source_digest="$(/usr/bin/sha256sum "$FINAL_ARTIFACT"',
+            preserve,
+        )
+        self.assertIn(
+            'execution_digest="$(/usr/bin/sha256sum "$preserve_execution"',
+            preserve,
+        )
+        self.assertIn('test "$execution_digest" = "$source_digest"', preserve)
+        self.assertIn('/bin/chmod 0700 "$preserve_execution"', preserve)
+        self.assertIn(
+            'test "$(/usr/bin/stat --format=\'%a\' "$FINAL_ARTIFACT")" = "400"',
+            preserve,
+        )
+        self.assertIn('preserve_user="usagehub-preserve"', preserve)
+        self.assertIn(
+            'if id "$preserve_user" >/dev/null 2>&1; then',
+            preserve,
+        )
+        self.assertIn(
+            'sudo useradd --no-create-home --home-dir "$preserve_root/home" '
+            '"$preserve_user"',
+            preserve,
+        )
+        user_creation = preserve.index(
+            'sudo useradd --no-create-home --home-dir "$preserve_root/home" '
+            '"$preserve_user"'
+        )
+        home_creation = preserve.index(
+            'sudo mkdir --mode=0700 "$preserve_root/home"'
+        )
+        self.assertLess(user_creation, home_creation)
+        self.assertIn('current_uid="$(id -u "$preserve_user")"', preserve)
+        self.assertIn(
+            'test "$(getent passwd "$preserve_user" | cut -d: -f6)" '
+            '= "$preserve_root/home"',
+            preserve,
+        )
+        self.assertIn(
+            'sudo chown "$preserve_user:$preserve_user"',
+            preserve,
+        )
+        for owned_path in (
+            '"$preserve_execution"',
+            '"$preserve_root/data"',
+            '"$preserve_root/tmp"',
+        ):
+            with self.subTest(owned_path=owned_path):
+                self.assertIn(owned_path, preserve)
+        self.assertIn('sudo -u "$preserve_user" /usr/bin/env -i', preserve)
+        self.assertIn('/bin/bash -c', preserve)
+        self.assertIn('exec {appimage_fd}<"$preserve_execution"', preserve)
+        self.assertIn(
+            'HOME="$preserve_root/home"',
+            preserve,
+        )
+        self.assertIn('XDG_DATA_HOME="$preserve_root/data"', preserve)
+        self.assertIn('TMPDIR="$preserve_root/tmp"', preserve)
+        self.assertIn(
+            'sudo systemctl start "user@$current_uid.service"',
+            preserve,
+        )
+        self.assertIn(
+            'test -S "/run/user/$current_uid/systemd/private"',
+            preserve,
+        )
+        self.assertIn('XDG_RUNTIME_DIR="/run/user/$current_uid"', preserve)
+        self.assertIn(
+            'DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/'
+            '$current_uid/systemd/private"',
+            preserve,
+        )
+        self.assertIn('APPIMAGE_EXTRACT_AND_RUN=1', preserve)
+        self.assertIn("/usr/bin/env -i", preserve)
+        for closed_environment in (
+            'PATH="/usr/bin:/bin"',
+            "LANG=C",
+            "LC_ALL=C",
+            "PYTHONNOUSERSITE=1",
+        ):
+            with self.subTest(closed_environment=closed_environment):
+                self.assertIn(closed_environment, preserve)
+        self.assertIn(
+            'timeout --signal=TERM --kill-after=10s 180s '
+            '"/proc/self/fd/$appimage_fd" --usagehub-uninstall',
+            preserve,
+        )
+        self.assertIn('test "$preserve_status" -eq 0', preserve)
+        self.assertIn('test ! -s "$preserve_stdout"', preserve)
+        self.assertIn('test ! -s "$preserve_stderr"', preserve)
+        self.assertIn('sudo systemctl stop "user@$current_uid.service"', preserve)
+        self.assertIn('sudo userdel "$preserve_user"', preserve)
+        self.assertIn("sudo /bin/rm -f", preserve)
+        self.assertIn("sudo rmdir", preserve)
+        self.assertIn(
+            'final_source_digest="$(/usr/bin/sha256sum "$FINAL_ARTIFACT"',
+            preserve,
+        )
+        self.assertIn('test "$final_source_digest" = "$source_digest"', preserve)
+        for forbidden in (
+            "GITHUB_OUTPUT",
+            "native_lifecycle_evidence",
+            "native_ci_evidence",
+            "--delete-data",
+            "upload-artifact",
+            "XDG_CONFIG_HOME",
+            "DISPLAY",
+            '"$preserve_root/config"',
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, preserve)
+
     def test_onefile_canary_documents_its_ephemeral_nonclaim_boundary(self):
         script = (ROOT / "scripts/canary_onefile_local_api.py").read_text(
             encoding="utf-8"
