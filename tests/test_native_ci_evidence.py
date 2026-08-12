@@ -2392,6 +2392,40 @@ class NativeCiEvidenceTests(unittest.TestCase):
             preserve,
         )
         self.assertIn(
+            'service_absence_source="$preserve_root/service-absence-source"',
+            preserve,
+        )
+        self.assertIn(
+            '/bin/cp -R "$GITHUB_WORKSPACE/openusage_bar"', preserve
+        )
+        self.assertIn(
+            '"$service_absence_source/openusage_bar"', preserve
+        )
+        self.assertIn(
+            '/bin/cp "$GITHUB_WORKSPACE/scripts/canary_linux_service_absence.py"',
+            preserve,
+        )
+        self.assertIn(
+            '"$service_absence_source/scripts/canary_linux_service_absence.py"',
+            preserve,
+        )
+        self.assertIn(
+            '"$GITHUB_WORKSPACE/openusage_bar/platform_services.py"',
+            preserve,
+        )
+        self.assertIn(
+            '"$service_absence_source/openusage_bar/platform_services.py"',
+            preserve,
+        )
+        self.assertIn(
+            '"$GITHUB_WORKSPACE/scripts/canary_linux_service_absence.py"',
+            preserve,
+        )
+        self.assertIn(
+            '"$service_absence_source/scripts/canary_linux_service_absence.py"',
+            preserve,
+        )
+        self.assertIn(
             '/bin/cp "$packaged_collector_source" "$packaged_collector"',
             preserve,
         )
@@ -2482,6 +2516,18 @@ class NativeCiEvidenceTests(unittest.TestCase):
         self.assertLess(absence_canary, wrapper_binding)
         self.assertIn('service_absence_stdout="$5"', preserve)
         self.assertIn('service_absence_stderr="$6"', preserve)
+        self.assertIn('service_absence_source="$7"', preserve)
+        self.assertIn(
+            'sudo chown -R "$preserve_user:$preserve_user"',
+            preserve,
+        )
+        self.assertIn('"$service_absence_source"', preserve)
+        self.assertIn('cd "$service_absence_source"', preserve)
+        self.assertIn(
+            '"$service_absence_stderr"',
+            preserve,
+        )
+        self.assertIn('"$service_absence_source"', preserve)
         self.assertIn(
             '>"$service_absence_stdout" 2>"$service_absence_stderr"',
             preserve,
