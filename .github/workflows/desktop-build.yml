@@ -35,6 +35,7 @@ on:
       - "docs/schemas/release-handoff-v1.schema.json"
       - "docs/schemas/product-version-truth-v1.schema.json"
       - "scripts/appimage_payload_offset.py"
+      - "scripts/canary_onefile_local_api.py"
       - "scripts/extract_nsis_payload.py"
       - "scripts/distribution_trust_posture.py"
       - "scripts/native_ci_evidence.py"
@@ -51,6 +52,7 @@ on:
       - "scripts/verify_artifact_build_identity.py"
       - "tests/test_bounded_process.py"
       - "tests/test_bounded_process_windows*.py"
+      - "tests/test_canary_onefile_local_api.py"
       - "tests/test_collector_cli.py"
       - "tests/test_desktop_packaging_contract.py"
       - "tests/test_distribution_trust_posture.py"
@@ -118,6 +120,7 @@ on:
       - "docs/schemas/release-handoff-v1.schema.json"
       - "docs/schemas/product-version-truth-v1.schema.json"
       - "scripts/appimage_payload_offset.py"
+      - "scripts/canary_onefile_local_api.py"
       - "scripts/extract_nsis_payload.py"
       - "scripts/distribution_trust_posture.py"
       - "scripts/native_ci_evidence.py"
@@ -134,6 +137,7 @@ on:
       - "scripts/verify_artifact_build_identity.py"
       - "tests/test_bounded_process.py"
       - "tests/test_bounded_process_windows*.py"
+      - "tests/test_canary_onefile_local_api.py"
       - "tests/test_collector_cli.py"
       - "tests/test_desktop_packaging_contract.py"
       - "tests/test_distribution_trust_posture.py"
@@ -320,6 +324,7 @@ jobs:
             tests.test_bounded_process_windows \
             tests.test_appimage_payload_offset \
             tests.test_artifact_build_identity \
+            tests.test_canary_onefile_local_api \
             tests.test_collector_cli \
             tests.test_desktop_packaging_contract \
             tests.test_distribution_trust_posture \
@@ -484,6 +489,13 @@ jobs:
         id: collector_status
         shell: bash
         run: ./dist-collector/${{ matrix.collector }} --offline status --format json
+      - name: Run onefile Local API canary
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        shell: bash
+        run: |
+          # Ephemeral topology gate only; no lifecycle or release evidence.
+          collector_path="$(realpath --canonicalize-existing "./dist-collector/${{ matrix.collector }}")"
+          python -m scripts.canary_onefile_local_api --collector "$collector_path"
       - name: Smoke bundled Gateway modes
         id: gateway_smoke
         shell: bash

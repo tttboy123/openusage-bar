@@ -1,3 +1,4 @@
+import ast
 import hashlib
 import json
 import os
@@ -2264,6 +2265,90 @@ class NativeCiEvidenceTests(unittest.TestCase):
         self.assertNotIn("--enforce", performance)
         self.assertEqual(performance.count("actions/upload-artifact@"), 1)
         self.assertNotIn("if: always()", source)
+
+    def test_workflow_runs_only_the_linux_x64_onefile_local_api_canary(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        build_marker = "- name: Build bundled collector"
+        canary_marker = "- name: Run onefile Local API canary"
+        package_marker = "- name: Package desktop app"
+
+        self.assertEqual(source.count(canary_marker), 1)
+        build_start = source.index(build_marker)
+        canary_start = source.index(canary_marker)
+        package_start = source.index(package_marker)
+        self.assertLess(build_start, canary_start)
+        self.assertLess(canary_start, package_start)
+
+        canary_end = source.index("\n      - name:", canary_start + 1)
+        canary = source[canary_start:canary_end]
+        self.assertIn("if: matrix.platform == 'linux' && matrix.arch == 'x64'", canary)
+        self.assertIn("shell: bash", canary)
+        self.assertIn(
+            'collector_path="$(realpath --canonicalize-existing '
+            '"./dist-collector/${{ matrix.collector }}")"',
+            canary,
+        )
+        self.assertIn(
+            'python -m scripts.canary_onefile_local_api --collector "$collector_path"',
+            canary,
+        )
+        for forbidden in (
+            "GITHUB_OUTPUT",
+            "native_lifecycle",
+            "stableDirectChild",
+            "upload-artifact",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, canary)
+
+        contracts_start = source.index(
+            "- name: Run portable Observer and Gateway contracts"
+        )
+        contracts_end = source.index("- name: Run native Windows Job contracts")
+        contracts = source[contracts_start:contracts_end]
+        self.assertIn("tests.test_canary_onefile_local_api", contracts)
+
+        push = source[source.index("  push:\n"):source.index("  pull_request:\n")]
+        pull_request = source[
+            source.index("  pull_request:\n"):source.index("\npermissions:")
+        ]
+        for event, block in (("push", push), ("pull_request", pull_request)):
+            with self.subTest(event=event):
+                self.assertIn('- "scripts/canary_onefile_local_api.py"', block)
+                self.assertIn('- "tests/test_canary_onefile_local_api.py"', block)
+
+        package_job = source[:source.index("\n  gateway-performance:")]
+        self.assertEqual(package_job.count("actions/upload-artifact@"), 1)
+        upload_start = package_job.index("- name: Upload artifact and evidence")
+        upload = package_job[upload_start:]
+        self.assertNotIn("onefile", upload.casefold())
+        self.assertNotIn("stableDirectChild", upload)
+
+    def test_onefile_canary_documents_its_ephemeral_nonclaim_boundary(self):
+        script = (ROOT / "scripts/canary_onefile_local_api.py").read_text(
+            encoding="utf-8"
+        )
+        module_docstring = ast.get_docstring(ast.parse(script), clean=False) or ""
+        for required_nonclaim in (
+            "exclusive, disposable GitHub-hosted Linux/x64",
+            "instantaneous diagnostic",
+            "not lifecycle or release evidence",
+            "no hostile concurrent same-UID namespace/PID-PGID reuse",
+        ):
+            with self.subTest(required_nonclaim=required_nonclaim):
+                self.assertIn(required_nonclaim, module_docstring)
+
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        canary_start = workflow.index("- name: Run onefile Local API canary")
+        canary_end = workflow.index("\n      - name:", canary_start + 1)
+        canary = workflow[canary_start:canary_end]
+        self.assertIn(
+            "# Ephemeral topology gate only; no lifecycle or release evidence.",
+            canary,
+        )
+        self.assertNotIn("GITHUB_OUTPUT", canary)
+        self.assertNotIn("upload-artifact", canary)
+
     def test_workflow_portable_contracts_include_every_gateway_module(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         contracts = source[
