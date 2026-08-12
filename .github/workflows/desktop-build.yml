@@ -41,6 +41,7 @@ on:
       - "scripts/native_ci_evidence.py"
       - "scripts/native_lifecycle_evidence.py"
       - "scripts/canary_linux_service_absence.py"
+      - "scripts/canary_linux_observer_topology.py"
       - "scripts/observer_source_native_evidence.py"
       - "scripts/release_handoff.py"
       - "scripts/measure_gateway_performance.py"
@@ -72,6 +73,7 @@ on:
       - "tests/test_native_ci_evidence.py"
       - "tests/test_native_lifecycle_evidence.py"
       - "tests/test_canary_linux_service_absence.py"
+      - "tests/test_canary_linux_observer_topology.py"
       - "tests/test_native_lifecycle_runner.py"
       - "tests/test_observer_source_native_evidence.py"
       - "tests/test_release_handoff.py"
@@ -128,6 +130,7 @@ on:
       - "scripts/native_ci_evidence.py"
       - "scripts/native_lifecycle_evidence.py"
       - "scripts/canary_linux_service_absence.py"
+      - "scripts/canary_linux_observer_topology.py"
       - "scripts/observer_source_native_evidence.py"
       - "scripts/release_handoff.py"
       - "scripts/measure_gateway_performance.py"
@@ -159,6 +162,7 @@ on:
       - "tests/test_native_ci_evidence.py"
       - "tests/test_native_lifecycle_evidence.py"
       - "tests/test_canary_linux_service_absence.py"
+      - "tests/test_canary_linux_observer_topology.py"
       - "tests/test_native_lifecycle_runner.py"
       - "tests/test_observer_source_native_evidence.py"
       - "tests/test_release_handoff.py"
@@ -374,6 +378,7 @@ jobs:
             tests.test_native_ci_evidence \
             tests.test_native_lifecycle_evidence \
             tests.test_canary_linux_service_absence \
+            tests.test_canary_linux_observer_topology \
             tests.test_native_lifecycle_runner \
             tests.test_observer_source_native_evidence \
             tests.test_openusage_settings_entrypoint \
@@ -959,6 +964,8 @@ jobs:
           collector_stderr="$preserve_root/collector.stderr"
           service_absence_stdout="$preserve_root/service-absence.stdout"
           service_absence_stderr="$preserve_root/service-absence.stderr"
+          topology_stdout="$preserve_root/topology.stdout"
+          topology_stderr="$preserve_root/topology.stderr"
           service_absence_source="$preserve_root/service-absence-source"
           packaged_collector_source="$RUNNER_TEMP/usagehub-appimage-${{ matrix.arch }}/resources/collector/${{ matrix.collector }}"
           packaged_collector="$preserve_root/openusage-collector"
@@ -1021,12 +1028,17 @@ jobs:
             "$service_absence_source/openusage_bar"
           /bin/cp "$GITHUB_WORKSPACE/scripts/canary_linux_service_absence.py" \
             "$service_absence_source/scripts/canary_linux_service_absence.py"
+          /bin/cp "$GITHUB_WORKSPACE/scripts/canary_linux_observer_topology.py" \
+            "$service_absence_source/scripts/canary_linux_observer_topology.py"
           /usr/bin/cmp -s \
             "$GITHUB_WORKSPACE/openusage_bar/platform_services.py" \
             "$service_absence_source/openusage_bar/platform_services.py"
           /usr/bin/cmp -s \
             "$GITHUB_WORKSPACE/scripts/canary_linux_service_absence.py" \
             "$service_absence_source/scripts/canary_linux_service_absence.py"
+          /usr/bin/cmp -s \
+            "$GITHUB_WORKSPACE/scripts/canary_linux_observer_topology.py" \
+            "$service_absence_source/scripts/canary_linux_observer_topology.py"
           execution_digest="$(/usr/bin/sha256sum "$preserve_execution" | /usr/bin/awk '{print $1}')"
           test "$execution_digest" = "$source_digest"
           /bin/chmod 0700 "$preserve_execution"
@@ -1071,6 +1083,22 @@ jobs:
               service_absence_stdout="$5"
               service_absence_stderr="$6"
               service_absence_source="$7"
+              topology_stdout="$8"
+              topology_stderr="$9"
+              cd "$service_absence_source"
+              set +e
+              /usr/bin/xvfb-run --auto-servernum /usr/bin/python3 -m \
+                scripts.canary_linux_observer_topology --appimage \
+                "$preserve_execution" \
+                >"$topology_stdout" 2>"$topology_stderr"
+              topology_status=$?
+              set -e
+              if [[ "$topology_status" -ne 0 || -s "$topology_stdout" || -s "$topology_stderr" ]]; then
+                printf "%s\n" "appimage_observer_topology_failed category=topology" >&2
+                exit 1
+              fi
+              test ! -s "$topology_stdout"
+              test ! -s "$topology_stderr"
               set +e
               "$packaged_collector" desktop-service uninstall \
                 >"$collector_stdout" 2>"$collector_stderr"
@@ -1140,7 +1168,9 @@ jobs:
               "$collector_stderr" \
               "$service_absence_stdout" \
               "$service_absence_stderr" \
-              "$service_absence_source"
+              "$service_absence_source" \
+              "$topology_stdout" \
+              "$topology_stderr"
           preserve_status=$?
           set -e
           test "$preserve_status" -eq 0

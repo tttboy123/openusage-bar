@@ -8118,6 +8118,12 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     "process_executable_file_id": "foreign-dev:foreign-ino",
                     "process_executable_signature_sha256": "4" * 64,
                     "process_argv_nul": b"foreign\0",
+                    "manager_executable_authority": (
+                        "live-inode"
+                        if service_s1.manager_executable_authority
+                        == "peer-provenance-canonical-cmdline"
+                        else "peer-provenance-canonical-cmdline"
+                    ),
                 }
                 self.assertEqual(
                     set(drift_values),

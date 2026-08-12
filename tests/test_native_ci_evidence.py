@@ -2633,7 +2633,10 @@ class NativeCiEvidenceTests(unittest.TestCase):
         )
         self.assertLess(
             preserve.index('exec {appimage_fd}<"$preserve_execution"'),
-            preserve.index('/usr/bin/xvfb-run --auto-servernum'),
+            preserve.index(
+                '/usr/bin/xvfb-run --auto-servernum '
+                '"/proc/self/fd/$appimage_fd" --usagehub-uninstall'
+            ),
         )
         self.assertEqual(
             preserve.count('--no-sandbox'),
@@ -2771,6 +2774,66 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 )
                 self.assertIn(
                     '- "tests/test_canary_linux_service_absence.py"', block
+                )
+
+    def test_workflow_proves_observer_survives_ui_stop_before_preserve_cleanup(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        marker = "- name: Run audited AppImage preserve uninstall"
+        start = source.index(marker)
+        end = source.index("\n      - name:", start + 1)
+        preserve = source[start:end]
+
+        topology_copy = (
+            '/bin/cp "$GITHUB_WORKSPACE/scripts/'
+            'canary_linux_observer_topology.py"'
+        )
+        topology_run = "scripts.canary_linux_observer_topology --appimage"
+        collector_run = '"$packaged_collector" desktop-service uninstall'
+        wrapper_run = '"/proc/self/fd/$appimage_fd" --usagehub-uninstall'
+
+        self.assertIn(topology_copy, preserve)
+        self.assertIn(topology_run, preserve)
+        self.assertLess(preserve.index(topology_copy), preserve.index(topology_run))
+        self.assertLess(preserve.index(topology_run), preserve.index(collector_run))
+        self.assertLess(preserve.index(topology_run), preserve.index(wrapper_run))
+        self.assertIn(
+            'topology_stdout="$preserve_root/topology.stdout"', preserve
+        )
+        self.assertIn(
+            'topology_stderr="$preserve_root/topology.stderr"', preserve
+        )
+        self.assertIn('test ! -s "$topology_stdout"', preserve)
+        self.assertIn('test ! -s "$topology_stderr"', preserve)
+        self.assertIn(
+            "appimage_observer_topology_failed category=topology", preserve
+        )
+        for forbidden in (
+            "GITHUB_OUTPUT",
+            "native_lifecycle",
+            "releaseEligible",
+            "upload-artifact",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, preserve)
+
+        contracts_start = source.index(
+            "- name: Run portable Observer and Gateway contracts"
+        )
+        contracts_end = source.index("- name: Run native Windows Job contracts")
+        contracts = source[contracts_start:contracts_end]
+        self.assertIn("tests.test_canary_linux_observer_topology", contracts)
+
+        push = source[source.index("  push:\n"):source.index("  pull_request:\n")]
+        pull_request = source[
+            source.index("  pull_request:\n"):source.index("\npermissions:")
+        ]
+        for event, block in (("push", push), ("pull_request", pull_request)):
+            with self.subTest(event=event):
+                self.assertIn(
+                    '- "scripts/canary_linux_observer_topology.py"', block
+                )
+                self.assertIn(
+                    '- "tests/test_canary_linux_observer_topology.py"', block
                 )
 
     def test_onefile_canary_documents_its_ephemeral_nonclaim_boundary(self):
