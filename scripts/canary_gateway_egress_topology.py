@@ -18,10 +18,16 @@ import time
 from dataclasses import dataclass
 
 from openusage_bar.gateway.egress import GatewayEgressAttemptCounters
+from openusage_bar.gateway.server import (
+    GatewayAdviseHealthState,
+    read_gateway_advise_health_state,
+    read_gateway_egress_attempt_counters,
+)
 
 
 _COLLECTOR_MODE = 0o700
 _STOP_SECONDS = 5.0
+_READINESS_SECONDS = 15.0
 _ADVISE_CONFIG = b'{"enabled":true,"mode":"advise"}'
 _ENVIRONMENT_FIXED = {
     "PATH": "/usr/bin:/bin",
@@ -117,6 +123,44 @@ class _GatewayProcessLease:
             )
         except Exception:
             return False
+
+    def read_token(self) -> str:
+        try:
+            before = os.fstat(self._token_descriptor)
+            raw = os.pread(self._token_descriptor, 257, 0)
+            after = os.fstat(self._token_descriptor)
+            if (
+                _file_signature(before) != self._token_signature
+                or _file_signature(after) != self._token_signature
+            ):
+                raise GatewayEgressTopologyCanaryError
+            token = raw.decode("ascii", "strict")
+            if (
+                type(token) is not str
+                or not 43 <= len(token) <= 256
+                or not token.isascii()
+                or any(
+                    ord(character) < 0x21 or character.isspace()
+                    for character in token
+                )
+            ):
+                raise GatewayEgressTopologyCanaryError
+            return token
+        except GatewayEgressTopologyCanaryError:
+            raise
+        except Exception:
+            raise GatewayEgressTopologyCanaryError from None
+
+    def leader_has_exited(self) -> bool:
+        try:
+            status = os.waitid(
+                os.P_PID,
+                self._process.pid,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+            )
+        except Exception:
+            raise GatewayEgressTopologyCanaryError from None
+        return status is not None and status.si_pid == self._process.pid
 
     def stop(self) -> None:
         if (
@@ -535,6 +579,119 @@ def _wait_for_group_members_to_exit(process_group_id: int) -> None:
         time.sleep(min(0.05, deadline - last))
 
 
+def _wait_for_advise_health(
+    *,
+    port: int,
+    bearer_token: str,
+    lease: _GatewayProcessLease,
+) -> GatewayAdviseHealthState:
+    started = time.monotonic()
+    if (
+        type(started) not in {int, float}
+        or not math.isfinite(started)
+        or started < 0
+    ):
+        raise GatewayEgressTopologyCanaryError
+    deadline = float(started) + _READINESS_SECONDS
+    if not math.isfinite(deadline):
+        raise GatewayEgressTopologyCanaryError
+    last = float(started)
+
+    def check_clock() -> float:
+        nonlocal last
+        current = time.monotonic()
+        if (
+            type(current) not in {int, float}
+            or not math.isfinite(current)
+            or current < last
+            or current >= deadline
+        ):
+            raise GatewayEgressTopologyCanaryError
+        last = float(current)
+        return last
+
+    while True:
+        try:
+            check_clock()
+            observed = read_gateway_advise_health_state(
+                port=port,
+                bearer_token=bearer_token,
+            )
+            if type(observed) is not GatewayAdviseHealthState:
+                raise GatewayEgressTopologyCanaryError
+            check_clock()
+            return observed
+        except GatewayEgressTopologyCanaryError:
+            raise
+        except Exception:
+            if lease.leader_has_exited():
+                raise GatewayEgressTopologyCanaryError from None
+            try:
+                current = check_clock()
+            except GatewayEgressTopologyCanaryError:
+                raise GatewayEgressTopologyCanaryError from None
+            time.sleep(min(0.1, deadline - last))
+
+
+def run_gateway_egress_topology_canary(
+    *,
+    collector: str,
+    config_path: str,
+    token_path: str,
+    port: int,
+    environment: dict[str, str],
+) -> GatewayEgressTopologySummary:
+    """Observe one ready advise endpoint epoch and always reclaim its lease."""
+
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise GatewayEgressTopologyCanaryError
+    lease: _GatewayProcessLease | None = None
+    result: GatewayEgressTopologySummary | None = None
+    failed = False
+    try:
+        lease = _start_gateway_process_lease(
+            collector=collector,
+            config_path=config_path,
+            token_path=token_path,
+            environment=environment,
+        )
+        token = lease.read_token()
+        _wait_for_advise_health(port=port, bearer_token=token, lease=lease)
+        counters_before = read_gateway_egress_attempt_counters(
+            port=port,
+            bearer_token=token,
+        )
+        health = read_gateway_advise_health_state(
+            port=port,
+            bearer_token=token,
+        )
+        if type(health) is not GatewayAdviseHealthState:
+            raise GatewayEgressTopologyCanaryError
+        counters_after = read_gateway_egress_attempt_counters(
+            port=port,
+            bearer_token=token,
+        )
+        result = evaluate_gateway_egress_attempt_window(
+            counters_before=counters_before,
+            counters_after=counters_after,
+        )
+        lease.stop()
+    except Exception:
+        failed = True
+    finally:
+        if lease is not None:
+            try:
+                lease.close()
+            except Exception:
+                failed = True
+    if (
+        failed
+        or type(result) is not GatewayEgressTopologySummary
+    ):
+        raise GatewayEgressTopologyCanaryError from None
+    return result
+
+
 def evaluate_gateway_egress_attempt_window(
     *,
     counters_before: GatewayEgressAttemptCounters,
@@ -555,4 +712,5 @@ __all__ = [
     "GatewayEgressTopologyCanaryError",
     "GatewayEgressTopologySummary",
     "evaluate_gateway_egress_attempt_window",
+    "run_gateway_egress_topology_canary",
 ]

@@ -547,6 +547,121 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
             with open(os.path.join(root, "openusage-collector"), "rb") as stream:
                 self.assertEqual(stream.read(), b"foreign-collector")
 
+    def test_runner_observes_one_ready_advise_epoch_and_always_stops(self) -> None:
+        from openusage_bar.gateway.egress import GatewayEgressAttemptCounters
+        from openusage_bar.gateway.server import GatewayAdviseHealthState
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologySummary,
+            run_gateway_egress_topology_canary,
+        )
+
+        events: list[object] = []
+        counters = GatewayEgressAttemptCounters("a" * 64, 17, 5)
+        health = GatewayAdviseHealthState(
+            api_version="gateway.openusage/v1",
+            status="ok",
+            mode="advise",
+            should_send=True,
+            responses=False,
+        )
+
+        class Lease:
+            def leader_has_exited(self) -> bool:
+                return False
+
+            def read_token(self) -> str:
+                events.append("token")
+                return "g" * 48
+
+            def stop(self) -> None:
+                events.append("stop")
+
+            def close(self) -> None:
+                events.append("close")
+
+        with (
+            patch(
+                "scripts.canary_gateway_egress_topology._start_gateway_process_lease",
+                side_effect=lambda **_kwargs: events.append("start") or Lease(),
+            ),
+            patch(
+                "scripts.canary_gateway_egress_topology.read_gateway_advise_health_state",
+                side_effect=lambda **_kwargs: events.append("health") or health,
+            ),
+            patch(
+                "scripts.canary_gateway_egress_topology.read_gateway_egress_attempt_counters",
+                side_effect=lambda **_kwargs: events.append("counters") or counters,
+            ),
+            patch(
+                "scripts.canary_gateway_egress_topology.evaluate_gateway_egress_attempt_window",
+                side_effect=lambda **_kwargs: events.append("evaluate")
+                or GatewayEgressTopologySummary(True),
+            ),
+        ):
+            summary = run_gateway_egress_topology_canary(
+                collector="/PRIVATE/openusage-collector",
+                config_path="/PRIVATE/gateway.json",
+                token_path="/PRIVATE/gateway.token",
+                port=17823,
+                environment=self._closed_environment(),
+            )
+
+        self.assertEqual(summary, GatewayEgressTopologySummary(True))
+        self.assertEqual(
+            events,
+            [
+                "start",
+                "token",
+                "health",
+                "counters",
+                "health",
+                "counters",
+                "evaluate",
+                "stop",
+                "close",
+            ],
+        )
+
+    def test_readiness_deadline_is_checked_after_successful_health(self) -> None:
+        from openusage_bar.gateway.server import GatewayAdviseHealthState
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            _wait_for_advise_health,
+        )
+
+        health = GatewayAdviseHealthState(
+            "gateway.openusage/v1",
+            "ok",
+            "advise",
+            True,
+            False,
+        )
+
+        class Lease:
+            def leader_has_exited(self) -> bool:
+                return False
+
+        clock = iter((100.0, 114.9, 116.0))
+        with (
+            patch(
+                "scripts.canary_gateway_egress_topology.time.monotonic",
+                side_effect=lambda: next(clock),
+            ),
+            patch(
+                "scripts.canary_gateway_egress_topology.read_gateway_advise_health_state",
+                return_value=health,
+            ),
+        ):
+            with self.assertRaisesRegex(
+                GatewayEgressTopologyCanaryError,
+                r"^Gateway egress topology canary failed$",
+            ):
+                _wait_for_advise_health(
+                    port=17823,
+                    bearer_token="g" * 48,
+                    lease=Lease(),
+                )
+
     def test_evaluator_accepts_only_one_authenticated_endpoint_epoch_with_zero_delta(
         self,
     ) -> None:
