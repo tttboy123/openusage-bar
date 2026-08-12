@@ -448,6 +448,61 @@ class _LinuxLocalAPIObservationHarness:
 
 @unittest.skipIf(os.name == "nt", "requires native Linux descriptor semantics")
 class LinuxLocalAPIObservationTests(unittest.TestCase):
+    def test_current_user_boundary_reader_uses_canonical_socket_and_one_deadline(
+        self,
+    ):
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from openusage_bar.local_api import (
+            LinuxSharedClientBoundaryState,
+            read_current_user_shared_client_boundary_state,
+        )
+
+        home = Path("/authoritative-home")
+        authority = LifecycleStatePaths(platform="linux", home=home)
+        expected = LinuxSharedClientBoundaryState(
+            peer_pid=4312,
+            peer_uid=os.getuid(),
+            peer_gid=os.getgid(),
+            process_epoch_sha256="a" * 64,
+            bounded_http_open_attempts=0,
+            headless_keychain_get_attempts=0,
+        )
+        clock = iter((100.0, 100.25, 101.75))
+
+        def read_boundary(path, *, remaining_timeout):
+            self.assertEqual(
+                path,
+                "/authoritative-home/.local/state/openusage-bar/openusage.sock",
+            )
+            self.assertEqual(remaining_timeout(), 1.0)
+            self.assertEqual(remaining_timeout(), 0.25)
+            return expected
+
+        with patch.object(
+            LifecycleStatePaths,
+            "for_current_user",
+            return_value=authority,
+        ) as current_user, patch(
+            "openusage_bar.local_api.sys.platform",
+            "linux",
+        ), patch(
+            "openusage_bar.local_api.Path.home",
+            return_value=home,
+        ), patch(
+            "openusage_bar.local_api.time.monotonic",
+            side_effect=lambda: next(clock),
+        ), patch(
+            "openusage_bar.local_api.read_linux_shared_client_boundary_state",
+            side_effect=read_boundary,
+        ) as raw_reader:
+            self.assertIs(
+                read_current_user_shared_client_boundary_state(),
+                expected,
+            )
+
+        current_user.assert_called_once_with(platform="linux")
+        raw_reader.assert_called_once()
+
     def test_read_current_user_local_api_state_binds_socket_peer_and_health(self):
         import struct
         from contextlib import ExitStack

@@ -30,6 +30,10 @@ from typing import Callable
 from openusage_bar.shared_client_boundary import (
     SharedClientBoundaryAttemptCounters,
 )
+from openusage_bar.local_api import (
+    closed_linux_shared_client_boundary_values,
+    read_linux_shared_client_boundary_state,
+)
 
 
 _PROC_FACT_LIMIT = 65_536
@@ -41,17 +45,6 @@ _HEALTH_REQUEST = (
     b"Accept: application/json\r\n"
     b"Connection: close\r\n\r\n"
 )
-_BOUNDARY_REQUEST = (
-    b"GET /_internal/v1/shared-client-boundary-attempts HTTP/1.1\r\n"
-    b"Host: localhost\r\n"
-    b"Accept: application/json\r\n"
-    b"Connection: close\r\n\r\n"
-)
-_HTTP_FIELD_NAME_CHARACTERS = frozenset(
-    "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-)
-
-
 class OnefileLocalAPICanaryError(RuntimeError):
     """A path-free frozen-process topology failure."""
 
@@ -256,172 +249,23 @@ def read_onefile_shared_client_boundary_snapshot(
     *,
     remaining_timeout: Callable[[], float],
 ) -> tuple[bytes, SharedClientBoundaryAttemptCounters]:
-    """Read one strict private snapshot and return its stable Unix peer bytes."""
-
-    client: socket.socket | None = None
-    failed = False
-    observed: tuple[bytes, SharedClientBoundaryAttemptCounters] | None = None
-
-    def next_timeout() -> float:
-        value = remaining_timeout()
-        if (
-            type(value) not in (int, float)
-            or not math.isfinite(value)
-            or value <= 0
-            or value > 1.0
-        ):
-            raise OnefileLocalAPICanaryError
-        return float(value)
-
+    """Adapt the production private reader to the canary's closed peer fact."""
     try:
-        if (
-            type(socket_path) is not str
-            or not socket_path
-            or not os.path.isabs(socket_path)
-            or "\0" in socket_path
-        ):
+        observed = read_linux_shared_client_boundary_state(
+            socket_path,
+            remaining_timeout=remaining_timeout,
+        )
+        fields = closed_linux_shared_client_boundary_values(observed)
+        if fields is None:
             raise OnefileLocalAPICanaryError
-        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        client.settimeout(next_timeout())
-        client.connect(socket_path)
-        peer_before = client.getsockopt(1, 17, 12)
-        if type(peer_before) is not bytes or len(peer_before) != 12:
+        if fields[1] != os.getuid() or fields[2] != os.getgid():
             raise OnefileLocalAPICanaryError
-        peer_pid, peer_uid, peer_gid = struct.unpack("=3i", peer_before)
-        if (
-            peer_pid <= 0
-            or peer_uid != os.getuid()
-            or peer_gid != os.getgid()
-        ):
-            raise OnefileLocalAPICanaryError
-        client.settimeout(next_timeout())
-        client.sendall(_BOUNDARY_REQUEST)
-        response = bytearray()
-        while True:
-            client.settimeout(next_timeout())
-            chunk = client.recv(65_536)
-            if type(chunk) is not bytes:
-                raise OnefileLocalAPICanaryError
-            if not chunk:
-                break
-            response.extend(chunk)
-            if len(response) > _HEALTH_RESPONSE_LIMIT:
-                raise OnefileLocalAPICanaryError
-        next_timeout()
-        peer_after = client.getsockopt(1, 17, 12)
-        if type(peer_after) is not bytes or peer_after != peer_before:
-            raise OnefileLocalAPICanaryError
-        next_timeout()
-        counters = _parse_shared_client_boundary_response(bytes(response))
-        next_timeout()
-        observed = (peer_before, counters)
-    except Exception:
-        failed = True
-    finally:
-        if client is not None:
-            try:
-                client.close()
-            except Exception:
-                failed = True
-            if not failed and observed is not None:
-                try:
-                    next_timeout()
-                except Exception:
-                    failed = True
-    if failed or observed is None:
-        raise OnefileLocalAPICanaryError
-    return observed
-
-
-def _parse_shared_client_boundary_response(
-    response: bytes,
-) -> SharedClientBoundaryAttemptCounters:
-    if type(response) is not bytes or len(response) > _HEALTH_RESPONSE_LIMIT:
-        raise OnefileLocalAPICanaryError
-    separator = response.find(b"\r\n\r\n")
-    if separator < 0 or separator > 16_384:
-        raise OnefileLocalAPICanaryError
-    try:
-        lines = response[:separator].decode("ascii").split("\r\n")
     except Exception:
         raise OnefileLocalAPICanaryError from None
-    if not lines or len(lines) > 65 or lines[0] != "HTTP/1.1 200 OK":
-        raise OnefileLocalAPICanaryError
-    headers: dict[str, str] = {}
-    for line in lines[1:]:
-        if ":" not in line:
-            raise OnefileLocalAPICanaryError
-        name, value = line.split(":", 1)
-        normalized_name = name.casefold()
-        if (
-            not name
-            or name != name.strip()
-            or any(character not in _HTTP_FIELD_NAME_CHARACTERS for character in name)
-            or normalized_name in headers
-            or any(
-                character != "\t" and not (" " <= character <= "~")
-                for character in value
-            )
-        ):
-            raise OnefileLocalAPICanaryError
-        headers[normalized_name] = value.strip(" \t")
-    length = headers.get("content-length")
-    if (
-        "transfer-encoding" in headers
-        or length is None
-        or not length.isascii()
-        or not length.isdecimal()
-        or str(int(length)) != length
-        or headers.get("content-type") != "application/json; charset=utf-8"
-        or headers.get("cache-control") != "no-store"
-        or headers.get("x-content-type-options") != "nosniff"
-        or headers.get("connection", "").casefold() != "close"
-    ):
-        raise OnefileLocalAPICanaryError
-    body = response[separator + 4 :]
-    if int(length) != len(body) or len(body) > 65_536:
-        raise OnefileLocalAPICanaryError
-
-    def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
-        result: dict[str, object] = {}
-        for key, value in pairs:
-            if type(key) is not str or key in result:
-                raise OnefileLocalAPICanaryError
-            result[key] = value
-        return result
-
-    try:
-        payload = json.loads(
-            body.decode("utf-8"),
-            object_pairs_hook=unique_pairs,
-            parse_constant=lambda _value: (_ for _ in ()).throw(
-                OnefileLocalAPICanaryError()
-            ),
-        )
-        if type(payload) is not dict or set(payload) != {
-            "apiVersion",
-            "object",
-            "processEpochSha256",
-            "boundedHttpOpenAttempts",
-            "headlessKeychainGetAttempts",
-        }:
-            raise OnefileLocalAPICanaryError
-        if (
-            type(payload["apiVersion"]) is not str
-            or payload["apiVersion"] != "local-api-internal-diagnostics/v1"
-            or type(payload["object"]) is not str
-            or payload["object"] != "sharedClientBoundaryAttempts"
-        ):
-            raise OnefileLocalAPICanaryError
-        return SharedClientBoundaryAttemptCounters(
-            payload["processEpochSha256"],
-            payload["boundedHttpOpenAttempts"],
-            payload["headlessKeychainGetAttempts"],
-        )
-    except OnefileLocalAPICanaryError:
-        raise
-    except Exception:
-        raise OnefileLocalAPICanaryError from None
+    return (
+        struct.pack("=3i", fields[0], fields[1], fields[2]),
+        SharedClientBoundaryAttemptCounters(fields[3], fields[4], fields[5]),
+    )
 
 
 def evaluate_onefile_local_api_peer(

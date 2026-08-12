@@ -120,9 +120,9 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                         events.append("close")
 
                 with patch(
-                    "scripts.canary_onefile_local_api.socket.socket",
+                    "openusage_bar.local_api.socket.socket",
                     return_value=Client(),
-                ):
+                ), patch("openusage_bar.local_api.sys.platform", "linux"):
                     with self.assertRaisesRegex(
                         OnefileLocalAPICanaryError,
                         "^onefile Local API canary failed$",
@@ -149,9 +149,9 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                         events.append("close")
 
                 with patch(
-                    "scripts.canary_onefile_local_api.socket.socket",
+                    "openusage_bar.local_api.socket.socket",
                     return_value=Client(),
-                ):
+                ), patch("openusage_bar.local_api.sys.platform", "linux"):
                     with self.assertRaisesRegex(
                         OnefileLocalAPICanaryError,
                         "^onefile Local API canary failed$",
@@ -279,9 +279,9 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
 
         self_outer = self
         with patch(
-            "scripts.canary_onefile_local_api.socket.socket",
+            "openusage_bar.local_api.socket.socket",
             return_value=Client(),
-        ):
+        ), patch("openusage_bar.local_api.sys.platform", "linux"):
             observed_peer, counters = read_onefile_shared_client_boundary_snapshot(
                 "/PRIVATE/openusage.sock",
                 remaining_timeout=lambda: 0.5,

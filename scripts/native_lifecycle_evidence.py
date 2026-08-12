@@ -2425,22 +2425,43 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             try:
                 from openusage_bar.local_api import (
                     LinuxLocalAPIState,
+                    closed_linux_shared_client_boundary_values,
                     read_current_user_local_api_state,
+                    read_current_user_shared_client_boundary_state,
                 )
                 from openusage_bar.platform_services import (
                     LinuxCollectorServiceState,
                     read_current_user_collector_service_state,
                 )
 
+                boundary_before = (
+                    read_current_user_shared_client_boundary_state()
+                )
                 local_state = read_current_user_local_api_state()
+                boundary_after = (
+                    read_current_user_shared_client_boundary_state()
+                )
                 service_after = read_current_user_collector_service_state()
                 current_uid = os.getuid()
                 current_gid = os.getgid()
+
+                boundary_before_values = (
+                    closed_linux_shared_client_boundary_values(
+                        boundary_before
+                    )
+                )
+                boundary_after_values = (
+                    closed_linux_shared_client_boundary_values(boundary_after)
+                )
                 if (
                     type(positive_service_observation)
                     is not LinuxCollectorServiceState
                     or type(service_after) is not LinuxCollectorServiceState
                     or type(local_state) is not LinuxLocalAPIState
+                    or boundary_before_values is None
+                    or boundary_after_values is None
+                    or boundary_before_values != boundary_after_values
+                    or boundary_before_values[4:] != (0, 0)
                     or service_after != positive_service_observation
                 ):
                     _fail("driver_unavailable")
@@ -2475,6 +2496,12 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                 if (
                     local_state.socket_mode != 0o600
                     or local_state.socket_uid != current_uid
+                    or boundary_before_values[:3]
+                    != (
+                        local_state.peer_pid,
+                        local_state.peer_uid,
+                        local_state.peer_gid,
+                    )
                     or not (peer_is_main or peer_is_stable_direct_child)
                     or local_state.peer_uid != current_uid
                     or local_state.peer_uid

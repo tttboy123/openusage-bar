@@ -255,6 +255,24 @@ def _linux_positive_listener_facts(home: Path) -> tuple[object, object, tuple[st
     return service, local, command
 
 
+def _linux_positive_boundary_fact(local: object) -> object:
+    from openusage_bar.local_api import (
+        LinuxLocalAPIState,
+        LinuxSharedClientBoundaryState,
+    )
+
+    if type(local) is not LinuxLocalAPIState:
+        raise AssertionError("closed local fact required")
+    return LinuxSharedClientBoundaryState(
+        peer_pid=local.peer_pid,
+        peer_uid=local.peer_uid,
+        peer_gid=local.peer_gid,
+        process_epoch_sha256="a" * 64,
+        bounded_http_open_attempts=0,
+        headless_keychain_get_attempts=0,
+    )
+
+
 def _native_path_identity(path: Path) -> tuple[int, int, int, int, int]:
     metadata = path.lstat()
     return (
@@ -8778,6 +8796,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
         from openusage_bar.lifecycle_state import LifecycleStatePaths
         from openusage_bar.local_api import (
+            LinuxSharedClientBoundaryState,
             LinuxLocalAPIState,
             read_current_user_local_api_state,
         )
@@ -8892,6 +8911,14 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 health_ok=True,
                 health_status="ok",
             )
+            boundary_state = LinuxSharedClientBoundaryState(
+                peer_pid=local_state.peer_pid,
+                peer_uid=local_state.peer_uid,
+                peer_gid=local_state.peer_gid,
+                process_epoch_sha256="a" * 64,
+                bounded_http_open_attempts=0,
+                headless_keychain_get_attempts=0,
+            )
             self.assertEqual(
                 tuple(field.name for field in fields(LinuxLocalAPIState)),
                 (
@@ -8925,6 +8952,8 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 *,
                 second_service: LinuxCollectorServiceState,
                 observed_local: LinuxLocalAPIState,
+                boundary_before: object = boundary_state,
+                boundary_after: object = boundary_state,
             ) -> None:
                 events: list[str] = []
 
@@ -8936,11 +8965,19 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     events.append("local")
                     return observed_local
 
+                def read_boundary():
+                    events.append("boundary")
+                    return next(boundary_states)
+
                 service_states = iter((service_s1, second_service))
+                boundary_states = iter((boundary_before, boundary_after))
                 with patch(
                     "openusage_bar.platform_services.read_current_user_collector_service_state",
                     side_effect=read_service,
                 ) as service_reader, patch(
+                    "openusage_bar.local_api.read_current_user_shared_client_boundary_state",
+                    side_effect=read_boundary,
+                ) as boundary_reader, patch(
                     "openusage_bar.local_api.read_current_user_local_api_state",
                     side_effect=read_local,
                 ) as local_reader, native_lifecycle_dependencies_for_host() as dependencies:
@@ -8956,8 +8993,12 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     self.assertEqual(str(unavailable.exception), "driver_unavailable")
                     self.assertNotIn(str(root), str(unavailable.exception))
                     self.assertNotIn("PRIVATE", str(unavailable.exception))
-                    self.assertEqual(events, ["service", "local", "service"])
+                    self.assertEqual(
+                        events,
+                        ["service", "boundary", "local", "boundary", "service"],
+                    )
                     self.assertEqual(service_reader.call_count, 2)
+                    self.assertEqual(boundary_reader.call_count, 2)
                     local_reader.assert_called_once_with()
 
                     with self.assertRaisesRegex(
@@ -8965,8 +9006,12 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     ) as consumed:
                         dependencies.inspect_listener("linux", "local")
                     self.assertEqual(str(consumed.exception), "driver_failed")
-                    self.assertEqual(events, ["service", "local", "service"])
+                    self.assertEqual(
+                        events,
+                        ["service", "boundary", "local", "boundary", "service"],
+                    )
                     self.assertEqual(service_reader.call_count, 2)
+                    self.assertEqual(boundary_reader.call_count, 2)
                     local_reader.assert_called_once_with()
 
             with patch(
@@ -8999,11 +9044,18 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     events.append("local")
                     return local_state
 
+                def read_boundary():
+                    events.append("boundary")
+                    return boundary_state
+
                 service_states = iter((service_s1, service_s2))
                 with patch(
                     "openusage_bar.platform_services.read_current_user_collector_service_state",
                     side_effect=read_service,
                 ) as service_reader, patch(
+                    "openusage_bar.local_api.read_current_user_shared_client_boundary_state",
+                    side_effect=read_boundary,
+                ) as boundary_reader, patch(
                     "openusage_bar.local_api.read_current_user_local_api_state",
                     side_effect=read_local,
                 ) as local_reader, native_lifecycle_dependencies_for_host() as dependencies:
@@ -9014,6 +9066,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         dependencies.inspect_listener("linux", "local")
                     self.assertEqual(str(wrong_order.exception), "driver_failed")
                     service_reader.assert_not_called()
+                    boundary_reader.assert_not_called()
                     local_reader.assert_not_called()
 
                     self.assertEqual(
@@ -9024,8 +9077,12 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         dependencies.inspect_listener("linux", "local"),
                         NativeListenerState(True, True),
                     )
-                    self.assertEqual(events, ["service", "local", "service"])
+                    self.assertEqual(
+                        events,
+                        ["service", "boundary", "local", "boundary", "service"],
+                    )
                     self.assertEqual(service_reader.call_count, 2)
+                    self.assertEqual(boundary_reader.call_count, 2)
                     local_reader.assert_called_once_with()
 
                     with self.assertRaisesRegex(
@@ -9033,8 +9090,12 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     ) as repeated:
                         dependencies.inspect_listener("linux", "local")
                     self.assertEqual(str(repeated.exception), "driver_failed")
-                    self.assertEqual(events, ["service", "local", "service"])
+                    self.assertEqual(
+                        events,
+                        ["service", "boundary", "local", "boundary", "service"],
+                    )
                     self.assertEqual(service_reader.call_count, 2)
+                    self.assertEqual(boundary_reader.call_count, 2)
                     local_reader.assert_called_once_with()
 
                 drift_values = {
@@ -9104,6 +9165,61 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                             ),
                         )
 
+                boundary_drift_values = {
+                    "peer_pid": boundary_state.peer_pid + 1,
+                    "peer_uid": boundary_state.peer_uid + 1,
+                    "peer_gid": boundary_state.peer_gid + 1,
+                    "process_epoch_sha256": "b" * 64,
+                    "bounded_http_open_attempts": 1,
+                    "headless_keychain_get_attempts": 1,
+                }
+                self.assertEqual(
+                    set(boundary_drift_values),
+                    {field.name for field in fields(LinuxSharedClientBoundaryState)},
+                )
+                for field_name, drifted_value in boundary_drift_values.items():
+                    with self.subTest(boundary_field=field_name):
+                        exercise_failure(
+                            second_service=service_s2,
+                            observed_local=local_state,
+                            boundary_after=replace(
+                                boundary_state,
+                                **{field_name: drifted_value},
+                            ),
+                        )
+
+                for counter_field in (
+                    "bounded_http_open_attempts",
+                    "headless_keychain_get_attempts",
+                ):
+                    with self.subTest(nonzero_boundary_field=counter_field):
+                        nonzero = replace(
+                            boundary_state,
+                            **{counter_field: 1},
+                        )
+                        exercise_failure(
+                            second_service=service_s2,
+                            observed_local=local_state,
+                            boundary_before=nonzero,
+                            boundary_after=nonzero,
+                        )
+
+                for peer_field in ("peer_pid", "peer_uid", "peer_gid"):
+                    with self.subTest(stable_foreign_boundary_peer=peer_field):
+                        foreign_peer = replace(
+                            boundary_state,
+                            **{
+                                peer_field: getattr(boundary_state, peer_field)
+                                + 1
+                            },
+                        )
+                        exercise_failure(
+                            second_service=service_s2,
+                            observed_local=local_state,
+                            boundary_before=foreign_peer,
+                            boundary_after=foreign_peer,
+                        )
+
             self.assertGreaterEqual(registered.call_count, 1)
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
@@ -9155,6 +9271,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 home.mkdir()
                 authority = LifecycleStatePaths(platform="linux", home=home)
                 service_state, local_state, command = _linux_positive_listener_facts(home)
+                boundary_state = _linux_positive_boundary_fact(local_state)
                 with ExitStack() as stack:
                     stack.enter_context(
                         patch(
@@ -9174,6 +9291,12 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                             return_value=local_state,
                         )
                     )
+                    boundary_reader = stack.enter_context(
+                        patch(
+                            "openusage_bar.local_api.read_current_user_shared_client_boundary_state",
+                            return_value=boundary_state,
+                        )
+                    )
                     dependencies, _run_directory, profile, _package = (
                         _enter_linux_host_dependencies(stack, authority)
                     )
@@ -9182,6 +9305,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         NativeServiceState(True, True, command),
                     )
                     self.assertEqual(service_reader.call_count, 1)
+                    boundary_reader.assert_not_called()
                     local_reader.assert_not_called()
 
                     invoke(dependencies, profile)
@@ -9195,6 +9319,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     self.assertNotIn(str(root), str(revoked.exception))
                     self.assertNotIn("PRIVATE", str(revoked.exception))
                     self.assertEqual(service_reader.call_count, 1)
+                    boundary_reader.assert_not_called()
                     local_reader.assert_not_called()
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
@@ -9235,6 +9360,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             home.mkdir()
             authority = LifecycleStatePaths(platform="linux", home=home)
             service_state, local_state, command = _linux_positive_listener_facts(home)
+            boundary_state = _linux_positive_boundary_fact(local_state)
             service_values = {
                 field.name: getattr(service_state, field.name)
                 for field in fields(LinuxCollectorServiceState)
@@ -9279,6 +9405,12 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                             return_value=local_after,
                         )
                     )
+                    boundary_reader = stack.enter_context(
+                        patch(
+                            "openusage_bar.local_api.read_current_user_shared_client_boundary_state",
+                            return_value=boundary_state,
+                        )
+                    )
                     dependencies, _run_directory, _profile, _package = (
                         _enter_linux_host_dependencies(stack, authority)
                     )
@@ -9299,6 +9431,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
                     reads_after_failure = (
                         service_reader.call_count,
+                        boundary_reader.call_count,
                         local_reader.call_count,
                     )
                     with self.assertRaisesRegex(
@@ -9310,6 +9443,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     self.assertEqual(
                         (
                             service_reader.call_count,
+                            boundary_reader.call_count,
                             local_reader.call_count,
                         ),
                         reads_after_failure,

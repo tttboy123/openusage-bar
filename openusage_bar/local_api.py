@@ -41,7 +41,10 @@ from .config import ID_PATTERN
 from .provider_catalog import ObserverPlatformResolver
 from .provider_catalog import catalog as default_catalog
 from .query import MAX_LIMIT, SCHEMA_VERSION, QueryService, to_wire
-from .shared_client_boundary import shared_client_boundary_attempt_counters
+from .shared_client_boundary import (
+    SharedClientBoundaryAttemptCounters,
+    shared_client_boundary_attempt_counters,
+)
 from .windows_file_security import native_windows_file_security
 
 
@@ -66,6 +69,15 @@ DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 2.0
 _MAX_TOKEN_PATH_LENGTH = 4_096
 _BAD_PERCENT = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_HTTP_FIELD_NAME_CHARACTERS = frozenset(
+    "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+)
+_SHARED_CLIENT_BOUNDARY_REQUEST = (
+    b"GET /_internal/v1/shared-client-boundary-attempts HTTP/1.1\r\n"
+    b"Host: localhost\r\n"
+    b"Accept: application/json\r\n"
+    b"Connection: close\r\n\r\n"
+)
 _WINDOWS_FILE_SECURITY = native_windows_file_security()
 
 
@@ -180,6 +192,318 @@ class LinuxLocalAPIState:
             or self.health_status != "ok"
         ):
             raise ValueError("Linux Local API state invalid")
+
+
+@dataclass(frozen=True, repr=False)
+class LinuxSharedClientBoundaryState:
+    """Closed current-user Unix peer and shared-client counter snapshot."""
+
+    peer_pid: int
+    peer_uid: int
+    peer_gid: int
+    process_epoch_sha256: str
+    bounded_http_open_attempts: int
+    headless_keychain_get_attempts: int
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.peer_pid) is not int
+            or self.peer_pid <= 0
+            or type(self.peer_uid) is not int
+            or self.peer_uid < 0
+            or type(self.peer_gid) is not int
+            or self.peer_gid < 0
+            or type(self.process_epoch_sha256) is not str
+            or len(self.process_epoch_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.process_epoch_sha256
+            )
+            or type(self.bounded_http_open_attempts) is not int
+            or not 0 <= self.bounded_http_open_attempts < 1 << 64
+            or type(self.headless_keychain_get_attempts) is not int
+            or not 0 <= self.headless_keychain_get_attempts < 1 << 64
+        ):
+            raise ValueError("Linux shared-client boundary state invalid")
+
+    def __repr__(self) -> str:
+        return "<LinuxSharedClientBoundaryState closed>"
+
+
+def closed_linux_shared_client_boundary_values(
+    value: object,
+) -> tuple[int, int, int, str, int, int] | None:
+    """Return canonical primitive values for one independently closed fact."""
+
+    if type(value) is not LinuxSharedClientBoundaryState:
+        return None
+    fields = (
+        value.peer_pid,
+        value.peer_uid,
+        value.peer_gid,
+        value.process_epoch_sha256,
+        value.bounded_http_open_attempts,
+        value.headless_keychain_get_attempts,
+    )
+    if (
+        type(fields[0]) is not int
+        or fields[0] <= 0
+        or type(fields[1]) is not int
+        or fields[1] < 0
+        or type(fields[2]) is not int
+        or fields[2] < 0
+        or type(fields[3]) is not str
+        or len(fields[3]) != 64
+        or any(character not in "0123456789abcdef" for character in fields[3])
+        or type(fields[4]) is not int
+        or type(fields[5]) is not int
+        or not 0 <= fields[4] < 1 << 64
+        or not 0 <= fields[5] < 1 << 64
+    ):
+        return None
+    return fields
+
+
+def _parse_shared_client_boundary_response(
+    response: bytes,
+) -> SharedClientBoundaryAttemptCounters:
+    if type(response) is not bytes or len(response) > 81_920:
+        raise LocalAPIObservationError
+    separator = response.find(b"\r\n\r\n")
+    if separator < 0 or separator > 16_384:
+        raise LocalAPIObservationError
+    try:
+        lines = response[:separator].decode("ascii").split("\r\n")
+    except Exception:
+        raise LocalAPIObservationError from None
+    if not lines or len(lines) > 65 or lines[0] != "HTTP/1.1 200 OK":
+        raise LocalAPIObservationError
+    headers: dict[str, str] = {}
+    for line in lines[1:]:
+        if ":" not in line:
+            raise LocalAPIObservationError
+        name, value = line.split(":", 1)
+        normalized_name = name.casefold()
+        if (
+            not name
+            or name != name.strip()
+            or any(
+                character not in _HTTP_FIELD_NAME_CHARACTERS
+                for character in name
+            )
+            or normalized_name in headers
+            or any(
+                character != "\t" and not (" " <= character <= "~")
+                for character in value
+            )
+        ):
+            raise LocalAPIObservationError
+        headers[normalized_name] = value.strip(" \t")
+    length = headers.get("content-length")
+    if (
+        "transfer-encoding" in headers
+        or length is None
+        or not length.isascii()
+        or not length.isdecimal()
+        or str(int(length)) != length
+        or headers.get("content-type") != "application/json; charset=utf-8"
+        or headers.get("cache-control") != "no-store"
+        or headers.get("x-content-type-options") != "nosniff"
+        or headers.get("connection", "").casefold() != "close"
+    ):
+        raise LocalAPIObservationError
+    body = response[separator + 4 :]
+    if int(length) != len(body) or len(body) > 65_536:
+        raise LocalAPIObservationError
+
+    def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if type(key) is not str or key in result:
+                raise LocalAPIObservationError
+            result[key] = value
+        return result
+
+    def reject_constant(_value: str) -> object:
+        raise LocalAPIObservationError
+
+    try:
+        payload = json.loads(
+            body.decode("utf-8"),
+            object_pairs_hook=unique_pairs,
+            parse_constant=reject_constant,
+        )
+        if type(payload) is not dict or set(payload) != {
+            "apiVersion",
+            "object",
+            "processEpochSha256",
+            "boundedHttpOpenAttempts",
+            "headlessKeychainGetAttempts",
+        }:
+            raise LocalAPIObservationError
+        if (
+            type(payload["apiVersion"]) is not str
+            or payload["apiVersion"]
+            != "local-api-internal-diagnostics/v1"
+            or type(payload["object"]) is not str
+            or payload["object"] != "sharedClientBoundaryAttempts"
+        ):
+            raise LocalAPIObservationError
+        return SharedClientBoundaryAttemptCounters(
+            payload["processEpochSha256"],
+            payload["boundedHttpOpenAttempts"],
+            payload["headlessKeychainGetAttempts"],
+        )
+    except LocalAPIObservationError:
+        raise
+    except Exception:
+        raise LocalAPIObservationError from None
+
+
+def read_linux_shared_client_boundary_state(
+    socket_path: str,
+    *,
+    remaining_timeout: Callable[[], float],
+) -> LinuxSharedClientBoundaryState:
+    """Read one strict private Unix snapshot with its current-user peer."""
+
+    client: socket.socket | None = None
+    failed = False
+    observed: LinuxSharedClientBoundaryState | None = None
+
+    def next_timeout() -> float:
+        value = remaining_timeout()
+        if (
+            type(value) not in (int, float)
+            or not math.isfinite(value)
+            or value <= 0
+            or value > 1.0
+        ):
+            raise LocalAPIObservationError
+        return float(value)
+
+    try:
+        if (
+            sys.platform != "linux"
+            or type(socket_path) is not str
+            or not socket_path
+            or not os.path.isabs(socket_path)
+            or "\0" in socket_path
+        ):
+            raise LocalAPIObservationError
+        current_uid = os.getuid()
+        current_gid = os.getgid()
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(next_timeout())
+        client.connect(socket_path)
+        peer_before = client.getsockopt(1, 17, 12)
+        if type(peer_before) is not bytes or len(peer_before) != 12:
+            raise LocalAPIObservationError
+        peer_pid, peer_uid, peer_gid = struct.unpack("=3i", peer_before)
+        if (
+            peer_pid <= 0
+            or peer_uid != current_uid
+            or peer_gid != current_gid
+        ):
+            raise LocalAPIObservationError
+        client.settimeout(next_timeout())
+        client.sendall(_SHARED_CLIENT_BOUNDARY_REQUEST)
+        response = bytearray()
+        while True:
+            client.settimeout(next_timeout())
+            chunk = client.recv(65_536)
+            if type(chunk) is not bytes:
+                raise LocalAPIObservationError
+            if not chunk:
+                break
+            response.extend(chunk)
+            if len(response) > 81_920:
+                raise LocalAPIObservationError
+        next_timeout()
+        peer_after = client.getsockopt(1, 17, 12)
+        if type(peer_after) is not bytes or peer_after != peer_before:
+            raise LocalAPIObservationError
+        next_timeout()
+        counters = _parse_shared_client_boundary_response(bytes(response))
+        next_timeout()
+        observed = LinuxSharedClientBoundaryState(
+            peer_pid=peer_pid,
+            peer_uid=peer_uid,
+            peer_gid=peer_gid,
+            process_epoch_sha256=counters.process_epoch_sha256,
+            bounded_http_open_attempts=counters.bounded_http_open_attempts,
+            headless_keychain_get_attempts=(
+                counters.headless_keychain_get_attempts
+            ),
+        )
+    except Exception:
+        failed = True
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                failed = True
+            if not failed and observed is not None:
+                try:
+                    next_timeout()
+                except Exception:
+                    failed = True
+    if failed or observed is None:
+        raise LocalAPIObservationError("http")
+    return observed
+
+
+def read_current_user_shared_client_boundary_state(
+) -> LinuxSharedClientBoundaryState:
+    """Read one bounded canonical current-user private counter snapshot."""
+
+    from .lifecycle_state import LifecycleStatePaths
+
+    try:
+        if sys.platform != "linux":
+            raise LocalAPIObservationError
+        authority = LifecycleStatePaths.for_current_user(platform="linux")
+        if (
+            type(authority) is not LifecycleStatePaths
+            or authority.platform != "linux"
+            or authority.home != Path.home()
+            or len(authority.roots) != 2
+        ):
+            raise LocalAPIObservationError
+        started = time.monotonic()
+        if (
+            type(started) not in (int, float)
+            or not math.isfinite(started)
+            or started < 0
+        ):
+            raise LocalAPIObservationError
+        deadline = float(started) + 2.0
+        if not math.isfinite(deadline):
+            raise LocalAPIObservationError
+        last_time = float(started)
+
+        def remaining_timeout() -> float:
+            nonlocal last_time
+            current = time.monotonic()
+            if (
+                type(current) not in (int, float)
+                or not math.isfinite(current)
+                or current < last_time
+                or current >= deadline
+            ):
+                raise LocalAPIObservationError
+            last_time = float(current)
+            return min(1.0, deadline - last_time)
+
+        return read_linux_shared_client_boundary_state(
+            str(authority.roots[0] / "openusage.sock"),
+            remaining_timeout=remaining_timeout,
+        )
+    except LocalAPIObservationError:
+        raise
+    except Exception:
+        raise LocalAPIObservationError("authority") from None
 
 
 def _linux_local_api_ancestor_is_private(
