@@ -999,12 +999,12 @@ jobs:
             "$preserve_root/tmp"
           sudo systemctl start "user@$current_uid.service"
           for manager_attempt in {1..50}; do
-            if [[ -S "/run/user/$current_uid/systemd/private" ]]; then
+            if sudo -u "$preserve_user" test -S "/run/user/$current_uid/systemd/private"; then
               break
             fi
             sleep 0.2
           done
-          test -S "/run/user/$current_uid/systemd/private"
+          sudo -u "$preserve_user" test -S "/run/user/$current_uid/systemd/private"
           set +e
           sudo -u "$preserve_user" /usr/bin/env -i \
             HOME="$preserve_root/home" \

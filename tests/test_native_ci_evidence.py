@@ -2440,8 +2440,17 @@ class NativeCiEvidenceTests(unittest.TestCase):
             'sudo systemctl start "user@$current_uid.service"',
             preserve,
         )
-        self.assertIn(
-            'test -S "/run/user/$current_uid/systemd/private"',
+        private_socket_probe = (
+            'sudo -u "$preserve_user" test -S '
+            '"/run/user/$current_uid/systemd/private"'
+        )
+        self.assertEqual(preserve.count(private_socket_probe), 2)
+        self.assertNotIn(
+            '\n            if [[ -S "/run/user/$current_uid/systemd/private" ]]',
+            preserve,
+        )
+        self.assertNotIn(
+            '\n          test -S "/run/user/$current_uid/systemd/private"',
             preserve,
         )
         self.assertIn('XDG_RUNTIME_DIR="/run/user/$current_uid"', preserve)
