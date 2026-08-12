@@ -93,6 +93,16 @@ def _file_signature(metadata: os.stat_result) -> tuple[int, ...]:
     )
 
 
+def _directory_signature(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_uid,
+        metadata.st_gid,
+    )
+
+
 class _GatewayProcessLease:
     def __init__(
         self,
@@ -131,9 +141,16 @@ class _GatewayProcessLease:
                 and _file_signature(os.fstat(self._token_descriptor))
                 == self._token_signature
                 and all(
-                    _file_signature(os.fstat(descriptor)) == signature
-                    and _file_signature(os.lstat(path)) == signature
-                    for path, descriptor, signature in self._directory_bindings
+                    (
+                        _file_signature(os.fstat(descriptor)) == signature
+                        and _file_signature(os.lstat(path)) == signature
+                        if index == 0
+                        else _directory_signature(os.fstat(descriptor)) == signature
+                        and _directory_signature(os.lstat(path)) == signature
+                    )
+                    for index, (path, descriptor, signature) in enumerate(
+                        self._directory_bindings
+                    )
                 )
             )
         except Exception:
@@ -346,7 +363,7 @@ def _start_gateway_process_lease(
                 dir_fd=root_descriptor,
             )
             child_metadata = os.fstat(child_descriptor)
-            child_signature = _file_signature(child_metadata)
+            child_signature = _directory_signature(child_metadata)
             directory_bindings.append(
                 (child_path, child_descriptor, child_signature)
             )
@@ -354,7 +371,7 @@ def _start_gateway_process_lease(
                 not stat.S_ISDIR(child_metadata.st_mode)
                 or child_metadata.st_uid != os.getuid()
                 or stat.S_IMODE(child_metadata.st_mode) != 0o700
-                or _file_signature(os.lstat(child_path)) != child_signature
+                or _directory_signature(os.lstat(child_path)) != child_signature
             ):
                 raise GatewayEgressTopologyCanaryError
         descriptor = os.open(

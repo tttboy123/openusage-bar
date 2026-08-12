@@ -107,6 +107,8 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
                     token_path=token,
                     environment=environment,
                 )
+                with open(os.path.join(environment["XDG_DATA_HOME"], "activity.sqlite3"), "wb") as stream:
+                    stream.write(b"runtime-data")
                 lease.stop()
                 lease.close()
 
@@ -152,6 +154,73 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
         self.assertIn(("killpg", process.pid, signal.SIGTERM), events)
         self.assertIn(("killpg", process.pid, signal.SIGKILL), events)
         self.assertIn(("wait", 5.0), events)
+
+    def test_gateway_lease_rejects_root_or_child_directory_authority_drift(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            _start_gateway_process_lease,
+        )
+
+        class Process:
+            pid = 4312
+
+            def wait(self, *, timeout: float) -> int:
+                del timeout
+                return -signal.SIGKILL
+
+        for drift in ("root-entry", "child-rebind", "child-mode"):
+            with self.subTest(drift=drift), tempfile.TemporaryDirectory() as directory:
+                root = os.path.realpath(directory)
+                self._prepare_private_root(root)
+                environment = self._closed_environment(root)
+                collector = os.path.join(root, "openusage-collector")
+                with open(collector, "wb") as stream:
+                    stream.write(b"audited-collector")
+                os.chmod(collector, 0o700)
+                config = self._prepare_advise_config(root)
+                token = self._prepare_gateway_token(root)
+                with (
+                    patch(
+                        "scripts.canary_gateway_egress_topology.subprocess.Popen",
+                        return_value=Process(),
+                    ),
+                    patch(
+                        "scripts.canary_gateway_egress_topology.os.getpgid",
+                        return_value=4312,
+                    ),
+                    patch(
+                        "scripts.canary_gateway_egress_topology.os.killpg",
+                    ),
+                    patch(
+                        "scripts.canary_gateway_egress_topology._wait_for_reserved_leader",
+                        return_value=True,
+                    ),
+                    patch(
+                        "scripts.canary_gateway_egress_topology._wait_for_group_members_to_exit",
+                    ),
+                ):
+                    lease = _start_gateway_process_lease(
+                        collector=collector,
+                        config_path=config,
+                        token_path=token,
+                        environment=environment,
+                    )
+                    data = environment["XDG_DATA_HOME"]
+                    if drift == "root-entry":
+                        with open(os.path.join(root, "foreign.marker"), "wb") as stream:
+                            stream.write(b"PRIVATE")
+                    elif drift == "child-rebind":
+                        os.rename(data, f"{data}.owned-original")
+                        os.mkdir(data, 0o700)
+                        os.chmod(data, 0o700)
+                    else:
+                        os.chmod(data, 0o750)
+                    with self.assertRaisesRegex(
+                        GatewayEgressTopologyCanaryError,
+                        r"^Gateway egress topology canary failed$",
+                    ):
+                        lease.stop()
+                    lease.close()
 
     def test_reaped_gateway_leader_is_never_signalled_after_binding_failure(self) -> None:
         from scripts.canary_gateway_egress_topology import (
