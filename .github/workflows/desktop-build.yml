@@ -1044,7 +1044,7 @@ jobs:
               collector_status=$?
               set -e
               if [[ "$collector_status" -ne 0 || -s "$collector_stdout" || -s "$collector_stderr" ]]; then
-                printf 'appimage_preserve_uninstall_failed category=collector\n' >&2
+                printf "%s\n" "appimage_preserve_uninstall_failed category=collector" >&2
                 exit 1
               fi
               test ! -s "$collector_stdout"
@@ -1057,15 +1057,15 @@ jobs:
               set -e
               exec {appimage_fd}<&-
               if [[ "$preserve_status" -ne 0 ]]; then
-                printf 'appimage_preserve_uninstall_failed category=wrapper\n' >&2
+                printf "%s\n" "appimage_preserve_uninstall_failed category=wrapper" >&2
                 exit 1
               fi
               if [[ -s "$preserve_stdout" ]]; then
-                printf 'appimage_preserve_stdout_not_empty\n' >&2
+                printf "%s\n" "appimage_preserve_stdout_not_empty" >&2
                 exit 1
               fi
               if [[ -s "$preserve_stderr" ]]; then
-                printf 'appimage_preserve_stderr_not_empty\n' >&2
+                printf "%s\n" "appimage_preserve_stderr_not_empty" >&2
                 exit 1
               fi
               test ! -s "$preserve_stdout"
