@@ -351,10 +351,13 @@ class _LinuxServiceReaderHarness:
                 "peer_status",
                 "peer_stat",
                 "peer_cgroup",
-                "peer_exe",
                 "peer_exe_stat",
                 "peer_public_exe_stat",
             }.issubset(self.events)
+        )
+        self.test_case.assertTrue(
+            "peer_exe" in self.events
+            or "peer_exe_permission_denied" in self.events
         )
         self.test_case.assertEqual(command, self.manager_command)
         self.test_case.assertEqual(
@@ -1233,6 +1236,18 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                 observed_headless, headless_events = read_success()
                 happy_collector_metadata = harness.collector_metadata
 
+                harness.manager_exe_readlink_denied = True
+                harness.manager_exe_stat_denied = True
+                observed_protected_manager, protected_manager_events = (
+                    read_success()
+                )
+                self.assertEqual(
+                    observed_protected_manager.manager_executable_authority,
+                    "peer-provenance-canonical-cmdline",
+                )
+                harness.manager_exe_readlink_denied = False
+                harness.manager_exe_stat_denied = False
+
                 ownership_failures = []
                 for ownership_case in ("wrong_ppid", "foreign_cgroup"):
                     harness.collector_ownership_case = ownership_case
@@ -1361,7 +1376,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             ):
                 assert_path_free(error)
 
-            self.assertEqual(harness.systemctl_which.call_count, 17)
+            self.assertEqual(harness.systemctl_which.call_count, 18)
             self.assertTrue(
                 all(
                     call.args == ("systemctl",) and call.kwargs == {}
@@ -1466,7 +1481,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                     for flags in harness.peer_open_flags
                 )
             )
-            self.assertEqual(harness.peer_socket_factory.call_count, 16)
+            self.assertEqual(harness.peer_socket_factory.call_count, 17)
 
             self.assertEqual(observed_headless, observed)
             self.assertEqual(headless_events.count("manager"), 2)
@@ -1563,6 +1578,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                         )
                     ).hexdigest(),
                     process_argv_nul=harness.argv_nul,
+                    manager_executable_authority="live-inode",
                 ),
             )
 

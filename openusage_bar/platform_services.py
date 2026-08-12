@@ -115,6 +115,7 @@ class LinuxCollectorServiceState:
     process_executable_file_id: str
     process_executable_signature_sha256: str
     process_argv_nul: bytes
+    manager_executable_authority: str
 
     def __post_init__(self) -> None:
         if (
@@ -162,6 +163,12 @@ class LinuxCollectorServiceState:
             or type(self.process_argv_nul) is not bytes
             or not self.process_argv_nul
             or not self.process_argv_nul.endswith(b"\0")
+            or type(self.manager_executable_authority) is not str
+            or self.manager_executable_authority
+            not in {
+                "live-inode",
+                "peer-provenance-canonical-cmdline",
+            }
         ):
             raise ValueError("Linux collector service state invalid")
 
@@ -733,11 +740,12 @@ def read_current_user_collector_service_state() -> LinuxCollectorServiceState:
         manager_cgroup_before = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
-        manager_executable_before = _read_linux_systemd_manager_executable(
-            manager_peer.pid
-        )
         manager_cmdline_before = _read_linux_systemd_manager_cmdline(
             manager_peer.pid
+        )
+        manager_executable_before = _read_linux_systemd_manager_executable(
+            manager_peer.pid,
+            unreadable_executable_cmdline=manager_cmdline_before,
         )
         systemctl_binding = _bind_linux_systemctl_executable(systemctl)
         unit_before = _read_linux_service_unit(home, unit)
@@ -780,11 +788,12 @@ def read_current_user_collector_service_state() -> LinuxCollectorServiceState:
         manager_cgroup_after = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
-        manager_executable_after = _read_linux_systemd_manager_executable(
-            manager_peer.pid
-        )
         manager_cmdline_after = _read_linux_systemd_manager_cmdline(
             manager_peer.pid
+        )
+        manager_executable_after = _read_linux_systemd_manager_executable(
+            manager_peer.pid,
+            unreadable_executable_cmdline=manager_cmdline_after,
         )
         if (
             manager_after != manager_before
@@ -828,6 +837,7 @@ def read_current_user_collector_service_state() -> LinuxCollectorServiceState:
                 struct.pack(">9Q", *process_executable_signature)
             ).hexdigest(),
             process_argv_nul=process_argv_nul,
+            manager_executable_authority=manager_executable_before[2],
         )
     except ServiceCommandError:
         raise

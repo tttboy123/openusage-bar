@@ -221,6 +221,7 @@ def _linux_positive_listener_facts(home: Path) -> tuple[object, object, tuple[st
         process_executable_file_id="collector-dev:collector-ino",
         process_executable_signature_sha256=executable_signature_sha256,
         process_argv_nul=("\0".join(command) + "\0").encode(),
+        manager_executable_authority="live-inode",
     )
     local = LinuxLocalAPIState(
         socket_file_id="socket-dev:socket-ino",
@@ -7912,6 +7913,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     executable_signature_sha256
                 ),
                 process_argv_nul=("\0".join(command) + "\0").encode(),
+                manager_executable_authority="live-inode",
             )
             service_s2 = replace(service_s1)
             service_cgroup = (
@@ -8430,6 +8432,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 process_executable_file_id="collector-dev:collector-ino",
                 process_executable_signature_sha256="4" * 64,
                 process_argv_nul=("\0".join(command) + "\0").encode(),
+                manager_executable_authority="live-inode",
             )
             before = tuple(
                 (path.relative_to(root).as_posix(), stat.S_IFMT(path.lstat().st_mode))
