@@ -1595,10 +1595,6 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         preserve_uninstall_token = run_directory.preserve_uninstall_token()
         process_rollback_unproven = False
 
-    def mark_product_rollback_proven() -> None:
-        nonlocal product_rollback_unproven
-        product_rollback_unproven = False
-
     def profile_paths(platform: object) -> NativeProfilePaths:
         nonlocal profile_home, profile_projection, package_projection
         nonlocal profile_xdg_binding, profile_xdg_trusted_root
@@ -2683,11 +2679,6 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             dependencies,
             "_mark_process_rollback_proven",
             mark_process_rollback_proven,
-        )
-        object.__setattr__(
-            dependencies,
-            "_mark_product_rollback_proven",
-            mark_product_rollback_proven,
         )
         yield dependencies
     finally:

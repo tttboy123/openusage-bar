@@ -1541,6 +1541,16 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         identities,
                     )
 
+                    self.assertFalse(
+                        hasattr(
+                            dependencies,
+                            "_mark_product_rollback_proven",
+                        )
+                    )
+                    self.assertEqual(
+                        _file_snapshot(run_directory), identities
+                    )
+
                     with self.assertRaisesRegex(
                         LifecycleEvidenceError, "driver_failed"
                     ) as repeated:
