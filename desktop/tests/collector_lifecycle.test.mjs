@@ -402,6 +402,18 @@ test("desktop main handles packaged lifecycle before readiness and keeps service
   );
   assert.match(
     source,
+    /request\.action !== "uninstall"[\s\S]*app\.exit\(2\)/u,
+  );
+  assert.match(
+    source,
+    /plan === null[\s\S]*app\.exit\(3\)/u,
+  );
+  assert.match(
+    source,
+    /result\.state === "removed" \? 0 : 4/u,
+  );
+  assert.match(
+    source,
     /ensurePackagedObserverService\([\s\S]*probe:\s*\(\)\s*=>\s*probePrivateObserver/u,
   );
   const ensureBody = source.split("async function ensurePrivateObserver()", 2)[1]

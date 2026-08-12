@@ -187,14 +187,14 @@ async function runPackagedLifecycleCommand() {
   }
   const plan = packagedCollectorLifecyclePlan();
   if (plan === null) {
-    app.exit(1);
+    app.exit(3);
     return true;
   }
   const result = await removePackagedObserverService({
     plan,
     deleteData: request.deleteData,
   });
-  app.exit(result.state === "removed" ? 0 : 1);
+  app.exit(result.state === "removed" ? 0 : 4);
   return true;
 }
 

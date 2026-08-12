@@ -964,7 +964,7 @@ jobs:
               sudo systemctl stop "user@$current_uid.service" || cleanup_failed=1
             fi
             if [[ "$preserve_user_created" == "1" ]]; then
-              sudo userdel "$preserve_user" || cleanup_failed=1
+              sudo userdel --remove "$preserve_user" || cleanup_failed=1
             fi
             sudo /bin/rm -f \
               "$preserve_execution" \
@@ -974,7 +974,6 @@ jobs:
               "$collector_stdout" \
               "$collector_stderr" || cleanup_failed=1
             sudo rmdir \
-              "$preserve_root/home" \
               "$preserve_root/data" \
               "$preserve_root/tmp" \
               "$preserve_root" || cleanup_failed=1
@@ -1051,11 +1050,23 @@ jobs:
               test ! -s "$collector_stderr"
               exec {appimage_fd}<"$preserve_execution"
               set +e
-              timeout --signal=TERM --kill-after=10s 180s "/proc/self/fd/$appimage_fd" --no-sandbox --usagehub-uninstall \
+              timeout --signal=TERM --kill-after=10s 180s "/proc/self/fd/$appimage_fd" --usagehub-uninstall \
                 >"$preserve_stdout" 2>"$preserve_stderr"
               preserve_status=$?
               set -e
               exec {appimage_fd}<&-
+              if [[ "$preserve_status" -eq 2 ]]; then
+                printf "%s\n" "appimage_preserve_uninstall_failed category=wrapper-request" >&2
+                exit 1
+              fi
+              if [[ "$preserve_status" -eq 3 ]]; then
+                printf "%s\n" "appimage_preserve_uninstall_failed category=wrapper-plan" >&2
+                exit 1
+              fi
+              if [[ "$preserve_status" -eq 4 ]]; then
+                printf "%s\n" "appimage_preserve_uninstall_failed category=wrapper-collector" >&2
+                exit 1
+              fi
               if [[ "$preserve_status" -ne 0 ]]; then
                 printf "%s\n" "appimage_preserve_uninstall_failed category=wrapper" >&2
                 exit 1

@@ -2527,12 +2527,12 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 self.assertIn(closed_environment, preserve)
         self.assertIn(
             'timeout --signal=TERM --kill-after=10s 180s '
-            '"/proc/self/fd/$appimage_fd" --no-sandbox --usagehub-uninstall',
+            '"/proc/self/fd/$appimage_fd" --usagehub-uninstall',
             preserve,
         )
         self.assertEqual(
-            preserve.count('--no-sandbox --usagehub-uninstall'),
-            1,
+            preserve.count('--no-sandbox'),
+            0,
         )
         self.assertIn('test "$preserve_status" -eq 0', preserve)
         self.assertIn('test ! -s "$preserve_stdout"', preserve)
@@ -2556,7 +2556,31 @@ class NativeCiEvidenceTests(unittest.TestCase):
             with self.subTest(private_output_probe=private_output_probe):
                 self.assertNotIn(private_output_probe, preserve)
         self.assertIn('sudo systemctl stop "user@$current_uid.service"', preserve)
-        self.assertIn('sudo userdel "$preserve_user"', preserve)
+        self.assertIn('sudo userdel --remove "$preserve_user"', preserve)
+        self.assertLess(
+            preserve.index('sudo systemctl stop "user@$current_uid.service"'),
+            preserve.index('sudo userdel --remove "$preserve_user"'),
+        )
+        rmdir_start = preserve.index("sudo rmdir")
+        rmdir_end = preserve.index('return "$cleanup_failed"', rmdir_start)
+        self.assertNotIn(
+            '"$preserve_root/home"',
+            preserve[rmdir_start:rmdir_end],
+        )
+        for wrapper_status, category in (
+            (2, "wrapper-request"),
+            (3, "wrapper-plan"),
+            (4, "wrapper-collector"),
+        ):
+            with self.subTest(wrapper_status=wrapper_status):
+                self.assertIn(
+                    f'"$preserve_status" -eq {wrapper_status}',
+                    preserve,
+                )
+                self.assertIn(
+                    f"appimage_preserve_uninstall_failed category={category}",
+                    preserve,
+                )
         self.assertIn("sudo /bin/rm -f", preserve)
         self.assertIn("sudo rmdir", preserve)
         self.assertIn(
