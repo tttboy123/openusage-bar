@@ -180,13 +180,24 @@ function parsePackagedLifecycleCommand({
   if (isPackaged !== true || platform !== "linux") {
     return { action: "invalid" };
   }
-  if (argv.length === 1 && argv[0] === "--usagehub-uninstall") {
+  const lifecycleArgv =
+    argv[0] === "--no-sandbox" ? argv.slice(1) : argv;
+  if (
+    argv.some((argument) => typeof argument !== "string") ||
+    lifecycleArgv.includes("--no-sandbox")
+  ) {
+    return { action: "invalid" };
+  }
+  if (
+    lifecycleArgv.length === 1 &&
+    lifecycleArgv[0] === "--usagehub-uninstall"
+  ) {
     return { action: "uninstall", deleteData: false };
   }
   if (
-    argv.length === 2 &&
-    argv[0] === "--usagehub-uninstall" &&
-    argv[1] === "--delete-data"
+    lifecycleArgv.length === 2 &&
+    lifecycleArgv[0] === "--usagehub-uninstall" &&
+    lifecycleArgv[1] === "--delete-data"
   ) {
     return { action: "uninstall", deleteData: true };
   }

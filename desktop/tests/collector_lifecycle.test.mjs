@@ -200,10 +200,29 @@ test("Linux headless uninstall delegates managed removal and deletes state only 
     }),
     { action: "uninstall", deleteData: true },
   );
+  assert.deepEqual(
+    parsePackagedLifecycleCommand({
+      isPackaged: true,
+      platform: "linux",
+      argv: ["--no-sandbox", "--usagehub-uninstall"],
+    }),
+    { action: "uninstall", deleteData: false },
+  );
+  assert.deepEqual(
+    parsePackagedLifecycleCommand({
+      isPackaged: true,
+      platform: "linux",
+      argv: ["--no-sandbox", "--usagehub-uninstall", "--delete-data"],
+    }),
+    { action: "uninstall", deleteData: true },
+  );
   for (const argv of [
     ["--delete-data"],
     ["--usagehub-uninstall", "--unknown"],
     ["--usagehub-uninstall", "--delete-data", "extra"],
+    ["--usagehub-uninstall", "--no-sandbox"],
+    ["--no-sandbox", "--no-sandbox", "--usagehub-uninstall"],
+    ["--disable-gpu", "--usagehub-uninstall"],
   ]) {
     assert.deepEqual(
       parsePackagedLifecycleCommand({

@@ -2378,8 +2378,20 @@ class NativeCiEvidenceTests(unittest.TestCase):
             preserve,
         )
         self.assertIn(
-            'packaged_collector="$RUNNER_TEMP/usagehub-appimage-'
+            'packaged_collector_source="$RUNNER_TEMP/usagehub-appimage-'
             '${{ matrix.arch }}/resources/collector/${{ matrix.collector }}"',
+            preserve,
+        )
+        self.assertIn(
+            'packaged_collector="$preserve_root/openusage-collector"',
+            preserve,
+        )
+        self.assertIn(
+            '/bin/cp "$packaged_collector_source" "$packaged_collector"',
+            preserve,
+        )
+        self.assertIn(
+            '/usr/bin/cmp -s "$packaged_collector_source" "$packaged_collector"',
             preserve,
         )
         self.assertIn('test -x "$packaged_collector"', preserve)
@@ -2502,8 +2514,12 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 self.assertIn(closed_environment, preserve)
         self.assertIn(
             'timeout --signal=TERM --kill-after=10s 180s '
-            '"/proc/self/fd/$appimage_fd" --usagehub-uninstall',
+            '"/proc/self/fd/$appimage_fd" --no-sandbox --usagehub-uninstall',
             preserve,
+        )
+        self.assertEqual(
+            preserve.count('--no-sandbox --usagehub-uninstall'),
+            1,
         )
         self.assertIn('test "$preserve_status" -eq 0', preserve)
         self.assertIn('test ! -s "$preserve_stdout"', preserve)

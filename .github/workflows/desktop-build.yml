@@ -953,8 +953,9 @@ jobs:
           preserve_stderr="$preserve_root/stderr"
           collector_stdout="$preserve_root/collector.stdout"
           collector_stderr="$preserve_root/collector.stderr"
-          packaged_collector="$RUNNER_TEMP/usagehub-appimage-${{ matrix.arch }}/resources/collector/${{ matrix.collector }}"
-          test -x "$packaged_collector"
+          packaged_collector_source="$RUNNER_TEMP/usagehub-appimage-${{ matrix.arch }}/resources/collector/${{ matrix.collector }}"
+          packaged_collector="$preserve_root/openusage-collector"
+          test -x "$packaged_collector_source"
           preserve_user_created=0
           current_uid=""
           cleanup_preserve() {
@@ -969,6 +970,7 @@ jobs:
               "$preserve_execution" \
               "$preserve_stdout" \
               "$preserve_stderr" \
+              "$packaged_collector" \
               "$collector_stdout" \
               "$collector_stderr" || cleanup_failed=1
             sudo rmdir \
@@ -994,13 +996,18 @@ jobs:
           source_digest="$(/usr/bin/sha256sum "$FINAL_ARTIFACT" | /usr/bin/awk '{print $1}')"
           /bin/cp "$FINAL_ARTIFACT" "$preserve_execution"
           /usr/bin/cmp -s "$FINAL_ARTIFACT" "$preserve_execution"
+          /bin/cp "$packaged_collector_source" "$packaged_collector"
+          /usr/bin/cmp -s "$packaged_collector_source" "$packaged_collector"
           execution_digest="$(/usr/bin/sha256sum "$preserve_execution" | /usr/bin/awk '{print $1}')"
           test "$execution_digest" = "$source_digest"
           /bin/chmod 0700 "$preserve_execution"
+          /bin/chmod 0700 "$packaged_collector"
+          test -x "$packaged_collector"
           sudo chown "$preserve_user:$preserve_user" \
             "$preserve_root" \
             "$preserve_root/home" \
             "$preserve_execution" \
+            "$packaged_collector" \
             "$preserve_root/data" \
             "$preserve_root/tmp"
           sudo systemctl start "user@$current_uid.service"
@@ -1044,7 +1051,7 @@ jobs:
               test ! -s "$collector_stderr"
               exec {appimage_fd}<"$preserve_execution"
               set +e
-              timeout --signal=TERM --kill-after=10s 180s "/proc/self/fd/$appimage_fd" --usagehub-uninstall \
+              timeout --signal=TERM --kill-after=10s 180s "/proc/self/fd/$appimage_fd" --no-sandbox --usagehub-uninstall \
                 >"$preserve_stdout" 2>"$preserve_stderr"
               preserve_status=$?
               set -e
