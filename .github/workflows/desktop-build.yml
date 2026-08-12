@@ -996,6 +996,8 @@ jobs:
           sudo chown "$preserve_user:$preserve_user" \
             "$preserve_root" \
             "$preserve_root/home" \
+            "$preserve_root/home/data" \
+            "$preserve_root/home/tmp" \
             "$preserve_execution" \
             "$packaged_collector"
           sudo systemctl start "user@$current_uid.service"
