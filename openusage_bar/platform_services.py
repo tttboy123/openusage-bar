@@ -1185,8 +1185,7 @@ def _bind_linux_systemd_private_peer(
             not stat.S_ISSOCK(private_metadata.st_mode)
             or private_metadata.st_uid != current_uid
             or private_metadata.st_nlink != 1
-            or private_mode & 0o700 != 0o600
-            or private_mode & 0o111
+            or private_mode not in {0o600, 0o700}
         ):
             raise ServiceCommandError()
         connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

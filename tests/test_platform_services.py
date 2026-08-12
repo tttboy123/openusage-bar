@@ -907,6 +907,9 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                     stderr=b"",
                 )
 
+            harness.private_metadata = harness._socket_metadata(
+                harness.systemd_metadata.st_ino + 1000, 0o700
+            )
             with harness.patched(manager_side_effect=negative_manager):
                 harness.manager_stdout = absence_stdout
                 self.assertEqual(
