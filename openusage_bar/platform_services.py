@@ -64,7 +64,8 @@ _LINUX_SERVICE_ABSENCE_STAGES = frozenset(
         "authority",
         "runtime-peer",
         "manager-provenance",
-        "manager-binary-path",
+        "manager-binary-readlink",
+        "manager-binary-path-value",
         "manager-binary-metadata",
         "manager-binary-public-identity",
         "systemctl-binding",
@@ -904,7 +905,7 @@ def read_current_user_collector_service_absence_state(
         manager_cgroup_before = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
-        stage = "manager-binary-path"
+        stage = "manager-binary-readlink"
         manager_executable_before = _read_linux_systemd_manager_executable(
             manager_peer.pid
         )
@@ -934,7 +935,7 @@ def read_current_user_collector_service_absence_state(
         manager_cgroup_after = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
-        stage = "manager-binary-path"
+        stage = "manager-binary-readlink"
         manager_executable_after = _read_linux_systemd_manager_executable(
             manager_peer.pid
         )
@@ -1313,9 +1314,9 @@ def _read_linux_systemd_manager_executable(
     try:
         raw_path = os.readlink(proc_executable)
     except Exception as error:
-        raise ServiceCommandError(stage="manager-binary-path") from error
+        raise ServiceCommandError(stage="manager-binary-readlink") from error
     if raw_path != "/usr/lib/systemd/systemd":
-        raise ServiceCommandError(stage="manager-binary-path")
+        raise ServiceCommandError(stage="manager-binary-path-value")
     try:
         proc_metadata = os.stat(proc_executable)
     except Exception as error:

@@ -76,14 +76,15 @@ class LinuxServiceAbsenceCanaryTests(unittest.TestCase):
             (10, "authority"),
             (11, "runtime-peer"),
             (12, "manager-provenance"),
-            (13, "manager-binary-path"),
-            (14, "manager-binary-metadata"),
-            (15, "manager-binary-public-identity"),
-            (16, "systemctl-binding"),
-            (17, "unit-absence"),
-            (18, "manager-query"),
-            (19, "sandwich"),
-            (20, "cleanup"),
+            (13, "manager-binary-readlink"),
+            (14, "manager-binary-path-value"),
+            (15, "manager-binary-metadata"),
+            (16, "manager-binary-public-identity"),
+            (17, "systemctl-binding"),
+            (18, "unit-absence"),
+            (19, "manager-query"),
+            (20, "sandwich"),
+            (21, "cleanup"),
         )
         for status, stage in stages:
             with self.subTest(stage=stage):
