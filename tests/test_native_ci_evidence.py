@@ -2538,11 +2538,12 @@ class NativeCiEvidenceTests(unittest.TestCase):
             (10, "authority"),
             (11, "runtime-peer"),
             (12, "manager-provenance"),
-            (13, "binary-binding"),
-            (14, "unit-absence"),
-            (15, "manager-query"),
-            (16, "sandwich"),
-            (17, "cleanup"),
+            (13, "manager-binary"),
+            (14, "systemctl-binding"),
+            (15, "unit-absence"),
+            (16, "manager-query"),
+            (17, "sandwich"),
+            (18, "cleanup"),
         ):
             with self.subTest(service_absence_category=category):
                 self.assertIn(

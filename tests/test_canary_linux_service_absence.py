@@ -73,16 +73,17 @@ class LinuxServiceAbsenceCanaryTests(unittest.TestCase):
         from scripts.canary_linux_service_absence import main
 
         stages = (
-            "authority",
-            "runtime-peer",
-            "manager-provenance",
-            "binary-binding",
-            "unit-absence",
-            "manager-query",
-            "sandwich",
-            "cleanup",
+            (10, "authority"),
+            (11, "runtime-peer"),
+            (12, "manager-provenance"),
+            (13, "manager-binary"),
+            (14, "systemctl-binding"),
+            (15, "unit-absence"),
+            (16, "manager-query"),
+            (17, "sandwich"),
+            (18, "cleanup"),
         )
-        for offset, stage in enumerate(stages, start=10):
+        for status, stage in stages:
             with self.subTest(stage=stage):
                 stdout = io.StringIO()
                 stderr = io.StringIO()
@@ -97,7 +98,7 @@ class LinuxServiceAbsenceCanaryTests(unittest.TestCase):
                 ):
                     result = main(())
 
-                self.assertEqual(result, offset)
+                self.assertEqual(result, status)
                 self.assertEqual(stdout.getvalue(), "")
                 self.assertEqual(stderr.getvalue(), "")
 

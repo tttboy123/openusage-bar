@@ -15,11 +15,12 @@ _STAGE_STATUS = {
     "authority": 10,
     "runtime-peer": 11,
     "manager-provenance": 12,
-    "binary-binding": 13,
-    "unit-absence": 14,
-    "manager-query": 15,
-    "sandwich": 16,
-    "cleanup": 17,
+    "manager-binary": 13,
+    "systemctl-binding": 14,
+    "unit-absence": 15,
+    "manager-query": 16,
+    "sandwich": 17,
+    "cleanup": 18,
 }
 
 

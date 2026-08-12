@@ -64,7 +64,8 @@ _LINUX_SERVICE_ABSENCE_STAGES = frozenset(
         "authority",
         "runtime-peer",
         "manager-provenance",
-        "binary-binding",
+        "manager-binary",
+        "systemctl-binding",
         "unit-absence",
         "manager-query",
         "sandwich",
@@ -901,7 +902,7 @@ def read_current_user_collector_service_absence_state(
         manager_cgroup_before = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
-        stage = "binary-binding"
+        stage = "manager-binary"
         manager_executable_before = _read_linux_systemd_manager_executable(
             manager_peer.pid
         )
@@ -909,7 +910,7 @@ def read_current_user_collector_service_absence_state(
         manager_cmdline_before = _read_linux_systemd_manager_cmdline(
             manager_peer.pid
         )
-        stage = "binary-binding"
+        stage = "systemctl-binding"
         systemctl_binding = _bind_linux_systemctl_executable(systemctl)
         stage = "unit-absence"
         _prove_linux_service_unit_missing(home, unit)
@@ -931,7 +932,7 @@ def read_current_user_collector_service_absence_state(
         manager_cgroup_after = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
-        stage = "binary-binding"
+        stage = "manager-binary"
         manager_executable_after = _read_linux_systemd_manager_executable(
             manager_peer.pid
         )

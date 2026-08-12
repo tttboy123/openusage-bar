@@ -1094,11 +1094,12 @@ jobs:
                   10) service_absence_category="authority" ;;
                   11) service_absence_category="runtime-peer" ;;
                   12) service_absence_category="manager-provenance" ;;
-                  13) service_absence_category="binary-binding" ;;
-                  14) service_absence_category="unit-absence" ;;
-                  15) service_absence_category="manager-query" ;;
-                  16) service_absence_category="sandwich" ;;
-                  17) service_absence_category="cleanup" ;;
+                  13) service_absence_category="manager-binary" ;;
+                  14) service_absence_category="systemctl-binding" ;;
+                  15) service_absence_category="unit-absence" ;;
+                  16) service_absence_category="manager-query" ;;
+                  17) service_absence_category="sandwich" ;;
+                  18) service_absence_category="cleanup" ;;
                 esac
                 printf "%s\n" "appimage_preserve_uninstall_failed category=service-absence-$service_absence_category" >&2
                 exit 1
