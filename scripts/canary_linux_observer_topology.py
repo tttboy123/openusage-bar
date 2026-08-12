@@ -36,6 +36,8 @@ from openusage_bar.platform_services import (
     read_current_user_collector_service_state,
 )
 from scripts.canary_onefile_local_api import (
+    SharedClientBoundaryZeroWindow,
+    closed_shared_client_boundary_zero_window_values,
     evaluate_onefile_shared_client_boundary_window,
     read_onefile_shared_client_boundary_snapshot,
 )
@@ -100,6 +102,32 @@ class LinuxObserverTopologySummary:
 
     def __repr__(self) -> str:
         return "<LinuxObserverTopologySummary closed>"
+
+
+@dataclass(frozen=True, repr=False)
+class LinuxObserverRuntimeFact:
+    service_before: LinuxCollectorServiceState
+    local_api: LinuxLocalAPIState
+    service_after: LinuxCollectorServiceState
+    shared_client_boundary: SharedClientBoundaryZeroWindow
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.service_before) is not LinuxCollectorServiceState
+            or type(self.local_api) is not LinuxLocalAPIState
+            or type(self.service_after) is not LinuxCollectorServiceState
+            or self.service_before != self.service_after
+            or type(self.shared_client_boundary)
+            is not SharedClientBoundaryZeroWindow
+            or closed_shared_client_boundary_zero_window_values(
+                self.shared_client_boundary
+            )
+            is None
+        ):
+            raise ValueError("Linux Observer runtime fact invalid")
+
+    def __repr__(self) -> str:
+        return "<LinuxObserverRuntimeFact closed>"
 
 
 _APPIMAGE_MODE = 0o700
@@ -286,11 +314,7 @@ def _read_absence() -> LinuxCollectorServiceAbsenceState:
     return observed
 
 
-def _observe_runtime(*, remaining_timeout) -> tuple[
-    LinuxCollectorServiceState,
-    LinuxLocalAPIState,
-    LinuxCollectorServiceState,
-]:
+def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
     try:
         service_before = read_current_user_collector_service_state()
     except Exception:
@@ -467,20 +491,31 @@ def _observe_runtime(*, remaining_timeout) -> tuple[
             local_state.peer_uid,
             local_state.peer_gid,
         )
-        evaluate_onefile_shared_client_boundary_window(
+        boundary_window = evaluate_onefile_shared_client_boundary_window(
             health_peer=health_peer,
             peer_before=boundary_peer_before,
             counters_before=boundary_before,
             peer_after=boundary_peer_after,
             counters_after=boundary_after,
         )
+        boundary_values = closed_shared_client_boundary_zero_window_values(
+            boundary_window
+        )
+        if boundary_values is None:
+            raise LinuxObserverTopologyCanaryError("runtime-before-boundary")
+        boundary_window = SharedClientBoundaryZeroWindow(*boundary_values)
     except Exception:
         raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
     try:
         remaining_timeout()
     except Exception:
         raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
-    return service_before, local_state, service_after
+    return LinuxObserverRuntimeFact(
+        service_before,
+        local_state,
+        service_after,
+        boundary_window,
+    )
 
 
 def _start_appimage_lease(appimage: str) -> _AppImageProcessLease:
@@ -673,11 +708,7 @@ def _run_preserve_uninstall(appimage: str) -> None:
 
 def _wait_for_runtime(
     lease: _AppImageProcessLease | None = None,
-) -> tuple[
-    LinuxCollectorServiceState,
-    LinuxLocalAPIState,
-    LinuxCollectorServiceState,
-]:
+) -> LinuxObserverRuntimeFact:
     started = time.monotonic()
     if (
         isinstance(started, bool)
@@ -761,6 +792,8 @@ def run_linux_observer_topology_canary(
                 raise
             except Exception:
                 raise LinuxObserverTopologyCanaryError("runtime-before") from None
+            if type(runtime_before) is not LinuxObserverRuntimeFact:
+                raise LinuxObserverTopologyCanaryError("runtime-before")
             try:
                 lease.stop()
             except Exception:
@@ -769,7 +802,10 @@ def run_linux_observer_topology_canary(
                 runtime_after = _wait_for_runtime()
             except Exception:
                 raise LinuxObserverTopologyCanaryError("runtime-after") from None
-            if runtime_after != runtime_before:
+            if (
+                type(runtime_after) is not LinuxObserverRuntimeFact
+                or runtime_after != runtime_before
+            ):
                 raise LinuxObserverTopologyCanaryError("runtime-after")
         try:
             _run_preserve_uninstall(appimage)

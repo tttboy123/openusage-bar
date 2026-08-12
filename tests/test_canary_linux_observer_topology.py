@@ -111,6 +111,9 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
                 (service, local, service),
             )
         )
+        from scripts.canary_linux_observer_topology import LinuxObserverRuntimeFact
+        from scripts.canary_onefile_local_api import SharedClientBoundaryZeroWindow
+        boundary = SharedClientBoundaryZeroWindow("a" * 64, True, True)
 
         class Lease:
             def __enter__(self):
@@ -131,7 +134,7 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
             self.assertGreater(remaining_timeout(), 0.0)
             before, listener, after = next(runtime_facts)
             events.extend(("service", "local", "service"))
-            return before, listener, after
+            return LinuxObserverRuntimeFact(before, listener, after, boundary)
 
         def start_lease(selected: str):
             self.assertEqual(selected, appimage)
@@ -206,7 +209,15 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
         process = SimpleProcess(events)
         absence = self._absence_state()
         service, local = self._runtime_state()
-        runtime = (service, local, service)
+        from scripts.canary_linux_observer_topology import LinuxObserverRuntimeFact
+        from scripts.canary_onefile_local_api import SharedClientBoundaryZeroWindow
+
+        runtime = LinuxObserverRuntimeFact(
+            service,
+            local,
+            service,
+            SharedClientBoundaryZeroWindow("a" * 64, True, True),
+        )
 
         with tempfile.TemporaryDirectory() as directory:
             appimage = os.path.join(directory, "OpenUsageBar.AppImage")
@@ -315,6 +326,10 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
         from dataclasses import replace
 
         changed_local = replace(local, socket_file_id="77:88")
+        from scripts.canary_linux_observer_topology import LinuxObserverRuntimeFact
+        from scripts.canary_onefile_local_api import SharedClientBoundaryZeroWindow
+
+        boundary = SharedClientBoundaryZeroWindow("a" * 64, True, True)
         events: list[str] = []
 
         class Lease:
@@ -336,8 +351,10 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
             patch(
                 "scripts.canary_linux_observer_topology._wait_for_runtime",
                 side_effect=(
-                    (service, local, service),
-                    (service, changed_local, service),
+                    LinuxObserverRuntimeFact(service, local, service, boundary),
+                    LinuxObserverRuntimeFact(
+                        service, changed_local, service, boundary
+                    ),
                 ),
             ),
             patch(
@@ -360,6 +377,91 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
                 run_linux_observer_topology_canary("/PRIVATE/AppImage")
         self.assertEqual(events, ["stop", "close"])
         preserve.assert_not_called()
+
+    def test_shared_boundary_epoch_drift_after_ui_stop_never_runs_preserve(self):
+        from scripts.canary_linux_observer_topology import (
+            LinuxObserverRuntimeFact,
+            LinuxObserverTopologyCanaryError,
+            run_linux_observer_topology_canary,
+        )
+        from scripts.canary_onefile_local_api import SharedClientBoundaryZeroWindow
+
+        service, local = self._runtime_state()
+        before = LinuxObserverRuntimeFact(
+            service,
+            local,
+            service,
+            SharedClientBoundaryZeroWindow("a" * 64, True, True),
+        )
+        after = LinuxObserverRuntimeFact(
+            service,
+            local,
+            service,
+            SharedClientBoundaryZeroWindow("b" * 64, True, True),
+        )
+        events: list[str] = []
+
+        class Lease:
+            def __enter__(self):
+                return self
+
+            def stop(self):
+                events.append("stop")
+
+            def __exit__(self, exc_type, exc, traceback):
+                events.append("close")
+
+        absence = self._absence_state()
+        with (
+            patch(
+                "scripts.canary_linux_observer_topology._read_absence",
+                side_effect=(absence, absence),
+            ),
+            patch(
+                "scripts.canary_linux_observer_topology._wait_for_runtime",
+                side_effect=(before, after),
+            ),
+            patch(
+                "scripts.canary_linux_observer_topology._start_appimage_lease",
+                return_value=Lease(),
+            ),
+            patch(
+                "scripts.canary_linux_observer_topology._run_preserve_uninstall"
+            ) as preserve,
+            patch("scripts.canary_linux_observer_topology.sys.platform", "linux"),
+            patch(
+                "scripts.canary_linux_observer_topology.platform.machine",
+                return_value="x86_64",
+            ),
+        ):
+            with self.assertRaisesRegex(
+                LinuxObserverTopologyCanaryError,
+                "^Linux Observer topology canary failed$",
+            ) as raised:
+                run_linux_observer_topology_canary("/PRIVATE/AppImage")
+
+        self.assertEqual(raised.exception.stage, "runtime-after")
+        self.assertEqual(events, ["stop", "close"])
+        preserve.assert_not_called()
+
+    def test_runtime_fact_rejects_an_unsafe_mutated_boundary_proof(self):
+        from scripts.canary_linux_observer_topology import LinuxObserverRuntimeFact
+        from scripts.canary_onefile_local_api import SharedClientBoundaryZeroWindow
+
+        service, local = self._runtime_state()
+        for field_name, value in (
+            ("process_epoch_sha256", "PRIVATE"),
+            ("bounded_http_open_attempts_zero", False),
+            ("headless_keychain_get_attempts_zero", 1),
+        ):
+            with self.subTest(field_name=field_name):
+                proof = SharedClientBoundaryZeroWindow("a" * 64, True, True)
+                object.__setattr__(proof, field_name, value)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "^Linux Observer runtime fact invalid$",
+                ):
+                    LinuxObserverRuntimeFact(service, local, service, proof)
 
     def test_runtime_observation_accepts_only_canonical_product_facts(self):
         from scripts.canary_linux_observer_topology import _observe_runtime
@@ -394,6 +496,10 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
             self.assertEqual(kwargs["peer_after"], peer)
             self.assertEqual(kwargs["counters_after"], counters)
             events.append("evaluate")
+            from scripts.canary_onefile_local_api import (
+                SharedClientBoundaryZeroWindow,
+            )
+            return SharedClientBoundaryZeroWindow("a" * 64, True, True)
 
         with (
             patch.dict(
@@ -420,7 +526,18 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
         ):
             observed = _observe_runtime(remaining_timeout=lambda: 0.5)
 
-        self.assertEqual(observed, (service, local, service))
+        from scripts.canary_linux_observer_topology import LinuxObserverRuntimeFact
+        from scripts.canary_onefile_local_api import SharedClientBoundaryZeroWindow
+
+        self.assertEqual(
+            observed,
+            LinuxObserverRuntimeFact(
+                service,
+                local,
+                service,
+                SharedClientBoundaryZeroWindow("a" * 64, True, True),
+            ),
+        )
         self.assertEqual(service_reader.call_count, 2)
         local_reader.assert_called_once_with()
         self.assertEqual(boundary_reader.call_count, 2)

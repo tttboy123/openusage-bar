@@ -148,6 +148,47 @@ class OnefileLocalAPISummary:
             raise ValueError("onefile Local API summary invalid")
 
 
+@dataclass(frozen=True, repr=False)
+class SharedClientBoundaryZeroWindow:
+    process_epoch_sha256: str
+    bounded_http_open_attempts_zero: bool
+    headless_keychain_get_attempts_zero: bool
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.process_epoch_sha256) is not str
+            or len(self.process_epoch_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.process_epoch_sha256
+            )
+            or self.bounded_http_open_attempts_zero is not True
+            or self.headless_keychain_get_attempts_zero is not True
+        ):
+            raise ValueError("shared client boundary zero window invalid")
+
+
+def closed_shared_client_boundary_zero_window_values(
+    value: object,
+) -> tuple[str, bool, bool] | None:
+    if type(value) is not SharedClientBoundaryZeroWindow:
+        return None
+    fields = (
+        value.process_epoch_sha256,
+        value.bounded_http_open_attempts_zero,
+        value.headless_keychain_get_attempts_zero,
+    )
+    if (
+        type(fields[0]) is not str
+        or len(fields[0]) != 64
+        or any(character not in "0123456789abcdef" for character in fields[0])
+        or fields[1] is not True
+        or fields[2] is not True
+    ):
+        return None
+    return fields
+
+
 def _closed_shared_boundary_values(
     value: object,
 ) -> tuple[str, int, int] | None:
@@ -192,7 +233,7 @@ def evaluate_onefile_shared_client_boundary_window(
     counters_before: object,
     peer_after: bytes,
     counters_after: object,
-) -> None:
+) -> SharedClientBoundaryZeroWindow:
     before_values = _closed_shared_boundary_values(counters_before)
     after_values = _closed_shared_boundary_values(counters_after)
     if (
@@ -207,6 +248,7 @@ def evaluate_onefile_shared_client_boundary_window(
         or before_values[1:] != (0, 0)
     ):
         raise OnefileLocalAPICanaryError
+    return SharedClientBoundaryZeroWindow(before_values[0], True, True)
 
 
 def read_onefile_shared_client_boundary_snapshot(
@@ -720,13 +762,15 @@ def run_onefile_local_api_canary(collector: str) -> OnefileLocalAPISummary:
                 remaining_timeout=remaining_timeout,
             )
         )
-        evaluate_onefile_shared_client_boundary_window(
+        boundary_window = evaluate_onefile_shared_client_boundary_window(
             health_peer=peer_before,
             peer_before=boundary_peer_before,
             counters_before=boundary_before,
             peer_after=boundary_peer_after,
             counters_after=boundary_after,
         )
+        if type(boundary_window) is not SharedClientBoundaryZeroWindow:
+            raise OnefileLocalAPICanaryError
         child_after = read_linux_process_facts(peer_pid)
         parent_after = read_linux_process_facts(process.pid)
         if any(
