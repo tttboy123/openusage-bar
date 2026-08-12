@@ -670,6 +670,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
             GatewayAdviseHealthState,
             GatewayFixedUnknownAdviceState,
         )
+        from scripts.canary_onefile_local_api import OnefileLocalAPISummary
         from scripts.canary_gateway_egress_topology import (
             GatewayEgressTopologySummary,
             run_gateway_egress_topology_canary,
@@ -726,6 +727,13 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
                 side_effect=lambda **_kwargs: events.append("fixed-advice") or advice,
             ),
             patch(
+                "scripts.canary_gateway_egress_topology.run_onefile_local_api_canary",
+                side_effect=lambda observed_collector: events.append(
+                    f"onefile:{observed_collector}"
+                )
+                or OnefileLocalAPISummary(True),
+            ),
+            patch(
                 "scripts.canary_gateway_egress_topology.evaluate_gateway_egress_attempt_window",
                 side_effect=lambda **_kwargs: events.append("evaluate")
                 or GatewayEgressTopologySummary(True),
@@ -748,6 +756,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
                 "health",
                 "counters",
                 "fixed-advice",
+                "onefile:/PRIVATE/openusage-collector",
                 "health",
                 "counters",
                 "evaluate",
@@ -755,6 +764,93 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
                 "close",
             ],
         )
+
+    def test_runner_refuses_final_counters_when_onefile_workload_is_unproven(self) -> None:
+        from openusage_bar.gateway.egress import GatewayEgressAttemptCounters
+        from openusage_bar.gateway.server import (
+            GatewayAdviseHealthState,
+            GatewayFixedUnknownAdviceState,
+        )
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            run_gateway_egress_topology_canary,
+        )
+
+        counters = GatewayEgressAttemptCounters("a" * 64, 17, 5)
+        health = GatewayAdviseHealthState(
+            "gateway.openusage/v1", "ok", "advise", True, False
+        )
+        advice = GatewayFixedUnknownAdviceState(
+            "defer", 0.5, "quota_unknown", None, None, None, None
+        )
+
+        for name, workload_result in (
+            ("wrong-type", object()),
+            ("private-error", RuntimeError("PRIVATE_OBSERVER_FAILURE")),
+        ):
+            events: list[str] = []
+
+            class Lease:
+                def leader_has_exited(self) -> bool:
+                    return False
+
+                def read_token(self) -> str:
+                    return "g" * 48
+
+                def stop(self) -> None:
+                    events.append("stop")
+
+                def close(self) -> None:
+                    events.append("close")
+
+            def onefile(_collector: str) -> object:
+                events.append("onefile")
+                if isinstance(workload_result, Exception):
+                    raise workload_result
+                return workload_result
+
+            with self.subTest(name=name):
+                with (
+                    patch(
+                        "scripts.canary_gateway_egress_topology._start_gateway_process_lease",
+                        return_value=Lease(),
+                    ),
+                    patch(
+                        "scripts.canary_gateway_egress_topology.read_gateway_advise_health_state",
+                        return_value=health,
+                    ),
+                    patch(
+                        "scripts.canary_gateway_egress_topology.read_gateway_egress_attempt_counters",
+                        side_effect=lambda **_kwargs: events.append("counter") or counters,
+                    ),
+                    patch(
+                        "scripts.canary_gateway_egress_topology.read_gateway_fixed_unknown_advice_state",
+                        return_value=advice,
+                    ),
+                    patch(
+                        "scripts.canary_gateway_egress_topology.run_onefile_local_api_canary",
+                        side_effect=onefile,
+                    ),
+                    patch(
+                        "scripts.canary_gateway_egress_topology.evaluate_gateway_egress_attempt_window"
+                    ) as evaluate,
+                ):
+                    with self.assertRaisesRegex(
+                        GatewayEgressTopologyCanaryError,
+                        r"^Gateway egress topology canary failed$",
+                    ) as raised:
+                        run_gateway_egress_topology_canary(
+                            collector="/PRIVATE/openusage-collector",
+                            config_path="/PRIVATE/gateway.json",
+                            token_path="/PRIVATE/gateway.token",
+                            port=17823,
+                            environment=self._closed_environment(),
+                        )
+
+            self.assertEqual(raised.exception.stage, "onefile-local-api")
+            self.assertNotIn("PRIVATE", str(raised.exception))
+            self.assertEqual(events, ["counter", "onefile", "close"])
+            evaluate.assert_not_called()
 
     def test_runner_rejects_a_hostile_mutated_failure_stage(self) -> None:
         from scripts.canary_gateway_egress_topology import (
@@ -989,6 +1085,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
             ("counter-window", 14),
             ("stop", 15),
             ("cleanup", 16),
+            ("onefile-local-api", 17),
         ):
             with self.subTest(stage=stage), patch(
                 "scripts.canary_gateway_egress_topology.run_gateway_egress_topology_canary",

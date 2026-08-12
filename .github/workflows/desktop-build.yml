@@ -732,11 +732,11 @@ jobs:
             --built-collector "./dist-collector/${{ matrix.collector }}" \
             --built-settings "./dist-settings/${{ matrix.settings }}" \
             --built-bridge "./dist-bridge/${{ matrix.bridge }}"
-      - name: Run audited Gateway empty-window canary
+      - name: Run audited Gateway zero-egress workload canary
         if: matrix.platform == 'linux' && matrix.arch == 'x64'
         shell: bash
         run: |
-          # Ephemeral Gateway topology gate only; no lifecycle or release evidence.
+          # Ephemeral Gateway/Local API topology workload gate only; no lifecycle or release evidence.
           set -euo pipefail
           gateway_root="$(mktemp -d "$RUNNER_TEMP/usagehub-gateway-empty.XXXXXX")"
           gateway_root_identity="$(/usr/bin/stat --format='%d:%i' "$gateway_root")"
@@ -792,6 +792,7 @@ jobs:
               14) gateway_category="counter-window" ;;
               15) gateway_category="stop" ;;
               16) gateway_category="cleanup" ;;
+              17) gateway_category="onefile-local-api" ;;
               *) gateway_category="runtime" ;;
             esac
             printf '%s\n' "gateway_empty_window_failed category=$gateway_category" >&2

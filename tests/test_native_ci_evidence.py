@@ -2149,9 +2149,9 @@ class NativeCiEvidenceTests(unittest.TestCase):
             runtime_capability_smoke_step,
         )
 
-    def test_workflow_runs_audited_gateway_empty_window_without_evidence_output(self):
+    def test_workflow_runs_audited_gateway_zero_egress_workload_without_evidence_output(self):
         source = WORKFLOW.read_text(encoding="utf-8")
-        marker = "- name: Run audited Gateway empty-window canary"
+        marker = "- name: Run audited Gateway zero-egress workload canary"
         self.assertEqual(source.count(marker), 1)
         start = source.index(marker)
         end = source.index("\n      - name:", start + 1)
@@ -2161,7 +2161,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
         self.assertLess(source.index("- name: Audit packaged collector"), start)
         self.assertLess(start, source.index("- name: Resolve final artifact"))
         self.assertIn(
-            "# Ephemeral Gateway topology gate only; no lifecycle or release evidence.",
+            "# Ephemeral Gateway/Local API topology workload gate only; no lifecycle or release evidence.",
             gate,
         )
         for required in (
@@ -2210,7 +2210,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 self.assertLess(gate.rindex(completed_check), authorization)
         status_check = gate[
             gate.index('if [[ "$gateway_status" != "0" ]]'):
-            gate.index("fi", gate.index('if [[ "$gateway_status" != "0" ]]'))
+            gate.index("\n          fi", gate.index('if [[ "$gateway_status" != "0" ]]'))
         ]
         self.assertIn("exit 1", status_check)
         for status, category in (
@@ -2220,6 +2220,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
             ("14", "counter-window"),
             ("15", "stop"),
             ("16", "cleanup"),
+            ("17", "onefile-local-api"),
         ):
             with self.subTest(status=status, category=category):
                 self.assertIn(f'{status}) gateway_category="{category}" ;;', gate)

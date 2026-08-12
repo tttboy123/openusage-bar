@@ -4,10 +4,12 @@
 This is not native lifecycle or release evidence.  It describes only logical
 provider-egress attempts exposed by one authenticated endpoint process epoch.
 It includes one fixed synthetic Should-Send evaluation, which may change
-Gateway rate-limit/cache/trace memory state.  It does not attribute the endpoint
-to a service or PID and does not cover the Observer daemon, Local API v1, real
-Providers/accounts, other processes, DNS, sockets, HTTP success, or credential
-stores.
+Gateway rate-limit/cache/trace memory state, and one independently isolated
+onefile Local API topology transaction.  It does not attribute the Gateway
+endpoint to a service or PID, and its Gateway counters do not measure or prove
+the Observer transaction's network or credential-store activity.  It does not
+cover real Providers/accounts, other processes, DNS, sockets, HTTP success, or
+credential stores.
 """
 
 from __future__ import annotations
@@ -29,6 +31,10 @@ from openusage_bar.gateway.server import (
     read_gateway_advise_health_state,
     read_gateway_egress_attempt_counters,
     read_gateway_fixed_unknown_advice_state,
+)
+from scripts.canary_onefile_local_api import (
+    OnefileLocalAPISummary,
+    run_onefile_local_api_canary,
 )
 
 
@@ -55,6 +61,7 @@ _STAGE_EXIT_CODES = {
     "counter-window": 14,
     "stop": 15,
     "cleanup": 16,
+    "onefile-local-api": 17,
 }
 class GatewayEgressTopologyCanaryError(RuntimeError):
     """A fixed, value-free diagnostic failure."""
@@ -734,6 +741,14 @@ def run_gateway_egress_topology_canary(
         )
         if not _is_fixed_unknown_advice(advice):
             raise GatewayEgressTopologyCanaryError
+        stage = "onefile-local-api"
+        observer = run_onefile_local_api_canary(collector)
+        if (
+            type(observer) is not OnefileLocalAPISummary
+            or observer.stable_direct_child is not True
+        ):
+            raise GatewayEgressTopologyCanaryError
+        stage = "counter-window"
         health = read_gateway_advise_health_state(
             port=port,
             bearer_token=token,
@@ -797,7 +812,7 @@ def main(
     stdout: TextIO = sys.stdout,
     stderr: TextIO = sys.stderr,
 ) -> int:
-    """Run the silent hosted empty-window diagnostic."""
+    """Run the silent hosted zero-egress Local API workload diagnostic."""
 
     del stdout, stderr
     try:
