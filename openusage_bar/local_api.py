@@ -41,6 +41,7 @@ from .config import ID_PATTERN
 from .provider_catalog import ObserverPlatformResolver
 from .provider_catalog import catalog as default_catalog
 from .query import MAX_LIMIT, SCHEMA_VERSION, QueryService, to_wire
+from .shared_client_boundary import shared_client_boundary_attempt_counters
 from .windows_file_security import native_windows_file_security
 
 
@@ -1666,10 +1667,53 @@ class ReadOnlyHandler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def do_GET(self) -> None:
+        if self._handle_unix_internal_shared_client_boundary():
+            return
         self.server.router.handle(self, include_body=True)
 
     def do_HEAD(self) -> None:
         self.server.router.handle(self, include_body=False)
+
+    def _handle_unix_internal_shared_client_boundary(self) -> bool:
+        if not getattr(self.server, "_shared_client_boundary_enabled", False):
+            return False
+        if self.path != "/_internal/v1/shared-client-boundary-attempts":
+            return False
+        try:
+            self.server.router._validate_headers(self)
+            self.server.router._reject_body(self)
+            observed = shared_client_boundary_attempt_counters()
+            body = _compact(
+                {
+                    "apiVersion": "local-api-internal-diagnostics/v1",
+                    "object": "sharedClientBoundaryAttempts",
+                    "processEpochSha256": observed.process_epoch_sha256,
+                    "boundedHttpOpenAttempts": observed.bounded_http_open_attempts,
+                    "headlessKeychainGetAttempts": observed.headless_keychain_get_attempts,
+                }
+            )
+            self._send(
+                HTTPStatus.OK,
+                body,
+                {
+                    "Content-Type": "application/json; charset=utf-8",
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                },
+                include_body=True,
+            )
+        except APIProblem as problem:
+            self._problem(problem, include_body=True)
+        except Exception:
+            self._problem(
+                _error(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    "internal_error",
+                    "Request could not be completed.",
+                ),
+                include_body=True,
+            )
+        return True
 
     def _method_not_allowed(self, *, include_body: bool = True) -> None:
         # Never drain a mutation body; close after the 405 so its bytes cannot
@@ -1869,6 +1913,7 @@ if hasattr(socketserver, "UnixStreamServer"):
         ) -> None:
             self.path = path
             self.router = router
+            self._shared_client_boundary_enabled = True
             self._created_identity: tuple[int, int] | None = None
             self._cleanup_hook = cleanup_hook
             _prepare_socket_path(path)

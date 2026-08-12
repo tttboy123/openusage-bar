@@ -2510,6 +2510,103 @@ class UnixLocalAPITests(unittest.TestCase):
         self.thread.join(2)
         self.assertFalse(self.socket_path.exists())
 
+    def test_unix_transport_alone_exposes_closed_shared_client_boundary_snapshot(self):
+        from openusage_bar.shared_client_boundary import (
+            shared_client_boundary_attempt_counters,
+        )
+
+        expected = shared_client_boundary_attempt_counters()
+        target = "/_internal/v1/shared-client-boundary-attempts"
+        status, headers, body = self.request(target)
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            headers,
+            {
+                "server": "OpenUsageLocalAPI/1 ",
+                "date": headers["date"],
+                "content-type": "application/json; charset=utf-8",
+                "cache-control": "no-store",
+                "x-content-type-options": "nosniff",
+                "connection": "close",
+                "content-length": str(len(body)),
+            },
+        )
+        self.assertEqual(
+            json.loads(body, object_pairs_hook=lambda pairs: dict(pairs)),
+            {
+                "apiVersion": "local-api-internal-diagnostics/v1",
+                "object": "sharedClientBoundaryAttempts",
+                "processEpochSha256": expected.process_epoch_sha256,
+                "boundedHttpOpenAttempts": expected.bounded_http_open_attempts,
+                "headlessKeychainGetAttempts": expected.headless_keychain_get_attempts,
+            },
+        )
+        self.assertNotIn(
+            target,
+            json.dumps(local_api_module.LOCAL_API_SCHEMA, sort_keys=True),
+        )
+
+        tcp = create_tcp_server(self.query, port=0, bearer_token=TOKEN)
+        tcp_thread = start(tcp)
+        try:
+            tcp_port = tcp.server_address[1]
+            response = raw_exchange(
+                ("127.0.0.1", tcp_port),
+                (
+                    f"GET {target} HTTP/1.1\r\n"
+                    f"Host: 127.0.0.1:{tcp_port}\r\n"
+                    f"Authorization: Bearer {TOKEN}\r\n"
+                    "Connection: close\r\n\r\n"
+                ).encode("ascii"),
+            )
+            tcp_status = int(response.split(b" ", 2)[1])
+        finally:
+            tcp.shutdown()
+            tcp.server_close()
+            tcp_thread.join(2)
+        self.assertEqual(tcp_status, 404)
+
+    def test_unix_internal_boundary_keeps_strict_framing_taxonomy(self):
+        target = "/_internal/v1/shared-client-boundary-attempts"
+        tail = (
+            b"GET /v1/health HTTP/1.1\r\n"
+            b"Host: localhost\r\nConnection: close\r\n\r\n"
+        )
+        cases = (
+            (
+                b"Host: localhost\r\nContent-Length: 1\r\n\r\nx",
+                b"413",
+                b"request_body_not_allowed",
+            ),
+            (
+                b"Host: localhost\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+                b"413",
+                b"request_body_not_allowed",
+            ),
+            (
+                b"Host: localhost\r\nHost: duplicate\r\n\r\n",
+                b"400",
+                b"invalid_header",
+            ),
+            (
+                b"Host: localhost\r\nContent-Length: nope\r\n\r\n",
+                b"400",
+                b"invalid_header",
+            ),
+        )
+        for headers, status, code in cases:
+            request = b"GET " + target.encode("ascii") + b" HTTP/1.1\r\n" + headers
+            with self.subTest(status=status, code=code), patch(
+                "openusage_bar.local_api.shared_client_boundary_attempt_counters"
+            ) as snapshot:
+                response = raw_exchange(self.socket_path, request + tail)
+            self.assertTrue(response.startswith(b"HTTP/1.1 " + status + b" "))
+            self.assertIn(b"Connection: close\r\n", response)
+            self.assertEqual(response.count(b"HTTP/1.1 "), 1)
+            self.assertIn(code, response)
+            self.assertNotIn(b"sharedClientBoundaryAttempts", response)
+            snapshot.assert_not_called()
+
     def test_routes_reuse_canonical_query_envelopes(self):
         expectations = {
             "/v1/summary?today=2026-07-14": "todayTokens",
