@@ -79,6 +79,10 @@ class LocalAPIObservationError(RuntimeError):
         if stage not in {
             "unknown",
             "authority",
+            "authority-home",
+            "authority-local",
+            "authority-state",
+            "authority-root",
             "socket",
             "connect-peer",
             "proc",
@@ -240,7 +244,7 @@ def _stat_linux_canonical_local_socket(home: Path) -> os.stat_result:
     # nofollow semantics by reopening the fixed chain component by component.
     descriptors: list[int] = []
     failed = False
-    failure_stage = "authority"
+    failure_stage = "authority-home"
     metadata = None
     try:
         directory_flag = getattr(os, "O_DIRECTORY", 0)
@@ -559,6 +563,11 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
         bindings: list[tuple[int, str, tuple[int, ...]]] = []
         parent_descriptor = home_descriptor
         for name in (".local", "state", "openusage-bar"):
+            failure_stage = {
+                ".local": "authority-local",
+                "state": "authority-state",
+                "openusage-bar": "authority-root",
+            }[name]
             child_descriptor = os.open(
                 name,
                 flags,
@@ -585,6 +594,7 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
             )
             parent_descriptor = child_descriptor
 
+        failure_stage = "authority-root"
         state_root_descriptor = directory_descriptors[-1]
         state_root = os.fstat(state_root_descriptor)
         if (
