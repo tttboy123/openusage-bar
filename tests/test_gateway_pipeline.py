@@ -6,6 +6,7 @@ from dataclasses import FrozenInstanceError, fields, replace
 from pathlib import Path
 import unittest
 import urllib.error
+from unittest.mock import patch
 
 from openusage_bar.gateway import providers as provider_module
 from openusage_bar.gateway.egress import (
@@ -820,9 +821,27 @@ class GatewayEgressTests(unittest.TestCase):
     def test_closed_counters_increment_before_private_boundary_attempts(self) -> None:
         self.assertEqual(
             [field.name for field in fields(GatewayEgressAttemptCounters)],
-            ["provider_network_attempts", "provider_credential_read_attempts"],
+            [
+                "process_epoch_sha256",
+                "provider_network_attempts",
+                "provider_credential_read_attempts",
+            ],
         )
         initial = gateway_egress_attempt_counters()
+        self.assertRegex(initial.process_epoch_sha256, r"^[0-9a-f]{64}$")
+        with patch("openusage_bar.gateway.egress.os.getpid", return_value=999_999):
+            forked = gateway_egress_attempt_counters()
+        self.assertNotEqual(forked.process_epoch_sha256, initial.process_epoch_sha256)
+        self.assertEqual(
+            (
+                forked.provider_network_attempts,
+                forked.provider_credential_read_attempts,
+            ),
+            (
+                initial.provider_network_attempts,
+                initial.provider_credential_read_attempts,
+            ),
+        )
         with self.assertRaises(FrozenInstanceError):
             initial.provider_network_attempts = 1
 
@@ -837,6 +856,7 @@ class GatewayEgressTests(unittest.TestCase):
         self.assertEqual(
             gateway_egress_attempt_counters(),
             GatewayEgressAttemptCounters(
+                initial.process_epoch_sha256,
                 initial.provider_network_attempts,
                 initial.provider_credential_read_attempts + 1,
             ),
@@ -860,6 +880,7 @@ class GatewayEgressTests(unittest.TestCase):
         self.assertEqual(
             observed,
             GatewayEgressAttemptCounters(
+                initial.process_epoch_sha256,
                 initial.provider_network_attempts + 1,
                 initial.provider_credential_read_attempts + 1,
             ),

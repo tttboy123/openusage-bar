@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+import hashlib
+import os
+import secrets
 from threading import Lock
 from typing import Any
 
@@ -33,6 +36,7 @@ _MAX_ATTEMPT_COUNT = (1 << 64) - 1
 class GatewayEgressAttemptCounters:
     """Closed, dimension-free counters for Gateway private-boundary attempts."""
 
+    process_epoch_sha256: str
     provider_network_attempts: int
     provider_credential_read_attempts: int
 
@@ -45,12 +49,22 @@ class GatewayEgressAttemptCounters:
             )
         ):
             raise ValueError("invalid Gateway egress counters")
+        if (
+            type(self.process_epoch_sha256) is not str
+            or len(self.process_epoch_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.process_epoch_sha256
+            )
+        ):
+            raise ValueError("invalid Gateway egress counters")
 
     def __repr__(self) -> str:
         return "<GatewayEgressAttemptCounters closed>"
 
 
 _ATTEMPT_COUNTER_LOCK = Lock()
+_PROCESS_EPOCH_SEED = secrets.token_bytes(32)
 _provider_network_attempts = 0
 _provider_credential_read_attempts = 0
 
@@ -60,6 +74,9 @@ def gateway_egress_attempt_counters() -> GatewayEgressAttemptCounters:
 
     with _ATTEMPT_COUNTER_LOCK:
         return GatewayEgressAttemptCounters(
+            hashlib.sha256(
+                _PROCESS_EPOCH_SEED + str(os.getpid()).encode("ascii")
+            ).hexdigest(),
             _provider_network_attempts,
             _provider_credential_read_attempts,
         )

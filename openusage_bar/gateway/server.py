@@ -669,6 +669,7 @@ class _GatewayHandler(BaseHTTPRequestHandler):
                 payload = {
                     "apiVersion": "gateway-internal-diagnostics/v1",
                     "object": "gateway.egressAttempts",
+                    "processEpochSha256": counters.process_epoch_sha256,
                     "providerNetworkAttempts": counters.provider_network_attempts,
                     "providerCredentialReadAttempts": (
                         counters.provider_credential_read_attempts
@@ -1175,6 +1176,7 @@ def read_gateway_egress_attempt_counters(
             != {
                 "apiVersion",
                 "object",
+                "processEpochSha256",
                 "providerNetworkAttempts",
                 "providerCredentialReadAttempts",
             }
@@ -1183,6 +1185,7 @@ def read_gateway_egress_attempt_counters(
         ):
             raise RuntimeError
         result = GatewayEgressAttemptCounters(
+            payload["processEpochSha256"],
             payload["providerNetworkAttempts"],
             payload["providerCredentialReadAttempts"],
         )

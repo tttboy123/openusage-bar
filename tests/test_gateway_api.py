@@ -270,6 +270,7 @@ class GatewayRouterTests(unittest.TestCase):
         self.assertEqual(
             observed,
             GatewayEgressAttemptCounters(
+                expected.process_epoch_sha256,
                 expected.provider_network_attempts,
                 expected.provider_credential_read_attempts,
             ),
@@ -287,6 +288,7 @@ class GatewayRouterTests(unittest.TestCase):
             {
                 "apiVersion": "gateway-internal-diagnostics/v1",
                 "object": "gateway.egressAttempts",
+                "processEpochSha256": expected.process_epoch_sha256,
                 "providerNetworkAttempts": expected.provider_network_attempts,
                 "providerCredentialReadAttempts": (
                     expected.provider_credential_read_attempts
@@ -298,6 +300,7 @@ class GatewayRouterTests(unittest.TestCase):
             {
                 "apiVersion",
                 "object",
+                "processEpochSha256",
                 "providerNetworkAttempts",
                 "providerCredentialReadAttempts",
             },
@@ -316,6 +319,7 @@ class GatewayRouterTests(unittest.TestCase):
             {
                 "apiVersion": "gateway-internal-diagnostics/v1",
                 "object": "gateway.egressAttempts",
+                "processEpochSha256": "a" * 64,
                 "providerNetworkAttempts": 0,
                 "providerCredentialReadAttempts": 0,
             },
@@ -364,6 +368,7 @@ class GatewayRouterTests(unittest.TestCase):
             {
                 "apiVersion": "gateway-internal-diagnostics/v1",
                 "object": "gateway.egressAttempts",
+                "processEpochSha256": "a" * 64,
                 "providerNetworkAttempts": 0,
                 "providerCredentialReadAttempts": 0,
             },
@@ -413,6 +418,7 @@ class GatewayRouterTests(unittest.TestCase):
             {
                 "apiVersion": "gateway-internal-diagnostics/v1",
                 "object": "gateway.egressAttempts",
+                "processEpochSha256": "a" * 64,
                 "providerNetworkAttempts": 0,
                 "providerCredentialReadAttempts": 0,
             },
