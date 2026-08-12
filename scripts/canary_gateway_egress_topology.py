@@ -7,7 +7,7 @@ It includes one fixed synthetic Should-Send evaluation, which may change
 Gateway rate-limit/cache/trace memory state, and one independently isolated
 onefile Local API topology transaction.  It does not attribute the Gateway
 endpoint to a service or PID, and its Gateway counters do not measure or prove
-the Observer transaction's network or credential-store activity.  It does not
+the Local API transaction's network or credential-store activity.  It does not
 cover real Providers/accounts, other processes, DNS, sockets, HTTP success, or
 credential stores.
 """

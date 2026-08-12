@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import BinaryIO, Callable, Protocol, Sequence
 
 from .bounded_process import BoundedProcessError, run_bounded
+from .shared_client_boundary import _record_headless_keychain_get_attempt
 
 
 SERVICE = "com.lune.openusage-menubar"
@@ -531,7 +532,9 @@ class HeadlessKeychain:
         return {"service": SERVICE, "account": account}
 
     def get(self, account: str) -> str | None:
-        value = self._api.get(self._query(account))
+        query = self._query(account)
+        _record_headless_keychain_get_attempt()
+        value = self._api.get(query)
         if value is None:
             return None
         try:

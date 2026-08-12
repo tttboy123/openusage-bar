@@ -9,6 +9,8 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
+from .shared_client_boundary import _record_bounded_http_open_attempt
+
 
 class NetworkError(RuntimeError):
     pass
@@ -140,6 +142,7 @@ class BoundedHTTPClient:
                 method=method,
             )
             try:
+                _record_bounded_http_open_attempt()
                 with self.opener.open(request, timeout=self.timeout) as response:
                     body = response.read(self.max_bytes + 1)
             except urllib.error.HTTPError as error:
