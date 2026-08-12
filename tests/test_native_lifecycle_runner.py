@@ -1185,6 +1185,522 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 hashlib.sha256(source.read_bytes()).hexdigest(), source_sha256
             )
 
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_run_process_allows_only_one_proven_preserve_uninstall(
+        self,
+    ) -> None:
+        import subprocess
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            NativePathState,
+            NativeProcessResult,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact_bytes = b"audited preserve-uninstall artifact"
+            artifact.write_bytes(artifact_bytes)
+            artifact_sha256 = hashlib.sha256(artifact_bytes).hexdigest()
+
+            with ExitStack() as stack:
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.Path.home",
+                        return_value=home,
+                    )
+                )
+                dependencies, run_directory, profile, package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                self.assertEqual(package.install_root, profile.runtime_root)
+                execution_copy = run_directory / artifact.name
+                sentinel = run_directory / "outside-product-sentinel.bin"
+                self.assertEqual(
+                    dependencies.inspect_path(
+                        "fresh_execution_copy", execution_copy
+                    ),
+                    NativePathState(False, "missing", 0, None, 0, None),
+                )
+                dependencies.copy_file(artifact, execution_copy)
+                dependencies.set_file_mode(execution_copy, 0o700)
+                execution_state = dependencies.inspect_path(
+                    "execution_copy", execution_copy
+                )
+                self.assertEqual(execution_state.sha256, artifact_sha256)
+                self.assertEqual(execution_state.mode, 0o700)
+                self.assertEqual(
+                    dependencies.inspect_path("fresh_sentinel", sentinel),
+                    NativePathState(False, "missing", 0, None, 0, None),
+                )
+                dependencies.copy_file(artifact, sentinel)
+                sentinel_state = dependencies.inspect_path("sentinel", sentinel)
+                self.assertEqual(sentinel_state.sha256, artifact_sha256)
+                self.assertEqual(sentinel_state.mode, 0o600)
+                identities = _file_snapshot(run_directory)
+                runner_calls: list[tuple[tuple[str, ...], float]] = []
+                runner_outcomes: list[object] = []
+
+                def bounded_runner(argv, *, timeout, **kwargs):
+                    runner_calls.append((tuple(argv), timeout))
+                    self.assertRegex(argv[0], r"\A/proc/self/fd/[0-9]+\Z")
+                    self.assertEqual(argv[1:], ("--usagehub-uninstall",))
+                    self.assertEqual(
+                        kwargs,
+                        {
+                            "shell": False,
+                            "stdin": subprocess.DEVNULL,
+                            "stdout": subprocess.DEVNULL,
+                            "stderr": subprocess.DEVNULL,
+                            "check": False,
+                            "env": {
+                                "HOME": str(home),
+                                "PATH": "/usr/bin:/bin",
+                                "LANG": "C",
+                                "LC_ALL": "C",
+                                "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
+                            },
+                            "pass_fds": (int(argv[0].rsplit("/", 1)[1]),),
+                        },
+                    )
+                    outcome = runner_outcomes.pop(0) if runner_outcomes else 0
+                    if isinstance(outcome, Exception):
+                        raise outcome
+                    return subprocess.CompletedProcess(argv, outcome, b"", b"")
+
+                preserve_argv = (
+                    str(execution_copy),
+                    "--usagehub-uninstall",
+                )
+
+                with patch(
+                    "openusage_bar.bounded_process.run_bounded",
+                    side_effect=bounded_runner,
+                ), patch(
+                    "openusage_bar.platform_services.service_is_registered",
+                    return_value=False,
+                ):
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as before_token:
+                        dependencies.run_process(preserve_argv, 180.0)
+                    self.assertEqual(str(before_token.exception), "driver_failed")
+                    self.assertEqual(runner_calls, [])
+                    self.assertEqual(
+                        _file_snapshot(run_directory),
+                        identities,
+                    )
+
+                    getattr(
+                        dependencies, "_mark_process_rollback_unproven"
+                    )()
+                    getattr(dependencies, "_mark_process_rollback_proven")()
+                    before_environment_calls = len(runner_calls)
+                    with patch.dict(
+                        os.environ,
+                        {"XDG_DATA_HOME": str(root / "PRIVATE_XDG_DRIFT")},
+                        clear=True,
+                    ):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_unavailable"
+                        ) as environment_drift:
+                            dependencies.run_process(
+                                preserve_argv, 180.0
+                            )
+                    self.assertEqual(
+                        str(environment_drift.exception),
+                        "driver_unavailable",
+                    )
+                    self.assertNotIn(
+                        "PRIVATE", str(environment_drift.exception)
+                    )
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ):
+                        dependencies.run_process(preserve_argv, 180.0)
+                    self.assertEqual(
+                        len(runner_calls), before_environment_calls
+                    )
+                    self.assertEqual(
+                        _file_snapshot(run_directory), identities
+                    )
+
+                    def generic_gateway_observation() -> None:
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_unavailable"
+                        ):
+                            dependencies.inspect_listener("linux", "gateway")
+
+                    def unordered_ledger_observation() -> None:
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ):
+                            dependencies.inspect_ledger("linux")
+
+                    callbacks = (
+                        (
+                            "service",
+                            lambda: dependencies.inspect_service("linux"),
+                        ),
+                        ("listener", generic_gateway_observation),
+                        ("ledger", unordered_ledger_observation),
+                        (
+                            "path",
+                            lambda: dependencies.inspect_path(
+                                "execution_copy", execution_copy
+                            ),
+                        ),
+                        (
+                            "profile",
+                            lambda: dependencies.profile_paths("linux"),
+                        ),
+                        (
+                            "package",
+                            lambda: dependencies.package_paths(
+                                "linux", profile
+                            ),
+                        ),
+                    )
+                    for callback_name, callback in callbacks:
+                        with self.subTest(callback=callback_name):
+                            getattr(
+                                dependencies,
+                                "_mark_process_rollback_unproven",
+                            )()
+                            getattr(
+                                dependencies,
+                                "_mark_process_rollback_proven",
+                            )()
+                            callback()
+                            before_calls = len(runner_calls)
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ) as revoked:
+                                dependencies.run_process(
+                                    preserve_argv, 180.0
+                                )
+                            self.assertEqual(
+                                str(revoked.exception), "driver_failed"
+                            )
+                            self.assertEqual(len(runner_calls), before_calls)
+                            self.assertEqual(
+                                _file_snapshot(run_directory), identities
+                            )
+
+                    class HostileArgument(str):
+                        def __eq__(self, other: object) -> bool:
+                            del other
+                            raise RuntimeError("PRIVATE_HOSTILE_ARGUMENT")
+
+                        def __ne__(self, other: object) -> bool:
+                            del other
+                            raise RuntimeError("PRIVATE_HOSTILE_ARGUMENT")
+
+                    getattr(
+                        dependencies, "_mark_process_rollback_unproven"
+                    )()
+                    getattr(dependencies, "_mark_process_rollback_proven")()
+                    before_hostile_calls = len(runner_calls)
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as hostile:
+                        dependencies.run_process(
+                            (
+                                HostileArgument(str(execution_copy)),
+                                "--usagehub-uninstall",
+                            ),
+                            180.0,
+                        )
+                    self.assertEqual(str(hostile.exception), "driver_failed")
+                    self.assertNotIn("PRIVATE", str(hostile.exception))
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ):
+                        dependencies.run_process(preserve_argv, 180.0)
+                    self.assertEqual(len(runner_calls), before_hostile_calls)
+                    self.assertEqual(
+                        _file_snapshot(run_directory), identities
+                    )
+
+                    invalid_requests = (
+                        ((str(root / "foreign.AppImage"), "--usagehub-uninstall"), 180.0),
+                        (preserve_argv, True),
+                        (preserve_argv, 180),
+                    )
+                    for invalid_argv, invalid_timeout in invalid_requests:
+                        with self.subTest(
+                            argv=invalid_argv, timeout=invalid_timeout
+                        ):
+                            getattr(
+                                dependencies,
+                                "_mark_process_rollback_unproven",
+                            )()
+                            getattr(
+                                dependencies,
+                                "_mark_process_rollback_proven",
+                            )()
+                            before_calls = len(runner_calls)
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ) as invalid:
+                                dependencies.run_process(
+                                    invalid_argv, invalid_timeout
+                                )
+                            self.assertEqual(
+                                str(invalid.exception), "driver_failed"
+                            )
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ):
+                                dependencies.run_process(
+                                    preserve_argv, 180.0
+                                )
+                            self.assertEqual(len(runner_calls), before_calls)
+                            self.assertEqual(
+                                _file_snapshot(run_directory), identities
+                            )
+
+                    for outcome in (
+                        7,
+                        RuntimeError("PRIVATE_BOUNDED_FAILURE"),
+                    ):
+                        with self.subTest(outcome=type(outcome).__name__):
+                            getattr(
+                                dependencies,
+                                "_mark_process_rollback_unproven",
+                            )()
+                            getattr(
+                                dependencies,
+                                "_mark_process_rollback_proven",
+                            )()
+                            runner_outcomes.append(outcome)
+                            before_calls = len(runner_calls)
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ) as failed_runner:
+                                dependencies.run_process(
+                                    preserve_argv, 180.0
+                                )
+                            self.assertEqual(
+                                str(failed_runner.exception), "driver_failed"
+                            )
+                            self.assertNotIn(
+                                "PRIVATE", str(failed_runner.exception)
+                            )
+                            with self.assertRaisesRegex(
+                                LifecycleEvidenceError, "driver_failed"
+                            ):
+                                dependencies.run_process(
+                                    preserve_argv, 180.0
+                                )
+                            self.assertEqual(
+                                len(runner_calls), before_calls + 1
+                            )
+                            self.assertEqual(
+                                _file_snapshot(run_directory), identities
+                            )
+
+                    getattr(
+                        dependencies, "_mark_process_rollback_unproven"
+                    )()
+                    getattr(dependencies, "_mark_process_rollback_proven")()
+                    before_delete_calls = len(runner_calls)
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as delete_data:
+                        dependencies.run_process(
+                            preserve_argv + ("--delete-data",), 180.0
+                        )
+                    self.assertEqual(str(delete_data.exception), "driver_failed")
+                    self.assertEqual(len(runner_calls), before_delete_calls)
+                    self.assertEqual(
+                        _file_snapshot(run_directory),
+                        identities,
+                    )
+
+                    getattr(
+                        dependencies, "_mark_process_rollback_unproven"
+                    )()
+                    getattr(dependencies, "_mark_process_rollback_proven")()
+                    before_success_calls = len(runner_calls)
+                    self.assertEqual(
+                        dependencies.run_process(preserve_argv, 180.0),
+                        NativeProcessResult(0, b"", b"", False),
+                    )
+                    self.assertEqual(
+                        len(runner_calls), before_success_calls + 1
+                    )
+                    self.assertEqual(runner_calls[-1][1], 180.0)
+                    self.assertEqual(
+                        _file_snapshot(run_directory),
+                        identities,
+                    )
+
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as repeated:
+                        dependencies.run_process(preserve_argv, 180.0)
+                    self.assertEqual(str(repeated.exception), "driver_failed")
+                    self.assertEqual(
+                        len(runner_calls), before_success_calls + 1
+                    )
+                    self.assertEqual(
+                        _file_snapshot(run_directory),
+                        identities,
+                    )
+
+            try:
+                self.assertTrue(run_directory.is_dir())
+                self.assertEqual(_file_snapshot(run_directory), identities)
+            finally:
+                if run_directory.exists():
+                    for child in run_directory.iterdir():
+                        child.unlink()
+                    run_directory.rmdir()
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_preserve_uninstall_rejects_a_rebound_public_run_root(
+        self,
+    ) -> None:
+        import subprocess
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            native_lifecycle_dependencies_for_host,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact.write_bytes(b"audited run-root binding artifact")
+            context = None
+            run_directory: Path | None = None
+            owned_original: Path | None = None
+            foreign_identity: tuple[int, int] | None = None
+            runner_calls: list[tuple[object, ...]] = []
+
+            try:
+                with (
+                    patch(
+                        "scripts.native_lifecycle_evidence.sys.platform",
+                        "linux",
+                    ),
+                    patch(
+                        "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                        return_value="x86_64",
+                    ),
+                    patch.object(
+                        LifecycleStatePaths,
+                        "for_current_user",
+                        return_value=authority,
+                    ),
+                    patch(
+                        "scripts.native_lifecycle_evidence.Path.home",
+                        return_value=home,
+                    ),
+                    patch.dict(os.environ, {}, clear=True),
+                ):
+                    context = native_lifecycle_dependencies_for_host()
+                    dependencies = context.__enter__()
+                    run_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    profile = dependencies.profile_paths("linux")
+                    package = dependencies.package_paths("linux", profile)
+                    self.assertEqual(package.install_root, profile.runtime_root)
+                    execution_copy = run_directory / artifact.name
+                    sentinel = (
+                        run_directory / "outside-product-sentinel.bin"
+                    )
+                    dependencies.copy_file(artifact, execution_copy)
+                    dependencies.set_file_mode(execution_copy, 0o700)
+                    dependencies.inspect_path(
+                        "execution_copy", execution_copy
+                    )
+                    dependencies.copy_file(artifact, sentinel)
+                    dependencies.inspect_path("sentinel", sentinel)
+                    getattr(
+                        dependencies, "_mark_process_rollback_unproven"
+                    )()
+                    getattr(
+                        dependencies, "_mark_process_rollback_proven"
+                    )()
+
+                    owned_original = run_directory.with_name(
+                        f"{run_directory.name}-owned-original"
+                    )
+                    run_directory.rename(owned_original)
+                    run_directory.mkdir(mode=0o700)
+                    foreign_marker = run_directory / "PRIVATE_FOREIGN_MARKER"
+                    foreign_marker.write_bytes(b"foreign remains")
+                    foreign_metadata = run_directory.lstat()
+                    foreign_identity = (
+                        foreign_metadata.st_dev,
+                        foreign_metadata.st_ino,
+                    )
+                    owned_snapshot = _file_snapshot(owned_original)
+
+                    with patch(
+                        "openusage_bar.bounded_process.run_bounded",
+                        side_effect=lambda *args, **kwargs: (
+                            runner_calls.append((args, kwargs))
+                            or subprocess.CompletedProcess(args[0], 0)
+                        ),
+                    ):
+                        with self.assertRaisesRegex(
+                            LifecycleEvidenceError, "driver_failed"
+                        ) as rebound:
+                            dependencies.run_process(
+                                (
+                                    str(run_directory / artifact.name),
+                                    "--usagehub-uninstall",
+                                ),
+                                180.0,
+                            )
+                    self.assertEqual(str(rebound.exception), "driver_failed")
+                    self.assertNotIn("PRIVATE", str(rebound.exception))
+                    self.assertEqual(runner_calls, [])
+                    self.assertEqual(
+                        _file_snapshot(owned_original), owned_snapshot
+                    )
+                    self.assertEqual(
+                        (
+                            run_directory.lstat().st_dev,
+                            run_directory.lstat().st_ino,
+                        ),
+                        foreign_identity,
+                    )
+                    self.assertEqual(
+                        foreign_marker.read_bytes(), b"foreign remains"
+                    )
+
+                    getattr(
+                        dependencies, "_mark_process_rollback_unproven"
+                    )()
+                    context.__exit__(None, None, None)
+                    context = None
+            finally:
+                if context is not None:
+                    try:
+                        context.__exit__(None, None, None)
+                    except LifecycleEvidenceError:
+                        pass
+                for candidate in (run_directory, owned_original):
+                    if candidate is None or not candidate.exists():
+                        continue
+                    for child in candidate.iterdir():
+                        child.unlink()
+                    candidate.rmdir()
+
     @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
     def test_linux_host_set_file_mode_promotes_only_the_owned_execution_copy_to_0700(
         self,
@@ -6242,28 +6758,23 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         for path in (execution_copy, sentinel)
                     }
 
-                if rollback_proven:
-                    self.assertFalse(run_path[0].exists())
-                    self.assertFalse(execution_copy.exists())
-                    self.assertFalse(sentinel.exists())
-                else:
-                    try:
-                        self.assertTrue(run_path[0].is_dir())
-                        for path, expected in before_exit.items():
-                            metadata = path.lstat()
-                            self.assertEqual(
-                                (
-                                    metadata.st_dev,
-                                    metadata.st_ino,
-                                    path.read_bytes(),
-                                ),
-                                expected,
-                            )
-                    finally:
-                        if run_path[0].exists():
-                            for child in run_path[0].iterdir():
-                                child.unlink()
-                            run_path[0].rmdir()
+                try:
+                    self.assertTrue(run_path[0].is_dir())
+                    for path, expected in before_exit.items():
+                        metadata = path.lstat()
+                        self.assertEqual(
+                            (
+                                metadata.st_dev,
+                                metadata.st_ino,
+                                path.read_bytes(),
+                            ),
+                            expected,
+                        )
+                finally:
+                    if run_path[0].exists():
+                        for child in run_path[0].iterdir():
+                            child.unlink()
+                        run_path[0].rmdir()
                 self.assertFalse((root / "native-lifecycle-report.json").exists())
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")

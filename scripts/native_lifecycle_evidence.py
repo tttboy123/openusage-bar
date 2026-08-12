@@ -17,6 +17,7 @@ import platform as host_platform_module
 import re
 import secrets
 import stat
+import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -727,6 +728,59 @@ class _BoundRunDirectory:
     authoritative_source: Path | None = None
     authoritative_source_signature: tuple[int, ...] | None = None
     authoritative_source_sha256: str | None = None
+
+    def preserve_uninstall_token(self) -> tuple[object, ...]:
+        execution = self.execution_copy
+        sentinel = self.sentinel
+        if (
+            execution is None
+            or execution.mode != 0o700
+            or sentinel is None
+            or sentinel.mode != 0o600
+        ):
+            _driver_fail()
+        self.inspect_path("execution_copy", self.path / execution.name)
+        self.inspect_path("sentinel", self.path / sentinel.name)
+        try:
+            public_root = os.stat(
+                self.path.name,
+                dir_fd=self.parent_fd,
+                follow_symlinks=False,
+            )
+            opened_root = os.fstat(self.directory_fd)
+        except Exception:
+            _driver_fail()
+        if (
+            not stat.S_ISDIR(public_root.st_mode)
+            or not stat.S_ISDIR(opened_root.st_mode)
+            or (public_root.st_dev, public_root.st_ino) != self.identity
+            or (opened_root.st_dev, opened_root.st_ino) != self.identity
+            or stat.S_IMODE(public_root.st_mode) != 0o700
+            or stat.S_IMODE(opened_root.st_mode) != 0o700
+        ):
+            _driver_fail()
+        return (
+            self.execution_generation,
+            execution.name,
+            execution.identity,
+            execution.size_bytes,
+            execution.sha256,
+            execution.mode,
+            sentinel.identity,
+            sentinel.size_bytes,
+            sentinel.sha256,
+            sentinel.mode,
+        )
+
+    def prepare_preserve_uninstall(
+        self,
+        token: tuple[object, ...],
+    ) -> tuple[int, str]:
+        if type(token) is not tuple or token != self.preserve_uninstall_token():
+            _driver_fail()
+        execution = self.execution_copy
+        assert execution is not None
+        return execution.descriptor, f"/proc/self/fd/{execution.descriptor}"
 
     def _validate_child_path(self, path: object) -> Path:
         if (
@@ -1505,6 +1559,8 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     service_presence_observation: object | None = None
     local_listener_absence_confirmed = False
     process_rollback_unproven = False
+    product_rollback_unproven = False
+    preserve_uninstall_token: tuple[object, ...] | None = None
 
     def revoke_runtime_install_absence_fact() -> None:
         nonlocal runtime_install_absence_fact
@@ -1515,8 +1571,10 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         service_presence_observation = None
 
     def revoke_transient_observation_facts() -> None:
+        nonlocal preserve_uninstall_token
         revoke_runtime_install_absence_fact()
         revoke_service_presence_observation()
+        preserve_uninstall_token = None
 
     def unavailable(*args: object, **kwargs: object) -> object:
         revoke_transient_observation_facts()
@@ -1524,12 +1582,22 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         _fail("driver_unavailable")
 
     def mark_process_rollback_unproven() -> None:
-        nonlocal process_rollback_unproven
+        nonlocal process_rollback_unproven, product_rollback_unproven
+        nonlocal preserve_uninstall_token
         process_rollback_unproven = True
+        product_rollback_unproven = True
+        preserve_uninstall_token = None
 
     def mark_process_rollback_proven() -> None:
-        nonlocal process_rollback_unproven
+        nonlocal process_rollback_unproven, preserve_uninstall_token
+        if not process_rollback_unproven or run_directory is None:
+            _driver_fail()
+        preserve_uninstall_token = run_directory.preserve_uninstall_token()
         process_rollback_unproven = False
+
+    def mark_product_rollback_proven() -> None:
+        nonlocal product_rollback_unproven
+        product_rollback_unproven = False
 
     def profile_paths(platform: object) -> NativeProfilePaths:
         nonlocal profile_home, profile_projection, package_projection
@@ -1539,7 +1607,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         nonlocal service_absence_confirmed
         nonlocal service_presence_observation
         nonlocal local_listener_absence_confirmed
-        revoke_service_presence_observation()
+        revoke_transient_observation_facts()
         profile_projection = None
         profile_xdg_binding = None
         profile_xdg_trusted_root = None
@@ -1680,7 +1748,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         nonlocal runtime_install_absence_fact
         nonlocal service_absence_confirmed, local_listener_absence_confirmed
         nonlocal service_presence_observation
-        runtime_install_absence_fact = None
+        revoke_transient_observation_facts()
         service_presence_observation = None
         if (
             type(platform) is not str
@@ -1952,8 +2020,9 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     ) -> NativeListenerState:
         nonlocal runtime_install_absence_fact
         nonlocal service_absence_confirmed, local_listener_absence_confirmed
-        nonlocal service_presence_observation
-        runtime_install_absence_fact = None
+        nonlocal service_presence_observation, preserve_uninstall_token
+        revoke_runtime_install_absence_fact()
+        preserve_uninstall_token = None
         positive_service_observation = service_presence_observation
         service_presence_observation = None
         if (
@@ -2087,8 +2156,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     def inspect_ledger(platform: object) -> NativeLedgerState:
         nonlocal runtime_install_absence_fact
         nonlocal local_listener_absence_confirmed
-        runtime_install_absence_fact = None
-        revoke_service_presence_observation()
+        revoke_transient_observation_facts()
         if (
             type(platform) is not str
             or platform != "linux"
@@ -2145,7 +2213,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         profile: object,
     ) -> NativePackagePaths:
         nonlocal package_projection, runtime_install_absence_fact
-        revoke_service_presence_observation()
+        revoke_transient_observation_facts()
         package_projection = None
         runtime_install_absence_fact = None
         if (
@@ -2326,9 +2394,10 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         return candidate
 
     def inspect_path(purpose: object, path: object) -> NativePathState:
-        nonlocal runtime_install_absence_fact
+        nonlocal runtime_install_absence_fact, preserve_uninstall_token
         pending_runtime_install_fact = runtime_install_absence_fact
         runtime_install_absence_fact = None
+        preserve_uninstall_token = None
         revoke_service_presence_observation()
         if run_directory is None:
             _driver_fail()
@@ -2517,6 +2586,72 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _driver_fail()
         run_directory.remove_path(path)
 
+    def run_process(argv: object, timeout: object) -> NativeProcessResult:
+        nonlocal preserve_uninstall_token
+        token = preserve_uninstall_token
+        preserve_uninstall_token = None
+        revoke_runtime_install_absence_fact()
+        revoke_service_presence_observation()
+        if token is None or run_directory is None:
+            _driver_fail()
+        execution = run_directory.execution_copy
+        if execution is None:
+            _driver_fail()
+        expected = (
+            str(run_directory.path / execution.name),
+            "--usagehub-uninstall",
+        )
+        if (
+            type(argv) is not tuple
+            or len(argv) != 2
+            or any(type(value) is not str for value in argv)
+            or argv[0] != expected[0]
+            or argv[1] != expected[1]
+            or type(timeout) is not float
+            or timeout != 180.0
+        ):
+            _driver_fail()
+        current_runtime_authority()
+        try:
+            configured_xdg_config = os.environ.get("XDG_CONFIG_HOME")
+            current_uid = os.getuid()
+        except Exception:
+            _fail("driver_unavailable")
+        if configured_xdg_config not in {None, ""} or profile_home is None:
+            _fail("driver_unavailable")
+        child_environment = {
+            "HOME": str(profile_home),
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "XDG_RUNTIME_DIR": f"/run/user/{current_uid}",
+        }
+        if profile_xdg_binding is not None:
+            child_environment["XDG_DATA_HOME"] = profile_xdg_binding
+        descriptor, held_executable = run_directory.prepare_preserve_uninstall(token)
+        try:
+            from openusage_bar.bounded_process import run_bounded
+
+            completed = run_bounded(
+                (held_executable, "--usagehub-uninstall"),
+                timeout=180.0,
+                shell=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                env=child_environment,
+                pass_fds=(descriptor,),
+            )
+            if type(completed.returncode) is not int or completed.returncode != 0:
+                _driver_fail()
+            run_directory.prepare_preserve_uninstall(token)
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _driver_fail()
+        return NativeProcessResult(0, b"", b"", False)
+
     dependencies = NativeLifecycleDependencies(
         make_run_directory=make_run_directory,
         inspect_path=inspect_path,
@@ -2524,7 +2659,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         set_file_mode=set_file_mode,
         remove_path=remove_path,
         start_process=unavailable,
-        run_process=unavailable,
+        run_process=run_process,
         stop_process=unavailable,
         read_registry_value=unavailable,
         profile_paths=profile_paths,
@@ -2549,10 +2684,15 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             "_mark_process_rollback_proven",
             mark_process_rollback_proven,
         )
+        object.__setattr__(
+            dependencies,
+            "_mark_product_rollback_proven",
+            mark_product_rollback_proven,
+        )
         yield dependencies
     finally:
         if run_directory is not None:
-            if process_rollback_unproven:
+            if process_rollback_unproven or product_rollback_unproven:
                 run_directory.abandon()
             else:
                 run_directory.cleanup()
