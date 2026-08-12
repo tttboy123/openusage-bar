@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import signal
 import subprocess
@@ -661,6 +662,75 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
                     bearer_token="g" * 48,
                     lease=Lease(),
                 )
+
+    def test_cli_is_silent_and_accepts_only_one_canonical_private_layout(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologySummary,
+            main,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.realpath(directory)
+            self._prepare_private_root(root)
+            collector = os.path.join(root, "openusage-collector")
+            with open(collector, "wb") as stream:
+                stream.write(b"audited-collector")
+            os.chmod(collector, 0o700)
+            self._prepare_advise_config(root)
+            self._prepare_gateway_token(root)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch(
+                "scripts.canary_gateway_egress_topology.run_gateway_egress_topology_canary",
+                return_value=GatewayEgressTopologySummary(True),
+            ) as runner:
+                code = main(
+                    ("--collector", collector, "--port", "17823"),
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+
+            self.assertEqual((code, stdout.getvalue(), stderr.getvalue()), (0, "", ""))
+            runner.assert_called_once_with(
+                collector=collector,
+                config_path=os.path.join(root, "gateway.json"),
+                token_path=os.path.join(root, "gateway.token"),
+                port=17823,
+                environment=self._closed_environment(root),
+            )
+
+        for arguments in (
+            (),
+            ("--collector", "relative", "--port", "17823"),
+            ("--collector", "/PRIVATE/collector", "--port", "1"),
+            ("--collector", "/PRIVATE/collector", "--unknown", "17823"),
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(
+                    main(arguments, stdout=io.StringIO(), stderr=io.StringIO()),
+                    2,
+                )
+
+        class HostileString(str):
+            def __eq__(self, other: object) -> bool:
+                del other
+                raise RuntimeError("PRIVATE_ARGV_SECRET")
+
+            def __ne__(self, other: object) -> bool:
+                del other
+                raise RuntimeError("PRIVATE_ARGV_SECRET")
+
+        for index in (0, 2, 3):
+            arguments = ["--collector", "/PRIVATE/openusage-collector", "--port", "17823"]
+            arguments[index] = HostileString(arguments[index])
+            with self.subTest(hostile_index=index), patch(
+                "scripts.canary_gateway_egress_topology.run_gateway_egress_topology_canary"
+            ) as runner:
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                self.assertEqual(main(arguments, stdout=stdout, stderr=stderr), 2)
+                self.assertEqual((stdout.getvalue(), stderr.getvalue()), ("", ""))
+                runner.assert_not_called()
 
     def test_evaluator_accepts_only_one_authenticated_endpoint_epoch_with_zero_delta(
         self,

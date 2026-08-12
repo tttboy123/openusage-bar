@@ -14,8 +14,10 @@ import os
 import signal
 import stat
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
+from typing import TextIO
 
 from openusage_bar.gateway.egress import GatewayEgressAttemptCounters
 from openusage_bar.gateway.server import (
@@ -708,9 +710,65 @@ def evaluate_gateway_egress_attempt_window(
     return GatewayEgressTopologySummary(gateway_egress_attempt_delta_zero=True)
 
 
+def main(
+    arguments: tuple[str, ...] | list[str] | None = None,
+    *,
+    stdout: TextIO = sys.stdout,
+    stderr: TextIO = sys.stderr,
+) -> int:
+    """Run the silent hosted empty-window diagnostic."""
+
+    del stdout, stderr
+    try:
+        selected = tuple(sys.argv[1:] if arguments is None else arguments)
+        valid = (
+            len(selected) == 4
+            and all(type(item) is str for item in selected)
+            and selected[0] == "--collector"
+            and os.path.isabs(selected[1])
+            and "\0" not in selected[1]
+            and selected[2:] == ("--port", "17823")
+        )
+    except Exception:
+        return 2
+    if not valid:
+        return 2
+    collector = selected[1]
+    root = os.path.dirname(collector)
+    if os.path.basename(collector) != "openusage-collector":
+        return 2
+    environment = {
+        **_ENVIRONMENT_FIXED,
+        **{
+            key: os.path.join(root, child)
+            for key, child in _ENVIRONMENT_DIRECT_CHILDREN.items()
+        },
+    }
+    try:
+        summary = run_gateway_egress_topology_canary(
+            collector=collector,
+            config_path=os.path.join(root, "gateway.json"),
+            token_path=os.path.join(root, "gateway.token"),
+            port=17823,
+            environment=environment,
+        )
+        if (
+            type(summary) is not GatewayEgressTopologySummary
+            or summary.gateway_egress_attempt_delta_zero is not True
+        ):
+            raise GatewayEgressTopologyCanaryError
+    except Exception:
+        return 1
+    return 0
+
+
 __all__ = [
     "GatewayEgressTopologyCanaryError",
     "GatewayEgressTopologySummary",
     "evaluate_gateway_egress_attempt_window",
     "run_gateway_egress_topology_canary",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
