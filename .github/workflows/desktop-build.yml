@@ -1002,7 +1002,7 @@ jobs:
             if [[ -S "/run/user/$current_uid/systemd/private" ]]; then
               break
             fi
-            sleep 0.1
+            sleep 0.2
           done
           test -S "/run/user/$current_uid/systemd/private"
           set +e
