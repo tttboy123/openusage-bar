@@ -253,6 +253,8 @@ class _LinuxServiceReaderHarness:
         self.real_stat = os.stat
         self.real_readlink = os.readlink
         self.manager_exe_readlink_denied = False
+        self.manager_exe_stat_denied = False
+        self.restore_manager_exe_access_after_denied_stat = False
         self.real_fstat = os.fstat
         self.real_close = os.close
 
@@ -489,6 +491,11 @@ class _LinuxServiceReaderHarness:
             return self.collector_metadata
         if raw == f"/proc/{self.peer_pid}/exe":
             self.events.append("peer_exe_stat")
+            if self.manager_exe_stat_denied:
+                if self.restore_manager_exe_access_after_denied_stat:
+                    self.manager_exe_readlink_denied = False
+                    self.manager_exe_stat_denied = False
+                raise PermissionError("PRIVATE_MANAGER_EXE_STAT")
             return self.systemd_executable_metadata
         if raw == "/usr/lib/systemd/systemd":
             self.events.append("peer_public_exe_stat")
@@ -931,6 +938,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                         fragment_path=None,
                         drop_in_paths=(),
                         needs_reload=False,
+                        manager_executable_authority="live-inode",
                     ),
                 )
                 self.assertEqual(manager_calls, [absence_stdout, absence_stdout])
@@ -956,6 +964,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                         fragment_path=None,
                         drop_in_paths=(),
                         needs_reload=False,
+                        manager_executable_authority="live-inode",
                     ),
                 )
                 self.assertEqual(manager_calls, [absence_stdout, absence_stdout])
@@ -973,6 +982,35 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                     2,
                 )
                 harness.manager_exe_readlink_denied = False
+
+                manager_calls.clear()
+                harness.manager_exe_readlink_denied = True
+                harness.manager_exe_stat_denied = True
+                permission_limited = (
+                    read_current_user_collector_service_absence_state()
+                )
+                self.assertEqual(
+                    permission_limited.manager_executable_authority,
+                    "peer-provenance-canonical-cmdline",
+                )
+                self.assertEqual(manager_calls, [absence_stdout, absence_stdout])
+                self.assertEqual(
+                    harness.events.count("peer_exe_permission_denied"), 4
+                )
+                harness.manager_exe_readlink_denied = False
+                harness.manager_exe_stat_denied = False
+
+                manager_calls.clear()
+                harness.manager_exe_readlink_denied = True
+                harness.manager_exe_stat_denied = True
+                harness.restore_manager_exe_access_after_denied_stat = True
+                with self.assertRaises(
+                    platform_services.ServiceCommandError
+                ) as authority_drift:
+                    read_current_user_collector_service_absence_state()
+                self.assertEqual(authority_drift.exception.stage, "sandwich")
+                self.assertEqual(manager_calls, [absence_stdout, absence_stdout])
+                harness.restore_manager_exe_access_after_denied_stat = False
 
                 hostile_states = (
                     absence_stdout.replace(

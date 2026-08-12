@@ -1552,6 +1552,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         fragment_path=None,
                         drop_in_paths=(),
                         needs_reload=False,
+                        manager_executable_authority="live-inode",
                     )
                     service_reads = 0
 
@@ -1872,6 +1873,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 fragment_path=None,
                 drop_in_paths=(),
                 needs_reload=False,
+                manager_executable_authority="live-inode",
             )
             events: list[str] = []
             service_reads = 0
@@ -1992,6 +1994,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 fragment_path=None,
                 drop_in_paths=(),
                 needs_reload=False,
+                manager_executable_authority="live-inode",
             )
             service_reads = 0
             run_directory: Path | None = None
@@ -2116,6 +2119,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 fragment_path=None,
                 drop_in_paths=(),
                 needs_reload=False,
+                manager_executable_authority="live-inode",
             )
             service_reads = 0
             run_directory: Path | None = None

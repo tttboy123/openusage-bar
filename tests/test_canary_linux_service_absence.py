@@ -26,6 +26,7 @@ class LinuxServiceAbsenceCanaryTests(unittest.TestCase):
             fragment_path=None,
             drop_in_paths=(),
             needs_reload=False,
+            manager_executable_authority="live-inode",
         )
 
         for name, observations, expected in (

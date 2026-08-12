@@ -182,6 +182,7 @@ class LinuxCollectorServiceAbsenceState:
     fragment_path: Path | None
     drop_in_paths: tuple[Path, ...]
     needs_reload: bool
+    manager_executable_authority: str
 
     def __post_init__(self) -> None:
         if (
@@ -206,6 +207,12 @@ class LinuxCollectorServiceAbsenceState:
             or self.drop_in_paths != ()
             or type(self.needs_reload) is not bool
             or self.needs_reload is not False
+            or type(self.manager_executable_authority) is not str
+            or self.manager_executable_authority
+            not in {
+                "live-inode",
+                "peer-provenance-canonical-cmdline",
+            }
         ):
             raise ValueError("Linux collector service absence state invalid")
 
@@ -971,6 +978,7 @@ def read_current_user_collector_service_absence_state(
             fragment_path=None,
             drop_in_paths=(),
             needs_reload=False,
+            manager_executable_authority=manager_executable_before[2],
         )
     except ServiceCommandError as error:
         if error.stage is not None:
@@ -1313,7 +1321,7 @@ def _read_linux_systemd_manager_executable(
     manager_pid: int,
     *,
     unreadable_executable_cmdline: bytes | None = None,
-) -> tuple[str, tuple[int, ...]]:
+) -> tuple[str, tuple[int, ...], str]:
     proc_executable = f"/proc/{manager_pid}/exe"
     readlink_denied = False
     try:
@@ -1334,6 +1342,10 @@ def _read_linux_systemd_manager_executable(
         raise ServiceCommandError(stage="manager-binary-path-value")
     try:
         proc_metadata = os.stat(proc_executable)
+    except PermissionError:
+        if not readlink_denied:
+            raise ServiceCommandError(stage="manager-binary-metadata")
+        proc_metadata = None
     except Exception as error:
         raise ServiceCommandError(stage="manager-binary-metadata") from error
     try:
@@ -1342,6 +1354,22 @@ def _read_linux_systemd_manager_executable(
         raise ServiceCommandError(
             stage="manager-binary-public-identity"
         ) from error
+    public_mode = stat.S_IMODE(public_metadata.st_mode)
+    if (
+        not stat.S_ISREG(public_metadata.st_mode)
+        or public_metadata.st_uid != 0
+        or public_metadata.st_nlink != 1
+        or not public_mode & 0o100
+        or public_mode & 0o022
+    ):
+        raise ServiceCommandError(stage="manager-binary-metadata")
+    public_signature = _linux_file_signature(public_metadata)
+    if proc_metadata is None:
+        return (
+            raw_path,
+            public_signature,
+            "peer-provenance-canonical-cmdline",
+        )
     mode = stat.S_IMODE(proc_metadata.st_mode)
     signature = _linux_file_signature(proc_metadata)
     if (
@@ -1354,7 +1382,7 @@ def _read_linux_systemd_manager_executable(
         raise ServiceCommandError(stage="manager-binary-metadata")
     if _linux_file_signature(public_metadata) != signature:
         raise ServiceCommandError(stage="manager-binary-public-identity")
-    return raw_path, signature
+    return raw_path, signature, "live-inode"
 
 
 def _read_linux_systemd_manager_cmdline(manager_pid: int) -> bytes:
