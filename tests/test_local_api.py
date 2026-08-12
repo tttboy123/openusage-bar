@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import http.client
+import hashlib
 import io
 import json
 import os
 import socket
 import stat
+import struct
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -206,6 +209,92 @@ class _LinuxObservationClient:
         self.closed = True
 
 
+@contextmanager
+def _stable_linux_local_api_peer_process(test_case, *, pid=4312):
+    from types import SimpleNamespace
+
+    process = local_api_module._LinuxLocalAPIPeerProcessFact(
+        uid=os.getuid(),
+        gid=os.getgid(),
+        parent_pid=4300,
+        start_time_ticks=987655,
+        executable_path="/tmp/audited/openusage-collector",
+        executable_signature=(
+            91,
+            92,
+            stat.S_IFREG | 0o700,
+            os.getuid(),
+            os.getgid(),
+            1,
+            1024,
+            101,
+            102,
+        ),
+        argv_nul=b"/tmp/audited/openusage-collector\0daemon\0",
+        cgroup=b"0::/user.slice/openusage-bar.service\n",
+    )
+    proc_descriptor = 93_000
+    peer_descriptor = 93_001
+    real_open = local_api_module.os.open
+    real_fstat = local_api_module.os.fstat
+    real_close = local_api_module.os.close
+
+    def open_entry(path, flags, *args, dir_fd=None, **kwargs):
+        if path == "/proc":
+            test_case.assertEqual(args, ())
+            test_case.assertEqual(kwargs, {})
+            test_case.assertIsNone(dir_fd)
+            test_case.assertTrue(flags & os.O_DIRECTORY)
+            test_case.assertTrue(flags & os.O_NOFOLLOW)
+            return proc_descriptor
+        if (os.fspath(path), dir_fd) == (str(pid), proc_descriptor):
+            test_case.assertEqual(args, ())
+            test_case.assertEqual(kwargs, {})
+            test_case.assertTrue(flags & os.O_DIRECTORY)
+            test_case.assertTrue(flags & os.O_NOFOLLOW)
+            return peer_descriptor
+        if dir_fd is None:
+            return real_open(path, flags, *args, **kwargs)
+        return real_open(path, flags, *args, dir_fd=dir_fd, **kwargs)
+
+    def fstat_entry(descriptor):
+        if descriptor == proc_descriptor:
+            return SimpleNamespace(st_mode=stat.S_IFDIR | 0o555, st_uid=0)
+        if descriptor == peer_descriptor:
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR | 0o555,
+                st_uid=os.getuid(),
+                st_gid=os.getgid(),
+            )
+        return real_fstat(descriptor)
+
+    synthetic_closed = []
+
+    def close_entry(descriptor):
+        if descriptor in {proc_descriptor, peer_descriptor}:
+            test_case.assertNotIn(descriptor, synthetic_closed)
+            synthetic_closed.append(descriptor)
+            return None
+        return real_close(descriptor)
+
+    with (
+        patch.object(local_api_module.os, "open", side_effect=open_entry),
+        patch.object(local_api_module.os, "fstat", side_effect=fstat_entry),
+        patch.object(local_api_module.os, "close", side_effect=close_entry),
+        patch.object(
+            local_api_module,
+            "_read_linux_local_api_peer_process",
+            side_effect=(process, process),
+        ) as process_reader,
+    ):
+        yield SimpleNamespace(
+            process=process,
+            reader=process_reader,
+            descriptors=(proc_descriptor, peer_descriptor),
+            closed=synthetic_closed,
+        )
+
+
 _COMPLETE_HEALTH_PAYLOAD = {
     "schemaVersion": "1.0",
     "dataRevision": 7,
@@ -268,6 +357,7 @@ class _LinuxLocalAPIObservationHarness:
         self.stat_side_effect = None
         self.stack = None
         self.socket_factory = None
+        self.peer_process = None
 
     @staticmethod
     def identity(path):
@@ -327,6 +417,9 @@ class _LinuxLocalAPIObservationHarness:
                 side_effect=self.monotonic,
             )
         )
+        self.peer_process = self.stack.enter_context(
+            _stable_linux_local_api_peer_process(self.test_case)
+        )
         return self
 
     def __exit__(self, exc_type, exc, traceback):
@@ -378,6 +471,19 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
             current_uid = os.getuid()
             current_gid = os.getgid()
             peer_pid = 4312
+            peer_parent_pid = 4300
+            peer_start_time_ticks = 987655
+            peer_executable = root / "audited" / "openusage-collector"
+            peer_argv_nul = (
+                os.fsencode(peer_executable)
+                + b"\0daemon\0--interval\0"
+                + b"300\0"
+            )
+            peer_cgroup = (
+                "0::/user.slice/"
+                f"user-{current_uid}.slice/user@{current_uid}.service/"
+                "app.slice/openusage-bar.service\n"
+            )
             directory_paths = (
                 home,
                 home / ".local",
@@ -406,6 +512,76 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
             )
             descriptors = (7100, 7101, 7102, 7103)
             descriptor_facts = dict(zip(descriptors, directory_facts, strict=True))
+            proc_descriptor = 7200
+            peer_descriptor = 7201
+            proc_file_descriptors = tuple(range(7202, 7210))
+            proc_directory_facts = {
+                proc_descriptor: SimpleNamespace(
+                    st_mode=stat.S_IFDIR | 0o555,
+                    st_uid=0,
+                    st_gid=0,
+                    st_nlink=1,
+                ),
+                peer_descriptor: SimpleNamespace(
+                    st_mode=stat.S_IFDIR | 0o555,
+                    st_uid=current_uid,
+                    st_gid=current_gid,
+                    st_nlink=1,
+                ),
+            }
+            proc_file_fact = SimpleNamespace(
+                st_mode=stat.S_IFREG | 0o400,
+                st_uid=current_uid,
+                st_gid=current_gid,
+                st_nlink=1,
+                st_size=128,
+            )
+            peer_executable_fact = SimpleNamespace(
+                st_mode=stat.S_IFREG | 0o700,
+                st_uid=current_uid,
+                st_gid=current_gid,
+                st_nlink=1,
+                st_dev=91,
+                st_ino=92,
+                st_size=1024,
+                st_mtime_ns=101,
+                st_ctime_ns=102,
+            )
+            peer_status = (
+                f"Name:\tcollector\nUid:\t{current_uid}\t{current_uid}\t"
+                f"{current_uid}\t{current_uid}\nGid:\t{current_gid}\t"
+                f"{current_gid}\t{current_gid}\t{current_gid}\n"
+            ).encode("ascii")
+            peer_stat = (
+                f"{peer_pid} (openusage-collector) S {peer_parent_pid} "
+                + " ".join("0" for _ in range(17))
+                + f" {peer_start_time_ticks} 0\n"
+            ).encode("ascii")
+            proc_snapshots = (
+                ("before", "status", proc_file_descriptors[0], peer_status),
+                ("before", "stat", proc_file_descriptors[1], peer_stat),
+                (
+                    "before",
+                    "cgroup",
+                    proc_file_descriptors[2],
+                    peer_cgroup.encode("ascii"),
+                ),
+                ("before", "cmdline", proc_file_descriptors[3], peer_argv_nul),
+                ("after", "status", proc_file_descriptors[4], peer_status),
+                ("after", "stat", proc_file_descriptors[5], peer_stat),
+                (
+                    "after",
+                    "cgroup",
+                    proc_file_descriptors[6],
+                    peer_cgroup.encode("ascii"),
+                ),
+                ("after", "cmdline", proc_file_descriptors[7], peer_argv_nul),
+            )
+            proc_open_expectations = iter(proc_snapshots)
+            proc_payloads = {
+                descriptor: iter((payload, b""))
+                for _phase, _name, descriptor, payload in proc_snapshots
+            }
             child_facts = {
                 (descriptors[0], ".local"): directory_facts[1],
                 (descriptors[1], "state"): directory_facts[2],
@@ -424,6 +600,27 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
             def open_directory(path, flags, *args, dir_fd=None, **kwargs):
                 self.assertEqual(args, ())
                 self.assertEqual(kwargs, {})
+                name = os.fspath(path)
+                if name in {"status", "stat", "cgroup", "cmdline"}:
+                    phase, expected_name, descriptor, _payload = next(
+                        proc_open_expectations
+                    )
+                    self.assertEqual((name, dir_fd), (expected_name, peer_descriptor))
+                    self.assertTrue(flags & os.O_NOFOLLOW)
+                    self.assertFalse(flags & os.O_DIRECTORY)
+                    events.append(("proc_open", phase, name, descriptor))
+                    return descriptor
+                if path == "/proc":
+                    self.assertIsNone(dir_fd)
+                    self.assertTrue(flags & os.O_DIRECTORY)
+                    self.assertTrue(flags & os.O_NOFOLLOW)
+                    events.append(("proc_directory", proc_descriptor))
+                    return proc_descriptor
+                if (name, dir_fd) == (str(peer_pid), proc_descriptor):
+                    self.assertTrue(flags & os.O_DIRECTORY)
+                    self.assertTrue(flags & os.O_NOFOLLOW)
+                    events.append(("peer_directory", peer_descriptor))
+                    return peer_descriptor
                 expected_path, expected_parent, descriptor = next(open_expectations)
                 self.assertEqual(path, expected_path)
                 self.assertEqual(dir_fd, expected_parent)
@@ -434,7 +631,32 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
 
             def fstat_directory(descriptor):
                 events.append(("fstat", descriptor))
-                return descriptor_facts[descriptor]
+                if descriptor in descriptor_facts:
+                    return descriptor_facts[descriptor]
+                if descriptor in proc_directory_facts:
+                    return proc_directory_facts[descriptor]
+                self.assertIn(descriptor, proc_file_descriptors)
+                return proc_file_fact
+
+            def read_proc_file(descriptor, size):
+                self.assertIn(descriptor, proc_file_descriptors)
+                self.assertIs(type(size), int)
+                self.assertGreater(size, 0)
+                self.assertLessEqual(size, 65_537)
+                payload = next(proc_payloads[descriptor])
+                events.append(("proc_read", descriptor, len(payload)))
+                return payload
+
+            executable_reads = 0
+
+            def read_peer_executable(path, *args, dir_fd=None, **kwargs):
+                nonlocal executable_reads
+                self.assertEqual(args, ())
+                self.assertEqual(kwargs, {})
+                self.assertEqual((path, dir_fd), ("exe", peer_descriptor))
+                executable_reads += 1
+                events.append(("proc_exe_path", executable_reads))
+                return os.fspath(peer_executable)
 
             home_stats = 0
             held_socket_stats = 0
@@ -451,8 +673,12 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
                 nonlocal home_stats, held_socket_stats
                 self.assertEqual(args, ())
                 self.assertEqual(kwargs, {})
-                self.assertIs(follow_symlinks, False)
                 name = os.fspath(path)
+                if (dir_fd, name) == (peer_descriptor, "exe"):
+                    self.assertIs(follow_symlinks, True)
+                    events.append(("proc_exe_stat", executable_reads))
+                    return peer_executable_fact
+                self.assertIs(follow_symlinks, False)
                 if dir_fd is None:
                     self.assertEqual(path, home)
                     home_stats += 1
@@ -469,7 +695,12 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
             closed_descriptors: list[int] = []
 
             def close_descriptor(descriptor):
-                self.assertIn(descriptor, descriptors)
+                self.assertIn(
+                    descriptor,
+                    descriptors
+                    + (proc_descriptor, peer_descriptor)
+                    + proc_file_descriptors,
+                )
                 self.assertNotIn(descriptor, closed_descriptors)
                 closed_descriptors.append(descriptor)
                 events.append(("close_fd", descriptor))
@@ -583,6 +814,14 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
                 stack.enter_context(patch.object(local_api_module.Path, "home", return_value=home))
                 stack.enter_context(patch.object(local_api_module.os, "open", side_effect=open_directory))
                 stack.enter_context(patch.object(local_api_module.os, "fstat", side_effect=fstat_directory))
+                stack.enter_context(patch.object(local_api_module.os, "read", side_effect=read_proc_file))
+                stack.enter_context(
+                    patch.object(
+                        local_api_module.os,
+                        "readlink",
+                        side_effect=read_peer_executable,
+                    )
+                )
                 stack.enter_context(patch.object(local_api_module.os, "stat", side_effect=stat_entry))
                 stack.enter_context(patch.object(local_api_module.os, "close", side_effect=close_descriptor))
                 canonical_socket_reader = stack.enter_context(
@@ -614,6 +853,30 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
                     peer_pid=peer_pid,
                     peer_uid=current_uid,
                     peer_gid=current_gid,
+                    peer_parent_pid=peer_parent_pid,
+                    peer_start_time_ticks=peer_start_time_ticks,
+                    peer_executable_file_id="91:92",
+                    peer_executable_signature_sha256=hashlib.sha256(
+                        struct.pack(
+                            ">9Q",
+                            peer_executable_fact.st_dev,
+                            peer_executable_fact.st_ino,
+                            peer_executable_fact.st_mode,
+                            peer_executable_fact.st_uid,
+                            peer_executable_fact.st_gid,
+                            peer_executable_fact.st_nlink,
+                            peer_executable_fact.st_size,
+                            peer_executable_fact.st_mtime_ns,
+                            peer_executable_fact.st_ctime_ns,
+                        )
+                    ).hexdigest(),
+                    peer_executable_path_sha256=hashlib.sha256(
+                        os.fsencode(peer_executable)
+                    ).hexdigest(),
+                    peer_argv_sha256=hashlib.sha256(peer_argv_nul).hexdigest(),
+                    peer_cgroup_sha256=hashlib.sha256(
+                        peer_cgroup.encode("ascii")
+                    ).hexdigest(),
                     http_status=200,
                     schema_version="1.0",
                     health_ok=True,
@@ -630,11 +893,36 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
             canonical_socket_reader.assert_called_once_with(home)
             self.assertTrue(timeouts)
             self.assertLess(observed_times[-1], observed_times[0] + 2.0)
-            self.assertEqual(closed_descriptors, list(reversed(descriptors)))
+            self.assertEqual(len(closed_descriptors), len(set(closed_descriptors)))
+            self.assertEqual(
+                set(closed_descriptors),
+                set(
+                    descriptors
+                    + (proc_descriptor, peer_descriptor)
+                    + proc_file_descriptors
+                ),
+            )
+            self.assertEqual(closed_descriptors[-6:], [peer_descriptor, proc_descriptor, *reversed(descriptors)])
             self.assertLess(events.index(("held_socket_stat", 1)), events.index(("connect", f"/proc/self/fd/{descriptors[3]}/openusage.sock")))
+            self.assertLess(
+                events.index(("peer", 1)),
+                events.index(("proc_open", "before", "status", proc_file_descriptors[0])),
+            )
+            self.assertLess(
+                events.index(("proc_exe_stat", 1)),
+                events.index(("sendall", request)),
+            )
             self.assertLess(events.index(("peer", 2)), events.index(("canonical_socket_stat", 1)))
             self.assertLess(events.index(("peer", 1)), events.index(("sendall", request)))
             self.assertLess(events.index(("recv", 0)), events.index(("peer", 2)))
+            self.assertLess(
+                events.index(("peer", 2)),
+                events.index(("proc_open", "after", "status", proc_file_descriptors[4])),
+            )
+            self.assertLess(
+                events.index(("proc_exe_stat", 2)),
+                events.index(("canonical_socket_stat", 1)),
+            )
             self.assertLess(events.index(("peer", 2)), events.index(("socket_close",)))
             after = tuple(
                 (path.relative_to(root).as_posix(), path.lstat().st_mode, path.read_bytes())
@@ -642,6 +930,108 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
                 if path.is_file()
             )
             self.assertEqual(after, before)
+
+    def test_read_current_user_local_api_state_rejects_peer_process_drift(self):
+        from types import SimpleNamespace
+
+        from openusage_bar.local_api import (
+            LocalAPIObservationError,
+            _LinuxLocalAPIPeerProcessFact,
+            read_current_user_local_api_state,
+        )
+
+        executable_signature = (91, 92, stat.S_IFREG | 0o700, os.getuid(), os.getgid(), 1, 1024, 101, 102)
+        stable = _LinuxLocalAPIPeerProcessFact(
+            uid=os.getuid(),
+            gid=os.getgid(),
+            parent_pid=4300,
+            start_time_ticks=987655,
+            executable_path="/tmp/audited/openusage-collector",
+            executable_signature=executable_signature,
+            argv_nul=b"/tmp/audited/openusage-collector\0daemon\0",
+            cgroup=b"0::/user.slice/openusage-bar.service\n",
+        )
+        cases = (
+            ("parent_pid", replace(stable, parent_pid=4301)),
+            ("start_time_ticks", replace(stable, start_time_ticks=987656)),
+        )
+        real_open = local_api_module.os.open
+        real_fstat = local_api_module.os.fstat
+        real_close = local_api_module.os.close
+
+        for label, drifted in cases:
+            with self.subTest(label=label), _LinuxLocalAPIObservationHarness(self) as harness:
+                proc_descriptor = 9300
+                peer_descriptor = 9301
+                synthetic_closed: list[int] = []
+
+                def open_entry(path, flags, *args, dir_fd=None, **kwargs):
+                    self.assertEqual(args, ())
+                    self.assertEqual(kwargs, {})
+                    if path == "/proc":
+                        self.assertIsNone(dir_fd)
+                        self.assertTrue(flags & os.O_DIRECTORY)
+                        self.assertTrue(flags & os.O_NOFOLLOW)
+                        return proc_descriptor
+                    if (os.fspath(path), dir_fd) == ("4312", proc_descriptor):
+                        self.assertTrue(flags & os.O_DIRECTORY)
+                        self.assertTrue(flags & os.O_NOFOLLOW)
+                        return peer_descriptor
+                    return real_open(path, flags, dir_fd=dir_fd)
+
+                def fstat_entry(descriptor):
+                    if descriptor == proc_descriptor:
+                        return SimpleNamespace(st_mode=stat.S_IFDIR | 0o555, st_uid=0)
+                    if descriptor == peer_descriptor:
+                        return SimpleNamespace(
+                            st_mode=stat.S_IFDIR | 0o555,
+                            st_uid=os.getuid(),
+                            st_gid=os.getgid(),
+                        )
+                    return real_fstat(descriptor)
+
+                def close_entry(descriptor):
+                    if descriptor in {proc_descriptor, peer_descriptor}:
+                        synthetic_closed.append(descriptor)
+                        return None
+                    return real_close(descriptor)
+
+                with (
+                    patch.object(local_api_module.os, "open", side_effect=open_entry),
+                    patch.object(local_api_module.os, "fstat", side_effect=fstat_entry),
+                    patch.object(local_api_module.os, "close", side_effect=close_entry),
+                    patch.object(
+                        local_api_module,
+                        "_read_linux_local_api_peer_process",
+                        side_effect=(stable, drifted),
+                    ) as process_reader,
+                ):
+                    with self.assertRaises(LocalAPIObservationError) as raised:
+                        read_current_user_local_api_state()
+
+                self.assertEqual(
+                    str(raised.exception),
+                    "Local API observation failed",
+                )
+                process_reader.assert_has_calls(
+                    [
+                        unittest.mock.call(
+                            pid_descriptor=peer_descriptor,
+                            pid=4312,
+                            current_uid=os.getuid(),
+                            current_gid=os.getgid(),
+                        ),
+                        unittest.mock.call(
+                            pid_descriptor=peer_descriptor,
+                            pid=4312,
+                            current_uid=os.getuid(),
+                            current_gid=os.getgid(),
+                        ),
+                    ]
+                )
+                self.assertEqual(synthetic_closed, [peer_descriptor, proc_descriptor])
+                harness.assert_full_transaction()
+                harness.assert_marker_unchanged()
 
     def test_read_current_user_local_api_state_rejects_final_home_rebind(self):
         import struct
@@ -813,6 +1203,8 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
                     local_api_module.time,
                     "monotonic",
                     side_effect=monotonic,
+                ), _stable_linux_local_api_peer_process(
+                    self,
                 ):
                     with self.assertRaisesRegex(
                         LocalAPIObservationError,
@@ -1044,6 +1436,8 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
                     local_api_module.time,
                     "monotonic",
                     side_effect=monotonic,
+                ), _stable_linux_local_api_peer_process(
+                    self,
                 ):
                     with self.assertRaisesRegex(
                         LocalAPIObservationError,
@@ -1201,6 +1595,8 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
                     local_api_module.time,
                     "monotonic",
                     side_effect=monotonic,
+                ), _stable_linux_local_api_peer_process(
+                    self,
                 ):
                     with self.assertRaisesRegex(
                         LocalAPIObservationError,
@@ -1400,6 +1796,28 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
                     peer_pid=4312,
                     peer_uid=os.getuid(),
                     peer_gid=os.getgid(),
+                    peer_parent_pid=harness.peer_process.process.parent_pid,
+                    peer_start_time_ticks=(
+                        harness.peer_process.process.start_time_ticks
+                    ),
+                    peer_executable_file_id="91:92",
+                    peer_executable_signature_sha256=hashlib.sha256(
+                        struct.pack(
+                            ">9Q",
+                            *harness.peer_process.process.executable_signature,
+                        )
+                    ).hexdigest(),
+                    peer_executable_path_sha256=hashlib.sha256(
+                        os.fsencode(
+                            harness.peer_process.process.executable_path
+                        )
+                    ).hexdigest(),
+                    peer_argv_sha256=hashlib.sha256(
+                        harness.peer_process.process.argv_nul
+                    ).hexdigest(),
+                    peer_cgroup_sha256=hashlib.sha256(
+                        harness.peer_process.process.cgroup
+                    ).hexdigest(),
                     http_status=200,
                     schema_version="1.0",
                     health_ok=True,
@@ -1700,6 +2118,8 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
                         local_api_module.time,
                         "monotonic",
                         side_effect=monotonic,
+                    ), _stable_linux_local_api_peer_process(
+                        self,
                     ):
                         with self.assertRaisesRegex(
                             LocalAPIObservationError,
@@ -1925,6 +2345,9 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
                             stack.enter_context(
                                 patch.object(local_api_module.os, missing_flag, 0)
                             )
+                        stack.enter_context(
+                            _stable_linux_local_api_peer_process(self)
+                        )
 
                         with self.assertRaisesRegex(
                             LocalAPIObservationError,

@@ -62,7 +62,7 @@ class ServiceCommandError(RuntimeError):
         self.returncode = returncode
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class LinuxCollectorServiceState:
     """Closed, current-user systemd collector ownership observation."""
 
@@ -82,6 +82,7 @@ class LinuxCollectorServiceState:
     process_start_time_ticks: int
     process_executable: Path
     process_executable_file_id: str
+    process_executable_signature_sha256: str
     process_argv_nul: bytes
 
     def __post_init__(self) -> None:
@@ -121,6 +122,12 @@ class LinuxCollectorServiceState:
             or not self.process_executable.is_absolute()
             or type(self.process_executable_file_id) is not str
             or not self.process_executable_file_id
+            or type(self.process_executable_signature_sha256) is not str
+            or len(self.process_executable_signature_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.process_executable_signature_sha256
+            )
             or type(self.process_argv_nul) is not bytes
             or not self.process_argv_nul
             or not self.process_argv_nul.endswith(b"\0")
@@ -735,6 +742,9 @@ def read_current_user_collector_service_state() -> LinuxCollectorServiceState:
             process_start_time_ticks=process_identity_before[1],
             process_executable=process_executable,
             process_executable_file_id=executable_file_id,
+            process_executable_signature_sha256=hashlib.sha256(
+                struct.pack(">9Q", *process_executable_signature)
+            ).hexdigest(),
             process_argv_nul=process_argv_nul,
         )
     except ServiceCommandError:
@@ -1306,14 +1316,28 @@ def _read_linux_process_executable(
         or stat.S_IMODE(proc_metadata.st_mode) != 0o700
         or (proc_metadata.st_dev, proc_metadata.st_ino)
         != (public_metadata.st_dev, public_metadata.st_ino)
-        or _linux_file_signature(proc_metadata)
-        != _linux_file_signature(public_metadata)
+        or _linux_executable_signature(proc_metadata)
+        != _linux_executable_signature(public_metadata)
     ):
         raise ServiceCommandError()
     return (
         executable,
         f"{proc_metadata.st_dev}:{proc_metadata.st_ino}",
-        _linux_file_signature(proc_metadata),
+        _linux_executable_signature(proc_metadata),
+    )
+
+
+def _linux_executable_signature(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_uid,
+        metadata.st_gid,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
     )
 
 

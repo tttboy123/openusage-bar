@@ -875,6 +875,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             with harness.patched():
                 observed, happy_events = read_success()
                 observed_headless, headless_events = read_success()
+                happy_collector_metadata = harness.collector_metadata
 
                 ownership_failures = []
                 for ownership_case in ("wrong_ppid", "foreign_cgroup"):
@@ -1191,6 +1192,20 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                         f"{harness.collector_metadata.st_dev}:"
                         f"{harness.collector_metadata.st_ino}"
                     ),
+                    process_executable_signature_sha256=hashlib.sha256(
+                        struct.pack(
+                            ">9Q",
+                            happy_collector_metadata.st_dev,
+                            happy_collector_metadata.st_ino,
+                            happy_collector_metadata.st_mode,
+                            happy_collector_metadata.st_uid,
+                            happy_collector_metadata.st_gid,
+                            happy_collector_metadata.st_nlink,
+                            happy_collector_metadata.st_size,
+                            happy_collector_metadata.st_mtime_ns,
+                            happy_collector_metadata.st_ctime_ns,
+                        )
+                    ).hexdigest(),
                     process_argv_nul=harness.argv_nul,
                 ),
             )

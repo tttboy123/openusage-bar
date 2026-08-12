@@ -1968,20 +1968,55 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                     type(positive_service_observation)
                     is not LinuxCollectorServiceState
                     or type(service_after) is not LinuxCollectorServiceState
-                    or service_after != positive_service_observation
                     or type(local_state) is not LinuxLocalAPIState
-                    or local_state.socket_mode != 0o600
-                    or local_state.socket_uid != current_uid
-                    # This slice intentionally supports only a single-process
-                    # service topology.  A PyInstaller onefile child listener
-                    # remains unavailable until its PPID/start-time/cgroup and
-                    # executable facts are bound by a real packaged canary.
-                    or local_state.peer_pid
+                    or service_after != positive_service_observation
+                ):
+                    _fail("driver_unavailable")
+                expected_executable_path_sha256 = hashlib.sha256(
+                    os.fsencode(positive_service_observation.process_executable)
+                ).hexdigest()
+                expected_argv_sha256 = hashlib.sha256(
+                    positive_service_observation.process_argv_nul
+                ).hexdigest()
+                expected_cgroup = (
+                    "0::/user.slice/"
+                    f"user-{current_uid}.slice/user@{current_uid}.service/"
+                    "app.slice/openusage-bar.service\n"
+                ).encode("ascii")
+                expected_cgroup_sha256 = hashlib.sha256(
+                    expected_cgroup
+                ).hexdigest()
+                peer_is_main = (
+                    local_state.peer_pid
+                    == positive_service_observation.main_pid
+                    and local_state.peer_start_time_ticks
+                    == positive_service_observation.process_start_time_ticks
+                )
+                peer_is_stable_direct_child = (
+                    local_state.peer_pid
                     != positive_service_observation.main_pid
+                    and local_state.peer_parent_pid
+                    == positive_service_observation.main_pid
+                    and local_state.peer_start_time_ticks
+                    > positive_service_observation.process_start_time_ticks
+                )
+                if (
+                    local_state.socket_mode != 0o600
+                    or local_state.socket_uid != current_uid
+                    or not (peer_is_main or peer_is_stable_direct_child)
                     or local_state.peer_uid != current_uid
                     or local_state.peer_uid
                     != positive_service_observation.process_uid
                     or local_state.peer_gid != current_gid
+                    or local_state.peer_executable_file_id
+                    != positive_service_observation.process_executable_file_id
+                    or local_state.peer_executable_signature_sha256
+                    != positive_service_observation.process_executable_signature_sha256
+                    or local_state.peer_executable_path_sha256
+                    != expected_executable_path_sha256
+                    or local_state.peer_argv_sha256 != expected_argv_sha256
+                    or local_state.peer_cgroup_sha256
+                    != expected_cgroup_sha256
                     or local_state.http_status != 200
                     or local_state.schema_version != "1.0"
                     or local_state.health_ok is not True

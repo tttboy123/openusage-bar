@@ -79,7 +79,7 @@ class LocalAPIObservationError(RuntimeError):
         super().__init__("Local API observation failed")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class LinuxLocalAPIState:
     """Closed Linux Unix-socket and health observation."""
 
@@ -89,6 +89,13 @@ class LinuxLocalAPIState:
     peer_pid: int
     peer_uid: int
     peer_gid: int
+    peer_parent_pid: int
+    peer_start_time_ticks: int
+    peer_executable_file_id: str
+    peer_executable_signature_sha256: str
+    peer_executable_path_sha256: str
+    peer_argv_sha256: str
+    peer_cgroup_sha256: str
     http_status: int
     schema_version: str
     health_ok: bool
@@ -108,6 +115,36 @@ class LinuxLocalAPIState:
             or self.peer_uid < 0
             or type(self.peer_gid) is not int
             or self.peer_gid < 0
+            or type(self.peer_parent_pid) is not int
+            or self.peer_parent_pid <= 0
+            or type(self.peer_start_time_ticks) is not int
+            or self.peer_start_time_ticks <= 0
+            or type(self.peer_executable_file_id) is not str
+            or not self.peer_executable_file_id
+            or type(self.peer_executable_signature_sha256) is not str
+            or len(self.peer_executable_signature_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.peer_executable_signature_sha256
+            )
+            or type(self.peer_executable_path_sha256) is not str
+            or len(self.peer_executable_path_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.peer_executable_path_sha256
+            )
+            or type(self.peer_argv_sha256) is not str
+            or len(self.peer_argv_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.peer_argv_sha256
+            )
+            or type(self.peer_cgroup_sha256) is not str
+            or len(self.peer_cgroup_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.peer_cgroup_sha256
+            )
             or type(self.http_status) is not int
             or self.http_status != 200
             or type(self.schema_version) is not str
@@ -117,6 +154,18 @@ class LinuxLocalAPIState:
             or self.health_status != "ok"
         ):
             raise ValueError("Linux Local API state invalid")
+
+
+@dataclass(frozen=True, repr=False)
+class _LinuxLocalAPIPeerProcessFact:
+    uid: int
+    gid: int
+    parent_pid: int
+    start_time_ticks: int
+    executable_path: str
+    executable_signature: tuple[int, ...]
+    argv_nul: bytes
+    cgroup: bytes
 
 
 class _LinuxOpenHow(ctypes.Structure):
@@ -207,6 +256,221 @@ def _stat_linux_canonical_local_socket(home: Path) -> os.stat_result:
     if failed or metadata is None:
         raise LocalAPIObservationError
     return metadata
+
+
+def _read_linux_local_api_proc_file(
+    pid_descriptor: int,
+    name: str,
+) -> bytes:
+    if name not in {"status", "stat", "cgroup", "cmdline"}:
+        raise LocalAPIObservationError
+    descriptor: int | None = None
+    failed = False
+    payload: bytes | None = None
+    try:
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        close_on_exec = getattr(os, "O_CLOEXEC", 0)
+        if nofollow == 0 or close_on_exec == 0:
+            raise LocalAPIObservationError
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | nofollow | close_on_exec,
+            dir_fd=pid_descriptor,
+        )
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or metadata.st_gid != os.getgid()
+            or metadata.st_nlink != 1
+        ):
+            raise LocalAPIObservationError
+        collected = bytearray()
+        limit = 65_536
+        while True:
+            block = os.read(
+                descriptor,
+                min(8192, limit + 1 - len(collected)),
+            )
+            if type(block) is not bytes:
+                raise LocalAPIObservationError
+            if not block:
+                break
+            collected.extend(block)
+            if len(collected) > limit:
+                raise LocalAPIObservationError
+        after = os.fstat(descriptor)
+        if (
+            after.st_mode,
+            after.st_uid,
+            after.st_gid,
+            after.st_nlink,
+        ) != (
+            metadata.st_mode,
+            metadata.st_uid,
+            metadata.st_gid,
+            metadata.st_nlink,
+        ):
+            raise LocalAPIObservationError
+        payload = bytes(collected)
+    except Exception:
+        failed = True
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except Exception:
+                failed = True
+    if failed or payload is None or not payload:
+        raise LocalAPIObservationError
+    return payload
+
+
+def _parse_linux_local_api_identity(
+    *,
+    pid: int,
+    status_payload: bytes,
+    stat_payload: bytes,
+) -> tuple[int, int, int, int]:
+    try:
+        status_text = status_payload.decode("ascii")
+        stat_text = stat_payload.decode("ascii").strip()
+    except Exception:
+        raise LocalAPIObservationError from None
+
+    def exact_identity(label: str) -> int:
+        lines = [
+            line for line in status_text.splitlines() if line.startswith(label)
+        ]
+        if len(lines) != 1:
+            raise LocalAPIObservationError
+        fields = lines[0].split()
+        if (
+            len(fields) != 5
+            or fields[0] != label
+            or any(
+                not value.isascii() or not value.isdecimal()
+                for value in fields[1:]
+            )
+        ):
+            raise LocalAPIObservationError
+        values = tuple(int(value) for value in fields[1:])
+        if len(set(values)) != 1 or any(
+            str(value) != raw
+            for value, raw in zip(values, fields[1:], strict=True)
+        ):
+            raise LocalAPIObservationError
+        return values[0]
+
+    uid = exact_identity("Uid:")
+    gid = exact_identity("Gid:")
+    closing_parenthesis = stat_text.rfind(")")
+    if (
+        not stat_text.startswith(f"{pid} (")
+        or closing_parenthesis <= len(str(pid)) + 2
+        or closing_parenthesis + 2 >= len(stat_text)
+        or stat_text[closing_parenthesis + 1] != " "
+    ):
+        raise LocalAPIObservationError
+    remaining = stat_text[closing_parenthesis + 2 :].split()
+    if len(remaining) <= 19:
+        raise LocalAPIObservationError
+    parent_text = remaining[1]
+    start_text = remaining[19]
+    if (
+        not parent_text.isascii()
+        or not parent_text.isdecimal()
+        or not start_text.isascii()
+        or not start_text.isdecimal()
+    ):
+        raise LocalAPIObservationError
+    parent_pid = int(parent_text)
+    start_time_ticks = int(start_text)
+    if (
+        parent_pid < 0
+        or str(parent_pid) != parent_text
+        or start_time_ticks <= 0
+        or str(start_time_ticks) != start_text
+    ):
+        raise LocalAPIObservationError
+    return uid, gid, parent_pid, start_time_ticks
+
+
+def _read_linux_local_api_peer_process(
+    *,
+    pid_descriptor: int,
+    pid: int,
+    current_uid: int,
+    current_gid: int,
+) -> _LinuxLocalAPIPeerProcessFact:
+    status_payload = _read_linux_local_api_proc_file(pid_descriptor, "status")
+    stat_payload = _read_linux_local_api_proc_file(pid_descriptor, "stat")
+    cgroup = _read_linux_local_api_proc_file(pid_descriptor, "cgroup")
+    argv_nul = _read_linux_local_api_proc_file(pid_descriptor, "cmdline")
+    uid, gid, parent_pid, start_time_ticks = _parse_linux_local_api_identity(
+        pid=pid,
+        status_payload=status_payload,
+        stat_payload=stat_payload,
+    )
+    try:
+        executable_path = os.readlink("exe", dir_fd=pid_descriptor)
+        executable = Path(executable_path)
+        executable_metadata = os.stat(
+            "exe",
+            dir_fd=pid_descriptor,
+            follow_symlinks=True,
+        )
+    except Exception:
+        raise LocalAPIObservationError from None
+    executable_signature = (
+        executable_metadata.st_dev,
+        executable_metadata.st_ino,
+        executable_metadata.st_mode,
+        executable_metadata.st_uid,
+        executable_metadata.st_gid,
+        executable_metadata.st_nlink,
+        executable_metadata.st_size,
+        executable_metadata.st_mtime_ns,
+        executable_metadata.st_ctime_ns,
+    )
+    if (
+        uid != current_uid
+        or gid != current_gid
+        or type(executable_path) is not str
+        or not executable.is_absolute()
+        or ".." in executable.parts
+        or any(not character.isprintable() for character in executable_path)
+        or not stat.S_ISREG(executable_metadata.st_mode)
+        or executable_metadata.st_uid != current_uid
+        or executable_metadata.st_gid != current_gid
+        or executable_metadata.st_nlink != 1
+        or executable_metadata.st_size <= 0
+        or stat.S_IMODE(executable_metadata.st_mode) & 0o100 == 0
+        or stat.S_IMODE(executable_metadata.st_mode) & 0o022 != 0
+        or not argv_nul.endswith(b"\0")
+        or b"\0\0" in argv_nul
+        or not cgroup.endswith(b"\n")
+    ):
+        raise LocalAPIObservationError
+    try:
+        cgroup_text = cgroup.decode("ascii")
+    except UnicodeError:
+        raise LocalAPIObservationError from None
+    if any(
+        not character.isprintable() and character != "\n"
+        for character in cgroup_text
+    ):
+        raise LocalAPIObservationError
+    return _LinuxLocalAPIPeerProcessFact(
+        uid=uid,
+        gid=gid,
+        parent_pid=parent_pid,
+        start_time_ticks=start_time_ticks,
+        executable_path=executable_path,
+        executable_signature=executable_signature,
+        argv_nul=argv_nul,
+        cgroup=cgroup,
+    )
 
 
 def read_current_user_local_api_state() -> LinuxLocalAPIState:
@@ -369,6 +633,39 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
         ):
             raise LocalAPIObservationError
 
+        close_on_exec = getattr(os, "O_CLOEXEC", 0)
+        if close_on_exec == 0:
+            raise LocalAPIObservationError
+        proc_descriptor = os.open("/proc", flags | close_on_exec)
+        directory_descriptors.append(proc_descriptor)
+        proc_metadata = os.fstat(proc_descriptor)
+        if (
+            not stat.S_ISDIR(proc_metadata.st_mode)
+            or proc_metadata.st_uid != 0
+        ):
+            raise LocalAPIObservationError
+        peer_descriptor = os.open(
+            str(peer_before[0]),
+            flags | close_on_exec,
+            dir_fd=proc_descriptor,
+        )
+        directory_descriptors.append(peer_descriptor)
+        peer_directory_metadata = os.fstat(peer_descriptor)
+        if (
+            not stat.S_ISDIR(peer_directory_metadata.st_mode)
+            or peer_directory_metadata.st_uid != current_uid
+            or peer_directory_metadata.st_gid != current_gid
+        ):
+            raise LocalAPIObservationError
+        remaining_timeout()
+        peer_process_before = _read_linux_local_api_peer_process(
+            pid_descriptor=peer_descriptor,
+            pid=peer_before[0],
+            current_uid=current_uid,
+            current_gid=current_gid,
+        )
+        remaining_timeout()
+
         request = (
             b"GET /v1/health HTTP/1.1\r\n"
             b"Host: localhost\r\n"
@@ -396,6 +693,16 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
             or peer_after_raw != peer_before_raw
         ):
             raise LocalAPIObservationError
+        remaining_timeout()
+        peer_process_after = _read_linux_local_api_peer_process(
+            pid_descriptor=peer_descriptor,
+            pid=peer_before[0],
+            current_uid=current_uid,
+            current_gid=current_gid,
+        )
+        remaining_timeout()
+        if peer_process_after != peer_process_before:
+            raise LocalAPIObservationError
 
         status_code, payload = _parse_local_api_health_response(
             bytes(response)
@@ -422,6 +729,26 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
             peer_pid=peer_before[0],
             peer_uid=peer_before[1],
             peer_gid=peer_before[2],
+            peer_parent_pid=peer_process_before.parent_pid,
+            peer_start_time_ticks=peer_process_before.start_time_ticks,
+            peer_executable_file_id=(
+                f"{peer_process_before.executable_signature[0]}:"
+                f"{peer_process_before.executable_signature[1]}"
+            ),
+            peer_executable_signature_sha256=hashlib.sha256(
+                struct.pack(
+                    ">9Q", *peer_process_before.executable_signature
+                )
+            ).hexdigest(),
+            peer_executable_path_sha256=hashlib.sha256(
+                os.fsencode(peer_process_before.executable_path)
+            ).hexdigest(),
+            peer_argv_sha256=hashlib.sha256(
+                peer_process_before.argv_nul
+            ).hexdigest(),
+            peer_cgroup_sha256=hashlib.sha256(
+                peer_process_before.cgroup
+            ).hexdigest(),
             http_status=status_code,
             schema_version=payload["schemaVersion"],
             health_ok=payload["health"]["ok"],

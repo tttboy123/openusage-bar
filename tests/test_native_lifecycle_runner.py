@@ -188,6 +188,20 @@ def _linux_positive_listener_facts(home: Path) -> tuple[object, object, tuple[st
         api_socket=str(api_socket),
         command=str(collector),
     ).encode("utf-8")
+    executable_signature_sha256 = hashlib.sha256(
+        struct.pack(
+            ">9Q",
+            91,
+            92,
+            stat.S_IFREG | 0o700,
+            os.getuid(),
+            os.getgid(),
+            1,
+            1024,
+            101,
+            102,
+        )
+    ).hexdigest()
     service = LinuxCollectorServiceState(
         unit_file_id="unit-dev:unit-ino",
         unit_size_bytes=len(unit_bytes),
@@ -205,6 +219,7 @@ def _linux_positive_listener_facts(home: Path) -> tuple[object, object, tuple[st
         process_start_time_ticks=987654,
         process_executable=collector,
         process_executable_file_id="collector-dev:collector-ino",
+        process_executable_signature_sha256=executable_signature_sha256,
         process_argv_nul=("\0".join(command) + "\0").encode(),
     )
     local = LinuxLocalAPIState(
@@ -214,6 +229,23 @@ def _linux_positive_listener_facts(home: Path) -> tuple[object, object, tuple[st
         peer_pid=service.main_pid,
         peer_uid=os.getuid(),
         peer_gid=os.getgid(),
+        peer_parent_pid=1,
+        peer_start_time_ticks=service.process_start_time_ticks,
+        peer_executable_file_id=service.process_executable_file_id,
+        peer_executable_signature_sha256=executable_signature_sha256,
+        peer_executable_path_sha256=hashlib.sha256(
+            os.fsencode(service.process_executable)
+        ).hexdigest(),
+        peer_argv_sha256=hashlib.sha256(
+            service.process_argv_nul
+        ).hexdigest(),
+        peer_cgroup_sha256=hashlib.sha256(
+            (
+                "0::/user.slice/"
+                f"user-{os.getuid()}.slice/user@{os.getuid()}.service/"
+                "app.slice/openusage-bar.service\n"
+            ).encode("ascii")
+        ).hexdigest(),
         http_status=200,
         schema_version="1.0",
         health_ok=True,
@@ -6221,6 +6253,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
     def test_linux_host_local_listener_requires_one_stable_positive_service_fact(
         self,
     ) -> None:
+        import struct
         from dataclasses import fields, replace
         from unittest.mock import patch
 
@@ -6266,6 +6299,20 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 api_socket=str(api_socket),
                 command=str(collector),
             ).encode("utf-8")
+            executable_signature = (
+                91,
+                92,
+                stat.S_IFREG | 0o700,
+                os.getuid(),
+                os.getgid(),
+                1,
+                1024,
+                101,
+                102,
+            )
+            executable_signature_sha256 = hashlib.sha256(
+                struct.pack(">9Q", *executable_signature)
+            ).hexdigest()
             service_s1 = LinuxCollectorServiceState(
                 unit_file_id="unit-dev:unit-ino",
                 unit_size_bytes=len(unit_bytes),
@@ -6283,16 +6330,43 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 process_start_time_ticks=987654,
                 process_executable=collector,
                 process_executable_file_id="collector-dev:collector-ino",
+                process_executable_signature_sha256=(
+                    executable_signature_sha256
+                ),
                 process_argv_nul=("\0".join(command) + "\0").encode(),
             )
             service_s2 = replace(service_s1)
+            service_cgroup = (
+                "0::/user.slice/"
+                f"user-{os.getuid()}.slice/user@{os.getuid()}.service/"
+                "app.slice/openusage-bar.service\n"
+            )
             local_state = LinuxLocalAPIState(
                 socket_file_id="socket-dev:socket-ino",
                 socket_mode=0o600,
                 socket_uid=os.getuid(),
-                peer_pid=service_s1.main_pid,
+                peer_pid=service_s1.main_pid + 1,
                 peer_uid=os.getuid(),
                 peer_gid=os.getgid(),
+                peer_parent_pid=service_s1.main_pid,
+                peer_start_time_ticks=(
+                    service_s1.process_start_time_ticks + 1
+                ),
+                peer_executable_file_id=(
+                    service_s1.process_executable_file_id
+                ),
+                peer_executable_signature_sha256=(
+                    executable_signature_sha256
+                ),
+                peer_executable_path_sha256=hashlib.sha256(
+                    os.fsencode(service_s1.process_executable)
+                ).hexdigest(),
+                peer_argv_sha256=hashlib.sha256(
+                    service_s1.process_argv_nul
+                ).hexdigest(),
+                peer_cgroup_sha256=hashlib.sha256(
+                    service_cgroup.encode("ascii")
+                ).hexdigest(),
                 http_status=200,
                 schema_version="1.0",
                 health_ok=True,
@@ -6307,6 +6381,13 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     "peer_pid",
                     "peer_uid",
                     "peer_gid",
+                    "peer_parent_pid",
+                    "peer_start_time_ticks",
+                    "peer_executable_file_id",
+                    "peer_executable_signature_sha256",
+                    "peer_executable_path_sha256",
+                    "peer_argv_sha256",
+                    "peer_cgroup_sha256",
                     "http_status",
                     "schema_version",
                     "health_ok",
@@ -6455,6 +6536,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     ),
                     "process_executable": root / "foreign-collector",
                     "process_executable_file_id": "foreign-dev:foreign-ino",
+                    "process_executable_signature_sha256": "4" * 64,
                     "process_argv_nul": b"foreign\0",
                 }
                 self.assertEqual(
@@ -6472,8 +6554,20 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         )
 
                 for field_name, drifted_value in (
-                    ("peer_pid", local_state.peer_pid + 1),
                     ("peer_uid", local_state.peer_uid + 1),
+                    ("peer_parent_pid", service_s1.main_pid + 1),
+                    (
+                        "peer_start_time_ticks",
+                        service_s1.process_start_time_ticks,
+                    ),
+                    (
+                        "peer_executable_file_id",
+                        "foreign-dev:foreign-ino",
+                    ),
+                    ("peer_executable_signature_sha256", "4" * 64),
+                    ("peer_executable_path_sha256", "1" * 64),
+                    ("peer_argv_sha256", "2" * 64),
+                    ("peer_cgroup_sha256", "3" * 64),
                 ):
                     with self.subTest(local_field=field_name):
                         exercise_failure(
@@ -6756,6 +6850,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 process_start_time_ticks=987654,
                 process_executable=collector,
                 process_executable_file_id="collector-dev:collector-ino",
+                process_executable_signature_sha256="4" * 64,
                 process_argv_nul=("\0".join(command) + "\0").encode(),
             )
             before = tuple(
