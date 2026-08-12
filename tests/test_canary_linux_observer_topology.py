@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import hashlib
 import signal
+import struct
 import stat
 import subprocess
 import tempfile
@@ -126,7 +127,8 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
             events.append("absence")
             return next(absence_facts)
 
-        def observe_runtime():
+        def observe_runtime(*, remaining_timeout):
+            self.assertGreater(remaining_timeout(), 0.0)
             before, listener, after = next(runtime_facts)
             events.extend(("service", "local", "service"))
             return before, listener, after
@@ -363,6 +365,36 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
         from scripts.canary_linux_observer_topology import _observe_runtime
 
         service, local = self._runtime_state()
+        peer = struct.pack("=3i", local.peer_pid, local.peer_uid, local.peer_gid)
+        from openusage_bar.shared_client_boundary import (
+            SharedClientBoundaryAttemptCounters,
+        )
+        counters = SharedClientBoundaryAttemptCounters("a" * 64, 0, 0)
+        events: list[str] = []
+
+        def read_service():
+            events.append("service")
+            return service
+
+        def read_local():
+            events.append("local")
+            return local
+
+        boundary_facts = iter(((peer, counters), (peer, counters)))
+
+        def read_boundary(_path, *, remaining_timeout):
+            self.assertEqual(remaining_timeout(), 0.5)
+            events.append("boundary")
+            return next(boundary_facts)
+
+        def evaluate_boundary(**kwargs):
+            self.assertEqual(kwargs["health_peer"], peer)
+            self.assertEqual(kwargs["peer_before"], peer)
+            self.assertEqual(kwargs["counters_before"], counters)
+            self.assertEqual(kwargs["peer_after"], peer)
+            self.assertEqual(kwargs["counters_after"], counters)
+            events.append("evaluate")
+
         with (
             patch.dict(
                 os.environ,
@@ -371,18 +403,32 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
             ),
             patch(
                 "scripts.canary_linux_observer_topology.read_current_user_collector_service_state",
-                side_effect=(service, service),
+                side_effect=read_service,
             ) as service_reader,
             patch(
                 "scripts.canary_linux_observer_topology.read_current_user_local_api_state",
-                return_value=local,
+                side_effect=read_local,
             ) as local_reader,
+            patch(
+                "scripts.canary_linux_observer_topology.read_onefile_shared_client_boundary_snapshot",
+                side_effect=read_boundary,
+            ) as boundary_reader,
+            patch(
+                "scripts.canary_linux_observer_topology.evaluate_onefile_shared_client_boundary_window",
+                side_effect=evaluate_boundary,
+            ) as boundary_evaluator,
         ):
-            observed = _observe_runtime()
+            observed = _observe_runtime(remaining_timeout=lambda: 0.5)
 
         self.assertEqual(observed, (service, local, service))
         self.assertEqual(service_reader.call_count, 2)
         local_reader.assert_called_once_with()
+        self.assertEqual(boundary_reader.call_count, 2)
+        boundary_evaluator.assert_called_once()
+        self.assertEqual(
+            events,
+            ["service", "boundary", "local", "boundary", "service", "evaluate"],
+        )
 
     def test_cli_exposes_only_fixed_stage_status_without_output(self):
         from scripts.canary_linux_observer_topology import (

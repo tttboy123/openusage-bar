@@ -2895,12 +2895,20 @@ class NativeCiEvidenceTests(unittest.TestCase):
             'canary_linux_observer_topology.py"'
         )
         topology_run = "scripts.canary_linux_observer_topology --appimage"
+        boundary_reader_copy = (
+            '/bin/cp "$GITHUB_WORKSPACE/scripts/'
+            'canary_onefile_local_api.py"'
+        )
         collector_run = '"$packaged_collector" desktop-service uninstall'
         wrapper_run = '"/proc/self/fd/$appimage_fd" --usagehub-uninstall'
 
         self.assertIn(topology_copy, preserve)
+        self.assertIn(boundary_reader_copy, preserve)
         self.assertIn(topology_run, preserve)
         self.assertLess(preserve.index(topology_copy), preserve.index(topology_run))
+        self.assertLess(
+            preserve.index(boundary_reader_copy), preserve.index(topology_run)
+        )
         self.assertLess(preserve.index(topology_run), preserve.index(collector_run))
         self.assertLess(preserve.index(topology_run), preserve.index(wrapper_run))
         self.assertIn(
@@ -2940,6 +2948,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
             "runtime-before-local-http",
             "runtime-before-local-revalidate",
             "runtime-before-local-cleanup",
+            "runtime-before-boundary",
             "stop",
             "runtime-after",
             "preserve",

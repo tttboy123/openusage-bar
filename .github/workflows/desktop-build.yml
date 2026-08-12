@@ -1104,6 +1104,8 @@ jobs:
             "$service_absence_source/scripts/canary_linux_service_absence.py"
           /bin/cp "$GITHUB_WORKSPACE/scripts/canary_linux_observer_topology.py" \
             "$service_absence_source/scripts/canary_linux_observer_topology.py"
+          /bin/cp "$GITHUB_WORKSPACE/scripts/canary_onefile_local_api.py" \
+            "$service_absence_source/scripts/canary_onefile_local_api.py"
           /usr/bin/cmp -s \
             "$GITHUB_WORKSPACE/openusage_bar/platform_services.py" \
             "$service_absence_source/openusage_bar/platform_services.py"
@@ -1113,6 +1115,9 @@ jobs:
           /usr/bin/cmp -s \
             "$GITHUB_WORKSPACE/scripts/canary_linux_observer_topology.py" \
             "$service_absence_source/scripts/canary_linux_observer_topology.py"
+          /usr/bin/cmp -s \
+            "$GITHUB_WORKSPACE/scripts/canary_onefile_local_api.py" \
+            "$service_absence_source/scripts/canary_onefile_local_api.py"
           execution_digest="$(/usr/bin/sha256sum "$preserve_execution" | /usr/bin/awk '{print $1}')"
           test "$execution_digest" = "$source_digest"
           /bin/chmod 0700 "$preserve_execution"
@@ -1198,6 +1203,7 @@ jobs:
                   35) topology_category="runtime-before-local-authority-local-identity" ;;
                   36) topology_category="runtime-before-local-authority-local-owner" ;;
                   37) topology_category="runtime-before-local-authority-local-writable" ;;
+                  38) topology_category="runtime-before-boundary" ;;
                 esac
                 printf "%s\n" "appimage_observer_topology_failed category=$topology_category" >&2
                 exit 1

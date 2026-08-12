@@ -3,6 +3,9 @@
 This module is intentionally separate from native lifecycle and release evidence.
 It assumes an exclusive disposable hosted user session and does not claim UI,
 Gateway, ledger, persistence, or resistance to hostile same-UID concurrency.
+Each runtime fact also proves only that BoundedHTTPClient.open and
+HeadlessKeychain.get process-local counters are zero around one Local API
+health transaction; it does not prove all network or credential activity.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ import pwd
 import signal
 import stat
 import subprocess
+import struct
 import sys
 import time
 from dataclasses import dataclass
@@ -31,6 +35,10 @@ from openusage_bar.platform_services import (
     read_current_user_collector_service_absence_state,
     read_current_user_collector_service_state,
 )
+from scripts.canary_onefile_local_api import (
+    evaluate_onefile_shared_client_boundary_window,
+    read_onefile_shared_client_boundary_snapshot,
+)
 
 
 class LinuxObserverTopologyCanaryError(RuntimeError):
@@ -44,6 +52,7 @@ class LinuxObserverTopologyCanaryError(RuntimeError):
             "runtime-before",
             "runtime-before-ui-exited",
             "runtime-before-service",
+            "runtime-before-boundary",
             "runtime-before-local",
             "runtime-before-local-authority",
             "runtime-before-local-authority-home",
@@ -277,7 +286,7 @@ def _read_absence() -> LinuxCollectorServiceAbsenceState:
     return observed
 
 
-def _observe_runtime() -> tuple[
+def _observe_runtime(*, remaining_timeout) -> tuple[
     LinuxCollectorServiceState,
     LinuxLocalAPIState,
     LinuxCollectorServiceState,
@@ -286,6 +295,25 @@ def _observe_runtime() -> tuple[
         service_before = read_current_user_collector_service_state()
     except Exception:
         raise LinuxObserverTopologyCanaryError("runtime-before-service") from None
+    current_uid = os.getuid()
+    current_gid = os.getgid()
+    current_home = pwd.getpwuid(current_uid).pw_dir
+    expected_socket = os.path.join(
+        current_home,
+        ".local",
+        "state",
+        "openusage-bar",
+        "openusage.sock",
+    )
+    try:
+        boundary_peer_before, boundary_before = (
+            read_onefile_shared_client_boundary_snapshot(
+                expected_socket,
+                remaining_timeout=remaining_timeout,
+            )
+        )
+    except Exception:
+        raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
     try:
         local_state = read_current_user_local_api_state()
     except Exception as error:
@@ -313,7 +341,22 @@ def _observe_runtime() -> tuple[
             ) from None
         raise LinuxObserverTopologyCanaryError("runtime-before-local") from None
     try:
+        boundary_peer_after, boundary_after = (
+            read_onefile_shared_client_boundary_snapshot(
+                expected_socket,
+                remaining_timeout=remaining_timeout,
+            )
+        )
+    except Exception:
+        raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
+    try:
         service_after = read_current_user_collector_service_state()
+    except Exception:
+        raise LinuxObserverTopologyCanaryError(
+            "runtime-before-service-after"
+        ) from None
+    try:
+        remaining_timeout()
     except Exception:
         raise LinuxObserverTopologyCanaryError(
             "runtime-before-service-after"
@@ -326,9 +369,6 @@ def _observe_runtime() -> tuple[
     ):
         raise LinuxObserverTopologyCanaryError("runtime-before-mapping")
 
-    current_uid = os.getuid()
-    current_gid = os.getgid()
-    current_home = pwd.getpwuid(current_uid).pw_dir
     data_home = os.environ.get("XDG_DATA_HOME")
     if type(data_home) is not str or not os.path.isabs(data_home):
         raise LinuxObserverTopologyCanaryError("runtime-before-mapping")
@@ -337,13 +377,6 @@ def _observe_runtime() -> tuple[
         "usagehub",
         "runtime",
         "openusage-collector",
-    )
-    expected_socket = os.path.join(
-        current_home,
-        ".local",
-        "state",
-        "openusage-bar",
-        "openusage.sock",
     )
     expected_fragment = os.path.join(
         current_home,
@@ -427,6 +460,26 @@ def _observe_runtime() -> tuple[
         or local_state.health_status != "ok"
     ):
         raise LinuxObserverTopologyCanaryError
+    try:
+        health_peer = struct.pack(
+            "=3i",
+            local_state.peer_pid,
+            local_state.peer_uid,
+            local_state.peer_gid,
+        )
+        evaluate_onefile_shared_client_boundary_window(
+            health_peer=health_peer,
+            peer_before=boundary_peer_before,
+            counters_before=boundary_before,
+            peer_after=boundary_peer_after,
+            counters_after=boundary_after,
+        )
+    except Exception:
+        raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
+    try:
+        remaining_timeout()
+    except Exception:
+        raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
     return service_before, local_state, service_after
 
 
@@ -637,7 +690,21 @@ def _wait_for_runtime(
     last_stage = "runtime-before"
     while True:
         try:
-            return _observe_runtime()
+            def remaining_timeout() -> float:
+                nonlocal last
+                current = time.monotonic()
+                if (
+                    isinstance(current, bool)
+                    or not isinstance(current, (int, float))
+                    or not math.isfinite(current)
+                    or float(current) < last
+                    or float(current) >= deadline
+                ):
+                    raise LinuxObserverTopologyCanaryError(last_stage)
+                last = float(current)
+                return min(1.0, deadline - last)
+
+            return _observe_runtime(remaining_timeout=remaining_timeout)
         except LinuxObserverTopologyCanaryError as error:
             last_stage = error.stage
             if lease is not None and lease.leader_has_exited():
@@ -769,6 +836,7 @@ def main(arguments: tuple[str, ...] | None = None) -> int:
             "runtime-before-local-authority-local-identity": 35,
             "runtime-before-local-authority-local-owner": 36,
             "runtime-before-local-authority-local-writable": 37,
+            "runtime-before-boundary": 38,
             "stop": 13,
             "runtime-after": 14,
             "preserve": 15,
