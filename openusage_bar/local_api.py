@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import errno
 import ctypes
+import grp
 import hashlib
 import hmac
 import json
 import math
 import os
+import pwd
 import re
 import secrets
 import socket
@@ -175,6 +177,30 @@ class LinuxLocalAPIState:
             or self.health_status != "ok"
         ):
             raise ValueError("Linux Local API state invalid")
+
+
+def _linux_local_api_ancestor_is_private(
+    metadata: os.stat_result,
+    *,
+    current_uid: int,
+    current_gid: int,
+) -> bool:
+    mode = stat.S_IMODE(metadata.st_mode)
+    if metadata.st_uid != current_uid or mode & 0o002 != 0:
+        return False
+    if mode & 0o020 == 0:
+        return True
+    try:
+        account = pwd.getpwuid(current_uid)
+        group = grp.getgrgid(current_gid)
+    except Exception:
+        return False
+    return (
+        metadata.st_gid == current_gid
+        and account.pw_gid == current_gid
+        and account.pw_name == group.gr_name
+        and list(group.gr_mem) == []
+    )
 
 
 @dataclass(frozen=True, repr=False)
@@ -605,7 +631,11 @@ def read_current_user_local_api_state() -> LinuxLocalAPIState:
                 if name == ".local":
                     failure_stage = "authority-local-owner"
                 raise LocalAPIObservationError
-            if stat.S_IMODE(opened.st_mode) & 0o022 != 0:
+            if not _linux_local_api_ancestor_is_private(
+                opened,
+                current_uid=current_uid,
+                current_gid=current_gid,
+            ):
                 if name == ".local":
                     failure_stage = "authority-local-writable"
                 raise LocalAPIObservationError

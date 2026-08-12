@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import openusage_bar.local_api as local_api_module
@@ -1944,6 +1945,57 @@ class LinuxLocalAPIObservationTests(unittest.TestCase):
                     self.assertEqual(marker.read_bytes(), b"unchanged")
                 finally:
                     bound_socket.close()
+
+    def test_read_current_user_local_api_state_accepts_only_a_private_primary_group_local_root(self):
+        from openusage_bar.local_api import _linux_local_api_ancestor_is_private
+
+        current_uid = os.getuid()
+        current_gid = os.getgid()
+        metadata = SimpleNamespace(
+            st_uid=current_uid,
+            st_gid=current_gid,
+            st_mode=stat.S_IFDIR | 0o775,
+        )
+        with patch(
+            "openusage_bar.local_api.pwd.getpwuid",
+            return_value=SimpleNamespace(pw_name="usagehub", pw_gid=current_gid),
+        ), patch(
+            "openusage_bar.local_api.grp.getgrgid",
+            return_value=SimpleNamespace(gr_name="usagehub", gr_mem=[]),
+        ):
+            self.assertTrue(
+                _linux_local_api_ancestor_is_private(
+                    metadata,
+                    current_uid=current_uid,
+                    current_gid=current_gid,
+                )
+            )
+        for group_name, members, mode in (
+            ("shared", [], 0o775),
+            ("usagehub", ["foreign"], 0o775),
+            ("usagehub", [], 0o777),
+        ):
+            with self.subTest(group_name=group_name, members=members, mode=mode):
+                metadata.st_mode = stat.S_IFDIR | mode
+                with patch(
+                    "openusage_bar.local_api.pwd.getpwuid",
+                    return_value=SimpleNamespace(
+                        pw_name="usagehub", pw_gid=current_gid
+                    ),
+                ), patch(
+                    "openusage_bar.local_api.grp.getgrgid",
+                    return_value=SimpleNamespace(
+                        gr_name=group_name,
+                        gr_mem=members,
+                    ),
+                ):
+                    self.assertFalse(
+                        _linux_local_api_ancestor_is_private(
+                            metadata,
+                            current_uid=current_uid,
+                            current_gid=current_gid,
+                        )
+                    )
 
     def test_read_current_user_local_api_state_fails_closed_on_http_json_and_clock_uncertainty(self):
         import struct
