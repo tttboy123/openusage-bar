@@ -2805,8 +2805,19 @@ class NativeCiEvidenceTests(unittest.TestCase):
         self.assertIn('test ! -s "$topology_stdout"', preserve)
         self.assertIn('test ! -s "$topology_stderr"', preserve)
         self.assertIn(
-            "appimage_observer_topology_failed category=topology", preserve
+            "appimage_observer_topology_failed category=$topology_category",
+            preserve,
         )
+        for topology_category in (
+            "initial-absence",
+            "launch",
+            "runtime-before",
+            "stop",
+            "runtime-after",
+            "preserve",
+            "final-absence",
+        ):
+            self.assertIn(f'topology_category="{topology_category}"', preserve)
         for forbidden in (
             "GITHUB_OUTPUT",
             "native_lifecycle",

@@ -1094,7 +1094,17 @@ jobs:
               topology_status=$?
               set -e
               if [[ "$topology_status" -ne 0 || -s "$topology_stdout" || -s "$topology_stderr" ]]; then
-                printf "%s\n" "appimage_observer_topology_failed category=topology" >&2
+                topology_category="unknown"
+                case "$topology_status" in
+                  10) topology_category="initial-absence" ;;
+                  11) topology_category="launch" ;;
+                  12) topology_category="runtime-before" ;;
+                  13) topology_category="stop" ;;
+                  14) topology_category="runtime-after" ;;
+                  15) topology_category="preserve" ;;
+                  16) topology_category="final-absence" ;;
+                esac
+                printf "%s\n" "appimage_observer_topology_failed category=$topology_category" >&2
                 exit 1
               fi
               test ! -s "$topology_stdout"

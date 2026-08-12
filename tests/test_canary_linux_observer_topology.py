@@ -382,6 +382,19 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
         self.assertEqual(service_reader.call_count, 2)
         local_reader.assert_called_once_with()
 
+    def test_cli_exposes_only_fixed_stage_status_without_output(self):
+        from scripts.canary_linux_observer_topology import (
+            LinuxObserverTopologyCanaryError,
+            main,
+        )
+
+        with patch(
+            "scripts.canary_linux_observer_topology.run_linux_observer_topology_canary",
+            side_effect=LinuxObserverTopologyCanaryError("runtime-before"),
+        ) as runner:
+            self.assertEqual(main(("--appimage", "/PRIVATE/AppImage")), 12)
+        runner.assert_called_once_with("/PRIVATE/AppImage")
+
     @staticmethod
     def _absence_state():
         from openusage_bar.platform_services import LinuxCollectorServiceAbsenceState

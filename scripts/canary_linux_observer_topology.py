@@ -36,7 +36,19 @@ from openusage_bar.platform_services import (
 class LinuxObserverTopologyCanaryError(RuntimeError):
     """A path-free topology diagnostic failure."""
 
-    def __init__(self) -> None:
+    def __init__(self, stage: str = "unknown") -> None:
+        if stage not in {
+            "unknown",
+            "initial-absence",
+            "launch",
+            "runtime-before",
+            "stop",
+            "runtime-after",
+            "preserve",
+            "final-absence",
+        }:
+            stage = "unknown"
+        self.stage = stage
         super().__init__("Linux Observer topology canary failed")
 
 
@@ -587,29 +599,51 @@ def run_linux_observer_topology_canary(
             or not os.path.isabs(appimage)
         ):
             raise LinuxObserverTopologyCanaryError
-        absence_before = _read_absence()
-        absence_before_again = _read_absence()
+        try:
+            absence_before = _read_absence()
+            absence_before_again = _read_absence()
+        except Exception:
+            raise LinuxObserverTopologyCanaryError("initial-absence") from None
         if (
             type(absence_before) is not LinuxCollectorServiceAbsenceState
             or type(absence_before_again) is not LinuxCollectorServiceAbsenceState
             or absence_before_again != absence_before
         ):
-            raise LinuxObserverTopologyCanaryError
-        with _start_appimage_lease(appimage) as lease:
-            runtime_before = _wait_for_runtime()
-            lease.stop()
-            runtime_after = _wait_for_runtime()
+            raise LinuxObserverTopologyCanaryError("initial-absence")
+        try:
+            lease_context = _start_appimage_lease(appimage)
+        except Exception:
+            raise LinuxObserverTopologyCanaryError("launch") from None
+        with lease_context as lease:
+            try:
+                runtime_before = _wait_for_runtime()
+            except Exception:
+                raise LinuxObserverTopologyCanaryError("runtime-before") from None
+            try:
+                lease.stop()
+            except Exception:
+                raise LinuxObserverTopologyCanaryError("stop") from None
+            try:
+                runtime_after = _wait_for_runtime()
+            except Exception:
+                raise LinuxObserverTopologyCanaryError("runtime-after") from None
             if runtime_after != runtime_before:
-                raise LinuxObserverTopologyCanaryError
-        _run_preserve_uninstall(appimage)
-        absence_after = _read_absence()
-        absence_after_again = _read_absence()
+                raise LinuxObserverTopologyCanaryError("runtime-after")
+        try:
+            _run_preserve_uninstall(appimage)
+        except Exception:
+            raise LinuxObserverTopologyCanaryError("preserve") from None
+        try:
+            absence_after = _read_absence()
+            absence_after_again = _read_absence()
+        except Exception:
+            raise LinuxObserverTopologyCanaryError("final-absence") from None
         if (
             type(absence_after) is not LinuxCollectorServiceAbsenceState
             or type(absence_after_again) is not LinuxCollectorServiceAbsenceState
             or absence_after_again != absence_after
         ):
-            raise LinuxObserverTopologyCanaryError
+            raise LinuxObserverTopologyCanaryError("final-absence")
         return LinuxObserverTopologySummary(True, True)
     except LinuxObserverTopologyCanaryError:
         raise
@@ -634,6 +668,16 @@ def main(arguments: tuple[str, ...] | None = None) -> int:
         return 2
     try:
         run_linux_observer_topology_canary(selected[1])
+    except LinuxObserverTopologyCanaryError as error:
+        return {
+            "initial-absence": 10,
+            "launch": 11,
+            "runtime-before": 12,
+            "stop": 13,
+            "runtime-after": 14,
+            "preserve": 15,
+            "final-absence": 16,
+        }.get(error.stage, 1)
     except Exception:
         return 1
     return 0
