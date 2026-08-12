@@ -133,6 +133,67 @@ class OnefileLocalAPISummary:
             raise ValueError("onefile Local API summary invalid")
 
 
+def _closed_shared_boundary_values(
+    value: object,
+) -> tuple[str, int, int] | None:
+    if type(value) is not SharedClientBoundaryAttemptCounters:
+        return None
+    fields = (
+        value.process_epoch_sha256,
+        value.bounded_http_open_attempts,
+        value.headless_keychain_get_attempts,
+    )
+    if (
+        type(fields[0]) is not str
+        or len(fields[0]) != 64
+        or any(character not in "0123456789abcdef" for character in fields[0])
+        or type(fields[1]) is not int
+        or type(fields[2]) is not int
+        or not 0 <= fields[1] < 1 << 64
+        or not 0 <= fields[2] < 1 << 64
+    ):
+        return None
+    return fields
+
+
+def _is_current_unix_peer(value: object) -> bool:
+    if type(value) is not bytes or len(value) != 12:
+        return False
+    try:
+        peer_pid, peer_uid, peer_gid = struct.unpack("=3i", value)
+    except Exception:
+        return False
+    return (
+        peer_pid > 0
+        and peer_uid == os.getuid()
+        and peer_gid == os.getgid()
+    )
+
+
+def evaluate_onefile_shared_client_boundary_window(
+    *,
+    health_peer: bytes,
+    peer_before: bytes,
+    counters_before: object,
+    peer_after: bytes,
+    counters_after: object,
+) -> None:
+    before_values = _closed_shared_boundary_values(counters_before)
+    after_values = _closed_shared_boundary_values(counters_after)
+    if (
+        not _is_current_unix_peer(health_peer)
+        or not _is_current_unix_peer(peer_before)
+        or not _is_current_unix_peer(peer_after)
+        or peer_before != health_peer
+        or peer_after != health_peer
+        or before_values is None
+        or after_values is None
+        or before_values != after_values
+        or before_values[1:] != (0, 0)
+    ):
+        raise OnefileLocalAPICanaryError
+
+
 def read_onefile_shared_client_boundary_snapshot(
     socket_path: str,
     *,
@@ -616,6 +677,12 @@ def run_onefile_local_api_canary(collector: str) -> OnefileLocalAPISummary:
             raise OnefileLocalAPICanaryError
         parent_before = read_linux_process_facts(process.pid)
         child_before = read_linux_process_facts(peer_pid)
+        boundary_peer_before, boundary_before = (
+            read_onefile_shared_client_boundary_snapshot(
+                socket_path,
+                remaining_timeout=remaining_timeout,
+            )
+        )
         client.settimeout(remaining_timeout())
         client.sendall(_HEALTH_REQUEST)
         response = bytearray()
@@ -632,6 +699,19 @@ def run_onefile_local_api_canary(collector: str) -> OnefileLocalAPISummary:
         peer_after = client.getsockopt(1, 17, 12)
         if type(peer_after) is not bytes or peer_after != peer_before:
             raise OnefileLocalAPICanaryError
+        boundary_peer_after, boundary_after = (
+            read_onefile_shared_client_boundary_snapshot(
+                socket_path,
+                remaining_timeout=remaining_timeout,
+            )
+        )
+        evaluate_onefile_shared_client_boundary_window(
+            health_peer=peer_before,
+            peer_before=boundary_peer_before,
+            counters_before=boundary_before,
+            peer_after=boundary_peer_after,
+            counters_after=boundary_after,
+        )
         child_after = read_linux_process_facts(peer_pid)
         parent_after = read_linux_process_facts(process.pid)
         if any(

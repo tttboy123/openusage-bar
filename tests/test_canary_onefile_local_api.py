@@ -163,6 +163,57 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
 
                 self.assertEqual(events, ["close"])
 
+    def test_shared_boundary_window_rejects_peer_epoch_and_counter_drift(self):
+        from openusage_bar.shared_client_boundary import (
+            SharedClientBoundaryAttemptCounters,
+        )
+        from scripts.canary_onefile_local_api import (
+            OnefileLocalAPICanaryError,
+            evaluate_onefile_shared_client_boundary_window,
+        )
+
+        peer = struct.pack("=3i", 4312, os.getuid(), os.getgid())
+        zero = SharedClientBoundaryAttemptCounters("a" * 64, 0, 0)
+        invalid_epoch = SharedClientBoundaryAttemptCounters("c" * 64, 0, 0)
+        object.__setattr__(invalid_epoch, "process_epoch_sha256", "PRIVATE")
+        cases = (
+            ("wrong_type", object(), zero, peer),
+            (
+                "epoch_drift",
+                zero,
+                SharedClientBoundaryAttemptCounters("b" * 64, 0, 0),
+                peer,
+            ),
+            (
+                "http_open",
+                zero,
+                SharedClientBoundaryAttemptCounters("a" * 64, 1, 0),
+                peer,
+            ),
+            (
+                "keychain_get",
+                zero,
+                SharedClientBoundaryAttemptCounters("a" * 64, 0, 1),
+                peer,
+            ),
+            ("peer_drift", zero, zero, struct.pack("=3i", 4313, os.getuid(), os.getgid())),
+            ("invalid_peer", zero, zero, b""),
+            ("mutated_exact_fact", invalid_epoch, invalid_epoch, peer),
+        )
+        for label, before, after, peer_after in cases:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(
+                    OnefileLocalAPICanaryError,
+                    "^onefile Local API canary failed$",
+                ):
+                    evaluate_onefile_shared_client_boundary_window(
+                        health_peer=peer,
+                        peer_before=peer,
+                        counters_before=before,
+                        peer_after=peer_after,
+                        counters_after=after,
+                    )
+
     def test_private_boundary_reader_binds_one_unix_peer_and_strict_snapshot(self):
         from openusage_bar.shared_client_boundary import (
             SharedClientBoundaryAttemptCounters,
@@ -702,6 +753,9 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
             OnefileProcessFacts,
             run_onefile_local_api_canary,
         )
+        from openusage_bar.shared_client_boundary import (
+            SharedClientBoundaryAttemptCounters,
+        )
 
         with tempfile.TemporaryDirectory(prefix="canary-test-", dir="/tmp") as outer:
             root = os.path.abspath(outer)
@@ -944,6 +998,14 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                 events.append("evaluate")
                 return OnefileLocalAPISummary(True)
 
+            boundary_fact = SharedClientBoundaryAttemptCounters("a" * 64, 0, 0)
+
+            def read_boundary(path, *, remaining_timeout):
+                self.assertEqual(path, socket_path)
+                self.assertGreater(remaining_timeout(), 0.0)
+                events.append("boundary")
+                return peer, boundary_fact
+
             def terminate_group(pid, selected_signal):
                 self.assertEqual(pid, parent_pid)
                 if selected_signal == signal.SIGTERM:
@@ -1002,6 +1064,13 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                             side_effect=evaluate,
                         )
                     )
+                    boundary_reader = stack.enter_context(
+                        patch.object(
+                            canary,
+                            "read_onefile_shared_client_boundary_snapshot",
+                            side_effect=read_boundary,
+                        )
+                    )
                     term = stack.enter_context(
                         patch.object(canary.os, "killpg", side_effect=terminate_group)
                     )
@@ -1028,6 +1097,7 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                     socket.SOCK_STREAM,
                 )
                 evaluator.assert_called_once()
+                self.assertEqual(boundary_reader.call_count, 2)
                 self.assertEqual(launched_environments, [expected_environment])
                 self.assertEqual(
                     isolated_directory_facts,
@@ -1080,11 +1150,13 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                         "peer1",
                         "parent_before",
                         "child_before",
+                        "boundary",
                         "send",
                         f"recv{29}",
                         f"recv{len(response) - 29}",
                         "recv0",
                         "peer2",
+                        "boundary",
                         "child_after",
                         "parent_after",
                         "evaluate",
@@ -1353,6 +1425,9 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
 
     def test_run_onefile_local_api_canary_reaps_the_leader_after_a_gone_group_probe(self):
         import scripts.canary_onefile_local_api as canary
+        from openusage_bar.shared_client_boundary import (
+            SharedClientBoundaryAttemptCounters,
+        )
         from scripts.canary_onefile_local_api import (
             OnefileLocalAPICanaryError,
             OnefileLocalAPISummary,
@@ -1552,6 +1627,18 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                         canary,
                         "read_linux_process_facts",
                         side_effect=fact_reads,
+                    )
+                )
+                stack.enter_context(
+                    patch.object(
+                        canary,
+                        "read_onefile_shared_client_boundary_snapshot",
+                        return_value=(
+                            struct.pack(
+                                "=3i", child_pid, os.getuid(), os.getgid()
+                            ),
+                            SharedClientBoundaryAttemptCounters("a" * 64, 0, 0),
+                        ),
                     )
                 )
                 cleanup_error = None
@@ -1792,6 +1879,9 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
 
     def test_run_onefile_local_api_canary_binds_process_executable_to_collector(self):
         import scripts.canary_onefile_local_api as canary
+        from openusage_bar.shared_client_boundary import (
+            SharedClientBoundaryAttemptCounters,
+        )
         from scripts.canary_onefile_local_api import (
             OnefileLocalAPICanaryError,
             OnefileLocalAPISummary,
@@ -1940,6 +2030,18 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
                             canary,
                             "read_linux_process_facts",
                             side_effect=facts,
+                        )
+                    )
+                    stack.enter_context(
+                        patch.object(
+                            canary,
+                            "read_onefile_shared_client_boundary_snapshot",
+                            return_value=(
+                                peer,
+                                SharedClientBoundaryAttemptCounters(
+                                    "a" * 64, 0, 0
+                                ),
+                            ),
                         )
                     )
                     stack.enter_context(
