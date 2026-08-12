@@ -947,7 +947,7 @@ jobs:
           if id "$preserve_user" >/dev/null 2>&1; then
             exit 1
           fi
-          preserve_root="$(mktemp -d "$RUNNER_TEMP/usagehub-preserve-uninstall.XXXXXX")"
+          preserve_root="$(mktemp -d "/tmp/usagehub-preserve-uninstall.XXXXXX")"
           preserve_execution="$preserve_root/execution.AppImage"
           preserve_stdout="$preserve_root/stdout"
           preserve_stderr="$preserve_root/stderr"

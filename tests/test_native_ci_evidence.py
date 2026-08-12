@@ -2360,7 +2360,11 @@ class NativeCiEvidenceTests(unittest.TestCase):
         self.assertLess(absent_preflight, root_creation)
         self.assertIn(
             'preserve_root="$(mktemp -d '
-            '"$RUNNER_TEMP/usagehub-preserve-uninstall.XXXXXX")"',
+            '"/tmp/usagehub-preserve-uninstall.XXXXXX")"',
+            preserve,
+        )
+        self.assertNotIn(
+            '$RUNNER_TEMP/usagehub-preserve-uninstall.',
             preserve,
         )
         for owned_directory in ("home", "data", "tmp"):
