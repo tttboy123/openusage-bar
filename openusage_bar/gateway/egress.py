@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
+from threading import Lock
 from typing import Any
 
 from ..keychain import default_keychain
@@ -24,6 +26,56 @@ _PROVIDER_CREDENTIAL_ACCOUNTS: dict[str, str | None] = {
     "openai": "openai.gateway-api-key",
     "openrouter": "openrouter.gateway-api-key",
 }
+_MAX_ATTEMPT_COUNT = (1 << 64) - 1
+
+
+@dataclass(frozen=True, repr=False)
+class GatewayEgressAttemptCounters:
+    """Closed, dimension-free counters for Gateway private-boundary attempts."""
+
+    provider_network_attempts: int
+    provider_credential_read_attempts: int
+
+    def __post_init__(self) -> None:
+        if any(
+            type(value) is not int or not 0 <= value <= _MAX_ATTEMPT_COUNT
+            for value in (
+                self.provider_network_attempts,
+                self.provider_credential_read_attempts,
+            )
+        ):
+            raise ValueError("invalid Gateway egress counters")
+
+    def __repr__(self) -> str:
+        return "<GatewayEgressAttemptCounters closed>"
+
+
+_ATTEMPT_COUNTER_LOCK = Lock()
+_provider_network_attempts = 0
+_provider_credential_read_attempts = 0
+
+
+def gateway_egress_attempt_counters() -> GatewayEgressAttemptCounters:
+    """Return one closed snapshot without exposing provider or account identity."""
+
+    with _ATTEMPT_COUNTER_LOCK:
+        return GatewayEgressAttemptCounters(
+            _provider_network_attempts,
+            _provider_credential_read_attempts,
+        )
+
+
+def _record_gateway_egress_attempt(*, credential_read: bool) -> None:
+    global _provider_network_attempts, _provider_credential_read_attempts
+    with _ATTEMPT_COUNTER_LOCK:
+        if credential_read:
+            if _provider_credential_read_attempts >= _MAX_ATTEMPT_COUNT:
+                raise RuntimeError("Gateway egress counter unavailable")
+            _provider_credential_read_attempts += 1
+        else:
+            if _provider_network_attempts >= _MAX_ATTEMPT_COUNT:
+                raise RuntimeError("Gateway egress counter unavailable")
+            _provider_network_attempts += 1
 
 
 def _provider_error(code: str, retryable: bool = False) -> GatewayProviderError:
@@ -110,6 +162,7 @@ def execute_provider_call(
             raise _provider_error("credential_unavailable")
         try:
             boundary = keychain if keychain is not None else default_keychain()
+            _record_gateway_egress_attempt(credential_read=True)
             value = boundary.get(credential_account)
         except Exception:
             raise _provider_error("credential_unavailable") from None
@@ -118,6 +171,7 @@ def execute_provider_call(
         credential = value
 
     try:
+        _record_gateway_egress_attempt(credential_read=False)
         return provider.call(request_body, credential=credential)
     except GatewayProviderError:
         raise
@@ -126,7 +180,9 @@ def execute_provider_call(
 
 
 __all__ = [
+    "GatewayEgressAttemptCounters",
     "execute_provider_call",
+    "gateway_egress_attempt_counters",
     "supports_provider_account_credentials",
     "validate_provider_endpoint",
 ]

@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import json
 import socket
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, fields, replace
 from pathlib import Path
 import unittest
 import urllib.error
 
 from openusage_bar.gateway import providers as provider_module
-from openusage_bar.gateway.egress import execute_provider_call
+from openusage_bar.gateway.egress import (
+    GatewayEgressAttemptCounters,
+    execute_provider_call,
+    gateway_egress_attempt_counters,
+)
 from openusage_bar.gateway.accounts import ProviderAccountRef
 from openusage_bar.gateway.ingress import GatewayRequest, parse_gateway_request
 from openusage_bar.gateway.providers import (
@@ -813,6 +817,55 @@ class GatewayProviderTests(unittest.TestCase):
 
 
 class GatewayEgressTests(unittest.TestCase):
+    def test_closed_counters_increment_before_private_boundary_attempts(self) -> None:
+        self.assertEqual(
+            [field.name for field in fields(GatewayEgressAttemptCounters)],
+            ["provider_network_attempts", "provider_credential_read_attempts"],
+        )
+        initial = gateway_egress_attempt_counters()
+        with self.assertRaises(FrozenInstanceError):
+            initial.provider_network_attempts = 1
+
+        providers = self.providers(FakeTransport())
+        with self.assertRaises(GatewayProviderError):
+            execute_provider_call(
+                "openai",
+                request_bytes("openai"),
+                providers=providers,
+                keychain=FakeKeychain(error=RuntimeError(SECRET)),
+            )
+        self.assertEqual(
+            gateway_egress_attempt_counters(),
+            GatewayEgressAttemptCounters(
+                initial.provider_network_attempts,
+                initial.provider_credential_read_attempts + 1,
+            ),
+        )
+
+        class FailingProvider:
+            provider_id = "ollama"
+            credential_account = None
+
+            def call(self, request_body: bytes, *, credential: str) -> ProviderResult:
+                raise RuntimeError((request_body, credential, SECRET))
+
+        with self.assertRaises(GatewayProviderError):
+            execute_provider_call(
+                "ollama",
+                request_bytes("ollama", stream=False),
+                providers=(FailingProvider(),),
+                keychain=FakeKeychain(error=AssertionError("must not read")),
+            )
+        observed = gateway_egress_attempt_counters()
+        self.assertEqual(
+            observed,
+            GatewayEgressAttemptCounters(
+                initial.provider_network_attempts + 1,
+                initial.provider_credential_read_attempts + 1,
+            ),
+        )
+        self.assertNotIn(SECRET, repr(observed))
+
     def providers(self, transport: FakeTransport):
         return default_gateway_providers(
             transport=transport,
