@@ -964,7 +964,7 @@ jobs:
               sudo systemctl stop "user@$current_uid.service" || cleanup_failed=1
             fi
             if [[ "$preserve_user_created" == "1" ]]; then
-              sudo userdel --remove "$preserve_user" || cleanup_failed=1
+              sudo userdel --remove "$preserve_user" >/dev/null 2>&1 || cleanup_failed=1
             fi
             sudo /bin/rm -f \
               "$preserve_execution" \
@@ -1017,6 +1017,7 @@ jobs:
             sleep 0.2
           done
           sudo -u "$preserve_user" test -S "/run/user/$current_uid/systemd/private"
+          test -x /usr/bin/xvfb-run
           set +e
           sudo -u "$preserve_user" /usr/bin/env -i \
             HOME="$preserve_root/home" \
@@ -1050,7 +1051,7 @@ jobs:
               test ! -s "$collector_stderr"
               exec {appimage_fd}<"$preserve_execution"
               set +e
-              timeout --signal=TERM --kill-after=10s 180s "/proc/self/fd/$appimage_fd" --usagehub-uninstall \
+              timeout --signal=TERM --kill-after=10s 180s /usr/bin/xvfb-run --auto-servernum "/proc/self/fd/$appimage_fd" --usagehub-uninstall \
                 >"$preserve_stdout" 2>"$preserve_stderr"
               preserve_status=$?
               set -e

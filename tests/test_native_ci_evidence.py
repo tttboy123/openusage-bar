@@ -2516,6 +2516,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
             preserve,
         )
         self.assertIn('APPIMAGE_EXTRACT_AND_RUN=1', preserve)
+        self.assertIn('test -x /usr/bin/xvfb-run', preserve)
         self.assertIn("/usr/bin/env -i", preserve)
         for closed_environment in (
             'PATH="/usr/bin:/bin"',
@@ -2527,8 +2528,13 @@ class NativeCiEvidenceTests(unittest.TestCase):
                 self.assertIn(closed_environment, preserve)
         self.assertIn(
             'timeout --signal=TERM --kill-after=10s 180s '
+            '/usr/bin/xvfb-run --auto-servernum '
             '"/proc/self/fd/$appimage_fd" --usagehub-uninstall',
             preserve,
+        )
+        self.assertLess(
+            preserve.index('exec {appimage_fd}<"$preserve_execution"'),
+            preserve.index('/usr/bin/xvfb-run --auto-servernum'),
         )
         self.assertEqual(
             preserve.count('--no-sandbox'),
@@ -2556,7 +2562,10 @@ class NativeCiEvidenceTests(unittest.TestCase):
             with self.subTest(private_output_probe=private_output_probe):
                 self.assertNotIn(private_output_probe, preserve)
         self.assertIn('sudo systemctl stop "user@$current_uid.service"', preserve)
-        self.assertIn('sudo userdel --remove "$preserve_user"', preserve)
+        self.assertIn(
+            'sudo userdel --remove "$preserve_user" >/dev/null 2>&1',
+            preserve,
+        )
         self.assertLess(
             preserve.index('sudo systemctl stop "user@$current_uid.service"'),
             preserve.index('sudo userdel --remove "$preserve_user"'),
