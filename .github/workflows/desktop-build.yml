@@ -36,6 +36,7 @@ on:
       - "docs/schemas/product-version-truth-v1.schema.json"
       - "scripts/appimage_payload_offset.py"
       - "scripts/canary_onefile_local_api.py"
+      - "scripts/canary_gateway_egress_topology.py"
       - "scripts/extract_nsis_payload.py"
       - "scripts/distribution_trust_posture.py"
       - "scripts/native_ci_evidence.py"
@@ -55,6 +56,7 @@ on:
       - "tests/test_bounded_process.py"
       - "tests/test_bounded_process_windows*.py"
       - "tests/test_canary_onefile_local_api.py"
+      - "tests/test_canary_gateway_egress_topology.py"
       - "tests/test_collector_cli.py"
       - "tests/test_desktop_packaging_contract.py"
       - "tests/test_distribution_trust_posture.py"
@@ -125,6 +127,7 @@ on:
       - "docs/schemas/product-version-truth-v1.schema.json"
       - "scripts/appimage_payload_offset.py"
       - "scripts/canary_onefile_local_api.py"
+      - "scripts/canary_gateway_egress_topology.py"
       - "scripts/extract_nsis_payload.py"
       - "scripts/distribution_trust_posture.py"
       - "scripts/native_ci_evidence.py"
@@ -144,6 +147,7 @@ on:
       - "tests/test_bounded_process.py"
       - "tests/test_bounded_process_windows*.py"
       - "tests/test_canary_onefile_local_api.py"
+      - "tests/test_canary_gateway_egress_topology.py"
       - "tests/test_collector_cli.py"
       - "tests/test_desktop_packaging_contract.py"
       - "tests/test_distribution_trust_posture.py"
@@ -377,6 +381,7 @@ jobs:
             tests.test_managed_collector \
             tests.test_native_ci_evidence \
             tests.test_native_lifecycle_evidence \
+            tests.test_canary_gateway_egress_topology \
             tests.test_canary_linux_service_absence \
             tests.test_canary_linux_observer_topology \
             tests.test_native_lifecycle_runner \
@@ -727,6 +732,65 @@ jobs:
             --built-collector "./dist-collector/${{ matrix.collector }}" \
             --built-settings "./dist-settings/${{ matrix.settings }}" \
             --built-bridge "./dist-bridge/${{ matrix.bridge }}"
+      - name: Run audited Gateway empty-window canary
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        shell: bash
+        run: |
+          # Ephemeral Gateway topology gate only; no lifecycle or release evidence.
+          set -euo pipefail
+          gateway_root="$(mktemp -d "$RUNNER_TEMP/usagehub-gateway-empty.XXXXXX")"
+          gateway_root_identity="$(/usr/bin/stat --format='%d:%i' "$gateway_root")"
+          gateway_cleanup_authorized=0
+          gateway_collector="$gateway_root/openusage-collector"
+          gateway_stdout="$gateway_root/canary.stdout"
+          gateway_stderr="$gateway_root/canary.stderr"
+          source_digest="$(/usr/bin/sha256sum "./dist-collector/${{ matrix.collector }}" | /usr/bin/awk '{print $1}')"
+          cleanup_gateway() {
+            prior_status=$?
+            cleanup_status=0
+            if [[ "$gateway_cleanup_authorized" != "1" ]]; then
+              printf '%s\n' "gateway_empty_window_cleanup_deferred category=unproven" >&2
+              cleanup_status=1
+            elif ! test "$(/usr/bin/stat --format='%d:%i' "$gateway_root")" = "$gateway_root_identity"; then
+              printf '%s\n' "gateway_empty_window_cleanup_failed category=root-identity" >&2
+              cleanup_status=1
+            elif ! /bin/rm -rf --one-file-system "$gateway_root"; then
+              printf '%s\n' "gateway_empty_window_cleanup_failed category=root-remove" >&2
+              cleanup_status=1
+            fi
+            trap - EXIT
+            if [[ "$prior_status" != "0" || "$cleanup_status" != "0" ]]; then
+              exit 1
+            fi
+          }
+          trap cleanup_gateway EXIT
+          /bin/cp "./dist-collector/${{ matrix.collector }}" "$gateway_collector"
+          /usr/bin/cmp -s "./dist-collector/${{ matrix.collector }}" "$gateway_collector"
+          /bin/chmod 0700 "$gateway_collector"
+          /bin/mkdir --mode=0700 "$gateway_root/home" "$gateway_root/data" "$gateway_root/tmp"
+          printf '%s' '{"enabled":true,"mode":"advise"}' > "$gateway_root/gateway.json"
+          python -c 'import secrets, sys; sys.stdout.write(secrets.token_urlsafe(48))' \
+            > "$gateway_root/gateway.token"
+          /bin/chmod 0600 "$gateway_root/gateway.json" "$gateway_root/gateway.token"
+          copied_digest="$(/usr/bin/sha256sum "$gateway_collector" | /usr/bin/awk '{print $1}')"
+          test "$copied_digest" = "$source_digest"
+          set +e
+          python -m scripts.canary_gateway_egress_topology \
+            --collector "$gateway_collector" \
+            --port 17823 \
+            > "$gateway_stdout" \
+            2> "$gateway_stderr"
+          gateway_status=$?
+          set -e
+          test ! -s "$gateway_stdout"
+          test ! -s "$gateway_stderr"
+          if [[ "$gateway_status" != "0" ]]; then
+            printf '%s\n' "gateway_empty_window_failed category=runtime" >&2
+            exit 1
+          fi
+          test "$(/usr/bin/sha256sum "./dist-collector/${{ matrix.collector }}" | /usr/bin/awk '{print $1}')" = "$source_digest"
+          test "$(/usr/bin/sha256sum "$gateway_collector" | /usr/bin/awk '{print $1}')" = "$copied_digest"
+          gateway_cleanup_authorized=1
       - name: Resolve final artifact
         id: artifact
         shell: bash

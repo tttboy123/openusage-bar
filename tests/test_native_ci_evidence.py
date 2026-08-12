@@ -2149,6 +2149,101 @@ class NativeCiEvidenceTests(unittest.TestCase):
             runtime_capability_smoke_step,
         )
 
+    def test_workflow_runs_audited_gateway_empty_window_without_evidence_output(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        marker = "- name: Run audited Gateway empty-window canary"
+        self.assertEqual(source.count(marker), 1)
+        start = source.index(marker)
+        end = source.index("\n      - name:", start + 1)
+        gate = source[start:end]
+
+        self.assertIn("if: matrix.platform == 'linux' && matrix.arch == 'x64'", gate)
+        self.assertLess(source.index("- name: Audit packaged collector"), start)
+        self.assertLess(start, source.index("- name: Resolve final artifact"))
+        self.assertIn(
+            "# Ephemeral Gateway topology gate only; no lifecycle or release evidence.",
+            gate,
+        )
+        for required in (
+            'gateway_root="$(mktemp -d "$RUNNER_TEMP/usagehub-gateway-empty.XXXXXX")"',
+            'gateway_root_identity="$(/usr/bin/stat --format=\'%d:%i\' "$gateway_root")"',
+            "gateway_cleanup_authorized=0",
+            'gateway_collector="$gateway_root/openusage-collector"',
+            '/bin/cp "./dist-collector/${{ matrix.collector }}" "$gateway_collector"',
+            '/usr/bin/cmp -s "./dist-collector/${{ matrix.collector }}" "$gateway_collector"',
+            '/bin/chmod 0700 "$gateway_collector"',
+            '/bin/mkdir --mode=0700 "$gateway_root/home" "$gateway_root/data" "$gateway_root/tmp"',
+            "printf '%s' '{\"enabled\":true,\"mode\":\"advise\"}' > \"$gateway_root/gateway.json\"",
+            '/bin/chmod 0600 "$gateway_root/gateway.json" "$gateway_root/gateway.token"',
+            "python -m scripts.canary_gateway_egress_topology \\",
+            '--collector "$gateway_collector" \\',
+            '--port 17823',
+            "gateway_status=$?",
+            'gateway_empty_window_failed category=runtime',
+            'test ! -s "$gateway_stdout"',
+            'test ! -s "$gateway_stderr"',
+            'test "$(/usr/bin/stat --format=\'%d:%i\' "$gateway_root")" = "$gateway_root_identity"',
+            '/bin/rm -rf --one-file-system "$gateway_root"',
+            "gateway_cleanup_authorized=1",
+            "gateway_empty_window_cleanup_deferred category=unproven",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, gate)
+        self.assertLess(gate.index("gateway_root_identity="), gate.index("trap "))
+        self.assertLess(gate.index("trap "), gate.index("/bin/cp "))
+        self.assertLess(
+            gate.index('if [[ "$gateway_cleanup_authorized" != "1" ]]'),
+            gate.index("/bin/rm -rf"),
+        )
+        self.assertLess(gate.index("gateway_status=$?"), gate.index("set -e", gate.index("gateway_status=$?")))
+        self.assertLess(
+            gate.index('if [[ "$gateway_status" != "0" ]]'),
+            gate.index("gateway_cleanup_authorized=1"),
+        )
+        authorization = gate.index("gateway_cleanup_authorized=1")
+        for completed_check in (
+            'test ! -s "$gateway_stdout"',
+            'test ! -s "$gateway_stderr"',
+            'test "$(/usr/bin/sha256sum "./dist-collector/${{ matrix.collector }}"',
+        ):
+            with self.subTest(completed_check=completed_check):
+                self.assertLess(gate.rindex(completed_check), authorization)
+        status_check = gate[
+            gate.index('if [[ "$gateway_status" != "0" ]]'):
+            gate.index("fi", gate.index('if [[ "$gateway_status" != "0" ]]'))
+        ]
+        self.assertIn("exit 1", status_check)
+        self.assertLess(
+            gate.rindex('test "$(/usr/bin/sha256sum "$gateway_collector"'),
+            gate.index("gateway_cleanup_authorized=1"),
+        )
+        self.assertLess(gate.index("test \"$(/usr/bin/stat"), gate.index("/bin/rm -rf"))
+        for forbidden in (
+            "GITHUB_OUTPUT",
+            "native_lifecycle_evidence",
+            "native_ci_evidence",
+            "upload-artifact",
+            "--delete-data",
+            'cat "$gateway_stdout"',
+            'cat "$gateway_stderr"',
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, gate)
+
+        contracts_start = source.index("- name: Run portable Observer and Gateway contracts")
+        contracts_end = source.index("- name: Run native Windows Job contracts")
+        contracts = source[contracts_start:contracts_end]
+        self.assertIn("tests.test_canary_gateway_egress_topology", contracts)
+
+        push = source[source.index("  push:\n"):source.index("  pull_request:\n")]
+        pull_request = source[
+            source.index("  pull_request:\n"):source.index("\npermissions:")
+        ]
+        for event, block in (("push", push), ("pull_request", pull_request)):
+            with self.subTest(event=event):
+                self.assertIn('- "scripts/canary_gateway_egress_topology.py"', block)
+                self.assertIn('- "tests/test_canary_gateway_egress_topology.py"', block)
+
         generate_start = source.index("- name: Generate native CI evidence")
         source_probe_start = source.index(
             "- name: Probe and verify Observer source evidence"
