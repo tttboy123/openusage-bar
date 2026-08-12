@@ -2179,7 +2179,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
             '--collector "$gateway_collector" \\',
             '--port 17823',
             "gateway_status=$?",
-            'gateway_empty_window_failed category=runtime',
+            'gateway_empty_window_failed category=$gateway_category',
             'test ! -s "$gateway_stdout"',
             'test ! -s "$gateway_stderr"',
             'test "$(/usr/bin/stat --format=\'%d:%i\' "$gateway_root")" = "$gateway_root_identity"',
@@ -2213,6 +2213,16 @@ class NativeCiEvidenceTests(unittest.TestCase):
             gate.index("fi", gate.index('if [[ "$gateway_status" != "0" ]]'))
         ]
         self.assertIn("exit 1", status_check)
+        for status, category in (
+            ("11", "launch"),
+            ("12", "token"),
+            ("13", "readiness"),
+            ("14", "counter-window"),
+            ("15", "stop"),
+            ("16", "cleanup"),
+        ):
+            with self.subTest(status=status, category=category):
+                self.assertIn(f'{status}) gateway_category="{category}" ;;', gate)
         self.assertLess(
             gate.rindex('test "$(/usr/bin/sha256sum "$gateway_collector"'),
             gate.index("gateway_cleanup_authorized=1"),

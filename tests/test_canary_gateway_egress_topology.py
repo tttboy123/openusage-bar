@@ -488,6 +488,53 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
         self.assertIn(("killpg", 4312, signal.SIGKILL), events)
         self.assertIn(("wait", 5.0), events)
 
+    def test_gateway_lease_reports_unproven_post_spawn_cleanup(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            _start_gateway_process_lease,
+        )
+
+        class Process:
+            pid = 4312
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.realpath(directory)
+            self._prepare_private_root(root)
+            collector = os.path.join(root, "openusage-collector")
+            with open(collector, "wb") as stream:
+                stream.write(b"audited-collector")
+            os.chmod(collector, 0o700)
+            config = self._prepare_advise_config(root)
+            token = self._prepare_gateway_token(root)
+
+            with (
+                patch(
+                    "scripts.canary_gateway_egress_topology.subprocess.Popen",
+                    return_value=Process(),
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.getpgid",
+                    return_value=9999,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology._GatewayProcessLease.close",
+                    side_effect=RuntimeError("PRIVATE_CLEANUP"),
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    GatewayEgressTopologyCanaryError,
+                    r"^Gateway egress topology canary failed$",
+                ) as raised:
+                    _start_gateway_process_lease(
+                        collector=collector,
+                        config_path=config,
+                        token_path=token,
+                        environment=self._closed_environment(root),
+                    )
+
+        self.assertEqual(raised.exception.stage, "cleanup")
+        self.assertNotIn("PRIVATE", str(raised.exception))
+
     def test_gateway_lease_opens_every_artifact_beneath_the_held_root(self) -> None:
         from scripts.canary_gateway_egress_topology import (
             GatewayEgressTopologyCanaryError,
@@ -623,6 +670,48 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
             ],
         )
 
+    def test_runner_rejects_a_hostile_mutated_failure_stage(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            run_gateway_egress_topology_canary,
+        )
+
+        events: list[str] = []
+
+        class HostileStage:
+            def __eq__(self, other: object) -> bool:
+                del other
+                raise RuntimeError("PRIVATE_STAGE_EQ")
+
+        error = GatewayEgressTopologyCanaryError("cleanup")
+        error.stage = HostileStage()  # type: ignore[assignment]
+
+        class Lease:
+            def read_token(self) -> str:
+                raise error
+
+            def close(self) -> None:
+                events.append("close")
+
+        with patch(
+            "scripts.canary_gateway_egress_topology._start_gateway_process_lease",
+            return_value=Lease(),
+        ):
+            with self.assertRaisesRegex(
+                GatewayEgressTopologyCanaryError,
+                r"^Gateway egress topology canary failed$",
+            ) as raised:
+                run_gateway_egress_topology_canary(
+                    collector="/PRIVATE/openusage-collector",
+                    config_path="/PRIVATE/gateway.json",
+                    token_path="/PRIVATE/gateway.token",
+                    port=17823,
+                    environment=self._closed_environment(),
+                )
+
+        self.assertEqual((raised.exception.stage, events), ("token", ["close"]))
+        self.assertNotIn("PRIVATE", str(raised.exception))
+
     def test_readiness_deadline_is_checked_after_successful_health(self) -> None:
         from openusage_bar.gateway.server import GatewayAdviseHealthState
         from scripts.canary_gateway_egress_topology import (
@@ -665,6 +754,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
 
     def test_cli_is_silent_and_accepts_only_one_canonical_private_layout(self) -> None:
         from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
             GatewayEgressTopologySummary,
             main,
         )
@@ -731,6 +821,52 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
                 self.assertEqual(main(arguments, stdout=stdout, stderr=stderr), 2)
                 self.assertEqual((stdout.getvalue(), stderr.getvalue()), ("", ""))
                 runner.assert_not_called()
+
+        for stage, expected_code in (
+            ("launch", 11),
+            ("token", 12),
+            ("readiness", 13),
+            ("counter-window", 14),
+            ("stop", 15),
+            ("cleanup", 16),
+        ):
+            with self.subTest(stage=stage), patch(
+                "scripts.canary_gateway_egress_topology.run_gateway_egress_topology_canary",
+                side_effect=GatewayEgressTopologyCanaryError(stage),
+            ):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                self.assertEqual(
+                    main(
+                        ("--collector", "/PRIVATE/openusage-collector", "--port", "17823"),
+                        stdout=stdout,
+                        stderr=stderr,
+                    ),
+                    expected_code,
+                )
+                self.assertEqual((stdout.getvalue(), stderr.getvalue()), ("", ""))
+
+        class HostileStage:
+            def __hash__(self) -> int:
+                raise RuntimeError("PRIVATE_STAGE_MARKER")
+
+        hostile_error = GatewayEgressTopologyCanaryError("launch")
+        hostile_error.stage = HostileStage()  # type: ignore[assignment]
+        with patch(
+            "scripts.canary_gateway_egress_topology.run_gateway_egress_topology_canary",
+            side_effect=hostile_error,
+        ):
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            self.assertEqual(
+                main(
+                    ("--collector", "/PRIVATE/openusage-collector", "--port", "17823"),
+                    stdout=stdout,
+                    stderr=stderr,
+                ),
+                1,
+            )
+            self.assertEqual((stdout.getvalue(), stderr.getvalue()), ("", ""))
 
     def test_evaluator_accepts_only_one_authenticated_endpoint_epoch_with_zero_delta(
         self,

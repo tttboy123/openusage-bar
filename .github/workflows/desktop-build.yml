@@ -785,7 +785,16 @@ jobs:
           test ! -s "$gateway_stdout"
           test ! -s "$gateway_stderr"
           if [[ "$gateway_status" != "0" ]]; then
-            printf '%s\n' "gateway_empty_window_failed category=runtime" >&2
+            case "$gateway_status" in
+              11) gateway_category="launch" ;;
+              12) gateway_category="token" ;;
+              13) gateway_category="readiness" ;;
+              14) gateway_category="counter-window" ;;
+              15) gateway_category="stop" ;;
+              16) gateway_category="cleanup" ;;
+              *) gateway_category="runtime" ;;
+            esac
+            printf '%s\n' "gateway_empty_window_failed category=$gateway_category" >&2
             exit 1
           fi
           test "$(/usr/bin/sha256sum "./dist-collector/${{ matrix.collector }}" | /usr/bin/awk '{print $1}')" = "$source_digest"

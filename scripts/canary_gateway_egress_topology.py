@@ -43,12 +43,25 @@ _ENVIRONMENT_DIRECT_CHILDREN = {
     "XDG_DATA_HOME": "data",
     "TMPDIR": "tmp",
 }
+_STAGE_EXIT_CODES = {
+    "launch": 11,
+    "token": 12,
+    "readiness": 13,
+    "counter-window": 14,
+    "stop": 15,
+    "cleanup": 16,
+}
 
 
 class GatewayEgressTopologyCanaryError(RuntimeError):
     """A fixed, value-free diagnostic failure."""
 
-    def __init__(self) -> None:
+    def __init__(self, stage: str | None = None) -> None:
+        if stage is not None and (
+            type(stage) is not str or stage not in _STAGE_EXIT_CODES
+        ):
+            stage = None
+        self.stage = stage
         super().__init__("Gateway egress topology canary failed")
 
 
@@ -461,27 +474,28 @@ def _start_gateway_process_lease(
         if not lease._binding_is_stable():
             raise GatewayEgressTopologyCanaryError
         return lease
-    except Exception:
+    except Exception as error:
+        cleanup_failed = False
         if lease is not None:
             try:
                 lease.close()
             except Exception:
-                pass
+                cleanup_failed = True
         elif descriptor is not None:
             try:
                 os.close(descriptor)
             except Exception:
-                pass
+                cleanup_failed = True
         if lease is None and config_descriptor is not None:
             try:
                 os.close(config_descriptor)
             except Exception:
-                pass
+                cleanup_failed = True
         if lease is None and token_descriptor is not None:
             try:
                 os.close(token_descriptor)
             except Exception:
-                pass
+                cleanup_failed = True
         if lease is None:
             for _path, directory_descriptor, _signature in reversed(
                 directory_bindings
@@ -489,7 +503,11 @@ def _start_gateway_process_lease(
                 try:
                     os.close(directory_descriptor)
                 except Exception:
-                    pass
+                    cleanup_failed = True
+        if cleanup_failed:
+            raise GatewayEgressTopologyCanaryError("cleanup") from None
+        if type(error) is GatewayEgressTopologyCanaryError:
+            raise error from None
         raise GatewayEgressTopologyCanaryError from None
 
 
@@ -650,6 +668,8 @@ def run_gateway_egress_topology_canary(
     lease: _GatewayProcessLease | None = None
     result: GatewayEgressTopologySummary | None = None
     failed = False
+    failure_stage: str | None = None
+    stage = "launch"
     try:
         lease = _start_gateway_process_lease(
             collector=collector,
@@ -657,8 +677,11 @@ def run_gateway_egress_topology_canary(
             token_path=token_path,
             environment=environment,
         )
+        stage = "token"
         token = lease.read_token()
+        stage = "readiness"
         _wait_for_advise_health(port=port, bearer_token=token, lease=lease)
+        stage = "counter-window"
         counters_before = read_gateway_egress_attempt_counters(
             port=port,
             bearer_token=token,
@@ -677,20 +700,30 @@ def run_gateway_egress_topology_canary(
             counters_before=counters_before,
             counters_after=counters_after,
         )
+        stage = "stop"
         lease.stop()
-    except Exception:
+    except Exception as error:
         failed = True
+        if (
+            type(error) is GatewayEgressTopologyCanaryError
+            and type(error.stage) is str
+            and error.stage == "cleanup"
+        ):
+            failure_stage = "cleanup"
+        else:
+            failure_stage = stage
     finally:
         if lease is not None:
             try:
                 lease.close()
             except Exception:
                 failed = True
+                failure_stage = "cleanup"
     if (
         failed
         or type(result) is not GatewayEgressTopologySummary
     ):
-        raise GatewayEgressTopologyCanaryError from None
+        raise GatewayEgressTopologyCanaryError(failure_stage) from None
     return result
 
 
@@ -757,6 +790,10 @@ def main(
             or summary.gateway_egress_attempt_delta_zero is not True
         ):
             raise GatewayEgressTopologyCanaryError
+    except GatewayEgressTopologyCanaryError as error:
+        if type(error.stage) is str:
+            return _STAGE_EXIT_CODES.get(error.stage, 1)
+        return 1
     except Exception:
         return 1
     return 0
