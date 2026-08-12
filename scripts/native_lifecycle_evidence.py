@@ -17,6 +17,7 @@ import os
 import platform as host_platform_module
 import re
 import secrets
+import signal
 import stat
 import subprocess
 import sys
@@ -27,6 +28,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Protocol
+
+if os.name != "nt":
+    import pwd
 
 
 SCHEMA_VERSION = "native-lifecycle-evidence/v1"
@@ -784,6 +788,12 @@ class _BoundRunDirectory:
         assert execution is not None
         return execution.descriptor, f"/proc/self/fd/{execution.descriptor}"
 
+    def prepare_execution_lease(self) -> tuple[tuple[object, ...], int, str]:
+        token = self.preserve_uninstall_token()
+        execution = self.execution_copy
+        assert execution is not None
+        return token, execution.descriptor, f"/proc/self/fd/{execution.descriptor}"
+
     def _validate_child_path(self, path: object) -> Path:
         if (
             not isinstance(path, Path)
@@ -1307,6 +1317,145 @@ class _BoundRunDirectory:
             _driver_fail()
 
 
+@dataclass(repr=False)
+class _LinuxExecutionProcessLease:
+    token: tuple[object, ...]
+    process: subprocess.Popen[bytes]
+    pid: int
+    start_time_ticks: int
+    process_group_id: int
+    leader_reaped: bool = False
+
+    def __repr__(self) -> str:
+        return "<_LinuxExecutionProcessLease closed>"
+
+
+def _force_stop_linux_execution_lease(
+    lease: _LinuxExecutionProcessLease,
+) -> None:
+    cleanup_failed = False
+    try:
+        os.killpg(lease.process_group_id, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except Exception:
+        cleanup_failed = True
+    try:
+        if not _wait_for_linux_reserved_leader(lease.pid, 5.0):
+            cleanup_failed = True
+    except Exception:
+        cleanup_failed = True
+    try:
+        _wait_for_linux_process_group_exit(lease.process_group_id)
+    except Exception:
+        cleanup_failed = True
+    try:
+        result = lease.process.wait(timeout=5.0)
+        if type(result) is not int:
+            cleanup_failed = True
+        else:
+            lease.leader_reaped = True
+    except Exception:
+        cleanup_failed = True
+    if cleanup_failed:
+        _driver_fail()
+
+
+def _read_linux_process_identity(process_id: int) -> tuple[int, int, int]:
+    try:
+        from openusage_bar.platform_services import (
+            _read_linux_process_identity as read_identity,
+        )
+
+        observed = read_identity(process_id)
+    except Exception:
+        _driver_fail()
+    if (
+        type(observed) is not tuple
+        or len(observed) != 3
+        or any(type(value) is not int for value in observed)
+    ):
+        _driver_fail()
+    return observed
+
+
+def _linux_process_group_has_live_member(process_group_id: int) -> bool:
+    try:
+        entries = os.listdir("/proc")
+    except Exception:
+        _driver_fail()
+    for entry in entries:
+        if not entry.isascii() or not entry.isdecimal():
+            continue
+        try:
+            payload = Path("/proc", entry, "stat").read_bytes()
+            if len(payload) > 4096:
+                _driver_fail()
+            closing = payload.rfind(b")")
+            fields = payload[closing + 2 :].split()
+            if closing <= 0 or len(fields) < 3:
+                _driver_fail()
+            state = fields[0]
+            observed_group = int(fields[2])
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _driver_fail()
+        if observed_group == process_group_id and state != b"Z":
+            return True
+    return False
+
+
+def _wait_for_linux_reserved_leader(process_id: int, timeout: float) -> bool:
+    started = time.monotonic()
+    if type(started) is not float or not math.isfinite(started):
+        _driver_fail()
+    deadline = started + timeout
+    previous = started
+    while True:
+        try:
+            status = os.waitid(
+                os.P_PID,
+                process_id,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+            )
+        except Exception:
+            _driver_fail()
+        if status is not None and status.si_pid == process_id:
+            return True
+        current = time.monotonic()
+        if (
+            type(current) is not float
+            or not math.isfinite(current)
+            or current < previous
+            or current >= deadline
+        ):
+            return False
+        previous = current
+        time.sleep(min(0.05, deadline - current))
+
+
+def _wait_for_linux_process_group_exit(process_group_id: int) -> None:
+    started = time.monotonic()
+    if type(started) is not float or not math.isfinite(started):
+        _driver_fail()
+    deadline = started + 5.0
+    previous = started
+    while _linux_process_group_has_live_member(process_group_id):
+        current = time.monotonic()
+        if (
+            type(current) is not float
+            or not math.isfinite(current)
+            or current < previous
+            or current >= deadline
+        ):
+            _driver_fail()
+        previous = current
+        time.sleep(min(0.05, deadline - current))
+
+
 def _prove_linux_default_gateway_endpoint_absent() -> None:
     """Prove no TCP 17823 listener in the calling thread's current netns."""
 
@@ -1529,11 +1678,12 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     execution-copy, sentinel, mode, removal, and one recopy; authoritative
     profile/package projections; absence-only service, local-listener, and
     ledger facts; and an instantaneous current-netns TCP 17823 absence fact.
-    Only the bound preserve and second-generation delete-data ``run_process``
-    transactions and a closed monotonic/wait clock are enabled; Generic
-    Gateway state, start/stop, and other lifecycle callbacks remain
-    unavailable, so the default executor still cannot produce lifecycle
-    evidence.  Random
+    The bound start/stop process lease, preserve and second-generation
+    delete-data ``run_process`` transactions, and a closed monotonic/wait clock
+    are enabled.  Generic Gateway state and privacy event callbacks remain
+    unavailable, so real product lifecycle mutation is reachable but the
+    default executor still fails closed before producing lifecycle evidence.
+    Random
     quarantines and identity rechecks detect observed replacements, but are
     not isolation from a continuously malicious same-UID process after the
     final check.
@@ -1567,6 +1717,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     product_rollback_unproven = False
     preserve_uninstall_token: tuple[object, ...] | None = None
     last_monotonic: float | None = None
+    active_process_lease: _LinuxExecutionProcessLease | None = None
 
     def revoke_runtime_install_absence_fact() -> None:
         nonlocal runtime_install_absence_fact
@@ -1628,10 +1779,199 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
 
     def mark_process_rollback_proven() -> None:
         nonlocal process_rollback_unproven, preserve_uninstall_token
-        if not process_rollback_unproven or run_directory is None:
+        if (
+            not process_rollback_unproven
+            or run_directory is None
+            or active_process_lease is not None
+        ):
             _driver_fail()
         preserve_uninstall_token = run_directory.preserve_uninstall_token()
         process_rollback_unproven = False
+
+    def closed_execution_environment() -> dict[str, str]:
+        try:
+            current_uid = os.getuid()
+            current_home = Path(pwd.getpwuid(current_uid).pw_dir)
+            expected_runtime = f"/run/user/{current_uid}"
+            expected_bus = f"unix:path={expected_runtime}/systemd/private"
+            selected = {
+                "HOME": os.environ.get("HOME"),
+                "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR"),
+                "DBUS_SESSION_BUS_ADDRESS": os.environ.get(
+                    "DBUS_SESSION_BUS_ADDRESS"
+                ),
+                "TMPDIR": os.environ.get("TMPDIR"),
+                "DISPLAY": os.environ.get("DISPLAY"),
+                "XAUTHORITY": os.environ.get("XAUTHORITY"),
+            }
+            if (
+                profile_home is None
+                or current_home != profile_home
+                or Path.home() != current_home
+                or selected["HOME"] != str(current_home)
+                or selected["XDG_RUNTIME_DIR"] != expected_runtime
+                or selected["DBUS_SESSION_BUS_ADDRESS"] != expected_bus
+                or type(selected["TMPDIR"]) is not str
+                or not os.path.isabs(selected["TMPDIR"])
+                or type(selected["DISPLAY"]) is not str
+                or not selected["DISPLAY"].startswith(":")
+                or any(
+                    character not in ":.0123456789"
+                    for character in selected["DISPLAY"]
+                )
+                or type(selected["XAUTHORITY"]) is not str
+                or not os.path.isabs(selected["XAUTHORITY"])
+                or os.environ.get("XDG_CONFIG_HOME") not in {None, ""}
+            ):
+                _driver_fail()
+            tmp_directory = selected["TMPDIR"]
+            xauthority = selected["XAUTHORITY"]
+            assert isinstance(tmp_directory, str)
+            assert isinstance(xauthority, str)
+            xauthority_metadata = os.lstat(xauthority)
+            if (
+                os.path.commonpath((tmp_directory, xauthority))
+                != tmp_directory
+                or not stat.S_ISREG(xauthority_metadata.st_mode)
+                or xauthority_metadata.st_uid != current_uid
+                or xauthority_metadata.st_nlink != 1
+                or stat.S_IMODE(xauthority_metadata.st_mode) & 0o077 != 0
+            ):
+                _driver_fail()
+            environment = {
+                key: value
+                for key, value in selected.items()
+                if value is not None
+            }
+            if profile_xdg_binding:
+                environment["XDG_DATA_HOME"] = profile_xdg_binding
+            environment.update(
+                {
+                    "PATH": "/usr/bin:/bin",
+                    "LANG": "C",
+                    "LC_ALL": "C",
+                    "PYTHONNOUSERSITE": "1",
+                    "APPIMAGE_EXTRACT_AND_RUN": "1",
+                }
+            )
+            return environment
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _fail("driver_unavailable")
+
+    def start_process(argv: object = None) -> _LinuxExecutionProcessLease:
+        nonlocal process_rollback_unproven, product_rollback_unproven
+        nonlocal preserve_uninstall_token, active_process_lease
+        revoke_all_observation_facts()
+        if (
+            type(argv) is not tuple
+            or len(argv) != 1
+            or type(argv[0]) is not str
+            or run_directory is None
+            or active_process_lease is not None
+        ):
+            _driver_fail()
+        token, descriptor, alias = run_directory.prepare_execution_lease()
+        if argv != (str(run_directory.path / token[1]),):
+            _driver_fail()
+        process_rollback_unproven = True
+        product_rollback_unproven = True
+        preserve_uninstall_token = None
+        process: subprocess.Popen[bytes] | None = None
+        try:
+            process = subprocess.Popen(
+                (alias,),
+                shell=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env=closed_execution_environment(),
+                pass_fds=(descriptor,),
+            )
+            if type(process.pid) is not int or process.pid <= 0:
+                _driver_fail()
+            lease = _LinuxExecutionProcessLease(
+                token=token,
+                process=process,
+                pid=process.pid,
+                start_time_ticks=0,
+                process_group_id=process.pid,
+            )
+            active_process_lease = lease
+            process_uid, start_time_ticks, _parent_pid = (
+                _read_linux_process_identity(process.pid)
+            )
+            process_group_id = os.getpgid(process.pid)
+            if (
+                process_uid != os.getuid()
+                or start_time_ticks <= 0
+                or process_group_id != process.pid
+            ):
+                _driver_fail()
+            lease.start_time_ticks = start_time_ticks
+            return lease
+        except LifecycleEvidenceError:
+            if active_process_lease is not None:
+                pending = active_process_lease
+                try:
+                    _force_stop_linux_execution_lease(pending)
+                    active_process_lease = None
+                except LifecycleEvidenceError:
+                    if pending.leader_reaped:
+                        active_process_lease = None
+                    raise
+            raise
+        except Exception:
+            if active_process_lease is not None:
+                pending = active_process_lease
+                try:
+                    _force_stop_linux_execution_lease(pending)
+                    active_process_lease = None
+                except LifecycleEvidenceError:
+                    if pending.leader_reaped:
+                        active_process_lease = None
+                    raise
+            _driver_fail()
+
+    def stop_process(handle: object = None) -> None:
+        nonlocal active_process_lease
+        revoke_all_observation_facts()
+        if (
+            type(handle) is not _LinuxExecutionProcessLease
+            or handle is not active_process_lease
+            or run_directory is None
+            or handle.token != run_directory.preserve_uninstall_token()
+        ):
+            _driver_fail()
+        try:
+            process_uid, start_time_ticks, _parent_pid = (
+                _read_linux_process_identity(handle.pid)
+            )
+            if (
+                process_uid != os.getuid()
+                or start_time_ticks != handle.start_time_ticks
+                or os.getpgid(handle.pid) != handle.process_group_id
+                or handle.process_group_id != handle.pid
+            ):
+                _driver_fail()
+            os.killpg(handle.process_group_id, signal.SIGTERM)
+            if not _wait_for_linux_reserved_leader(handle.pid, 5.0):
+                os.killpg(handle.process_group_id, signal.SIGKILL)
+                if not _wait_for_linux_reserved_leader(handle.pid, 5.0):
+                    _driver_fail()
+            if _linux_process_group_has_live_member(handle.process_group_id):
+                os.killpg(handle.process_group_id, signal.SIGKILL)
+                _wait_for_linux_process_group_exit(handle.process_group_id)
+            result = handle.process.wait(timeout=5.0)
+            if type(result) is not int:
+                _driver_fail()
+            active_process_lease = None
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _driver_fail()
 
     def profile_paths(platform: object) -> NativeProfilePaths:
         nonlocal profile_home, profile_projection, package_projection
@@ -2809,9 +3149,9 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         copy_file=copy_file,
         set_file_mode=set_file_mode,
         remove_path=remove_path,
-        start_process=unavailable,
+        start_process=start_process,
         run_process=run_process,
-        stop_process=unavailable,
+        stop_process=stop_process,
         read_registry_value=unavailable,
         profile_paths=profile_paths,
         package_paths=package_paths,
@@ -2837,11 +3177,23 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         )
         yield dependencies
     finally:
+        cleanup_failed = False
+        if active_process_lease is not None:
+            try:
+                _force_stop_linux_execution_lease(active_process_lease)
+                active_process_lease = None
+            except LifecycleEvidenceError:
+                cleanup_failed = True
         if run_directory is not None:
-            if process_rollback_unproven or product_rollback_unproven:
-                run_directory.abandon()
-            else:
-                run_directory.cleanup()
+            try:
+                if process_rollback_unproven or product_rollback_unproven:
+                    run_directory.abandon()
+                else:
+                    run_directory.cleanup()
+            except LifecycleEvidenceError:
+                cleanup_failed = True
+        if cleanup_failed:
+            _driver_fail()
 
 
 class PlatformLifecycleDriver(Protocol):

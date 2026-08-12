@@ -1187,6 +1187,494 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             )
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_start_and_stop_own_one_bound_execution_process_group(
+        self,
+    ) -> None:
+        import signal
+        import subprocess
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import NativePathState
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            tmp = home / "tmp"
+            tmp.mkdir(mode=0o700)
+            xauthority = tmp / "xauthority"
+            xauthority.write_bytes(b"private X authority")
+            xauthority.chmod(0o600)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact.write_bytes(b"audited process lease artifact")
+            events: list[object] = []
+
+            class Process:
+                pid = 4411
+
+                def wait(self, *, timeout):
+                    events.append(("wait", timeout))
+                    return -signal.SIGTERM
+
+            process = Process()
+
+            def popen(argv, **kwargs):
+                events.append(("popen", tuple(argv), kwargs))
+                self.assertRegex(argv[0], r"\A/proc/self/fd/[0-9]+\Z")
+                descriptor = int(argv[0].rsplit("/", 1)[1])
+                self.assertEqual(
+                    kwargs,
+                    {
+                        "shell": False,
+                        "stdin": subprocess.DEVNULL,
+                        "stdout": subprocess.DEVNULL,
+                        "stderr": subprocess.DEVNULL,
+                        "start_new_session": True,
+                        "env": {
+                            "HOME": str(home),
+                            "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
+                            "DBUS_SESSION_BUS_ADDRESS": (
+                                "unix:path=/run/user/"
+                                f"{os.getuid()}/systemd/private"
+                            ),
+                            "TMPDIR": str(tmp),
+                            "DISPLAY": ":99",
+                            "XAUTHORITY": str(xauthority),
+                            "PATH": "/usr/bin:/bin",
+                            "LANG": "C",
+                            "LC_ALL": "C",
+                            "PYTHONNOUSERSITE": "1",
+                            "APPIMAGE_EXTRACT_AND_RUN": "1",
+                        },
+                        "pass_fds": (descriptor,),
+                    },
+                )
+                return process
+
+            environment = {
+                "HOME": str(home),
+                "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
+                "DBUS_SESSION_BUS_ADDRESS": (
+                    f"unix:path=/run/user/{os.getuid()}/systemd/private"
+                ),
+                "TMPDIR": str(tmp),
+                "DISPLAY": ":99",
+                "XAUTHORITY": str(xauthority),
+            }
+            run_directory: Path | None = None
+            with ExitStack() as stack:
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.Path.home",
+                        return_value=home,
+                    )
+                )
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.pwd.getpwuid",
+                        return_value=SimpleNamespace(pw_dir=str(home)),
+                    )
+                )
+                dependencies, run_directory, _profile, _package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                execution = run_directory / artifact.name
+                sentinel = run_directory / "outside-product-sentinel.bin"
+                dependencies.copy_file(artifact, execution)
+                dependencies.set_file_mode(execution, 0o700)
+                dependencies.copy_file(artifact, sentinel)
+                before = _file_snapshot(run_directory)
+                stack.enter_context(patch.dict(os.environ, environment, clear=True))
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.subprocess.Popen",
+                        side_effect=popen,
+                    )
+                )
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence._read_linux_process_identity",
+                        side_effect=(
+                            (os.getuid(), 88001, 1),
+                            (os.getuid(), 88001, 1),
+                        ),
+                        create=True,
+                    )
+                )
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.os.getpgid",
+                        return_value=process.pid,
+                    )
+                )
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.os.waitid",
+                        return_value=SimpleNamespace(si_pid=process.pid),
+                    )
+                )
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.os.killpg",
+                        side_effect=lambda process_group, selected_signal: events.append(
+                            ("killpg", process_group, selected_signal)
+                        ),
+                    )
+                )
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence._linux_process_group_has_live_member",
+                        return_value=False,
+                        create=True,
+                    )
+                )
+
+                handle = dependencies.start_process((str(execution),))
+                self.assertNotIn(str(execution), repr(handle))
+                self.assertNotIn("private X authority", repr(handle))
+                dependencies._mark_process_rollback_unproven()
+                dependencies.stop_process(handle)
+                dependencies._mark_process_rollback_proven()
+                self.assertEqual(_file_snapshot(run_directory), before)
+
+            self.assertEqual(
+                [event for event in events if event[0] != "popen"],
+                [
+                    ("killpg", process.pid, signal.SIGTERM),
+                    ("wait", 5.0),
+                ],
+            )
+            self.assertEqual(events[0][0], "popen")
+            self.assertTrue(run_directory.is_dir())
+            self.assertEqual(_file_snapshot(run_directory), before)
+            for child in run_directory.iterdir():
+                child.unlink()
+            run_directory.rmdir()
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_start_reaps_a_spawned_group_when_identity_binding_fails(
+        self,
+    ) -> None:
+        import signal
+        import subprocess
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            tmp = home / "tmp"
+            tmp.mkdir(mode=0o700)
+            xauthority = tmp / "xauthority"
+            xauthority.write_bytes(b"private X authority")
+            xauthority.chmod(0o600)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact.write_bytes(b"audited failed process lease artifact")
+            events: list[object] = []
+            reserved_attempts = [0]
+
+            class Process:
+                pid = 5511
+
+                def wait(self, *, timeout):
+                    events.append(("wait", timeout))
+                    return -signal.SIGKILL
+
+            process = Process()
+            environment = {
+                "HOME": str(home),
+                "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
+                "DBUS_SESSION_BUS_ADDRESS": (
+                    f"unix:path=/run/user/{os.getuid()}/systemd/private"
+                ),
+                "TMPDIR": str(tmp),
+                "DISPLAY": ":99",
+                "XAUTHORITY": str(xauthority),
+            }
+            run_directory: Path | None = None
+            with ExitStack() as stack:
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.Path.home",
+                        return_value=home,
+                    )
+                )
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.pwd.getpwuid",
+                        return_value=SimpleNamespace(pw_dir=str(home)),
+                    )
+                )
+                dependencies, run_directory, _profile, _package = (
+                    _enter_linux_host_dependencies(stack, authority)
+                )
+                execution = run_directory / artifact.name
+                sentinel = run_directory / "outside-product-sentinel.bin"
+                dependencies.copy_file(artifact, execution)
+                dependencies.set_file_mode(execution, 0o700)
+                dependencies.copy_file(artifact, sentinel)
+                before = _file_snapshot(run_directory)
+                stack.enter_context(patch.dict(os.environ, environment, clear=True))
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.subprocess.Popen",
+                        return_value=process,
+                    )
+                )
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence._read_linux_process_identity",
+                        side_effect=LifecycleEvidenceError("driver_failed"),
+                    )
+                )
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence.os.killpg",
+                        side_effect=lambda process_group, selected_signal: events.append(
+                            ("killpg", process_group, selected_signal)
+                        ),
+                    )
+                )
+                def reserve_leader(process_id, timeout):
+                    reserved_attempts[0] += 1
+                    events.append(("reserve", process_id, timeout))
+                    if reserved_attempts[0] == 1:
+                        raise LifecycleEvidenceError("driver_failed")
+                    return True
+
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence._wait_for_linux_reserved_leader",
+                        side_effect=reserve_leader,
+                    )
+                )
+                stack.enter_context(
+                    patch(
+                        "scripts.native_lifecycle_evidence._linux_process_group_has_live_member",
+                        return_value=False,
+                    )
+                )
+
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError, "driver_failed"
+                ) as rejected:
+                    dependencies.start_process((str(execution),))
+                self.assertEqual(str(rejected.exception), "driver_failed")
+                self.assertNotIn("private X authority", str(rejected.exception))
+                self.assertEqual(
+                    events,
+                    [
+                        ("killpg", process.pid, signal.SIGKILL),
+                        ("reserve", process.pid, 5.0),
+                        ("wait", 5.0),
+                    ],
+                )
+                self.assertEqual(_file_snapshot(run_directory), before)
+
+            self.assertTrue(run_directory.is_dir())
+            self.assertEqual(_file_snapshot(run_directory), before)
+            self.assertEqual(
+                events,
+                [
+                    ("killpg", process.pid, signal.SIGKILL),
+                    ("reserve", process.pid, 5.0),
+                    ("wait", 5.0),
+                ],
+            )
+            for child in run_directory.iterdir():
+                child.unlink()
+            run_directory.rmdir()
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
+    def test_linux_host_context_reaps_the_private_lease_after_public_binding_drift(
+        self,
+    ) -> None:
+        import signal
+
+        from openusage_bar.lifecycle_state import LifecycleStatePaths
+        from scripts.native_lifecycle_evidence import LifecycleEvidenceError
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "authoritative-home"
+            home.mkdir()
+            tmp = home / "tmp"
+            tmp.mkdir(mode=0o700)
+            xauthority = tmp / "xauthority"
+            xauthority.write_bytes(b"private X authority")
+            xauthority.chmod(0o600)
+            authority = LifecycleStatePaths(platform="linux", home=home)
+            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact.write_bytes(b"audited drift process lease artifact")
+            events: list[object] = []
+
+            class Process:
+                pid = 6611
+
+                def wait(self, *, timeout):
+                    events.append(("wait", timeout))
+                    return -signal.SIGKILL
+
+            process = Process()
+            environment = {
+                "HOME": str(home),
+                "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
+                "DBUS_SESSION_BUS_ADDRESS": (
+                    f"unix:path=/run/user/{os.getuid()}/systemd/private"
+                ),
+                "TMPDIR": str(tmp),
+                "DISPLAY": ":99",
+                "XAUTHORITY": str(xauthority),
+            }
+            run_directory: Path | None = None
+            owned_original: Path | None = None
+            execution: Path | None = None
+            sentinel: Path | None = None
+            context = None
+            try:
+                with ExitStack() as stack:
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence.Path.home",
+                            return_value=home,
+                        )
+                    )
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence.pwd.getpwuid",
+                            return_value=SimpleNamespace(pw_dir=str(home)),
+                        )
+                    )
+                    stack.enter_context(
+                        patch.dict(os.environ, environment, clear=True)
+                    )
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence.sys.platform",
+                            "linux",
+                        )
+                    )
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence.host_platform_module.machine",
+                            return_value="x86_64",
+                        )
+                    )
+                    stack.enter_context(
+                        patch.object(
+                            LifecycleStatePaths,
+                            "for_current_user",
+                            return_value=authority,
+                        )
+                    )
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence.subprocess.Popen",
+                            return_value=process,
+                        )
+                    )
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence._read_linux_process_identity",
+                            side_effect=(
+                                (os.getuid(), 99001, 1),
+                                (os.getuid(), 99001, 1),
+                            ),
+                        )
+                    )
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence.os.getpgid",
+                            return_value=process.pid,
+                        )
+                    )
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence.os.killpg",
+                            side_effect=lambda process_group, selected_signal: events.append(
+                                ("killpg", process_group, selected_signal)
+                            ),
+                        )
+                    )
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence.os.waitid",
+                            return_value=SimpleNamespace(si_pid=process.pid),
+                        )
+                    )
+                    stack.enter_context(
+                        patch(
+                            "scripts.native_lifecycle_evidence._linux_process_group_has_live_member",
+                            return_value=False,
+                        )
+                    )
+                    from scripts.native_lifecycle_evidence import (
+                        native_lifecycle_dependencies_for_host,
+                    )
+
+                    context = native_lifecycle_dependencies_for_host()
+                    dependencies = context.__enter__()
+                    run_directory = dependencies.make_run_directory(
+                        "linux", "x64"
+                    )
+                    dependencies.profile_paths("linux")
+                    execution = run_directory / artifact.name
+                    sentinel = run_directory / "outside-product-sentinel.bin"
+                    dependencies.copy_file(artifact, execution)
+                    dependencies.set_file_mode(execution, 0o700)
+                    dependencies.copy_file(artifact, sentinel)
+                    handle = dependencies.start_process((str(execution),))
+                    dependencies._mark_process_rollback_unproven()
+                    owned_original = run_directory / "owned-original.AppImage"
+                    execution.rename(owned_original)
+                    execution.write_bytes(b"PRIVATE_FOREIGN_EXECUTION")
+                    execution.chmod(0o700)
+                    with self.assertRaisesRegex(
+                        LifecycleEvidenceError, "driver_failed"
+                    ) as rejected:
+                        dependencies.stop_process(handle)
+                    self.assertEqual(str(rejected.exception), "driver_failed")
+                    self.assertEqual(events, [])
+                    context.__exit__(
+                        type(rejected.exception),
+                        rejected.exception,
+                        rejected.exception.__traceback__,
+                    )
+                    context = None
+
+                self.assertEqual(
+                    events,
+                    [
+                        ("killpg", process.pid, signal.SIGKILL),
+                        ("wait", 5.0),
+                    ],
+                )
+                self.assertTrue(run_directory.is_dir())
+                self.assertEqual(
+                    execution.read_bytes(), b"PRIVATE_FOREIGN_EXECUTION"
+                )
+                self.assertEqual(
+                    owned_original.read_bytes(),
+                    b"audited drift process lease artifact",
+                )
+                self.assertTrue(sentinel.is_file())
+            finally:
+                if context is not None:
+                    try:
+                        context.__exit__(None, None, None)
+                    except LifecycleEvidenceError:
+                        pass
+                for candidate in (execution, owned_original, sentinel):
+                    if candidate is not None and candidate.exists():
+                        candidate.unlink()
+                if run_directory is not None and run_directory.exists():
+                    run_directory.rmdir()
+
+    @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_run_process_allows_only_one_proven_preserve_uninstall(
         self,
     ) -> None:
@@ -8014,11 +8502,11 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         )
                     else:
                         with self.assertRaisesRegex(
-                            LifecycleEvidenceError, "driver_unavailable"
+                            LifecycleEvidenceError, "driver_failed"
                         ) as unavailable:
                             dependencies.start_process()
                         self.assertEqual(
-                            str(unavailable.exception), "driver_unavailable"
+                            str(unavailable.exception), "driver_failed"
                         )
 
                     _assert_install_alias_rejected_without_probe(
