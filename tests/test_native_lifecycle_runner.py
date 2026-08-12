@@ -4497,13 +4497,13 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     ("linux", "local"),
                     ("linux", "gateway_default_endpoint"),
                     ("linux", "local"),
-                    ("linux", "gateway"),
+                    ("linux", "gateway_default_endpoint"),
                     ("linux", "local"),
-                    ("linux", "gateway"),
+                    ("linux", "gateway_default_endpoint"),
                     ("linux", "local"),
-                    ("linux", "gateway"),
+                    ("linux", "gateway_default_endpoint"),
                     ("linux", "local"),
-                    ("linux", "gateway"),
+                    ("linux", "gateway_default_endpoint"),
                 ],
             )
             self.assertEqual(

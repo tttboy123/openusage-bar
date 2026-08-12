@@ -92,6 +92,7 @@
         },
         "listenerActive": {
           "const": false,
+          "description": "False means the canonical default Gateway endpoint was inactive during the bounded observation; it does not prove custom Gateway endpoints absent.",
           "type": "boolean"
         },
         "telemetryCreated": {

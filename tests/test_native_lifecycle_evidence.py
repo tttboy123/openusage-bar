@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import unittest
+import json
 import subprocess
 import sys
+import unittest
 from pathlib import Path
 
 
@@ -61,6 +62,36 @@ def windows_x64_record() -> dict[str, object]:
 
 
 class NativeLifecycleEvidenceTests(unittest.TestCase):
+    def test_gateway_listener_field_is_only_the_canonical_default_endpoint(self) -> None:
+        lifecycle_schema = json.loads(
+            (ROOT / "docs/schemas/native-lifecycle-evidence-v1.schema.json")
+            .read_text(encoding="utf-8")
+        )
+        native_ci_schema = json.loads(
+            (ROOT / "docs/schemas/native-ci-evidence-v1.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        descriptions = (
+            lifecycle_schema["properties"]["gateway"]["properties"]
+            ["listenerActive"]["description"],
+            native_ci_schema["$defs"]["lifecycleGateway"]["properties"]
+            ["listenerActive"]["description"],
+        )
+        for description in descriptions:
+            self.assertIn("canonical default Gateway endpoint", description)
+            self.assertIn(
+                "does not prove custom Gateway endpoints absent", description
+            )
+
+        documentation = " ".join(
+            (ROOT / "docs/native-lifecycle-evidence.md")
+            .read_text(encoding="utf-8")
+            .split()
+        )
+        self.assertIn("canonical default Gateway endpoint", documentation)
+        self.assertIn("does not prove custom Gateway endpoints absent", documentation)
+
     def test_state_delete_does_not_expand_local_or_gateway_http_namespaces(self) -> None:
         from openusage_bar.gateway.api import GatewayRouter
         from openusage_bar.gateway.contracts import GatewayMode

@@ -3581,7 +3581,7 @@ def _linux_observe_install(
         api_socket=api_socket,
     )
     _require_listener(
-        dependencies.inspect_listener("linux", "gateway"),
+        dependencies.inspect_listener("linux", "gateway_default_endpoint"),
         active=False,
         authenticated_ready=False,
     )
@@ -3664,7 +3664,7 @@ def _linux_native_lifecycle(
             authenticated_ready=False,
         )
         _require_listener(
-            dependencies.inspect_listener("linux", "gateway"),
+            dependencies.inspect_listener("linux", "gateway_default_endpoint"),
             active=False,
             authenticated_ready=False,
         )
@@ -3755,7 +3755,7 @@ def _linux_native_lifecycle(
             authenticated_ready=False,
         )
         _require_listener(
-            dependencies.inspect_listener("linux", "gateway"),
+            dependencies.inspect_listener("linux", "gateway_default_endpoint"),
             active=False,
             authenticated_ready=False,
         )

@@ -930,7 +930,11 @@
       "properties": {
         "cacheCreated": {"const": false, "type": "boolean"},
         "defaultMode": {"const": "observe", "type": "string"},
-        "listenerActive": {"const": false, "type": "boolean"},
+        "listenerActive": {
+          "const": false,
+          "description": "False means the canonical default Gateway endpoint was inactive during the bounded observation; it does not prove custom Gateway endpoints absent.",
+          "type": "boolean"
+        },
         "telemetryCreated": {"const": false, "type": "boolean"}
       },
       "required": [

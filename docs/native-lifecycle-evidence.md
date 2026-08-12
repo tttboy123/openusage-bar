@@ -9,9 +9,11 @@ The record binds the source commit and final NSIS/AppImage name, size, and
 SHA-256 digest to nine observed lifecycle checks: install, first run,
 observation-only default, user-service registration, preserve uninstall,
 service removal, reinstall, confirmed delete uninstall, and final state
-removal. It also fixes Gateway startup to `observe`, requires the Gateway
-listener/cache/telemetry to remain absent, and records zero Provider credential
-reads and Provider network calls.
+removal. It also fixes Gateway startup to `observe`, requires the canonical
+default Gateway endpoint plus canonical cache and telemetry artifacts to remain
+absent, and records zero Provider credential reads and Provider network calls.
+The `gateway.listenerActive` field refers only to that canonical default Gateway
+endpoint; it does not prove custom Gateway endpoints absent.
 
 The production generator is deliberately fail-closed. It accepts no client
 supplied pass/fail JSON and creates no report unless its built-in external
