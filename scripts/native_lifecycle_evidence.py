@@ -2538,6 +2538,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         wait=unavailable,
     )
     try:
+        object.__setattr__(dependencies, "_owns_run_directory_cleanup", True)
         object.__setattr__(
             dependencies,
             "_mark_process_rollback_unproven",
@@ -3527,7 +3528,14 @@ def _linux_native_lifecycle(
                 cleanup_failed = True
             else:
                 active_handle = None
-        if run_directory is not None and active_handle is None:
+        context_owns_run_directory = (
+            getattr(dependencies, "_owns_run_directory_cleanup", False) is True
+        )
+        if (
+            run_directory is not None
+            and active_handle is None
+            and not context_owns_run_directory
+        ):
             try:
                 dependencies.remove_path(run_directory)
             except Exception:
