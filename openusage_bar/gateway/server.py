@@ -458,6 +458,64 @@ def _create_token(path: Path, token: str) -> bool:
 
 
 def _load_or_create_token(path: Path, supplied: str | None) -> str:
+    parts = path.parts
+    held_descriptor = (
+        int(parts[4])
+        if (
+            os.name != "nt"
+            and len(parts) == 5
+            and parts[:4] == ("/", "proc", "self", "fd")
+            and parts[4].isascii()
+            and parts[4].isdecimal()
+        )
+        else None
+    )
+    if held_descriptor is not None:
+        unsafe = "existing Gateway token file is unsafe"
+        try:
+            before = os.fstat(held_descriptor)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_nlink != 1
+                or before.st_uid != os.getuid()
+                or stat.S_IMODE(before.st_mode) != 0o600
+            ):
+                raise OSError
+            raw = os.pread(held_descriptor, 257, 0)
+            after = os.fstat(held_descriptor)
+            before_signature = (
+                before.st_dev,
+                before.st_ino,
+                before.st_mode,
+                before.st_uid,
+                before.st_gid,
+                before.st_nlink,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            after_signature = (
+                after.st_dev,
+                after.st_ino,
+                after.st_mode,
+                after.st_uid,
+                after.st_gid,
+                after.st_nlink,
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            )
+            if before_signature != after_signature:
+                raise OSError
+            token = _validate_token(raw.decode("ascii"))
+            if supplied is not None and not hmac.compare_digest(
+                token,
+                _validate_token(supplied),
+            ):
+                raise OSError
+            return token
+        except Exception:
+            raise OSError(unsafe) from None
     if not path.name or path.name in {".", ".."}:
         raise ValueError("Gateway token path is invalid")
     token = _validate_token(supplied) if supplied is not None else None

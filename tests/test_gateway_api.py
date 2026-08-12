@@ -1014,6 +1014,25 @@ class GatewayRouterTests(unittest.TestCase):
 
 
 class GatewayTokenPublicationTests(unittest.TestCase):
+    def test_held_linux_file_alias_is_a_private_read_only_token(self) -> None:
+        if os.name == "nt":
+            self.skipTest("POSIX held directory authority")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            token_path = root / "gateway.token"
+            token_path.write_text(GATEWAY_TOKEN, encoding="ascii")
+            token_path.chmod(0o600)
+            descriptor = os.open(token_path, os.O_RDONLY | os.O_CLOEXEC)
+            try:
+                alias = Path(f"/proc/self/fd/{descriptor}")
+                self.assertEqual(
+                    gateway_server_module._load_or_create_token(alias, None),
+                    GATEWAY_TOKEN,
+                )
+            finally:
+                os.close(descriptor)
+
     def test_windows_security_seam_hardens_existing_file_before_read(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             token_path = Path(directory) / "gateway.token"

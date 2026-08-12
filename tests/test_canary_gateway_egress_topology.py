@@ -1,9 +1,552 @@
 from __future__ import annotations
 
+import os
+import signal
+import subprocess
+import tempfile
 import unittest
+from unittest.mock import patch
 
 
 class GatewayEgressTopologyCanaryTests(unittest.TestCase):
+    @staticmethod
+    def _closed_environment(root: str = "/PRIVATE") -> dict[str, str]:
+        return {
+            "HOME": os.path.join(root, "home"),
+            "XDG_DATA_HOME": os.path.join(root, "data"),
+            "TMPDIR": os.path.join(root, "tmp"),
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PYTHONNOUSERSITE": "1",
+        }
+
+    @staticmethod
+    def _prepare_private_root(root: str) -> None:
+        os.chmod(root, 0o700)
+        for name in ("home", "data", "tmp"):
+            path = os.path.join(root, name)
+            os.mkdir(path, 0o700)
+            os.chmod(path, 0o700)
+
+    @staticmethod
+    def _prepare_advise_config(root: str) -> str:
+        config = os.path.join(root, "gateway.json")
+        with open(config, "wb") as stream:
+            stream.write(b'{"enabled":true,"mode":"advise"}')
+        os.chmod(config, 0o600)
+        return config
+
+    @staticmethod
+    def _prepare_gateway_token(root: str) -> str:
+        token = os.path.join(root, "gateway.token")
+        with open(token, "wb") as stream:
+            stream.write(b"g" * 48)
+        os.chmod(token, 0o600)
+        return token
+
+    def test_owned_gateway_process_lease_starts_from_held_collector_and_reaps(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            _start_gateway_process_lease,
+        )
+
+        events: list[object] = []
+
+        class Process:
+            pid = 4312
+
+            def wait(self, *, timeout: float) -> int:
+                events.append(("wait", timeout))
+                return 0
+
+        process = Process()
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.realpath(directory)
+            self._prepare_private_root(root)
+            environment = self._closed_environment(root)
+            collector = os.path.join(root, "openusage-collector")
+            config = self._prepare_advise_config(root)
+            token = self._prepare_gateway_token(root)
+            with open(collector, "wb") as stream:
+                stream.write(b"audited-collector")
+            os.chmod(collector, 0o700)
+
+            def popen(argv, **kwargs):
+                events.append(("popen", tuple(argv), kwargs))
+                return process
+
+            def killpg(process_group_id: int, selected_signal: int) -> None:
+                events.append(("killpg", process_group_id, selected_signal))
+
+            with (
+                patch(
+                    "scripts.canary_gateway_egress_topology.subprocess.Popen",
+                    side_effect=popen,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.getpgid",
+                    return_value=process.pid,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.killpg",
+                    side_effect=killpg,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology._wait_for_reserved_leader",
+                    return_value=True,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology._process_group_has_live_member",
+                    return_value=False,
+                ),
+            ):
+                lease = _start_gateway_process_lease(
+                    collector=collector,
+                    config_path=config,
+                    token_path=token,
+                    environment=environment,
+                )
+                lease.stop()
+                lease.close()
+
+        popen_event = next(event for event in events if event[0] == "popen")
+        _, argv, kwargs = popen_event
+        descriptor = int(argv[0].rsplit("/", 1)[1])
+        config_descriptor = int(argv[4].rsplit("/", 1)[1])
+        self.assertEqual(
+            argv,
+            (
+                f"/proc/self/fd/{descriptor}",
+                "gateway",
+                "start",
+                "--config",
+                f"/proc/self/fd/{config_descriptor}",
+                "--token-path",
+                argv[6],
+            ),
+        )
+        self.assertRegex(
+            argv[6],
+            r"^/proc/self/fd/[0-9]+$",
+        )
+        self.assertIn(int(argv[6].rsplit("/", 1)[1]), kwargs["pass_fds"])
+        self.assertNotIn(root, argv)
+        self.assertEqual(kwargs["pass_fds"][0], descriptor)
+        self.assertIn(config_descriptor, kwargs["pass_fds"])
+        for key in ("HOME", "XDG_DATA_HOME", "TMPDIR"):
+            self.assertRegex(kwargs["env"][key], r"^/proc/self/fd/[0-9]+$")
+            self.assertIn(
+                int(kwargs["env"][key].rsplit("/", 1)[1]),
+                kwargs["pass_fds"],
+            )
+        self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+        self.assertEqual(kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
+        self.assertIs(kwargs["shell"], False)
+        self.assertIs(kwargs["start_new_session"], True)
+        self.assertEqual(
+            {key: kwargs["env"][key] for key in ("PATH", "LANG", "LC_ALL", "PYTHONNOUSERSITE")},
+            {key: environment[key] for key in ("PATH", "LANG", "LC_ALL", "PYTHONNOUSERSITE")},
+        )
+        self.assertIn(("killpg", process.pid, signal.SIGTERM), events)
+        self.assertIn(("killpg", process.pid, signal.SIGKILL), events)
+        self.assertIn(("wait", 5.0), events)
+
+    def test_reaped_gateway_leader_is_never_signalled_after_binding_failure(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            _start_gateway_process_lease,
+        )
+
+        events: list[object] = []
+
+        class Process:
+            pid = 4312
+
+            def wait(self, *, timeout: float) -> int:
+                events.append(("wait", timeout))
+                return 0
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.realpath(directory)
+            self._prepare_private_root(root)
+            collector = os.path.join(root, "openusage-collector")
+            with open(collector, "wb") as stream:
+                stream.write(b"audited-collector")
+            os.chmod(collector, 0o700)
+            config = self._prepare_advise_config(root)
+            token = self._prepare_gateway_token(root)
+
+            with (
+                patch(
+                    "scripts.canary_gateway_egress_topology.subprocess.Popen",
+                    return_value=Process(),
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.getpgid",
+                    return_value=4312,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.killpg",
+                    side_effect=lambda pid, selected_signal: events.append(
+                        ("killpg", pid, selected_signal)
+                    ),
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology._wait_for_reserved_leader",
+                    return_value=True,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology._process_group_has_live_member",
+                    return_value=False,
+                ),
+            ):
+                lease = _start_gateway_process_lease(
+                    collector=collector,
+                    config_path=config,
+                    token_path=token,
+                    environment=self._closed_environment(root),
+                )
+                with patch.object(
+                    lease,
+                    "_binding_is_stable",
+                    side_effect=(True, False),
+                ):
+                    with self.assertRaisesRegex(
+                        GatewayEgressTopologyCanaryError,
+                        r"^Gateway egress topology canary failed$",
+                    ):
+                        lease.stop()
+                events_after_stop = list(events)
+                lease.close()
+
+        self.assertEqual(events, events_after_stop)
+        self.assertEqual(events.count(("wait", 5.0)), 1)
+        self.assertEqual(
+            [event for event in events if event[0] == "killpg"],
+            [
+                ("killpg", 4312, signal.SIGTERM),
+                ("killpg", 4312, signal.SIGKILL),
+            ],
+        )
+
+    def test_unverified_gateway_process_is_never_treated_as_an_owned_group(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            _start_gateway_process_lease,
+        )
+
+        events: list[object] = []
+
+        class Process:
+            pid = 4312
+
+            def kill(self) -> None:
+                events.append("kill-process")
+
+            def wait(self, *, timeout: float) -> int:
+                events.append(("wait", timeout))
+                return -signal.SIGKILL
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.realpath(directory)
+            self._prepare_private_root(root)
+            collector = os.path.join(root, "openusage-collector")
+            with open(collector, "wb") as stream:
+                stream.write(b"audited-collector")
+            os.chmod(collector, 0o700)
+            config = self._prepare_advise_config(root)
+            token = self._prepare_gateway_token(root)
+
+            with (
+                patch(
+                    "scripts.canary_gateway_egress_topology.subprocess.Popen",
+                    return_value=Process(),
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.getpgid",
+                    return_value=9999,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.killpg",
+                    side_effect=lambda *_args: events.append("kill-group"),
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.close",
+                    wraps=os.close,
+                ) as close_descriptor,
+            ):
+                with self.assertRaisesRegex(
+                    GatewayEgressTopologyCanaryError,
+                    r"^Gateway egress topology canary failed$",
+                ):
+                    _start_gateway_process_lease(
+                        collector=collector,
+                        config_path=config,
+                        token_path=token,
+                        environment=self._closed_environment(root),
+                    )
+
+        self.assertEqual(events, ["kill-process", ("wait", 5.0)])
+        self.assertEqual(close_descriptor.call_count, 7)
+
+    def test_gateway_lease_rejects_untrusted_environment_before_popen(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            _start_gateway_process_lease,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.realpath(directory)
+            self._prepare_private_root(root)
+            collector = os.path.join(root, "openusage-collector")
+            with open(collector, "wb") as stream:
+                stream.write(b"audited-collector")
+            os.chmod(collector, 0o700)
+            config = self._prepare_advise_config(root)
+            token = self._prepare_gateway_token(root)
+            environment = self._closed_environment(root) | {
+                "LD_PRELOAD": "/PRIVATE/injection.so"
+            }
+            with (
+                patch(
+                    "scripts.canary_gateway_egress_topology.subprocess.Popen",
+                ) as popen,
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.close",
+                    wraps=os.close,
+                ) as close_descriptor,
+            ):
+                with self.assertRaisesRegex(
+                    GatewayEgressTopologyCanaryError,
+                    r"^Gateway egress topology canary failed$",
+                ):
+                    _start_gateway_process_lease(
+                        collector=collector,
+                        config_path=config,
+                        token_path=token,
+                        environment=environment,
+                    )
+
+        popen.assert_not_called()
+        self.assertEqual(close_descriptor.call_count, 0)
+
+    def test_gateway_lease_rejects_symlinked_environment_authority(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            _start_gateway_process_lease,
+        )
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            tempfile.TemporaryDirectory() as foreign_directory,
+        ):
+            root = os.path.realpath(directory)
+            foreign = os.path.realpath(foreign_directory)
+            os.chmod(root, 0o700)
+            for name in ("data", "tmp"):
+                os.mkdir(os.path.join(root, name), 0o700)
+            os.symlink(foreign, os.path.join(root, "home"))
+            collector = os.path.join(root, "openusage-collector")
+            with open(collector, "wb") as stream:
+                stream.write(b"audited-collector")
+            os.chmod(collector, 0o700)
+            config = self._prepare_advise_config(root)
+            token = self._prepare_gateway_token(root)
+            marker = os.path.join(foreign, "PRIVATE_MARKER")
+            with open(marker, "wb") as stream:
+                stream.write(b"PRIVATE_BYTES")
+            marker_identity = os.lstat(marker)
+
+            with patch(
+                "scripts.canary_gateway_egress_topology.subprocess.Popen",
+            ) as popen:
+                with self.assertRaisesRegex(
+                    GatewayEgressTopologyCanaryError,
+                    r"^Gateway egress topology canary failed$",
+                ):
+                    _start_gateway_process_lease(
+                        collector=collector,
+                        config_path=config,
+                        token_path=token,
+                        environment=self._closed_environment(root),
+                    )
+
+            popen.assert_not_called()
+            self.assertEqual(
+                (os.lstat(marker).st_dev, os.lstat(marker).st_ino),
+                (marker_identity.st_dev, marker_identity.st_ino),
+            )
+            with open(marker, "rb") as stream:
+                self.assertEqual(stream.read(), b"PRIVATE_BYTES")
+
+    def test_gateway_lease_rejects_non_advise_config_before_popen(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            _start_gateway_process_lease,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.realpath(directory)
+            self._prepare_private_root(root)
+            collector = os.path.join(root, "openusage-collector")
+            with open(collector, "wb") as stream:
+                stream.write(b"audited-collector")
+            os.chmod(collector, 0o700)
+            config = os.path.join(root, "gateway.json")
+            with open(config, "wb") as stream:
+                stream.write(
+                    b'{"enabled":true,"mode":"gateway",'
+                    b'"proxy_enabled":true}'
+                )
+            os.chmod(config, 0o600)
+            token = self._prepare_gateway_token(root)
+
+            with patch(
+                "scripts.canary_gateway_egress_topology.subprocess.Popen",
+            ) as popen:
+                with self.assertRaisesRegex(
+                    GatewayEgressTopologyCanaryError,
+                    r"^Gateway egress topology canary failed$",
+                ):
+                    _start_gateway_process_lease(
+                        collector=collector,
+                        config_path=config,
+                        token_path=token,
+                        environment=self._closed_environment(root),
+                    )
+
+            popen.assert_not_called()
+
+    def test_gateway_lease_revalidates_every_binding_after_popen(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            _start_gateway_process_lease,
+        )
+
+        events: list[object] = []
+
+        class Process:
+            pid = 4312
+
+            def wait(self, *, timeout: float) -> int:
+                events.append(("wait", timeout))
+                return -signal.SIGKILL
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.realpath(directory)
+            self._prepare_private_root(root)
+            collector = os.path.join(root, "openusage-collector")
+            with open(collector, "wb") as stream:
+                stream.write(b"audited-collector")
+            os.chmod(collector, 0o700)
+            config = self._prepare_advise_config(root)
+            token = self._prepare_gateway_token(root)
+
+            def popen(_argv, **_kwargs):
+                os.rename(config, f"{config}.owned-original")
+                with open(config, "wb") as stream:
+                    stream.write(b'{"enabled":true,"mode":"advise"}')
+                os.chmod(config, 0o600)
+                return Process()
+
+            with (
+                patch(
+                    "scripts.canary_gateway_egress_topology.subprocess.Popen",
+                    side_effect=popen,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.getpgid",
+                    return_value=4312,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.killpg",
+                    side_effect=lambda pid, selected_signal: events.append(
+                        ("killpg", pid, selected_signal)
+                    ),
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology._wait_for_reserved_leader",
+                    return_value=True,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology._wait_for_group_members_to_exit",
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    GatewayEgressTopologyCanaryError,
+                    r"^Gateway egress topology canary failed$",
+                ):
+                    _start_gateway_process_lease(
+                        collector=collector,
+                        config_path=config,
+                        token_path=token,
+                        environment=self._closed_environment(root),
+                    )
+
+        self.assertIn(("killpg", 4312, signal.SIGKILL), events)
+        self.assertIn(("wait", 5.0), events)
+
+    def test_gateway_lease_opens_every_artifact_beneath_the_held_root(self) -> None:
+        from scripts.canary_gateway_egress_topology import (
+            GatewayEgressTopologyCanaryError,
+            _start_gateway_process_lease,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.realpath(directory)
+            self._prepare_private_root(root)
+            collector = os.path.join(root, "openusage-collector")
+            with open(collector, "wb") as stream:
+                stream.write(b"owned-collector")
+            os.chmod(collector, 0o700)
+            config = self._prepare_advise_config(root)
+            token = self._prepare_gateway_token(root)
+            original = f"{root}.owned-original"
+            real_open = os.open
+            swapped = False
+
+            def swap_root_then_open(path, flags, *args, **kwargs):
+                nonlocal swapped
+                if path == "openusage-collector" and not swapped:
+                    swapped = True
+                    os.rename(root, original)
+                    os.mkdir(root, 0o700)
+                    self._prepare_private_root(root)
+                    with open(os.path.join(root, "openusage-collector"), "wb") as stream:
+                        stream.write(b"foreign-collector")
+                    os.chmod(os.path.join(root, "openusage-collector"), 0o700)
+                    self._prepare_advise_config(root)
+                    self._prepare_gateway_token(root)
+                return real_open(path, flags, *args, **kwargs)
+
+            with (
+                patch(
+                    "scripts.canary_gateway_egress_topology.os.open",
+                    side_effect=swap_root_then_open,
+                ),
+                patch(
+                    "scripts.canary_gateway_egress_topology.subprocess.Popen",
+                ) as popen,
+            ):
+                with self.assertRaisesRegex(
+                    GatewayEgressTopologyCanaryError,
+                    r"^Gateway egress topology canary failed$",
+                ):
+                    _start_gateway_process_lease(
+                        collector=collector,
+                        config_path=config,
+                        token_path=token,
+                        environment=self._closed_environment(root),
+                    )
+
+            self.assertTrue(swapped)
+            popen.assert_not_called()
+            with open(os.path.join(original, "openusage-collector"), "rb") as stream:
+                self.assertEqual(stream.read(), b"owned-collector")
+            with open(os.path.join(root, "openusage-collector"), "rb") as stream:
+                self.assertEqual(stream.read(), b"foreign-collector")
+
     def test_evaluator_accepts_only_one_authenticated_endpoint_epoch_with_zero_delta(
         self,
     ) -> None:
