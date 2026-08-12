@@ -64,7 +64,9 @@ _LINUX_SERVICE_ABSENCE_STAGES = frozenset(
         "authority",
         "runtime-peer",
         "manager-provenance",
-        "manager-binary",
+        "manager-binary-path",
+        "manager-binary-metadata",
+        "manager-binary-public-identity",
         "systemctl-binding",
         "unit-absence",
         "manager-query",
@@ -902,7 +904,7 @@ def read_current_user_collector_service_absence_state(
         manager_cgroup_before = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
-        stage = "manager-binary"
+        stage = "manager-binary-path"
         manager_executable_before = _read_linux_systemd_manager_executable(
             manager_peer.pid
         )
@@ -932,7 +934,7 @@ def read_current_user_collector_service_absence_state(
         manager_cgroup_after = _read_linux_systemd_manager_cgroup(
             manager_peer.pid, current_uid
         )
-        stage = "manager-binary"
+        stage = "manager-binary-path"
         manager_executable_after = _read_linux_systemd_manager_executable(
             manager_peer.pid
         )
@@ -1310,14 +1312,20 @@ def _read_linux_systemd_manager_executable(
     proc_executable = f"/proc/{manager_pid}/exe"
     try:
         raw_path = os.readlink(proc_executable)
-        if raw_path != "/usr/lib/systemd/systemd":
-            raise ServiceCommandError()
-        proc_metadata = os.stat(proc_executable)
-        public_metadata = os.stat(raw_path, follow_symlinks=False)
-    except ServiceCommandError:
-        raise
     except Exception as error:
-        raise ServiceCommandError() from error
+        raise ServiceCommandError(stage="manager-binary-path") from error
+    if raw_path != "/usr/lib/systemd/systemd":
+        raise ServiceCommandError(stage="manager-binary-path")
+    try:
+        proc_metadata = os.stat(proc_executable)
+    except Exception as error:
+        raise ServiceCommandError(stage="manager-binary-metadata") from error
+    try:
+        public_metadata = os.stat(raw_path, follow_symlinks=False)
+    except Exception as error:
+        raise ServiceCommandError(
+            stage="manager-binary-public-identity"
+        ) from error
     mode = stat.S_IMODE(proc_metadata.st_mode)
     signature = _linux_file_signature(proc_metadata)
     if (
@@ -1326,9 +1334,10 @@ def _read_linux_systemd_manager_executable(
         or proc_metadata.st_nlink != 1
         or not mode & 0o100
         or mode & 0o022
-        or _linux_file_signature(public_metadata) != signature
     ):
-        raise ServiceCommandError()
+        raise ServiceCommandError(stage="manager-binary-metadata")
+    if _linux_file_signature(public_metadata) != signature:
+        raise ServiceCommandError(stage="manager-binary-public-identity")
     return raw_path, signature
 
 
