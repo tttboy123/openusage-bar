@@ -948,6 +948,7 @@ jobs:
             exit 1
           fi
           preserve_root="$(mktemp -d "/tmp/usagehub-preserve-uninstall.XXXXXX")"
+          preserve_root_identity="$(/usr/bin/stat --format='%d:%i' "$preserve_root")"
           preserve_execution="$preserve_root/execution.AppImage"
           collector_stdout="$preserve_root/collector.stdout"
           collector_stderr="$preserve_root/collector.stderr"
@@ -969,8 +970,11 @@ jobs:
               "$packaged_collector" \
               "$collector_stdout" \
               "$collector_stderr" || cleanup_failed=1
-            sudo rmdir \
-              "$preserve_root" || cleanup_failed=1
+            if ! test "$(/usr/bin/stat --format='%d:%i' "$preserve_root")" = "$preserve_root_identity"; then
+              cleanup_failed=1
+            else
+              sudo /bin/rm -rf --one-file-system "$preserve_root" || cleanup_failed=1
+            fi
             return "$cleanup_failed"
           }
           trap cleanup_preserve EXIT

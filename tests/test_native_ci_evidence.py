@@ -2363,6 +2363,11 @@ class NativeCiEvidenceTests(unittest.TestCase):
             '"/tmp/usagehub-preserve-uninstall.XXXXXX")"',
             preserve,
         )
+        self.assertIn(
+            'preserve_root_identity="$(/usr/bin/stat --format=\'%d:%i\' '
+            '"$preserve_root")"',
+            preserve,
+        )
         self.assertNotIn(
             '$RUNNER_TEMP/usagehub-preserve-uninstall.',
             preserve,
@@ -2569,12 +2574,7 @@ class NativeCiEvidenceTests(unittest.TestCase):
             preserve.index('sudo systemctl stop "user@$current_uid.service"'),
             preserve.index('sudo userdel --remove "$preserve_user"'),
         )
-        rmdir_start = preserve.index("sudo rmdir")
-        rmdir_end = preserve.index('return "$cleanup_failed"', rmdir_start)
-        self.assertNotIn(
-            '"$preserve_root/home"',
-            preserve[rmdir_start:rmdir_end],
-        )
+        self.assertNotIn("sudo rmdir", preserve)
         for wrapper_status, category in (
             (2, "wrapper-request"),
             (3, "wrapper-plan"),
@@ -2590,7 +2590,13 @@ class NativeCiEvidenceTests(unittest.TestCase):
                     preserve,
                 )
         self.assertIn("sudo /bin/rm -f", preserve)
-        self.assertIn("sudo rmdir", preserve)
+        self.assertIn(
+            'test "$(/usr/bin/stat --format=\'%d:%i\' "$preserve_root")" '
+            '= "$preserve_root_identity"',
+            preserve,
+        )
+        self.assertIn('sudo /bin/rm -rf --one-file-system "$preserve_root"', preserve)
+        self.assertNotIn("sudo rmdir", preserve)
         self.assertIn(
             'final_source_digest="$(/usr/bin/sha256sum "$FINAL_ARTIFACT"',
             preserve,
