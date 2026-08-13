@@ -24,7 +24,7 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Protocol
@@ -527,6 +527,50 @@ class NativeListenerState:
             or (self.authenticated_ready and not self.active)
         ):
             raise ValueError("native listener state invalid")
+
+
+@dataclass(frozen=True, repr=False)
+class LinuxManagedObserverGenerationFact:
+    """Closed continuity fact for one managed Linux Observer generation."""
+
+    generation: int
+    runtime_identity_sha256: str
+    process_epoch_sha256: str
+    bounded_http_open_attempts_zero: bool
+    headless_keychain_get_attempts_zero: bool
+
+    def __post_init__(self) -> None:
+        if _closed_linux_managed_generation_values(self) is None:
+            raise ValueError("Linux managed Observer generation fact invalid")
+
+    def __repr__(self) -> str:
+        return "<LinuxManagedObserverGenerationFact closed>"
+
+
+def _closed_linux_managed_generation_values(
+    value: object,
+) -> tuple[int, str, str, bool, bool] | None:
+    if type(value) is not LinuxManagedObserverGenerationFact:
+        return None
+    selected = (
+        value.generation,
+        value.runtime_identity_sha256,
+        value.process_epoch_sha256,
+        value.bounded_http_open_attempts_zero,
+        value.headless_keychain_get_attempts_zero,
+    )
+    if (
+        type(selected[0]) is not int
+        or selected[0] not in {1, 2}
+        or type(selected[1]) is not str
+        or SHA256.fullmatch(selected[1]) is None
+        or type(selected[2]) is not str
+        or SHA256.fullmatch(selected[2]) is None
+        or selected[3] is not True
+        or selected[4] is not True
+    ):
+        return None
+    return selected
 
 
 def _valid_native_path(value: object) -> bool:
@@ -1680,9 +1724,14 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     ledger facts; and an instantaneous current-netns TCP 17823 absence fact.
     The bound start/stop process lease, preserve and second-generation
     delete-data ``run_process`` transactions, and a closed monotonic/wait clock
-    are enabled.  Generic Gateway state and privacy event callbacks remain
-    unavailable, so real product lifecycle mutation is reachable but the
-    default executor still fails closed before producing lifecycle evidence.
+    are enabled.  Each managed generation must retain one exact service,
+    Local API, and shared-client process epoch fact across the Desktop process
+    group stop before preserve or delete rollback is authorized.  This covers
+    only the two instrumented process-local shared-client attempt boundaries;
+    it is not a whole-process network or credential observation.  Generic
+    Gateway state and privacy event callbacks remain unavailable, so real
+    product lifecycle mutation is reachable but the default executor still
+    fails closed before producing lifecycle evidence.
     Random
     quarantines and identity rechecks detect observed replacements, but are
     not isolation from a continuously malicious same-UID process after the
@@ -1718,6 +1767,10 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     preserve_uninstall_token: tuple[object, ...] | None = None
     last_monotonic: float | None = None
     active_process_lease: _LinuxExecutionProcessLease | None = None
+    managed_generation_observation: LinuxManagedObserverGenerationFact | None = None
+    managed_generation_before_values: tuple[int, str, str, bool, bool] | None = None
+    stopped_execution_token: tuple[object, ...] | None = None
+    managed_generation_continuity_proven = False
 
     def revoke_runtime_install_absence_fact() -> None:
         nonlocal runtime_install_absence_fact
@@ -1726,6 +1779,15 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     def revoke_service_presence_observation() -> None:
         nonlocal service_presence_observation
         service_presence_observation = None
+
+    def revoke_managed_generation_observation() -> None:
+        nonlocal managed_generation_observation
+        nonlocal managed_generation_before_values, stopped_execution_token
+        nonlocal managed_generation_continuity_proven
+        managed_generation_observation = None
+        managed_generation_before_values = None
+        stopped_execution_token = None
+        managed_generation_continuity_proven = False
 
     def revoke_transient_observation_facts() -> None:
         nonlocal preserve_uninstall_token
@@ -1736,6 +1798,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     def revoke_all_observation_facts() -> None:
         nonlocal service_absence_confirmed, local_listener_absence_confirmed
         revoke_transient_observation_facts()
+        revoke_managed_generation_observation()
         service_absence_confirmed = False
         local_listener_absence_confirmed = False
 
@@ -1776,6 +1839,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         process_rollback_unproven = True
         product_rollback_unproven = True
         preserve_uninstall_token = None
+        revoke_managed_generation_observation()
 
     def mark_process_rollback_proven() -> None:
         nonlocal process_rollback_unproven, preserve_uninstall_token
@@ -1787,6 +1851,16 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _driver_fail()
         preserve_uninstall_token = run_directory.preserve_uninstall_token()
         process_rollback_unproven = False
+        revoke_managed_generation_observation()
+
+    def mark_managed_process_rollback_proven() -> None:
+        if (
+            run_directory is None
+            or stopped_execution_token != run_directory.preserve_uninstall_token()
+            or managed_generation_continuity_proven is not True
+        ):
+            _driver_fail()
+        mark_process_rollback_proven()
 
     def closed_execution_environment() -> dict[str, str]:
         try:
@@ -1936,7 +2010,10 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             _driver_fail()
 
     def stop_process(handle: object = None) -> None:
-        nonlocal active_process_lease
+        nonlocal active_process_lease, managed_generation_before_values
+        nonlocal stopped_execution_token
+        nonlocal managed_generation_continuity_proven
+        before_values = managed_generation_before_values
         revoke_all_observation_facts()
         if (
             type(handle) is not _LinuxExecutionProcessLease
@@ -1968,6 +2045,9 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             if type(result) is not int:
                 _driver_fail()
             active_process_lease = None
+            managed_generation_before_values = before_values
+            stopped_execution_token = handle.token
+            managed_generation_continuity_proven = False
         except LifecycleEvidenceError:
             raise
         except Exception:
@@ -1982,6 +2062,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         nonlocal service_presence_observation
         nonlocal local_listener_absence_confirmed
         revoke_transient_observation_facts()
+        revoke_managed_generation_observation()
         profile_projection = None
         profile_xdg_binding = None
         profile_xdg_trusted_root = None
@@ -2117,6 +2198,89 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         if profile_projection.runtime_root != expected_runtime_root:
             _fail("driver_unavailable")
         return anchor, relative_components, expected_runtime_root
+
+    def managed_runtime_identity_sha256(
+        service: object,
+        local_state: object,
+    ) -> str:
+        def closed_value(value: object) -> object:
+            if type(value) in {str, int, bool}:
+                return [type(value).__name__, value]
+            if type(value) is bytes:
+                return ["bytes", value.hex()]
+            if isinstance(value, Path) and value.is_absolute():
+                return ["path", str(value)]
+            if type(value) is tuple:
+                return ["tuple", [closed_value(item) for item in value]]
+            _fail("driver_unavailable")
+
+        try:
+            from openusage_bar.local_api import LinuxLocalAPIState
+            from openusage_bar.platform_services import LinuxCollectorServiceState
+
+            if (
+                type(service) is not LinuxCollectorServiceState
+                or type(local_state) is not LinuxLocalAPIState
+            ):
+                _fail("driver_unavailable")
+            payload = [
+                [
+                    "service",
+                    [
+                        [field.name, closed_value(getattr(service, field.name))]
+                        for field in dataclass_fields(service)
+                    ],
+                ],
+                [
+                    "localApi",
+                    [
+                        [field.name, closed_value(getattr(local_state, field.name))]
+                        for field in dataclass_fields(local_state)
+                    ],
+                ],
+            ]
+            encoded = json.dumps(
+                payload,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("ascii")
+            return hashlib.sha256(encoded).hexdigest()
+        except LifecycleEvidenceError:
+            raise
+        except Exception:
+            _fail("driver_unavailable")
+
+    def consume_linux_managed_generation_fact(
+    ) -> LinuxManagedObserverGenerationFact:
+        nonlocal managed_generation_observation
+        nonlocal managed_generation_before_values
+        nonlocal managed_generation_continuity_proven
+        observed = managed_generation_observation
+        managed_generation_observation = None
+        values = _closed_linux_managed_generation_values(observed)
+        if values is None or run_directory is None:
+            _driver_fail()
+        if active_process_lease is not None:
+            if (
+                stopped_execution_token is not None
+                or values[0] != run_directory.execution_generation
+                or values[0] != active_process_lease.token[0]
+            ):
+                _driver_fail()
+            managed_generation_before_values = values
+            managed_generation_continuity_proven = False
+        else:
+            if (
+                stopped_execution_token is None
+                or values[0] != stopped_execution_token[0]
+                or managed_generation_before_values is None
+                or values != managed_generation_before_values
+            ):
+                _driver_fail()
+            managed_generation_continuity_proven = True
+        return LinuxManagedObserverGenerationFact(*values)
 
     def inspect_service(platform: object) -> NativeServiceState:
         nonlocal runtime_install_absence_fact
@@ -2395,6 +2559,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
         nonlocal runtime_install_absence_fact
         nonlocal service_absence_confirmed, local_listener_absence_confirmed
         nonlocal service_presence_observation, preserve_uninstall_token
+        nonlocal managed_generation_observation
         revoke_runtime_install_absence_fact()
         preserve_uninstall_token = None
         positive_service_observation = service_presence_observation
@@ -2522,6 +2687,34 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
                     or local_state.health_status != "ok"
                 ):
                     _fail("driver_unavailable")
+                execution_token = (
+                    active_process_lease.token
+                    if active_process_lease is not None
+                    else stopped_execution_token
+                )
+                if execution_token is not None:
+                    if (
+                        run_directory is None
+                        or execution_token
+                        != run_directory.preserve_uninstall_token()
+                        or type(execution_token[0]) is not int
+                        or execution_token[0] not in {1, 2}
+                    ):
+                        _fail("driver_unavailable")
+                    managed_generation_observation = (
+                        LinuxManagedObserverGenerationFact(
+                            generation=execution_token[0],
+                            runtime_identity_sha256=(
+                                managed_runtime_identity_sha256(
+                                    positive_service_observation,
+                                    local_state,
+                                )
+                            ),
+                            process_epoch_sha256=boundary_before_values[3],
+                            bounded_http_open_attempts_zero=True,
+                            headless_keychain_get_attempts_zero=True,
+                        )
+                    )
             except LifecycleEvidenceError:
                 raise
             except Exception:
@@ -2615,6 +2808,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     ) -> NativePackagePaths:
         nonlocal package_projection, runtime_install_absence_fact
         revoke_transient_observation_facts()
+        revoke_managed_generation_observation()
         package_projection = None
         runtime_install_absence_fact = None
         if (
@@ -2659,6 +2853,7 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
     def make_run_directory(platform: object, arch: object) -> Path:
         nonlocal run_directory
         revoke_transient_observation_facts()
+        revoke_managed_generation_observation()
         if (
             type(platform) is not str
             or platform != "linux"
@@ -2971,18 +3166,21 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
 
     def copy_file(source: object, destination: object) -> None:
         revoke_transient_observation_facts()
+        revoke_managed_generation_observation()
         if run_directory is None:
             _driver_fail()
         run_directory.copy_file(source, destination)
 
     def set_file_mode(path: object, mode: object) -> None:
         revoke_transient_observation_facts()
+        revoke_managed_generation_observation()
         if run_directory is None:
             _driver_fail()
         run_directory.set_file_mode(path, mode)
 
     def remove_path(path: object) -> None:
         revoke_transient_observation_facts()
+        revoke_managed_generation_observation()
         if run_directory is None:
             _driver_fail()
         run_directory.remove_path(path)
@@ -3201,6 +3399,16 @@ def native_lifecycle_dependencies_for_host() -> Iterator[NativeLifecycleDependen
             dependencies,
             "_mark_process_rollback_proven",
             mark_process_rollback_proven,
+        )
+        object.__setattr__(
+            dependencies,
+            "_mark_managed_process_rollback_proven",
+            mark_managed_process_rollback_proven,
+        )
+        object.__setattr__(
+            dependencies,
+            "_consume_linux_managed_generation_fact",
+            consume_linux_managed_generation_fact,
         )
         yield dependencies
     finally:
@@ -3939,7 +4147,18 @@ def _stop_linux_install(
     handle: object,
 ) -> None:
     dependencies.stop_process(handle)
-    marker = getattr(dependencies, "_mark_process_rollback_proven", None)
+
+
+def _mark_linux_process_rollback_proven(
+    dependencies: NativeLifecycleDependencies,
+) -> None:
+    marker = getattr(
+        dependencies,
+        "_mark_managed_process_rollback_proven",
+        None,
+    )
+    if marker is None:
+        marker = getattr(dependencies, "_mark_process_rollback_proven", None)
     if marker is not None:
         try:
             marker()
@@ -3947,11 +4166,63 @@ def _stop_linux_install(
             _driver_fail()
 
 
+def _consume_linux_managed_generation_fact(
+    dependencies: NativeLifecycleDependencies,
+) -> LinuxManagedObserverGenerationFact:
+    consumer = getattr(
+        dependencies,
+        "_consume_linux_managed_generation_fact",
+        None,
+    )
+    if not callable(consumer):
+        _driver_fail()
+    try:
+        observed = consumer()
+    except Exception:
+        _driver_fail()
+    values = _closed_linux_managed_generation_values(observed)
+    if values is None:
+        _driver_fail()
+    return LinuxManagedObserverGenerationFact(*values)
+
+
+def _reobserve_linux_managed_generation_after_stop(
+    dependencies: NativeLifecycleDependencies,
+    *,
+    collector: Path,
+    api_socket: Path,
+    expected: LinuxManagedObserverGenerationFact,
+) -> None:
+    service = _require_linux_service(
+        dependencies.inspect_service("linux"),
+        collector=collector,
+        api_socket=api_socket,
+    )
+    listener = dependencies.inspect_listener("linux", "local")
+    if (
+        type(service) is not NativeServiceState
+        or type(listener) is not NativeListenerState
+        or listener.active is not True
+        or listener.authenticated_ready is not True
+    ):
+        _driver_fail()
+    observed = _consume_linux_managed_generation_fact(dependencies)
+    expected_values = _closed_linux_managed_generation_values(expected)
+    observed_values = _closed_linux_managed_generation_values(observed)
+    if expected_values is None or observed_values != expected_values:
+        _driver_fail()
+    _mark_linux_process_rollback_proven(dependencies)
+
+
 def _linux_observe_install(
     dependencies: NativeLifecycleDependencies,
     *,
     profile_paths: NativeProfilePaths,
-) -> tuple[NativeLedgerState, NativePathState]:
+) -> tuple[
+    NativeLedgerState,
+    NativePathState,
+    LinuxManagedObserverGenerationFact,
+]:
     stable_collector = profile_paths.runtime_root / "openusage-collector"
     api_socket = profile_paths.state_root / "openusage.sock"
     _wait_for_linux_observer(
@@ -3959,6 +4230,7 @@ def _linux_observe_install(
         collector=stable_collector,
         api_socket=api_socket,
     )
+    generation_fact = _consume_linux_managed_generation_fact(dependencies)
     _require_listener(
         dependencies.inspect_listener("linux", "gateway_default_endpoint"),
         active=False,
@@ -3978,7 +4250,7 @@ def _linux_observe_install(
         ),
     ):
         _require_missing(dependencies.inspect_path(purpose, path))
-    return ledger, collector_state
+    return ledger, collector_state, generation_fact
 
 
 def _linux_native_lifecycle(
@@ -4023,12 +4295,18 @@ def _linux_native_lifecycle(
             dependencies,
             execution_copy=execution_copy,
         )
-        initial_ledger, initial_collector = _linux_observe_install(
+        initial_ledger, initial_collector, initial_generation = _linux_observe_install(
             dependencies,
             profile_paths=profile_paths,
         )
         _stop_linux_install(dependencies, active_handle)
         active_handle = None
+        _reobserve_linux_managed_generation_after_stop(
+            dependencies,
+            collector=stable_collector,
+            api_socket=profile_paths.state_root / "openusage.sock",
+            expected=initial_generation,
+        )
 
         _require_process_success(
             dependencies.run_process(
@@ -4100,7 +4378,7 @@ def _linux_native_lifecycle(
             dependencies,
             execution_copy=execution_copy,
         )
-        second_ledger, second_collector = _linux_observe_install(
+        second_ledger, second_collector, second_generation = _linux_observe_install(
             dependencies,
             profile_paths=profile_paths,
         )
@@ -4116,6 +4394,12 @@ def _linux_native_lifecycle(
             _driver_fail()
         _stop_linux_install(dependencies, active_handle)
         active_handle = None
+        _reobserve_linux_managed_generation_after_stop(
+            dependencies,
+            collector=stable_collector,
+            api_socket=profile_paths.state_root / "openusage.sock",
+            expected=second_generation,
+        )
 
         _require_process_success(
             dependencies.run_process(

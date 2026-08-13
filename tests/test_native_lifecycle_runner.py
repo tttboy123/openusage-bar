@@ -1212,7 +1212,13 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
         import subprocess
 
         from openusage_bar.lifecycle_state import LifecycleStatePaths
-        from scripts.native_lifecycle_evidence import NativePathState
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            LinuxManagedObserverGenerationFact,
+            NativeListenerState,
+            NativePathState,
+            NativeServiceState,
+        )
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1227,6 +1233,8 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited process lease artifact")
             events: list[object] = []
+            service_state, local_state, command = _linux_positive_listener_facts(home)
+            boundary_state = _linux_positive_boundary_fact(local_state)
 
             class Process:
                 pid = 4411
@@ -1347,13 +1355,74 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         create=True,
                     )
                 )
+                stack.enter_context(
+                    patch(
+                        "openusage_bar.platform_services.service_is_registered",
+                        return_value=True,
+                    )
+                )
+                service_reader = stack.enter_context(
+                    patch(
+                        "openusage_bar.platform_services.read_current_user_collector_service_state",
+                        side_effect=(service_state,) * 4,
+                    )
+                )
+                boundary_reader = stack.enter_context(
+                    patch(
+                        "openusage_bar.local_api.read_current_user_shared_client_boundary_state",
+                        return_value=boundary_state,
+                    )
+                )
+                local_reader = stack.enter_context(
+                    patch(
+                        "openusage_bar.local_api.read_current_user_local_api_state",
+                        return_value=local_state,
+                    )
+                )
 
                 handle = dependencies.start_process((str(execution),))
                 self.assertNotIn(str(execution), repr(handle))
                 self.assertNotIn("private X authority", repr(handle))
                 dependencies._mark_process_rollback_unproven()
+                self.assertEqual(
+                    dependencies.inspect_service("linux"),
+                    NativeServiceState(True, True, command),
+                )
+                self.assertEqual(
+                    dependencies.inspect_listener("linux", "local"),
+                    NativeListenerState(True, True),
+                )
+                generation_before = (
+                    dependencies._consume_linux_managed_generation_fact()
+                )
+                self.assertIs(
+                    type(generation_before),
+                    LinuxManagedObserverGenerationFact,
+                )
+                self.assertEqual(generation_before.generation, 1)
+                self.assertNotIn("a" * 64, repr(generation_before))
                 dependencies.stop_process(handle)
-                dependencies._mark_process_rollback_proven()
+                with self.assertRaisesRegex(
+                    LifecycleEvidenceError,
+                    r"^driver_failed$",
+                ):
+                    dependencies._mark_managed_process_rollback_proven()
+                self.assertEqual(
+                    dependencies.inspect_service("linux"),
+                    NativeServiceState(True, True, command),
+                )
+                self.assertEqual(
+                    dependencies.inspect_listener("linux", "local"),
+                    NativeListenerState(True, True),
+                )
+                generation_after = (
+                    dependencies._consume_linux_managed_generation_fact()
+                )
+                self.assertEqual(generation_after, generation_before)
+                dependencies._mark_managed_process_rollback_proven()
+                self.assertEqual(service_reader.call_count, 4)
+                self.assertEqual(boundary_reader.call_count, 4)
+                self.assertEqual(local_reader.call_count, 2)
                 self.assertEqual(_file_snapshot(run_directory), before)
 
             self.assertEqual(
@@ -1691,6 +1760,135 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                         candidate.unlink()
                 if run_directory is not None and run_directory.exists():
                     run_directory.rmdir()
+
+    def test_linux_post_stop_reobserve_rejects_generation_drift_before_rollback(
+        self,
+    ) -> None:
+        from dataclasses import replace
+        from types import SimpleNamespace
+
+        from scripts.native_lifecycle_evidence import (
+            LifecycleEvidenceError,
+            LinuxManagedObserverGenerationFact,
+            NativeListenerState,
+            NativeServiceState,
+            _reobserve_linux_managed_generation_after_stop,
+        )
+
+        collector = Path("/tmp/usagehub/runtime/openusage-collector")
+        api_socket = Path("/tmp/usagehub/state/openusage.sock")
+        command = (
+            str(collector),
+            "daemon",
+            "--interval",
+            "300",
+            "--api-transport",
+            "unix",
+            "--api-socket",
+            str(api_socket),
+        )
+        service = NativeServiceState(True, True, command)
+        expected = LinuxManagedObserverGenerationFact(
+            generation=1,
+            runtime_identity_sha256="1" * 64,
+            process_epoch_sha256="a" * 64,
+            bounded_http_open_attempts_zero=True,
+            headless_keychain_get_attempts_zero=True,
+        )
+        for field_name, drifted_value in (
+            ("generation", 2),
+            ("runtime_identity_sha256", "2" * 64),
+            ("process_epoch_sha256", "b" * 64),
+        ):
+            events: list[str] = []
+            drifted = replace(expected, **{field_name: drifted_value})
+            dependencies = SimpleNamespace(
+                inspect_service=lambda platform: (
+                    events.append(f"service:{platform}") or service
+                ),
+                inspect_listener=lambda platform, namespace: (
+                    events.append(f"listener:{platform}:{namespace}")
+                    or NativeListenerState(True, True)
+                ),
+            )
+            object.__setattr__(
+                dependencies,
+                "_consume_linux_managed_generation_fact",
+                lambda: events.append("consume") or drifted,
+            )
+            object.__setattr__(
+                dependencies,
+                "_mark_managed_process_rollback_proven",
+                lambda: events.append("mark"),
+            )
+
+            with self.subTest(field=field_name), self.assertRaisesRegex(
+                LifecycleEvidenceError,
+                r"^driver_failed$",
+            ) as rejected:
+                _reobserve_linux_managed_generation_after_stop(
+                    dependencies,
+                    collector=collector,
+                    api_socket=api_socket,
+                    expected=expected,
+                )
+            self.assertEqual(str(rejected.exception), "driver_failed")
+            self.assertEqual(
+                events,
+                ["service:linux", "listener:linux:local", "consume"],
+            )
+
+    def test_linux_managed_generation_fact_revalidates_closed_fields(self) -> None:
+        from dataclasses import fields
+
+        from scripts.native_lifecycle_evidence import (
+            LinuxManagedObserverGenerationFact,
+            _closed_linux_managed_generation_values,
+        )
+
+        valid = LinuxManagedObserverGenerationFact(
+            generation=1,
+            runtime_identity_sha256="1" * 64,
+            process_epoch_sha256="a" * 64,
+            bounded_http_open_attempts_zero=True,
+            headless_keychain_get_attempts_zero=True,
+        )
+        self.assertEqual(
+            tuple(field.name for field in fields(valid)),
+            (
+                "generation",
+                "runtime_identity_sha256",
+                "process_epoch_sha256",
+                "bounded_http_open_attempts_zero",
+                "headless_keychain_get_attempts_zero",
+            ),
+        )
+        self.assertEqual(repr(valid), "<LinuxManagedObserverGenerationFact closed>")
+        self.assertEqual(
+            _closed_linux_managed_generation_values(valid),
+            (1, "1" * 64, "a" * 64, True, True),
+        )
+
+        for field_name, hostile_value in (
+            ("generation", True),
+            ("runtime_identity_sha256", "PRIVATE"),
+            ("process_epoch_sha256", "PRIVATE"),
+            ("bounded_http_open_attempts_zero", 1),
+            ("headless_keychain_get_attempts_zero", False),
+        ):
+            candidate = LinuxManagedObserverGenerationFact(
+                generation=1,
+                runtime_identity_sha256="1" * 64,
+                process_epoch_sha256="a" * 64,
+                bounded_http_open_attempts_zero=True,
+                headless_keychain_get_attempts_zero=True,
+            )
+            object.__setattr__(candidate, field_name, hostile_value)
+            with self.subTest(field=field_name):
+                self.assertIsNone(
+                    _closed_linux_managed_generation_values(candidate)
+                )
+                self.assertNotIn("PRIVATE", repr(candidate))
 
     @unittest.skipIf(os.name == "nt", "requires native Linux path semantics")
     def test_linux_host_run_process_allows_only_one_proven_preserve_uninstall(
@@ -4621,6 +4819,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
         self,
     ) -> None:
         from scripts.native_lifecycle_evidence import (
+            LinuxManagedObserverGenerationFact,
             NativeLedgerState,
             NativeLifecycleDependencies,
             NativeLifecycleExecutor,
@@ -4782,7 +4981,9 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 (
                     NativeServiceState(False, False, None),
                     NativeServiceState(True, True, service_command),
+                    NativeServiceState(True, True, service_command),
                     NativeServiceState(False, False, None),
+                    NativeServiceState(True, True, service_command),
                     NativeServiceState(True, True, service_command),
                     NativeServiceState(False, False, None),
                 )
@@ -4796,7 +4997,9 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 (
                     NativeListenerState(False, False),
                     NativeListenerState(True, True),
+                    NativeListenerState(True, True),
                     NativeListenerState(False, False),
+                    NativeListenerState(True, True),
                     NativeListenerState(True, True),
                     NativeListenerState(False, False),
                 )
@@ -4842,6 +5045,44 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 events.append(("credential_events",))
                 return ()
 
+            generation_facts = iter(
+                (
+                    LinuxManagedObserverGenerationFact(
+                        generation=1,
+                        runtime_identity_sha256="1" * 64,
+                        process_epoch_sha256="a" * 64,
+                        bounded_http_open_attempts_zero=True,
+                        headless_keychain_get_attempts_zero=True,
+                    ),
+                    LinuxManagedObserverGenerationFact(
+                        generation=1,
+                        runtime_identity_sha256="1" * 64,
+                        process_epoch_sha256="a" * 64,
+                        bounded_http_open_attempts_zero=True,
+                        headless_keychain_get_attempts_zero=True,
+                    ),
+                    LinuxManagedObserverGenerationFact(
+                        generation=2,
+                        runtime_identity_sha256="2" * 64,
+                        process_epoch_sha256="b" * 64,
+                        bounded_http_open_attempts_zero=True,
+                        headless_keychain_get_attempts_zero=True,
+                    ),
+                    LinuxManagedObserverGenerationFact(
+                        generation=2,
+                        runtime_identity_sha256="2" * 64,
+                        process_epoch_sha256="b" * 64,
+                        bounded_http_open_attempts_zero=True,
+                        headless_keychain_get_attempts_zero=True,
+                    ),
+                )
+            )
+
+            def consume_generation_fact() -> LinuxManagedObserverGenerationFact:
+                fact = next(generation_facts)
+                events.append(("consume_generation_fact", fact.generation))
+                return fact
+
             dependencies = NativeLifecycleDependencies(
                 make_run_directory=make_run_directory,
                 inspect_path=inspect_path,
@@ -4861,6 +5102,11 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 credential_events=credential_events,
                 monotonic=monotonic,
                 wait=wait,
+            )
+            object.__setattr__(
+                dependencies,
+                "_consume_linux_managed_generation_fact",
+                consume_generation_fact,
             )
             executor = NativeLifecycleExecutor(
                 dependencies=dependencies,
@@ -4904,6 +5150,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     "monotonic",
                     "inspect_service",
                     "inspect_listener",
+                    "consume_generation_fact",
                     "inspect_listener",
                     "inspect_ledger",
                     "inspect_path",
@@ -4911,6 +5158,9 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     "inspect_path",
                     "inspect_path",
                     "stop_process",
+                    "inspect_service",
+                    "inspect_listener",
+                    "consume_generation_fact",
                     "run_process",
                     "inspect_service",
                     "inspect_listener",
@@ -4931,6 +5181,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     "monotonic",
                     "inspect_service",
                     "inspect_listener",
+                    "consume_generation_fact",
                     "inspect_listener",
                     "inspect_ledger",
                     "inspect_path",
@@ -4938,6 +5189,9 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     "inspect_path",
                     "inspect_path",
                     "stop_process",
+                    "inspect_service",
+                    "inspect_listener",
+                    "consume_generation_fact",
                     "run_process",
                     "inspect_service",
                     "inspect_listener",
@@ -5005,9 +5259,11 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     ("linux", "local"),
                     ("linux", "gateway_default_endpoint"),
                     ("linux", "local"),
+                    ("linux", "local"),
                     ("linux", "gateway_default_endpoint"),
                     ("linux", "local"),
                     ("linux", "gateway_default_endpoint"),
+                    ("linux", "local"),
                     ("linux", "local"),
                     ("linux", "gateway_default_endpoint"),
                 ],
