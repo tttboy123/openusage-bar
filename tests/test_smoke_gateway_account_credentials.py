@@ -102,6 +102,10 @@ class GatewayAccountCredentialSmokeTests(unittest.TestCase):
 
             with patch.object(module.sys, "platform", "darwin"), patch.object(
                 module,
+                "resolve_macos_keychain",
+                return_value=keychain_path.resolve(),
+            ) as resolve_keychain, patch.object(
+                module,
                 "default_keychain",
                 side_effect=AssertionError("must not use a foreign reader identity"),
             ) as default:
@@ -116,6 +120,7 @@ class GatewayAccountCredentialSmokeTests(unittest.TestCase):
                 )
 
         self.assertEqual(report, {"version": 1, "ok": True, "code": "ok"})
+        resolve_keychain.assert_called_once_with(str(keychain_path))
         default.assert_not_called()
         self.assertEqual(len(calls), 1)
         command, kwargs = calls[0]
@@ -145,6 +150,7 @@ class GatewayAccountCredentialSmokeTests(unittest.TestCase):
             },
         )
 
+    @unittest.skipIf(os.name == "nt", "POSIX keychain authority metadata")
     def test_macos_smoke_rejects_untrusted_keychain_before_helper_launch(self) -> None:
         module = smoke_credentials()
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
