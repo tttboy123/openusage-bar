@@ -557,16 +557,21 @@ def resolve_macos_keychain(value: object) -> Path:
         _reject_symlink_components(path)
         metadata = path.lstat()
         parent_metadata = path.parent.lstat()
+        current_uid = (
+            os.getuid()
+            if hasattr(os, "getuid")
+            else metadata.st_uid
+        )
     except OSError:
         raise SmokeFailure("invalid_native_keychain") from None
     if (
         stat.S_ISLNK(metadata.st_mode)
         or not stat.S_ISREG(metadata.st_mode)
-        or metadata.st_uid != os.getuid()
+        or metadata.st_uid != current_uid
         or stat.S_IMODE(metadata.st_mode) != 0o600
         or metadata.st_nlink != 1
         or not stat.S_ISDIR(parent_metadata.st_mode)
-        or parent_metadata.st_uid != os.getuid()
+        or parent_metadata.st_uid != current_uid
         or stat.S_IMODE(parent_metadata.st_mode) != 0o700
     ):
         raise SmokeFailure("invalid_native_keychain")
