@@ -787,6 +787,7 @@ class CollectorCLITests(unittest.TestCase):
             thread = threading.Thread(target=run_gateway)
             status = 0
             response_body = b""
+            last_request_error: tuple[str, int | None] | None = None
             try:
                 with patch(
                     "openusage_bar.collector_cli.DEFAULT_API_TOKEN_PATH",
@@ -830,7 +831,11 @@ class CollectorCLITests(unittest.TestCase):
                             status = response.status
                             response_body = response.read()
                             break
-                        except OSError:
+                        except OSError as error:
+                            last_request_error = (
+                                type(error).__name__,
+                                error.errno,
+                            )
                             time.sleep(0.02)
                         finally:
                             connection.close()
@@ -841,7 +846,7 @@ class CollectorCLITests(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertFalse(thread.is_alive())
             self.assertEqual(result, [0])
-            self.assertEqual(status, 200)
+            self.assertEqual(status, 200, last_request_error)
             payload = json.loads(response_body)
             self.assertEqual(
                 set(payload),
@@ -1500,6 +1505,7 @@ class CollectorCLITests(unittest.TestCase):
             thread.start()
             body = b""
             status = 0
+            last_request_error: tuple[str, int | None] | None = None
             try:
                 startup_deadline = time.monotonic() + 10
                 while (
@@ -1526,11 +1532,15 @@ class CollectorCLITests(unittest.TestCase):
                         status = response.status
                         body = response.read()
                         break
-                    except OSError:
+                    except OSError as error:
+                        last_request_error = (
+                            type(error).__name__,
+                            error.errno,
+                        )
                         time.sleep(0.05)
                     finally:
                         connection.close()
-                self.assertEqual(status, 200)
+                self.assertEqual(status, 200, last_request_error)
                 self.assertIn(b'"schemaVersion":"1.0"', body)
             finally:
                 stop.set()
