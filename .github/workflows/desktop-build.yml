@@ -696,20 +696,32 @@ jobs:
           elif [[ "${{ matrix.platform }}" == "mac" ]]; then
             test -n "$RUNNER_TEMP"
             mkdir -p "$settings_smoke_home/Library/Keychains"
+            chmod 0700 "$settings_smoke_home"
             chmod 0700 "$settings_smoke_home/Library"
             chmod 0700 "$settings_smoke_home/Library/Keychains"
             mac_keychain_path="$settings_smoke_home/Library/Keychains/openusage-ci.keychain-db"
-            mac_keychain_root_identity="$(/usr/bin/stat -f '%d:%i' "$settings_smoke_home")"
+            test -d "$settings_smoke_home"
+            test ! -L "$settings_smoke_home"
+            test ! -L "$settings_smoke_home/Library"
+            test ! -L "$settings_smoke_home/Library/Keychains"
+            mac_keychain_root_identity="$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home")"
+            mac_keychain_library_identity="$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home/Library")"
+            mac_keychain_directory_identity="$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home/Library/Keychains")"
             mac_keychain_password="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
             mac_keychain_created=0
-            mac_keychain_identity=""
             cleanup_macos_keychain() {
               prior_status=$?
               cleanup_status=0
               if [[ "$mac_keychain_created" == "1" ]]; then
-                if [[ "$(/usr/bin/stat -f '%d:%i' "$settings_smoke_home" 2>/dev/null || true)" != "$mac_keychain_root_identity" ]]; then
+                if [[ "$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home" 2>/dev/null || true)" != "$mac_keychain_root_identity" ]]; then
                   cleanup_status=1
-                elif [[ "$(/usr/bin/stat -f '%d:%i:%u:%Lp:%l' "$mac_keychain_path" 2>/dev/null || true)" != "$mac_keychain_identity" ]]; then
+                elif [[ "$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home/Library" 2>/dev/null || true)" != "$mac_keychain_library_identity" ]]; then
+                  cleanup_status=1
+                elif [[ "$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home/Library/Keychains" 2>/dev/null || true)" != "$mac_keychain_directory_identity" ]]; then
+                  cleanup_status=1
+                elif [[ ! -f "$mac_keychain_path" || -L "$mac_keychain_path" ]]; then
+                  cleanup_status=1
+                elif [[ "$(/usr/bin/stat -f '%u:%Lp:%l' "$mac_keychain_path" 2>/dev/null || true)" != "$(/usr/bin/id -u):600:1" ]]; then
                   cleanup_status=1
                 elif ! /usr/bin/security delete-keychain "$mac_keychain_path" >/dev/null 2>&1; then
                   cleanup_status=1
@@ -735,16 +747,14 @@ jobs:
             test "$(/usr/bin/stat -f '%u' "$mac_keychain_path")" = "$(/usr/bin/id -u)"
             test "$(/usr/bin/stat -f '%Lp' "$mac_keychain_path")" = "600"
             test "$(/usr/bin/stat -f '%l' "$mac_keychain_path")" = "1"
-            mac_keychain_identity="$(/usr/bin/stat -f '%d:%i:%u:%Lp:%l' "$mac_keychain_path")"
             /usr/bin/security unlock-keychain -p "$mac_keychain_password" "$mac_keychain_path" >/dev/null 2>&1
             /usr/bin/security set-keychain-settings -lut 300 "$mac_keychain_path" >/dev/null 2>&1
-            /usr/bin/security list-keychains -d user -s "$mac_keychain_path" >/dev/null 2>&1
-            /usr/bin/security default-keychain -d user -s "$mac_keychain_path" >/dev/null 2>&1
             account_smoke_stderr="$RUNNER_TEMP/openusage-account-credential-smoke.stderr"
             set +e
             account_smoke_output="$(
               python scripts/smoke_gateway_account_credentials.py \
                 --settings-helper "./dist-settings/${{ matrix.settings }}" \
+                --macos-keychain "$mac_keychain_path" \
                 2>"$account_smoke_stderr"
             )"
             account_smoke_status=$?

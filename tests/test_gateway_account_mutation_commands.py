@@ -5,9 +5,13 @@ import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
 from openusage_bar.gateway.accounts import AccountState, ProviderAccountRef
-from openusage_bar.gateway.commands import run_gateway_account_mutation
+from openusage_bar.gateway.commands import (
+    run_gateway_account_credential_roundtrip,
+    run_gateway_account_mutation,
+)
 from openusage_bar.gateway.config import GatewayConfig, GatewayConfigStore, GatewayMode
 from openusage_bar.gateway.pools import (
     AccountPool,
@@ -181,6 +185,96 @@ def expected_account_config() -> GatewayConfig:
 
 
 class GatewayAccountMutationCommandTests(unittest.TestCase):
+    def test_standard_mutation_keeps_the_platform_default_keychain_boundary(self) -> None:
+        events: list[tuple[object, ...]] = []
+        keychain = FakeKeychain(events)
+        store = FakeConfigStore(events)
+        output = io.StringIO()
+
+        with patch(
+            "openusage_bar.gateway.commands.default_keychain",
+            return_value=keychain,
+        ) as default:
+            exit_code = run_gateway_account_mutation(
+                create_account_request(alias="Work", secret="sk-private"),
+                output,
+                store=store,
+                account_id_factory=AccountIdFactory("work"),
+            )
+
+        self.assertEqual(exit_code, 0)
+        default.assert_called_once_with()
+        self.assertIn(("keychain.set", "openai.work.gateway-api-key", "sk-private"), events)
+
+    def test_credential_roundtrip_uses_one_store_and_keychain_identity(self) -> None:
+        class StatefulKeychain:
+            def __init__(self) -> None:
+                self.values: dict[str, str] = {}
+                self.events: list[tuple[str, str, str | None]] = []
+
+            def get(self, account: str) -> str | None:
+                value = self.values.get(account)
+                self.events.append(("get", account, value))
+                return value
+
+            def set(self, account: str, secret: str) -> None:
+                self.events.append(("set", account, secret))
+                self.values[account] = secret
+
+            def delete(self, account: str) -> None:
+                self.events.append(("delete", account, None))
+                self.values.pop(account, None)
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = GatewayConfigStore(Path(directory) / "gateway.json")
+            keychain = StatefulKeychain()
+            request = io.StringIO(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "providerId": "openai",
+                        "aliasCreate": "CI Smoke one process",
+                        "aliasEdit": "CI Smoke one process Edited",
+                        "credentialMaterial": {
+                            "initialProviderKey": "sk-private-initial",
+                            "editedProviderKey": "sk-private-edited",
+                        },
+                    }
+                )
+            )
+            output = io.StringIO()
+
+            exit_code = run_gateway_account_credential_roundtrip(
+                request,
+                output,
+                store=store,
+                keychain=keychain,
+                account_id_factory=AccountIdFactory("one-process"),
+            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(
+                output.getvalue(),
+                '{"version":1,"ok":true,"code":"ok"}\n',
+            )
+            self.assertEqual(store.load().accounts, ())
+            self.assertEqual(keychain.values, {})
+            self.assertEqual(
+                [event[0] for event in keychain.events],
+                [
+                    "get",
+                    "set",
+                    "get",
+                    "get",
+                    "set",
+                    "get",
+                    "get",
+                    "delete",
+                    "get",
+                ],
+            )
+            self.assertNotIn("sk-private", output.getvalue())
+
     def test_create_account_writes_credential_before_secret_free_config(self) -> None:
         events: list[tuple[object, ...]] = []
         keychain = FakeKeychain(events)

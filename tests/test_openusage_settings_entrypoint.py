@@ -165,6 +165,35 @@ class SettingsEntrypointTests(unittest.TestCase):
             keychain=native_keychain,
         )
 
+    def test_macos_gateway_account_credential_roundtrip_uses_one_process_identity(self):
+        native_keychain = object()
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "openusage_settings.py",
+                "__gateway-account-credential-roundtrip",
+                "/private/tmp/openusage-ci.keychain-db",
+            ],
+        ), patch.object(sys, "platform", "darwin"), patch(
+            "openusage_bar.keychain.MacOSKeychain", return_value=native_keychain
+        ) as construct, patch(
+            "openusage_bar.gateway.commands.run_gateway_account_credential_roundtrip",
+            return_value=17,
+        ) as roundtrip, patch.dict(sys.modules, {"openusage_bar.ui": None}):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path("openusage_settings.py", run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 17)
+        construct.assert_called_once_with(
+            keychain_path="/private/tmp/openusage-ci.keychain-db"
+        )
+        roundtrip.assert_called_once_with(
+            sys.stdin,
+            sys.stdout,
+            keychain=native_keychain,
+        )
+
     def test_gateway_provider_editor_is_dispatched_without_opening_appkit(self):
         with patch.object(
             sys, "argv", ["openusage_settings.py", "gateway-account-editor"]

@@ -79,6 +79,99 @@ class GatewayAccountCredentialSmokeTests(unittest.TestCase):
 
         default.assert_not_called()
 
+    def test_macos_smoke_runs_one_packaged_credential_roundtrip_process(self) -> None:
+        module = smoke_credentials()
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            helper = make_executable(
+                Path(directory) / "dist-settings" / "openusage-settings"
+            )
+            store = GatewayConfigStore(Path(directory) / "gateway.json")
+            keychain_path = Path(directory) / "openusage-ci.keychain-db"
+            keychain_path.write_bytes(b"private-keychain")
+            keychain_path.chmod(0o600)
+            calls: list[tuple[list[str], dict[str, object]]] = []
+
+            def runner(command, **kwargs):
+                calls.append((command, kwargs))
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout='{"version":1,"ok":true,"code":"ok"}\n',
+                    stderr="",
+                )
+
+            with patch.object(module.sys, "platform", "darwin"), patch.object(
+                module,
+                "default_keychain",
+                side_effect=AssertionError("must not use a foreign reader identity"),
+            ) as default:
+                report = module.run_smoke(
+                    helper,
+                    store=store,
+                    macos_keychain_path=str(keychain_path),
+                    command_runner=runner,
+                    secret1=SECRET1,
+                    secret2=SECRET2,
+                    nonce="single-process",
+                )
+
+        self.assertEqual(report, {"version": 1, "ok": True, "code": "ok"})
+        default.assert_not_called()
+        self.assertEqual(len(calls), 1)
+        command, kwargs = calls[0]
+        self.assertEqual(
+            command,
+            [
+                str(helper.resolve()),
+                "__gateway-account-credential-roundtrip",
+                str(keychain_path.resolve()),
+            ],
+        )
+        self.assertFalse(kwargs.get("shell", False))
+        self.assertEqual(kwargs.get("stdout"), subprocess.PIPE)
+        self.assertEqual(kwargs.get("stderr"), subprocess.PIPE)
+        request = json.loads(kwargs["input"])
+        self.assertEqual(
+            request,
+            {
+                "version": 1,
+                "providerId": "openai",
+                "aliasCreate": "CI Smoke single-process",
+                "aliasEdit": "CI Smoke single-process Edited",
+                "credentialMaterial": {
+                    "initialProviderKey": SECRET1,
+                    "editedProviderKey": SECRET2,
+                },
+            },
+        )
+
+    def test_macos_smoke_rejects_untrusted_keychain_before_helper_launch(self) -> None:
+        module = smoke_credentials()
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            helper = make_executable(root / "dist-settings" / "openusage-settings")
+            keychain_path = root / "openusage-ci.keychain-db"
+            keychain_path.write_bytes(b"private-keychain")
+            keychain_path.chmod(0o644)
+            calls: list[object] = []
+
+            with patch.object(module.sys, "platform", "darwin"):
+                with self.assertRaises(module.SmokeFailure) as raised:
+                    module.run_smoke(
+                        helper,
+                        macos_keychain_path=str(keychain_path),
+                        command_runner=lambda *args, **kwargs: calls.append(
+                            (args, kwargs)
+                        ),
+                        secret1=SECRET1,
+                        secret2=SECRET2,
+                        nonce="untrusted-keychain",
+                    )
+
+        self.assertEqual(raised.exception.code, "invalid_native_keychain")
+        self.assertEqual(calls, [])
+        self.assertNotIn(str(keychain_path), repr(raised.exception))
+
     def test_packaged_helper_fixture_uses_native_windows_exe_suffix(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             helper = make_executable(

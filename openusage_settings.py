@@ -38,6 +38,23 @@ def main(argv: list[str] | None = None) -> int:
                 keychain=MacOSKeychain(),
             )
         return run_gateway_account_mutation(sys.stdin, sys.stdout)
+    if (
+        len(arguments) == 2
+        and arguments[0] == "__gateway-account-credential-roundtrip"
+        and sys.platform == "darwin"
+    ):
+        from openusage_bar.gateway.commands import (
+            run_gateway_account_credential_roundtrip,
+        )
+        from openusage_bar.keychain import MacOSKeychain
+
+        # One process identity prevents a onefile diagnostic from crossing a
+        # Keychain ACL boundary between create/edit/remove.
+        return run_gateway_account_credential_roundtrip(
+            sys.stdin,
+            sys.stdout,
+            keychain=MacOSKeychain(keychain_path=arguments[1]),
+        )
     if arguments == ["gateway-account-editor"]:
         from openusage_bar.gateway.account_editor_tk import run_gateway_account_editor
 

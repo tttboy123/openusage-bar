@@ -980,7 +980,7 @@ process.stdout.write(JSON.stringify(plan));
         for variable in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR"):
             self.assertIn(variable, smoke)
 
-    def test_macos_native_credential_smoke_uses_one_private_default_keychain(self):
+    def test_macos_native_credential_smoke_uses_one_explicit_private_keychain(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         steps = _mapping_list(source, section="steps", item_indent=6)
         smoke = next(
@@ -993,18 +993,20 @@ process.stdout.write(JSON.stringify(plan));
         mac = smoke[mac_start:mac_end]
         required = (
             'mkdir -p "$settings_smoke_home/Library/Keychains"',
+            'chmod 0700 "$settings_smoke_home"',
             'chmod 0700 "$settings_smoke_home/Library"',
             'chmod 0700 "$settings_smoke_home/Library/Keychains"',
+            'mac_keychain_root_identity="$(/usr/bin/stat -f \'%d:%i:%u:%Lp\' "$settings_smoke_home")"',
+            'mac_keychain_library_identity="$(/usr/bin/stat -f \'%d:%i:%u:%Lp\' "$settings_smoke_home/Library")"',
+            'mac_keychain_directory_identity="$(/usr/bin/stat -f \'%d:%i:%u:%Lp\' "$settings_smoke_home/Library/Keychains")"',
             '/usr/bin/security create-keychain -p "$mac_keychain_password" "$mac_keychain_path"',
             'chmod 0600 "$mac_keychain_path"',
             'test -f "$mac_keychain_path"',
             'test ! -L "$mac_keychain_path"',
-            'mac_keychain_identity="$(/usr/bin/stat -f \'%d:%i:%u:%Lp:%l\' "$mac_keychain_path")"',
             '/usr/bin/security unlock-keychain -p "$mac_keychain_password" "$mac_keychain_path"',
             '/usr/bin/security set-keychain-settings -lut 300 "$mac_keychain_path"',
-            '/usr/bin/security list-keychains -d user -s "$mac_keychain_path"',
-            '/usr/bin/security default-keychain -d user -s "$mac_keychain_path"',
             'python scripts/smoke_gateway_account_credentials.py',
+            '--macos-keychain "$mac_keychain_path"',
         )
         indices = []
         for token in required:
@@ -1013,6 +1015,13 @@ process.stdout.write(JSON.stringify(plan));
                 indices.append(mac.index(token))
         self.assertEqual(indices, sorted(indices))
         self.assertNotIn("-A", mac)
+        self.assertNotIn("list-keychains", mac)
+        self.assertNotIn("default-keychain", mac)
+        self.assertNotIn("mac_keychain_identity", mac)
+        self.assertIn(
+            '[[ "$(/usr/bin/stat -f \'%u:%Lp:%l\' "$mac_keychain_path" 2>/dev/null || true)" != "$(/usr/bin/id -u):600:1" ]]',
+            mac,
+        )
         self.assertIn("trap cleanup_macos_keychain EXIT", mac)
         self.assertIn('/usr/bin/security delete-keychain "$mac_keychain_path"', mac)
         self.assertLess(

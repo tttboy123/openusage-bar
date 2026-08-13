@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import secrets
 from contextlib import nullcontext
@@ -18,6 +19,22 @@ from .pools import AccountPool, PoolMember, PoolStrategy
 MAX_REQUEST_BYTES = 131_072
 MAX_PROVIDER_KEY_BYTES = 64 * 1024
 MAX_ACCOUNT_ID_ATTEMPTS = 8
+_CREDENTIAL_ROUNDTRIP_FAILURE_CODES = frozenset(
+    {
+        "account_id_unavailable",
+        "already_exists",
+        "config_invalid",
+        "config_write_failed",
+        "credential_backend_unavailable",
+        "credential_delete_failed",
+        "credential_rollback_failed",
+        "credential_write_failed",
+        "invalid_request",
+        "lock_unavailable",
+        "not_found",
+        "unsupported_provider",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -174,6 +191,297 @@ def run_gateway_account_mutation(
         )
     except Exception:
         return _write_response(output_stream, False, "invalid_request")
+
+
+def run_gateway_account_credential_roundtrip(
+    input_stream: TextIO,
+    output_stream: TextIO,
+    *,
+    store: GatewayConfigStorage | None = None,
+    keychain: GatewayCredentialStore | None = None,
+    account_id_factory: Callable[[], str] | None = None,
+) -> int:
+    """Run the fixed packaged credential diagnostic under one process identity."""
+
+    try:
+        raw = input_stream.read(MAX_REQUEST_BYTES + 1)
+        if len(raw.encode("utf-8")) > MAX_REQUEST_BYTES:
+            return _write_response(output_stream, False, "invalid_request")
+        payload = json.loads(
+            raw,
+            object_pairs_hook=_json_object_without_duplicate_keys,
+            parse_constant=_reject_json_constant,
+        )
+        request = _credential_roundtrip_request(payload)
+        if request is None:
+            return _write_response(output_stream, False, "invalid_request")
+        provider_id, alias_create, alias_edit, secret_initial, secret_edited = request
+        resolved_store = store or GatewayConfigStore()
+        if keychain is None:
+            return _write_response(output_stream, False, "invalid_request")
+        resolved_keychain = keychain
+        resolved_account_id_factory = account_id_factory or _random_private_account_id
+        display_id: str | None = None
+        credential_account: str | None = None
+        failure_code: str | None = None
+        try:
+            create_code, created = _run_roundtrip_mutation(
+                {
+                    "version": 1,
+                    "action": "create_account",
+                    "account": {
+                        "providerId": provider_id,
+                        "alias": alias_create,
+                    },
+                    "credentialMaterial": {"providerKey": secret_initial},
+                },
+                store=resolved_store,
+                keychain=resolved_keychain,
+                account_id_factory=resolved_account_id_factory,
+            )
+            if create_code is not None:
+                return _write_response(output_stream, False, create_code)
+            display_id = _roundtrip_display_id(created, provider_id, alias_create)
+            if display_id is not None:
+                credential_account = _roundtrip_credential_account(
+                    resolved_store,
+                    resolved_keychain,
+                    display_id=display_id,
+                    provider_id=provider_id,
+                    alias=alias_create,
+                    expected_secret=secret_initial,
+                )
+            if display_id is None or credential_account is None:
+                failure_code = "credential_backend_unavailable"
+            else:
+                edit_code, edited = _run_roundtrip_mutation(
+                    {
+                        "version": 1,
+                        "action": "edit_account",
+                        "account": {
+                            "displayId": display_id,
+                            "alias": alias_edit,
+                        },
+                        "credentialMaterial": {"providerKey": secret_edited},
+                    },
+                    store=resolved_store,
+                    keychain=resolved_keychain,
+                )
+                if edit_code is not None:
+                    failure_code = edit_code
+                elif _roundtrip_display_id(edited, provider_id, alias_edit) != display_id:
+                    failure_code = "config_invalid"
+                elif _roundtrip_credential_account(
+                    resolved_store,
+                    resolved_keychain,
+                    display_id=display_id,
+                    provider_id=provider_id,
+                    alias=alias_edit,
+                    expected_secret=secret_edited,
+                ) != credential_account:
+                    failure_code = "credential_backend_unavailable"
+                else:
+                    remove_code, removed = _run_roundtrip_mutation(
+                        {
+                            "version": 1,
+                            "action": "remove_account",
+                            "account": {"displayId": display_id},
+                            "credentialMaterial": {},
+                        },
+                        store=resolved_store,
+                        keychain=resolved_keychain,
+                    )
+                    if remove_code is not None:
+                        failure_code = remove_code
+                    elif _roundtrip_display_id(
+                        removed,
+                        provider_id,
+                        alias_edit,
+                    ) != display_id:
+                        failure_code = "config_invalid"
+                    elif credential_account is None or not _roundtrip_absent(
+                        resolved_store,
+                        resolved_keychain,
+                        display_id=display_id,
+                        credential_account=credential_account,
+                    ):
+                        failure_code = "credential_delete_failed"
+                    else:
+                        display_id = None
+        except Exception:
+            failure_code = "credential_backend_unavailable"
+
+        if display_id is not None:
+            cleanup_code, _ = _run_roundtrip_mutation(
+                {
+                    "version": 1,
+                    "action": "remove_account",
+                    "account": {"displayId": display_id},
+                    "credentialMaterial": {},
+                },
+                store=resolved_store,
+                keychain=resolved_keychain,
+            )
+            if cleanup_code is not None:
+                return _write_response(
+                    output_stream,
+                    False,
+                    "credential_rollback_failed",
+                )
+        if failure_code is not None:
+            return _write_response(output_stream, False, failure_code)
+        return _write_response(output_stream, True, "ok")
+    except Exception:
+        return _write_response(output_stream, False, "invalid_request")
+
+
+def _credential_roundtrip_request(
+    payload: object,
+) -> tuple[str, str, str, str, str] | None:
+    if type(payload) is not dict or set(payload) != {
+        "version",
+        "providerId",
+        "aliasCreate",
+        "aliasEdit",
+        "credentialMaterial",
+    }:
+        return None
+    credential_material = payload.get("credentialMaterial")
+    if type(credential_material) is not dict or set(credential_material) != {
+        "initialProviderKey",
+        "editedProviderKey",
+    }:
+        return None
+    values = (
+        payload.get("providerId"),
+        payload.get("aliasCreate"),
+        payload.get("aliasEdit"),
+        credential_material.get("initialProviderKey"),
+        credential_material.get("editedProviderKey"),
+    )
+    provider_id, alias_create, alias_edit, secret_initial, secret_edited = values
+    if (
+        payload.get("version") != 1
+        or any(type(value) is not str or not value for value in values)
+        or provider_id != "openai"
+        or not alias_create.startswith("CI Smoke ")
+        or alias_edit != f"{alias_create} Edited"
+        or len(alias_edit) > 80
+        or any(
+            len(secret.encode("utf-8")) > 256
+            or any(not 0x21 <= ord(character) <= 0x7E for character in secret)
+            for secret in (secret_initial, secret_edited)
+        )
+    ):
+        return None
+    return values
+
+
+def _run_roundtrip_mutation(
+    payload: dict[str, object],
+    *,
+    store: GatewayConfigStorage,
+    keychain: GatewayCredentialStore,
+    account_id_factory: Callable[[], str] | None = None,
+) -> tuple[str | None, dict[str, object] | None]:
+    rendered = io.StringIO()
+    exit_code = run_gateway_account_mutation(
+        io.StringIO(json.dumps(payload, ensure_ascii=True, separators=(",", ":"))),
+        rendered,
+        store=store,
+        keychain=keychain,
+        account_id_factory=account_id_factory,
+    )
+    try:
+        response = json.loads(
+            rendered.getvalue(),
+            object_pairs_hook=_json_object_without_duplicate_keys,
+            parse_constant=_reject_json_constant,
+        )
+    except Exception:
+        return "invalid_request", None
+    if type(response) is not dict or response.get("version") != 1:
+        return "invalid_request", None
+    if exit_code == 0 and response.get("ok") is True and response.get("code") == "ok":
+        return None, response
+    code = response.get("code")
+    if (
+        exit_code == 1
+        and response.get("ok") is False
+        and type(code) is str
+        and code in _CREDENTIAL_ROUNDTRIP_FAILURE_CODES
+    ):
+        return code, None
+    return "invalid_request", None
+
+
+def _roundtrip_display_id(
+    payload: dict[str, object] | None,
+    provider_id: str,
+    alias: str,
+) -> str | None:
+    if type(payload) is not dict or set(payload) != {
+        "version",
+        "ok",
+        "code",
+        "account",
+    }:
+        return None
+    account = payload.get("account")
+    if type(account) is not dict or set(account) != {
+        "alias",
+        "displayId",
+        "providerId",
+        "state",
+    }:
+        return None
+    display_id = account.get("displayId")
+    if (
+        type(display_id) is not str
+        or not display_id.startswith("acct_")
+        or account.get("providerId") != provider_id
+        or account.get("alias") != alias
+    ):
+        return None
+    return display_id
+
+
+def _roundtrip_credential_account(
+    store: GatewayConfigStorage,
+    keychain: GatewayCredentialStore,
+    *,
+    display_id: str,
+    provider_id: str,
+    alias: str,
+    expected_secret: str,
+) -> str | None:
+    config = store.load()
+    matches = [
+        account
+        for account in config.accounts
+        if account.display_id == display_id
+        and account.provider_id == provider_id
+        and account.alias == alias
+    ]
+    if len(matches) != 1:
+        return None
+    if keychain.get(matches[0].credential_account) != expected_secret:
+        return None
+    return matches[0].credential_account
+
+
+def _roundtrip_absent(
+    store: GatewayConfigStorage,
+    keychain: GatewayCredentialStore,
+    *,
+    display_id: str,
+    credential_account: str,
+) -> bool:
+    config = store.load()
+    return (
+        all(account.display_id != display_id for account in config.accounts)
+        and keychain.get(credential_account) is None
+    )
 
 
 def _create_account(

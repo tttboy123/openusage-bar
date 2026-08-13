@@ -37,6 +37,7 @@ SAFE_CODES = {
     "credential_write_failed",
     "invalid_settings_helper",
     "invalid_request",
+    "invalid_native_keychain",
     "lock_unavailable",
     "native_credential_mismatch",
     "not_found",
@@ -119,6 +120,7 @@ def run_smoke(
     secret1: str | None = None,
     secret2: str | None = None,
     nonce: str | None = None,
+    macos_keychain_path: str | None = None,
     token_factory: Callable[[int], str] = secrets.token_urlsafe,
 ) -> dict[str, object]:
     helper = resolve_settings_helper(str(settings_helper))
@@ -140,6 +142,18 @@ def run_smoke(
         raise SmokeFailure("settings_helper_failed")
     alias_create = f"{ALIAS_PREFIX} {resolved_nonce}"
     alias_edit = f"{ALIAS_PREFIX} {resolved_nonce} Edited"
+    if sys.platform == "darwin" and keychain is None:
+        resolved_macos_keychain = resolve_macos_keychain(macos_keychain_path)
+        return _run_packaged_macos_roundtrip(
+            helper,
+            resolved_store,
+            keychain_path=resolved_macos_keychain,
+            alias_create=alias_create,
+            alias_edit=alias_edit,
+            secret1=resolved_secret1,
+            secret2=resolved_secret2,
+            command_runner=command_runner,
+        )
     display_id: str | None = None
     credential_account: str | None = None
     removed = False
@@ -207,6 +221,88 @@ def run_smoke(
                 aliases={alias_create, alias_edit},
                 command_runner=command_runner,
             )
+
+
+def _run_packaged_macos_roundtrip(
+    helper: Path,
+    store: object,
+    *,
+    keychain_path: Path,
+    alias_create: str,
+    alias_edit: str,
+    secret1: str,
+    secret2: str,
+    command_runner: Callable[..., subprocess.CompletedProcess],
+) -> dict[str, object]:
+    request = {
+        "version": VERSION,
+        "providerId": PROVIDER_ID,
+        "aliasCreate": alias_create,
+        "aliasEdit": alias_edit,
+        "credentialMaterial": {
+            "initialProviderKey": secret1,
+            "editedProviderKey": secret2,
+        },
+    }
+    encoded = json.dumps(request, ensure_ascii=True, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > MAX_PROTOCOL_BYTES:
+        raise SmokeFailure("settings_helper_failed")
+    try:
+        completed = command_runner(
+            [
+                str(helper),
+                "__gateway-account-credential-roundtrip",
+                str(keychain_path),
+            ],
+            input=encoded,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=HELPER_TIMEOUT_SECONDS,
+            shell=False,
+        )
+    except Exception:
+        raise SmokeFailure("settings_helper_failed") from None
+    if (
+        type(completed.stdout) is not str
+        or type(completed.stderr) is not str
+        or completed.stderr != ""
+        or len(completed.stdout.encode("utf-8")) > MAX_PROTOCOL_BYTES
+    ):
+        raise SmokeFailure("settings_helper_failed")
+    try:
+        payload = _loads_strict(completed.stdout)
+    except Exception:
+        raise SmokeFailure("settings_helper_failed") from None
+    if (
+        completed.returncode == 1
+        and type(payload) is dict
+        and set(payload) == {"version", "ok", "code"}
+        and payload.get("version") == VERSION
+        and payload.get("ok") is False
+        and payload.get("code") in HELPER_FAILURE_CODES
+    ):
+        raise SmokeFailure(str(payload["code"]))
+    if (
+        completed.returncode != 0
+        or type(payload) is not dict
+        or payload
+        != {"version": VERSION, "ok": True, "code": "ok"}
+    ):
+        raise SmokeFailure("settings_helper_failed")
+    try:
+        config = store.load()
+        if any(
+            account.provider_id == PROVIDER_ID
+            and account.alias in {alias_create, alias_edit}
+            for account in config.accounts
+        ):
+            raise SmokeFailure("config_invalid")
+    except SmokeFailure:
+        raise
+    except Exception:
+        raise SmokeFailure("config_invalid") from None
+    return {"version": VERSION, "ok": True, "code": "ok"}
 
 
 def _mutate(
@@ -385,11 +481,23 @@ def main(
     secret1: str | None = None,
     secret2: str | None = None,
     nonce: str | None = None,
+    macos_keychain_path: str | None = None,
     token_factory: Callable[[int], str] = secrets.token_urlsafe,
 ) -> int:
     del stderr
     try:
-        helper = _parse_helper_arg(sys.argv[1:] if argv is None else argv)
+        selected = list(sys.argv[1:] if argv is None else argv)
+        selected_keychain = macos_keychain_path
+        if sys.platform == "darwin" and keychain is None:
+            if (
+                selected_keychain is None
+                and len(selected) == 4
+                and selected[0] == "--settings-helper"
+                and selected[2] == "--macos-keychain"
+            ):
+                selected_keychain = selected[3]
+                selected = selected[:2]
+        helper = _parse_helper_arg(selected)
         report = run_smoke(
             helper,
             store=store,
@@ -398,6 +506,7 @@ def main(
             secret1=secret1,
             secret2=secret2,
             nonce=nonce,
+            macos_keychain_path=selected_keychain,
             token_factory=token_factory,
         )
         _write_envelope(stdout, True, str(report["code"]))
@@ -430,6 +539,38 @@ def _parse_helper_arg(argv: list[str]) -> str:
     if len(args) == 2 and args[0] == "--settings-helper" and args[1]:
         return args[1]
     raise SmokeFailure("invalid_settings_helper")
+
+
+def resolve_macos_keychain(value: object) -> Path:
+    if type(value) is not str:
+        raise SmokeFailure("invalid_native_keychain")
+    raw = value
+    if (
+        not raw
+        or len(raw) > 4096
+        or not os.path.isabs(raw)
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in raw)
+    ):
+        raise SmokeFailure("invalid_native_keychain")
+    path = Path(raw)
+    try:
+        _reject_symlink_components(path)
+        metadata = path.lstat()
+        parent_metadata = path.parent.lstat()
+    except OSError:
+        raise SmokeFailure("invalid_native_keychain") from None
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_nlink != 1
+        or not stat.S_ISDIR(parent_metadata.st_mode)
+        or parent_metadata.st_uid != os.getuid()
+        or stat.S_IMODE(parent_metadata.st_mode) != 0o700
+    ):
+        raise SmokeFailure("invalid_native_keychain")
+    return path
 
 
 def _safe_generated_value(value: object) -> bool:

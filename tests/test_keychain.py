@@ -20,6 +20,7 @@ from openusage_bar.keychain import (
     KeychainError,
     LinuxSecretServiceAPI,
     MacOSKeychain,
+    SecurityFrameworkAPI,
     UnsupportedPlatformKeychainError,
     WindowsCredentialManagerAPI,
     default_keychain,
@@ -29,6 +30,79 @@ from openusage_bar.keychain import (
 
 @unittest.skipIf(sys.platform == "win32", "macOS bounded keychain behavior")
 class KeychainTests(unittest.TestCase):
+    def test_security_framework_api_binds_all_operations_to_one_explicit_keychain(self):
+        class FakeSecurity:
+            errSecSuccess = 0
+            errSecItemNotFound = -25300
+            kSecValueRef = "value-ref"
+            kSecValueData = "value-data"
+
+            def __init__(self) -> None:
+                self.item = object()
+                self.value: bytes | None = None
+                self.events: list[tuple[object, ...]] = []
+
+            def SecKeychainOpen(self, path, output):
+                self.events.append(("open", path, output))
+                return self.errSecSuccess, "held-keychain"
+
+            def SecKeychainFindGenericPassword(
+                self, keychain, service_length, service, account_length, account,
+                password_length, password_data, item,
+            ):
+                self.events.append(("find", keychain, service, account))
+                if self.value is None:
+                    return self.errSecItemNotFound, 0, None, None
+                return self.errSecSuccess, len(self.value), self.value, self.item
+
+            def SecKeychainAddGenericPassword(
+                self, keychain, service_length, service, account_length, account,
+                password_length, password, item,
+            ):
+                self.events.append(("add", keychain, service, account, password))
+                self.value = bytes(password)
+                return self.errSecSuccess, self.item
+
+            def SecItemUpdate(self, query, attributes):
+                self.events.append(("update", query, attributes))
+                self.value = bytes(attributes[self.kSecValueData])
+                return self.errSecSuccess
+
+            def SecKeychainItemDelete(self, item):
+                self.events.append(("delete", item))
+                self.value = None
+                return self.errSecSuccess
+
+        security = FakeSecurity()
+        with patch.dict(sys.modules, {"Security": security}):
+            api = SecurityFrameworkAPI(
+                keychain_path="/private/tmp/openusage-ci.keychain-db"
+            )
+            query = {
+                "service": "com.lune.openusage-menubar",
+                "account": "openai.account-ci.gateway-api-key",
+            }
+
+            self.assertIsNone(api.get(query))
+            api.add(query, b"first")
+            self.assertEqual(api.get(query), b"first")
+            self.assertTrue(api.update(query, b"second"))
+            self.assertEqual(api.get(query), b"second")
+            api.delete(query)
+            self.assertIsNone(api.get(query))
+
+        self.assertEqual(
+            security.events[0],
+            ("open", b"/private/tmp/openusage-ci.keychain-db", None),
+        )
+        self.assertTrue(
+            all(
+                event[1] == "held-keychain"
+                for event in security.events
+                if event[0] in {"find", "add"}
+            )
+        )
+
     def test_uses_fixed_service_and_provider_account(self):
         api = Mock()
         api.update.return_value = True

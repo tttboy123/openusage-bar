@@ -45,10 +45,29 @@ class KeychainAPI(Protocol):
 
 
 class SecurityFrameworkAPI:
-    def __init__(self) -> None:
+    def __init__(self, *, keychain_path: str | None = None) -> None:
         import Security
 
         self.security = Security
+        self.keychain = None
+        if keychain_path is not None:
+            if (
+                type(keychain_path) is not str
+                or not os.path.isabs(keychain_path)
+                or not keychain_path
+                or "\x00" in keychain_path
+            ):
+                raise KeychainError("Keychain open failed")
+            try:
+                status, keychain = Security.SecKeychainOpen(
+                    os.fsencode(keychain_path),
+                    None,
+                )
+            except Exception:
+                raise KeychainError("Keychain open failed") from None
+            if status != Security.errSecSuccess or keychain is None:
+                raise KeychainError("Keychain open failed")
+            self.keychain = keychain
 
     def _native_query(self, query: dict[str, str]) -> dict:
         security = self.security
@@ -66,6 +85,9 @@ class SecurityFrameworkAPI:
         raise KeychainError(f"Keychain {operation} failed with status {status}")
 
     def get(self, query: dict[str, str]) -> bytes | None:
+        if self.keychain is not None:
+            value, _ = self._find_explicit(query)
+            return value
         native = self._native_query(query)
         native[self.security.kSecReturnData] = True
         native[self.security.kSecMatchLimit] = self.security.kSecMatchLimitOne
@@ -75,25 +97,107 @@ class SecurityFrameworkAPI:
         return bytes(result)
 
     def update(self, query: dict[str, str], value: bytes) -> bool:
+        if self.keychain is not None:
+            _, item = self._find_explicit(query)
+            if item is None:
+                return False
+            status = self.security.SecItemUpdate(
+                {self.security.kSecValueRef: item},
+                {self.security.kSecValueData: value},
+            )
+            return self._check(status, "update")
         status = self.security.SecItemUpdate(
             self._native_query(query), {self.security.kSecValueData: value}
         )
         return self._check(status, "update", allow_missing=True)
 
     def add(self, query: dict[str, str], value: bytes) -> None:
+        if self.keychain is not None:
+            service, account = self._explicit_names(query)
+            status, _ = self.security.SecKeychainAddGenericPassword(
+                self.keychain,
+                len(service),
+                service,
+                len(account),
+                account,
+                len(value),
+                value,
+                None,
+            )
+            self._check(status, "add")
+            return
         native = self._native_query(query)
         native[self.security.kSecValueData] = value
         status, _ = self.security.SecItemAdd(native, None)
         self._check(status, "add")
 
     def delete(self, query: dict[str, str]) -> None:
+        if self.keychain is not None:
+            _, item = self._find_explicit(query)
+            if item is None:
+                return
+            status = self.security.SecKeychainItemDelete(item)
+            self._check(status, "delete")
+            return
         status = self.security.SecItemDelete(self._native_query(query))
         self._check(status, "delete", allow_missing=True)
 
+    @staticmethod
+    def _explicit_names(query: dict[str, str]) -> tuple[bytes, bytes]:
+        try:
+            return query["service"].encode("utf-8"), query["account"].encode("utf-8")
+        except Exception:
+            raise KeychainError("Keychain query failed") from None
+
+    def _find_explicit(
+        self,
+        query: dict[str, str],
+    ) -> tuple[bytes | None, object | None]:
+        service, account = self._explicit_names(query)
+        try:
+            status, length, value, item = (
+                self.security.SecKeychainFindGenericPassword(
+                    self.keychain,
+                    len(service),
+                    service,
+                    len(account),
+                    account,
+                    None,
+                    None,
+                    None,
+                )
+            )
+        except Exception:
+            raise KeychainError("Keychain read failed") from None
+        if status == self.security.errSecItemNotFound:
+            return None, None
+        self._check(status, "read")
+        if (
+            type(length) is not int
+            or isinstance(length, bool)
+            or length < 0
+            or type(value) is not bytes
+            or len(value) != length
+            or item is None
+        ):
+            raise KeychainError("Keychain read failed")
+        return value, item
+
 
 class MacOSKeychain:
-    def __init__(self, api: KeychainAPI | None = None) -> None:
-        self.api = api or SecurityFrameworkAPI()
+    def __init__(
+        self,
+        api: KeychainAPI | None = None,
+        *,
+        keychain_path: str | None = None,
+    ) -> None:
+        if api is not None and keychain_path is not None:
+            raise ValueError("Keychain authority is ambiguous")
+        self.api = (
+            api
+            if api is not None
+            else SecurityFrameworkAPI(keychain_path=keychain_path)
+        )
 
     @staticmethod
     def _query(account: str) -> dict[str, str]:
