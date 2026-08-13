@@ -123,7 +123,14 @@ def run_smoke(
 ) -> dict[str, object]:
     helper = resolve_settings_helper(str(settings_helper))
     resolved_store = store if store is not None else GatewayConfigStore()
-    resolved_keychain = keychain if keychain is not None else default_keychain()
+    resolved_keychain = (
+        keychain
+        if keychain is not None
+        # The packaged macOS mutation helper performs its own native reads,
+        # writes, and deletes. A foreign security(1) verifier would require a
+        # separate ACL grant and turn this headless smoke into a UI prompt.
+        else (None if sys.platform == "darwin" else default_keychain())
+    )
     resolved_nonce = nonce if nonce is not None else token_factory(16)
     resolved_secret1 = secret1 if secret1 is not None else token_factory(32)
     resolved_secret2 = secret2 if secret2 is not None else token_factory(32)
@@ -150,7 +157,8 @@ def run_smoke(
         display_id = _public_display_id(created)
         account = _unique_smoke_account(resolved_store, display_id, alias_create)
         credential_account = account.credential_account
-        _assert_secret(resolved_keychain, credential_account, resolved_secret1)
+        if resolved_keychain is not None:
+            _assert_secret(resolved_keychain, credential_account, resolved_secret1)
 
         edited = _mutate(
             helper,
@@ -167,7 +175,8 @@ def run_smoke(
         account = _unique_smoke_account(resolved_store, display_id, alias_edit)
         if account.credential_account != credential_account:
             raise SmokeFailure("config_invalid")
-        _assert_secret(resolved_keychain, credential_account, resolved_secret2)
+        if resolved_keychain is not None:
+            _assert_secret(resolved_keychain, credential_account, resolved_secret2)
 
         _mutate(
             helper,
@@ -179,7 +188,12 @@ def run_smoke(
             },
             command_runner=command_runner,
         )
-        _assert_removed(resolved_store, resolved_keychain, display_id, credential_account)
+        _assert_removed(
+            resolved_store,
+            resolved_keychain,
+            display_id,
+            credential_account,
+        )
         removed = True
         return {"version": VERSION, "ok": True, "code": "ok"}
     finally:
@@ -294,7 +308,7 @@ def _assert_secret(keychain: object, credential_account: str, expected: str) -> 
 
 def _assert_removed(
     store: object,
-    keychain: object,
+    keychain: object | None,
     display_id: str,
     credential_account: str,
 ) -> None:
@@ -304,18 +318,19 @@ def _assert_removed(
         raise SmokeFailure("config_invalid") from None
     if any(account.display_id == display_id for account in config.accounts):
         raise SmokeFailure("config_invalid")
-    try:
-        value = keychain.get(credential_account)
-    except Exception:
-        raise SmokeFailure("native_credential_mismatch") from None
-    if value is not None:
-        raise SmokeFailure("native_credential_mismatch")
+    if keychain is not None:
+        try:
+            value = keychain.get(credential_account)
+        except Exception:
+            raise SmokeFailure("native_credential_mismatch") from None
+        if value is not None:
+            raise SmokeFailure("native_credential_mismatch")
 
 
 def _cleanup(
     helper: Path,
     store: object,
-    keychain: object,
+    keychain: object | None,
     *,
     display_id: str | None,
     credential_account: str | None,
@@ -352,7 +367,7 @@ def _cleanup(
             )
         except Exception:
             pass
-    if credential_account is not None:
+    if credential_account is not None and keychain is not None:
         try:
             keychain.delete(credential_account)
         except Exception:

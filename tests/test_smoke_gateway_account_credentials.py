@@ -58,6 +58,27 @@ class FakeKeychain:
 
 
 class GatewayAccountCredentialSmokeTests(unittest.TestCase):
+    def test_macos_smoke_delegates_native_credential_checks_to_packaged_mutations(self) -> None:
+        module = smoke_credentials()
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            helper = make_executable(
+                Path(directory) / "dist-settings" / "openusage-settings"
+            )
+            with patch.object(module.sys, "platform", "darwin"), patch.object(
+                module,
+                "default_keychain",
+                side_effect=AssertionError("must not use a foreign reader identity"),
+            ) as default:
+                with self.assertRaises(module.SmokeFailure):
+                    module.run_smoke(
+                        helper,
+                        secret1="",
+                        secret2=SECRET2,
+                        nonce="native-delegation",
+                    )
+
+        default.assert_not_called()
+
     def test_packaged_helper_fixture_uses_native_windows_exe_suffix(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             helper = make_executable(

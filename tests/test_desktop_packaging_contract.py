@@ -907,20 +907,20 @@ process.stdout.write(JSON.stringify(plan));
             step for step in steps if step.get("name") == "Smoke bundled settings helper"
         )["run"]
 
-        self.assertEqual(smoke.count("account_smoke_status=$?"), 2)
+        self.assertEqual(smoke.count("account_smoke_status=$?"), 3)
         self.assertEqual(
             smoke.count('test "$account_smoke_status" -eq 0'),
-            2,
+            3,
             "native credential smoke must record exit status before asserting",
         )
-        self.assertEqual(smoke.count("set +e"), 4)
-        self.assertEqual(smoke.count("set -e"), 4)
+        self.assertEqual(smoke.count("set +e"), 5)
+        self.assertEqual(smoke.count("set -e"), 5)
         self.assertEqual(
             smoke.count(
                 'printf \'gateway_account_credential_smoke=%s\\n\' '
                 '"$account_smoke_output"'
             ),
-            2,
+            3,
         )
         self.assertNotRegex(
             smoke,
@@ -945,10 +945,10 @@ process.stdout.write(JSON.stringify(plan));
         self.assertIn("\\r\\n", smoke)
         self.assertNotIn("settings_expected+=$'\\r'", smoke)
         self.assertNotIn("account_smoke_expected+=$'\\r'", smoke)
-        self.assertEqual(smoke.count("gateway_account_credential_smoke=%s"), 2)
+        self.assertEqual(smoke.count("gateway_account_credential_smoke=%s"), 3)
         self.assertEqual(
             smoke.count("gateway_account_credential_stderr_bytes=%s"),
-            2,
+            3,
         )
         self.assertNotIn('cat "$account_smoke_stderr"', smoke)
         self.assertNotIn('cat "$ACCOUNT_SMOKE_STDERR"', smoke)
@@ -979,6 +979,47 @@ process.stdout.write(JSON.stringify(plan));
         self.assertIn("gnome-keyring-daemon --unlock --components=secrets", smoke)
         for variable in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR"):
             self.assertIn(variable, smoke)
+
+    def test_macos_native_credential_smoke_uses_one_private_default_keychain(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        steps = _mapping_list(source, section="steps", item_indent=6)
+        smoke = next(
+            step for step in steps if step.get("name") == "Smoke bundled settings helper"
+        )["run"]
+
+        self.assertIn('elif [[ "${{ matrix.platform }}" == "mac" ]]; then', smoke)
+        mac_start = smoke.index('elif [[ "${{ matrix.platform }}" == "mac" ]]; then')
+        mac_end = smoke.index("\nelse\n", mac_start)
+        mac = smoke[mac_start:mac_end]
+        required = (
+            'mkdir -p "$settings_smoke_home/Library/Keychains"',
+            'chmod 0700 "$settings_smoke_home/Library"',
+            'chmod 0700 "$settings_smoke_home/Library/Keychains"',
+            '/usr/bin/security create-keychain -p "$mac_keychain_password" "$mac_keychain_path"',
+            'chmod 0600 "$mac_keychain_path"',
+            'test -f "$mac_keychain_path"',
+            'test ! -L "$mac_keychain_path"',
+            'mac_keychain_identity="$(/usr/bin/stat -f \'%d:%i:%u:%Lp:%l\' "$mac_keychain_path")"',
+            '/usr/bin/security unlock-keychain -p "$mac_keychain_password" "$mac_keychain_path"',
+            '/usr/bin/security set-keychain-settings -lut 300 "$mac_keychain_path"',
+            '/usr/bin/security list-keychains -d user -s "$mac_keychain_path"',
+            '/usr/bin/security default-keychain -d user -s "$mac_keychain_path"',
+            'python scripts/smoke_gateway_account_credentials.py',
+        )
+        indices = []
+        for token in required:
+            with self.subTest(token=token):
+                self.assertIn(token, mac)
+                indices.append(mac.index(token))
+        self.assertEqual(indices, sorted(indices))
+        self.assertNotIn("-A", mac)
+        self.assertIn("trap cleanup_macos_keychain EXIT", mac)
+        self.assertIn('/usr/bin/security delete-keychain "$mac_keychain_path"', mac)
+        self.assertLess(
+            mac.index("python scripts/smoke_gateway_account_credentials.py"),
+            mac.rindex("cleanup_macos_keychain"),
+        )
+        self.assertIn("native_keychain_cleanup_failed", mac)
 
     def test_native_gateway_account_credential_smoke_is_a_portable_contract_and_path_trigger(self):
         source = WORKFLOW.read_text(encoding="utf-8")

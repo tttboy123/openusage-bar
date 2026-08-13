@@ -27,6 +27,16 @@ def main(argv: list[str] | None = None) -> int:
     if arguments == ["gateway-account-mutate"]:
         from openusage_bar.gateway.commands import run_gateway_account_mutation
 
+        if sys.platform == "darwin":
+            from openusage_bar.keychain import MacOSKeychain
+
+            # Keep every native account mutation under this packaged helper's
+            # single Keychain ACL identity. The desktop host bounds this child.
+            return run_gateway_account_mutation(
+                sys.stdin,
+                sys.stdout,
+                keychain=MacOSKeychain(),
+            )
         return run_gateway_account_mutation(sys.stdin, sys.stdout)
     if arguments == ["gateway-account-editor"]:
         from openusage_bar.gateway.account_editor_tk import run_gateway_account_editor
