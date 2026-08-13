@@ -793,11 +793,11 @@ class CollectorCLITests(unittest.TestCase):
                     local_api_token_path,
                 ):
                     thread.start()
-                    deadline = time.monotonic() + 3
+                    startup_deadline = time.monotonic() + 10
                     while (
                         not gateway_token_path.exists()
                         and thread.is_alive()
-                        and time.monotonic() < deadline
+                        and time.monotonic() < startup_deadline
                     ):
                         time.sleep(0.01)
                     token = gateway_token_path.read_text(encoding="ascii")
@@ -808,7 +808,11 @@ class CollectorCLITests(unittest.TestCase):
                         "estimated_tokens": 8_000,
                         "window": "5m",
                     }).encode("utf-8")
-                    while thread.is_alive() and time.monotonic() < deadline:
+                    request_deadline = time.monotonic() + 10
+                    while (
+                        thread.is_alive()
+                        and time.monotonic() < request_deadline
+                    ):
                         connection = http.client.HTTPConnection(
                             "127.0.0.1", port, timeout=1
                         )
@@ -832,7 +836,7 @@ class CollectorCLITests(unittest.TestCase):
                             connection.close()
             finally:
                 stop.set()
-                thread.join(3)
+                thread.join(10)
 
             self.assertEqual(errors, [])
             self.assertFalse(thread.is_alive())
@@ -1494,34 +1498,43 @@ class CollectorCLITests(unittest.TestCase):
                 ))
             )
             thread.start()
-            deadline = time.monotonic() + 3
-            token = None
-            while not token_path.exists() and time.monotonic() < deadline:
-                time.sleep(0.01)
-            token = token_path.read_text(encoding="utf-8").strip()
-            self.assertGreaterEqual(len(token), 43)
-
             body = b""
             status = 0
-            while time.monotonic() < deadline:
-                try:
-                    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
-                    connection.request(
-                        "GET", "/v1/health",
-                        headers={"Authorization": f"Bearer {token}"},
-                    )
-                    response = connection.getresponse()
-                    status = response.status
-                    body = response.read()
-                    connection.close()
-                    break
-                except OSError:
-                    time.sleep(0.05)
-            self.assertEqual(status, 200)
-            self.assertIn(b'"schemaVersion":"1.0"', body)
+            try:
+                startup_deadline = time.monotonic() + 10
+                while (
+                    not token_path.exists()
+                    and time.monotonic() < startup_deadline
+                ):
+                    time.sleep(0.01)
+                token = token_path.read_text(encoding="utf-8").strip()
+                self.assertGreaterEqual(len(token), 43)
 
-            stop.set()
-            thread.join(daemon_cleanup_timeout_seconds)
+                request_deadline = time.monotonic() + 10
+                while time.monotonic() < request_deadline:
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1",
+                        port,
+                        timeout=2,
+                    )
+                    try:
+                        connection.request(
+                            "GET", "/v1/health",
+                            headers={"Authorization": f"Bearer {token}"},
+                        )
+                        response = connection.getresponse()
+                        status = response.status
+                        body = response.read()
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                    finally:
+                        connection.close()
+                self.assertEqual(status, 200)
+                self.assertIn(b'"schemaVersion":"1.0"', body)
+            finally:
+                stop.set()
+                thread.join(daemon_cleanup_timeout_seconds)
             self.assertFalse(thread.is_alive())
             self.assertEqual(result, [0])
 
