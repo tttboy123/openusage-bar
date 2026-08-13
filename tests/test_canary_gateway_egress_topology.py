@@ -4,9 +4,16 @@ import io
 import os
 import signal
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
+
+requires_linux_process_groups = unittest.skipUnless(
+    sys.platform == "linux",
+    "Gateway egress topology canary contracts require Linux process groups",
+)
 
 
 class GatewayEgressTopologyCanaryTests(unittest.TestCase):
@@ -46,6 +53,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
         os.chmod(token, 0o600)
         return token
 
+    @requires_linux_process_groups
     def test_owned_gateway_process_lease_starts_from_held_collector_and_reaps(self) -> None:
         from scripts.canary_gateway_egress_topology import (
             _start_gateway_process_lease,
@@ -155,6 +163,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
         self.assertIn(("killpg", process.pid, signal.SIGKILL), events)
         self.assertIn(("wait", 5.0), events)
 
+    @requires_linux_process_groups
     def test_gateway_lease_rejects_root_or_child_directory_authority_drift(self) -> None:
         from scripts.canary_gateway_egress_topology import (
             GatewayEgressTopologyCanaryError,
@@ -222,6 +231,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
                         lease.stop()
                     lease.close()
 
+    @requires_linux_process_groups
     def test_reaped_gateway_leader_is_never_signalled_after_binding_failure(self) -> None:
         from scripts.canary_gateway_egress_topology import (
             GatewayEgressTopologyCanaryError,
@@ -300,6 +310,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
             ],
         )
 
+    @requires_linux_process_groups
     def test_unverified_gateway_process_is_never_treated_as_an_owned_group(self) -> None:
         from scripts.canary_gateway_egress_topology import (
             GatewayEgressTopologyCanaryError,
@@ -488,6 +499,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
 
             popen.assert_not_called()
 
+    @requires_linux_process_groups
     def test_gateway_lease_revalidates_every_binding_after_popen(self) -> None:
         from scripts.canary_gateway_egress_topology import (
             GatewayEgressTopologyCanaryError,
@@ -557,6 +569,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
         self.assertIn(("killpg", 4312, signal.SIGKILL), events)
         self.assertIn(("wait", 5.0), events)
 
+    @requires_linux_process_groups
     def test_gateway_lease_reports_unproven_post_spawn_cleanup(self) -> None:
         from scripts.canary_gateway_egress_topology import (
             GatewayEgressTopologyCanaryError,
@@ -604,6 +617,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
         self.assertEqual(raised.exception.stage, "cleanup")
         self.assertNotIn("PRIVATE", str(raised.exception))
 
+    @requires_linux_process_groups
     def test_gateway_lease_opens_every_artifact_beneath_the_held_root(self) -> None:
         from scripts.canary_gateway_egress_topology import (
             GatewayEgressTopologyCanaryError,
@@ -1020,6 +1034,7 @@ class GatewayEgressTopologyCanaryTests(unittest.TestCase):
                     lease=Lease(),
                 )
 
+    @requires_linux_process_groups
     def test_cli_is_silent_and_accepts_only_one_canonical_private_layout(self) -> None:
         from scripts.canary_gateway_egress_topology import (
             GatewayEgressTopologyCanaryError,

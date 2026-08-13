@@ -427,6 +427,52 @@ def _verify_command(
 
 
 class NativeCiEvidenceTests(unittest.TestCase):
+    def test_linux_gateway_process_group_contracts_are_skipped_on_windows(self):
+        probe = """
+import importlib.util
+import io
+import os
+import pathlib
+import signal
+import subprocess
+import sys
+import tempfile
+import unittest
+import unittest.mock
+
+sys.platform = "win32"
+path = pathlib.Path("tests/test_canary_gateway_egress_topology.py").resolve()
+spec = importlib.util.spec_from_file_location("_windows_gateway_topology_contracts", path)
+if spec is None or spec.loader is None:
+    raise SystemExit(2)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+suite = unittest.defaultTestLoader.loadTestsFromTestCase(
+    module.GatewayEgressTopologyCanaryTests
+)
+result = unittest.TestResult()
+suite.run(result)
+if result.testsRun != suite.countTestCases():
+    raise SystemExit(3)
+if len(result.skipped) != 8:
+    raise SystemExit(4)
+if result.failures or result.errors:
+    raise SystemExit(5)
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        self.assertEqual(
+            (completed.returncode, completed.stdout, completed.stderr),
+            (0, "", ""),
+        )
+
     def test_cli_rejects_private_invalid_arguments_without_echoing_them(self):
         private_marker = "/tmp/native-ci-private-marker-secret"
         commands = (
