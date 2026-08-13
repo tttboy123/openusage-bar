@@ -3135,6 +3135,16 @@ if result.failures or result.errors:
                         f"{event} does not track {path}",
                     )
 
+    def test_portable_contract_gate_is_bounded_and_names_the_last_running_test(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        contracts = source[
+            source.index("- name: Run portable Observer and Gateway contracts"):
+            source.index("- name: Run native Windows Job contracts")
+        ]
+
+        self.assertIn("timeout-minutes: 15", contracts)
+        self.assertIn("python -m unittest -v \\", contracts)
+
     def test_swift_automation_presentation_never_exposes_private_transport(self):
         production = "\n".join(
             path.read_text(encoding="utf-8")

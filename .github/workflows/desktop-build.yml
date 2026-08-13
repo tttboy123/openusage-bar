@@ -330,8 +330,9 @@ jobs:
       - name: Run portable Observer and Gateway contracts
         id: contracts
         shell: bash
+        timeout-minutes: 15
         run: |
-          python -m unittest \
+          python -m unittest -v \
             tests.test_bounded_process \
             tests.test_bounded_process_windows \
             tests.test_appimage_payload_offset \
