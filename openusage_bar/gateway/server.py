@@ -13,6 +13,7 @@ import math
 import os
 import secrets
 import socket
+import socketserver
 import stat
 import threading
 import time
@@ -1129,6 +1130,13 @@ class GatewayHTTPServer(_BoundedThreads, ThreadingHTTPServer):
     allow_reuse_address = False
     daemon_threads = True
 
+    def server_bind(self) -> None:
+        # The address is already fixed to numeric loopback. HTTPServer's
+        # reverse-DNS lookup adds no authority and can block on hosted macOS.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "127.0.0.1"
+        self.server_port = self.server_address[1]
+
     def __init__(
         self,
         router: _Router,
@@ -1149,8 +1157,8 @@ class GatewayHTTPServer(_BoundedThreads, ThreadingHTTPServer):
         # inherited default of five can otherwise drop short loopback bursts
         # even though worker capacity remains available.
         self.request_queue_size = max_threads
-        super().__init__((host, port), _GatewayHandler)
         self._configure_threads(max_threads, client_timeout, request_deadline)
+        super().__init__((host, port), _GatewayHandler)
 
 
 def create_gateway_server(

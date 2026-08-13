@@ -39,20 +39,6 @@ from openusage_bar.query import QueryService, to_wire
 NOW = datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc)
 
 
-def _closed_thread_states() -> tuple[tuple[str, str], ...]:
-    frames = sys._current_frames()
-    return tuple(
-        sorted(
-            (
-                thread.name,
-                frames[thread.ident].f_code.co_name,
-            )
-            for thread in threading.enumerate()
-            if thread.ident in frames and thread is not threading.current_thread()
-        )
-    )
-
-
 @unittest.skipIf(sys.platform == "win32", "POSIX process-group helper test")
 class FrozenRefreshCommandTests(unittest.TestCase):
     def test_cursor_direct_export_has_measured_runtime_margin(self):
@@ -802,7 +788,6 @@ class CollectorCLITests(unittest.TestCase):
             status = 0
             response_body = b""
             last_request_error: tuple[str, int | None] | None = None
-            request_thread_states: tuple[tuple[str, str], ...] = ()
             try:
                 with patch(
                     "openusage_bar.collector_cli.DEFAULT_API_TOKEN_PATH",
@@ -854,7 +839,6 @@ class CollectorCLITests(unittest.TestCase):
                             time.sleep(0.02)
                         finally:
                             connection.close()
-                    request_thread_states = _closed_thread_states()
             finally:
                 stop.set()
                 thread.join(10)
@@ -865,7 +849,7 @@ class CollectorCLITests(unittest.TestCase):
             self.assertEqual(
                 status,
                 200,
-                (last_request_error, request_thread_states),
+                last_request_error,
             )
             payload = json.loads(response_body)
             self.assertEqual(
@@ -1563,7 +1547,7 @@ class CollectorCLITests(unittest.TestCase):
                 self.assertEqual(
                     status,
                     200,
-                    (last_request_error, _closed_thread_states()),
+                    last_request_error,
                 )
                 self.assertIn(b'"schemaVersion":"1.0"', body)
             finally:

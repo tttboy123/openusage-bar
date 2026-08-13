@@ -2278,6 +2278,13 @@ class LoopbackHTTPServer(_BoundedThreads, ThreadingHTTPServer):
     allow_reuse_address = False
     request_queue_size = DEFAULT_MAX_THREADS
 
+    def server_bind(self) -> None:
+        # The address is already fixed to numeric loopback. HTTPServer's
+        # reverse-DNS lookup adds no authority and can block on hosted macOS.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "127.0.0.1"
+        self.server_port = self.server_address[1]
+
     def __init__(
         self,
         router: LocalAPIRouter,
@@ -2287,9 +2294,9 @@ class LoopbackHTTPServer(_BoundedThreads, ThreadingHTTPServer):
         client_timeout: float,
         request_deadline: float,
     ) -> None:
-        super().__init__(("127.0.0.1", port), ReadOnlyHandler)
         self.router = router
         self._configure_threads(max_threads, client_timeout, request_deadline)
+        super().__init__(("127.0.0.1", port), ReadOnlyHandler)
 
 
 def _prepare_socket_path(path: Path) -> None:

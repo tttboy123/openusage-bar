@@ -4086,6 +4086,24 @@ class TCPLocalAPITests(unittest.TestCase):
         connection.close()
         return result
 
+    def test_loopback_bind_never_uses_reverse_dns(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            local_api_module.socket,
+            "getfqdn",
+            side_effect=AssertionError("reverse DNS is not loopback authority"),
+        ):
+            server = create_tcp_server(
+                self.query,
+                port=0,
+                bearer_token=TOKEN,
+                token_path=Path(directory) / "api.token",
+            )
+        try:
+            self.assertEqual(server.server_name, "127.0.0.1")
+            self.assertEqual(server.server_port, server.server_address[1])
+        finally:
+            server.server_close()
+
     def test_tcp_is_loopback_only_and_token_file_is_0600(self):
         self.assertEqual(self.server.server_address[0], "127.0.0.1")
         if os.name != "nt":

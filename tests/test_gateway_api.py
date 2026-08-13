@@ -1609,6 +1609,24 @@ class GatewayTokenPublicationTests(unittest.TestCase):
 
 
 class GatewayHTTPTests(unittest.TestCase):
+    def test_loopback_bind_never_uses_reverse_dns(self) -> None:
+        router = GatewayRouter(mode=GatewayMode.ADVISE, policy=policy, proxy=None)
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            gateway_server_module.socket,
+            "getfqdn",
+            side_effect=AssertionError("reverse DNS is not loopback authority"),
+        ):
+            server = create_gateway_server(
+                router,
+                port=0,
+                token_path=Path(directory) / "gateway.token",
+            )
+        try:
+            self.assertEqual(server.server_name, "127.0.0.1")
+            self.assertEqual(server.server_port, server.server_address[1])
+        finally:
+            server.server_close()
+
     def test_server_close_releases_a_closable_router_proxy_once(self) -> None:
         class ClosableProxy:
             def __init__(self) -> None:
