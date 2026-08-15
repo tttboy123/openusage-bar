@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from openusage_bar import platform_services
-from openusage_bar.lifecycle_state import LifecycleStatePaths
+from openusage_bar.lifecycle_state import LifecycleStateError, LifecycleStatePaths
 
 
 class _LinuxServiceReaderHarness:
@@ -830,12 +830,17 @@ class PlatformServicesRenderTests(unittest.TestCase):
         with (
             patch.object(platform_services.sys, "platform", "win32"),
             patch.dict(platform_services.os.environ, {}, clear=True),
+            patch(
+                "openusage_bar.lifecycle_state.LifecycleStatePaths.for_current_user",
+                side_effect=LifecycleStateError("state path unavailable"),
+            ),
         ):
             with self.assertRaisesRegex(
                 ValueError, "Windows state directory is unavailable"
             ):
                 platform_services.windows_task_xml(interval_minutes=5)
 
+    @unittest.skipIf(os.name == "nt", "tests the non-native LOCALAPPDATA fallback")
     def test_windows_native_rejects_remote_state_without_default_user_fallback(self):
         private_state = r"\\server\private-profile\AppData\Local"
         with (
@@ -2694,6 +2699,9 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
 
             with patch.object(platform_services.sys, "platform", "win32"), patch.dict(
                 "os.environ", {"LOCALAPPDATA": str(home)}
+            ), patch(
+                "openusage_bar.lifecycle_state.LifecycleStatePaths.for_current_user",
+                return_value=LifecycleStatePaths(platform="win32", home=home, local_app_data=home),
             ), patch.object(platform_services, "_run", side_effect=fake_run):
                 platform_services.install_service(interval=300)
 
@@ -2721,6 +2729,9 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             command = r"C:\Program Files\UsageHub\resources\collector\openusage-collector.exe"
             with patch.object(platform_services.sys, "platform", "win32"), patch.dict(
                 "os.environ", {"LOCALAPPDATA": str(home)}
+            ), patch(
+                "openusage_bar.lifecycle_state.LifecycleStatePaths.for_current_user",
+                return_value=LifecycleStatePaths(platform="win32", home=home, local_app_data=home),
             ), patch.object(platform_services, "_run"):
                 platform_services.install_service(
                     interval=300,
@@ -2950,6 +2961,9 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             calls: list[list[str]] = []
             with patch.object(platform_services.sys, "platform", "win32"), patch.dict(
                 "os.environ", {"LOCALAPPDATA": str(local_app_data)}
+            ), patch(
+                "openusage_bar.lifecycle_state.LifecycleStatePaths.for_current_user",
+                return_value=LifecycleStatePaths(platform="win32", home=local_app_data, local_app_data=local_app_data),
             ), patch.object(platform_services, "_run", side_effect=calls.append):
                 platform_services.uninstall_service()
 
@@ -2970,6 +2984,9 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             missing = platform_services.ServiceCommandError(returncode=1)
             with patch.object(platform_services.sys, "platform", "win32"), patch.dict(
                 "os.environ", {"LOCALAPPDATA": str(local_app_data)}
+            ), patch(
+                "openusage_bar.lifecycle_state.LifecycleStatePaths.for_current_user",
+                return_value=LifecycleStatePaths(platform="win32", home=local_app_data, local_app_data=local_app_data),
             ), patch.object(
                 platform_services,
                 "_windows_task_definition_path",
@@ -3018,6 +3035,9 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
 
             with patch.object(platform_services.sys, "platform", "win32"), patch.dict(
                 "os.environ", {"LOCALAPPDATA": str(local_app_data)}
+            ), patch(
+                "openusage_bar.lifecycle_state.LifecycleStatePaths.for_current_user",
+                return_value=LifecycleStatePaths(platform="win32", home=local_app_data, local_app_data=local_app_data),
             ), patch.object(
                 platform_services, "_windows_task_definition_path", return_value=canonical_task
             ), patch.object(platform_services, "_run", side_effect=fake_run):
