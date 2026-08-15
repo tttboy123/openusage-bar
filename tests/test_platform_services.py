@@ -2738,10 +2738,11 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                     command=command,
                 )
 
-            content = (home / "openusage-bar-task.xml").read_text(
-                encoding="utf-16-le"
+            content_bytes = (home / "openusage-bar-task.xml").read_bytes()
+            self.assertIn(
+                f"<Command>{command}</Command>".encode("utf-16-le"),
+                content_bytes,
             )
-            self.assertIn(f"<Command>{command}</Command>", content)
 
     def test_windows_run_failure_rolls_back_task_and_definition(self):
         with tempfile.TemporaryDirectory() as directory:
