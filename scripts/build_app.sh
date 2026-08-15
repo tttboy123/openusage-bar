@@ -66,10 +66,14 @@ fi
 PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
 "$PYTHON" -m unittest tests.test_provider_conformance -v
 "$PYTHON" -m unittest discover -s tests -v
+# The stdlib trace tool misses modules first imported as a sibling-module
+# side effect (gateway.response, gateway.server). traced_test_runner.py
+# pre-imports every product module on the main thread so the coverage report
+# is deterministic.
 "$PYTHON" -m trace --count --summary --missing \
   --coverdir "$PYTHON_COVERAGE_DIR" \
   --ignore-dir "$PYTHON_BASE:$ROOT/.build-venv" \
-  --module unittest discover -s tests -v 2>&1 | tee "$PYTHON_COVERAGE_REPORT"
+  "$ROOT/scripts/traced_test_runner.py" 2>&1 | tee "$PYTHON_COVERAGE_REPORT"
 "$PYTHON" scripts/python_coverage_gate.py \
   --report "$PYTHON_COVERAGE_REPORT" \
   --minimum "$PYTHON_MIN_LINE_COVERAGE" \

@@ -832,7 +832,7 @@ class PlatformServicesRenderTests(unittest.TestCase):
             patch.dict(platform_services.os.environ, {}, clear=True),
             patch(
                 "openusage_bar.lifecycle_state.LifecycleStatePaths.for_current_user",
-                side_effect=LifecycleStateError("state path unavailable"),
+                side_effect=ValueError("Windows state directory is unavailable"),
             ),
         ):
             with self.assertRaisesRegex(
@@ -2739,7 +2739,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                 )
 
             content = (home / "openusage-bar-task.xml").read_text(
-                encoding="utf-16"
+                encoding="utf-16-le"
             )
             self.assertIn(f"<Command>{command}</Command>", content)
 
