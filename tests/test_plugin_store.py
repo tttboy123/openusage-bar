@@ -8,7 +8,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from openusage_bar.plugin.store import IdempotencyConflict, PluginStore
+from openusage_bar.plugin.store import DecisionNotFound, IdempotencyConflict, PluginStore
 
 
 NOW = datetime(2026, 8, 10, 4, 5, 6, tzinfo=timezone.utc)
@@ -211,6 +211,76 @@ class PluginStoreTests(unittest.TestCase):
             connection.close()
             with self.assertRaises(RuntimeError):
                 PluginStore(path, clock=lambda: NOW)
+
+
+class PluginStoreFailClosedTests(unittest.TestCase):
+    """Cover the plugin store validation and fail-closed branches."""
+
+    def test_constructor_rejects_invalid_configuration(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid Plugin database path"):
+            PluginStore("not-a-path")
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "plugin.sqlite3"
+            with self.assertRaisesRegex(ValueError, "invalid waiter timeout"):
+                PluginStore(path, waiter_timeout_seconds=0)
+            with self.assertRaisesRegex(ValueError, "invalid Plugin capacity"):
+                PluginStore(path, max_records_per_principal=0)
+
+    def test_execute_idempotent_rejects_invalid_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = PluginStore(Path(temporary) / "plugin.sqlite3", clock=lambda: NOW)
+            with self.assertRaisesRegex(ValueError, "invalid idempotency input"):
+                store.execute_idempotent(
+                    principal="unknown", route="/plugin/v1/route-advice", key=KEY,
+                    projection={}, operation=lambda: (200, {}),
+                )
+            with self.assertRaisesRegex(ValueError, "invalid idempotency input"):
+                store.execute_idempotent(
+                    principal="loom", route="/other/v1", key=KEY,
+                    projection={}, operation=lambda: (200, {}),
+                )
+            with self.assertRaisesRegex(ValueError, "invalid idempotency input"):
+                store.execute_idempotent(
+                    principal="loom", route="/plugin/v1/route-advice", key="bad",
+                    projection={}, operation=lambda: (200, {}),
+                )
+            with self.assertRaisesRegex(ValueError, "invalid idempotency input"):
+                store.execute_idempotent(
+                    principal="loom", route="/plugin/v1/route-advice", key=KEY,
+                    projection={}, operation="not-callable",
+                )
+            store.close()
+
+    def test_execute_idempotent_rejects_invalid_operation_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = PluginStore(Path(temporary) / "plugin.sqlite3", clock=lambda: NOW)
+            result = store.execute_idempotent(
+                principal="loom", route="/plugin/v1/route-advice", key=KEY,
+                projection={}, operation=lambda: ("not", "a", "tuple", "of", "2or3"),
+            )
+            self.assertEqual(result[0], 500)
+            store.close()
+
+    def test_decision_transaction_validation_branches(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = PluginStore(Path(temporary) / "plugin.sqlite3", clock=lambda: NOW)
+            with self.assertRaisesRegex(ValueError, "invalid Plugin transaction"):
+                store.insert_decision_in_transaction(
+                    object(), "loom", {"decisionId": "dec_0123456789abcdef0123456789abcdef"}
+                )
+            with self.assertRaisesRegex(ValueError, "invalid decision"):
+                store.insert_decision_in_transaction(
+                    sqlite3.connect(":memory:"), "loom", {"decisionId": "bad"}
+                )
+            with self.assertRaisesRegex(ValueError, "invalid Plugin transaction"):
+                store.record_outcome_in_transaction(
+                    object(), "loom", "dec_0123456789abcdef0123456789abcdef", {}
+                )
+            with self.assertRaises(DecisionNotFound):
+                store.get_decision("unknown", "dec_0123456789abcdef0123456789abcdef")
+            with self.assertRaises(DecisionNotFound):
+                store.get_decision("loom", "bad")
+            store.close()
 
 
 if __name__ == "__main__":

@@ -39,7 +39,11 @@ def main() -> int:
     # imported as a side effect of a sibling module (gateway.api imports
     # gateway.response). Pre-import the affected module on the main thread so
     # its module-level code is traced and the coverage gate sees it.
-    importlib.import_module("openusage_bar.gateway.response")
+    for explicit in (
+        "openusage_bar.gateway.response",
+        "openusage_bar.gateway.server",
+    ):
+        importlib.import_module(explicit)
     for name in _product_module_names():
         try:
             importlib.import_module(name)

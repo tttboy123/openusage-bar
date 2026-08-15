@@ -4,6 +4,7 @@ import os
 import stat
 import tempfile
 import unittest
+from unittest.mock import patch
 import threading
 from pathlib import Path
 from unittest import mock
@@ -151,6 +152,119 @@ class PluginConfigTests(unittest.TestCase):
             self.assertEqual(len(security.states), len(PRINCIPALS))
             self.assertTrue(all(item["harden_calls"] == 1 for item in security.states))
             self.assertTrue(all(int(item["verify_calls"]) >= 1 for item in security.states))
+
+
+class PluginConfigFailClosedTests(unittest.TestCase):
+    """Cover the plugin token registry validation fail-closed branches."""
+
+    def test_validate_state_dir_rejects_unsafe_inputs(self) -> None:
+        import openusage_bar.plugin.config as config
+
+        with self.assertRaisesRegex(ValueError, "invalid Plugin state directory"):
+            config._validate_state_dir("not-a-path")
+        with self.assertRaisesRegex(ValueError, "invalid Plugin state directory"):
+            config._validate_state_dir(Path("relative"))
+        with self.assertRaisesRegex(ValueError, "invalid Plugin state directory"):
+            config._validate_state_dir(Path("/tmp/../escape"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.mkdir()
+            link = root / "link"
+            link.symlink_to(target, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "unsafe Plugin state directory"):
+                config._validate_state_dir(link)
+
+    def test_validate_state_dir_windows_and_chmod_fallback(self) -> None:
+        import openusage_bar.plugin.config as config
+        with tempfile.TemporaryDirectory() as directory:
+            value = Path(directory) / "state"
+            with patch.object(config.os, "name", "nt"), patch.object(
+                config, "_WINDOWS_FILE_SECURITY", None
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "Windows Plugin token security unavailable"
+                ):
+                    config._validate_state_dir(value)
+            value2 = Path(directory) / "state2"
+            with patch.object(config.os, "name", "nt"):
+
+                class Security:
+                    def harden_directory(self, path):
+                        return None
+
+                with patch.object(config, "_WINDOWS_FILE_SECURITY", Security()):
+                    result = config._validate_state_dir(value2)
+                self.assertEqual(result, value2)
+            value3 = Path(directory) / "state3"
+            real_chmod = config.os.chmod
+
+            def fake_chmod(path, mode, **kwargs):
+                if kwargs:
+                    raise NotImplementedError
+                real_chmod(path, mode)
+
+            with patch.object(config.os, "chmod", side_effect=fake_chmod):
+                config._validate_state_dir(value3)
+
+    def test_load_or_create_token_fail_closed_branches(self) -> None:
+        import openusage_bar.plugin.config as config
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            token_path = root / "loom.token"
+            token_path.write_text("x" * 48, encoding="ascii")
+            token_path.chmod(0o644)
+            os.chmod(token_path, 0o600)
+            # duplicate-handle short write
+            with patch.object(config.os, "write", return_value=1):
+                with self.assertRaises(OSError):
+                    config._load_or_create_token(root / "codex.token")
+            with patch.object(config.os, "name", "nt"), patch.object(
+                config, "_WINDOWS_FILE_SECURITY", None
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "Windows Plugin token security unavailable"
+                ):
+                    config._load_or_create_token(root / "desktop.token")
+            # non-regular existing path (directory)
+            directory_path = root / "claude_code.token"
+            directory_path.mkdir()
+            with self.assertRaisesRegex(ValueError, "unsafe Plugin token file"):
+                config._load_or_create_token(directory_path)
+
+    def test_read_private_token_fail_closed_branches(self) -> None:
+        import openusage_bar.plugin.config as config
+        with self.assertRaisesRegex(ValueError, "invalid private token path"):
+            config.read_private_token("not-a-path")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            good = root / "good.token"
+            good.write_text("token-value\n", encoding="ascii")
+            good.chmod(0o600)
+            # uid mismatch on posix
+            with patch.object(config.os, "geteuid", return_value=999999):
+                with self.assertRaisesRegex(ValueError, "unsafe private token file"):
+                    config.read_private_token(good)
+            # invalid content
+            bad = root / "bad.token"
+            bad.write_text("no newline", encoding="ascii")
+            bad.chmod(0o600)
+            with self.assertRaisesRegex(ValueError, "invalid private token file"):
+                config.read_private_token(bad)
+            whitespace = root / "ws.token"
+            whitespace.write_text("has space\n", encoding="ascii")
+            whitespace.chmod(0o600)
+            with self.assertRaisesRegex(ValueError, "invalid private token file"):
+                config.read_private_token(whitespace)
+
+    def test_registry_authenticate_and_principal_edges(self) -> None:
+        import openusage_bar.plugin.config as config
+        registry = config.PluginPrincipalRegistry(Path("/tmp"), {})
+        self.assertIsNone(registry.authenticate(123))
+        self.assertIsNone(registry.authenticate(""))
+        with self.assertRaisesRegex(ValueError, "invalid Plugin principal"):
+            registry.token_path("not-a-principal")
+        self.assertEqual(registry.configured_external_principals, ("loom", "codex", "claude_code"))
 
 
 if __name__ == "__main__":

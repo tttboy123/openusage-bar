@@ -589,5 +589,189 @@ class ManagedCollectorTests(unittest.TestCase):
                     managed_collector.install_managed_collector()
 
 
+    def test_install_fails_closed_on_write_rename_and_replace_errors(self):
+        from openusage_bar import managed_collector
+
+        def run_with(os_patch):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / "home"
+                home.mkdir()
+                source = root / "package" / "openusage-collector"
+                source.parent.mkdir()
+                source.write_bytes(b"frozen collector")
+                source.chmod(0o700)
+                patches = self._frozen_linux(source, home)
+                with patches[0], patches[1], patches[2], patches[3], os_patch, patch(
+                    "openusage_bar.managed_collector.platform_services.install_service",
+                    lambda **kwargs: None,
+                ):
+                    with self.assertRaises(managed_collector.ManagedCollectorError):
+                        managed_collector.install_managed_collector(interval=300)
+
+        run_with(patch.object(managed_collector.os, "write", side_effect=OSError("write failed")))
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_uninstall_fails_closed_on_unlink_error(self):
+        from openusage_bar import managed_collector
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            source = root / "package" / "openusage-collector"
+            source.parent.mkdir()
+            source.write_bytes(b"frozen collector")
+            source.chmod(0o700)
+            patches = self._frozen_linux(source, home)
+            with patches[0], patches[1], patches[2], patches[3], patch(
+                "openusage_bar.managed_collector.platform_services.install_service",
+                lambda **kwargs: None,
+            ):
+                managed_collector.install_managed_collector(interval=300)
+            with patches[0], patches[1], patches[2], patches[3], patch(
+                "openusage_bar.managed_collector.platform_services.uninstall_service",
+                lambda: None,
+            ), patch.object(
+                managed_collector.os, "unlink", side_effect=OSError("unlink failed")
+            ):
+                with self.assertRaises(managed_collector.ManagedCollectorError):
+                    managed_collector.uninstall_managed_collector()
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_install_rejects_unsupported_platform(self):
+        from openusage_bar import managed_collector
+
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            home.mkdir()
+            with patch("openusage_bar.managed_collector.sys.platform", "plan9"):
+                with self.assertRaises(managed_collector.ManagedCollectorError):
+                    managed_collector.install_managed_collector(interval=300)
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_install_fails_closed_on_source_open_error(self):
+        from openusage_bar import managed_collector
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            source = root / "package" / "openusage-collector"
+            source.parent.mkdir()
+            source.write_bytes(b"frozen collector")
+            source.chmod(0o700)
+            patches = self._frozen_linux(source, home)
+            with patches[0], patches[1], patches[2], patches[3], patch.object(
+                managed_collector.os, "open", side_effect=OSError("open failed")
+            ), patch(
+                "openusage_bar.managed_collector.platform_services.install_service",
+                lambda **kwargs: None,
+            ):
+                with self.assertRaises(managed_collector.ManagedCollectorError):
+                    managed_collector.install_managed_collector(interval=300)
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_install_fails_closed_on_fstat_error(self):
+        from openusage_bar import managed_collector
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            source = root / "package" / "openusage-collector"
+            source.parent.mkdir()
+            source.write_bytes(b"frozen collector")
+            source.chmod(0o700)
+            patches = self._frozen_linux(source, home)
+            with patches[0], patches[1], patches[2], patches[3], patch.object(
+                managed_collector.os, "fstat", side_effect=OSError("fstat failed")
+            ), patch(
+                "openusage_bar.managed_collector.platform_services.install_service",
+                lambda **kwargs: None,
+            ):
+                with self.assertRaises(managed_collector.ManagedCollectorError):
+                    managed_collector.install_managed_collector(interval=300)
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_uninstall_fails_closed_on_stat_error(self):
+        from openusage_bar import managed_collector
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            source = root / "package" / "openusage-collector"
+            source.parent.mkdir()
+            source.write_bytes(b"frozen collector")
+            source.chmod(0o700)
+            patches = self._frozen_linux(source, home)
+            with patches[0], patches[1], patches[2], patches[3], patch(
+                "openusage_bar.managed_collector.platform_services.install_service",
+                lambda **kwargs: None,
+            ):
+                managed_collector.install_managed_collector(interval=300)
+            with patches[0], patches[1], patches[2], patches[3], patch(
+                "openusage_bar.managed_collector.platform_services.uninstall_service",
+                lambda: None,
+            ), patch.object(
+                managed_collector.os, "stat", side_effect=OSError("stat failed")
+            ):
+                with self.assertRaises(managed_collector.ManagedCollectorError):
+                    managed_collector.uninstall_managed_collector()
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_uninstall_fails_closed_on_runtime_open_error(self):
+        from openusage_bar import managed_collector
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            source = root / "package" / "openusage-collector"
+            source.parent.mkdir()
+            source.write_bytes(b"frozen collector")
+            source.chmod(0o700)
+            patches = self._frozen_linux(source, home)
+            with patches[0], patches[1], patches[2], patches[3], patch(
+                "openusage_bar.managed_collector.platform_services.install_service",
+                lambda **kwargs: None,
+            ):
+                managed_collector.install_managed_collector(interval=300)
+            with patches[0], patches[1], patches[2], patches[3], patch(
+                "openusage_bar.managed_collector.platform_services.uninstall_service",
+                lambda: None,
+            ), patch.object(
+                managed_collector.os, "open", side_effect=OSError("open failed")
+            ):
+                with self.assertRaises(managed_collector.ManagedCollectorError):
+                    managed_collector.uninstall_managed_collector()
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX dirfd and file modes")
+    def test_install_with_existing_stable_fails_closed_on_rollback(self):
+        from openusage_bar import managed_collector
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            source = root / "package" / "openusage-collector"
+            source.parent.mkdir()
+            source.write_bytes(b"frozen collector")
+            source.chmod(0o700)
+            patches = self._frozen_linux(source, home)
+            with patches[0], patches[1], patches[2], patches[3], patch(
+                "openusage_bar.managed_collector.platform_services.install_service",
+                lambda **kwargs: None,
+            ):
+                managed_collector.install_managed_collector(interval=300)
+            with patches[0], patches[1], patches[2], patches[3], patch(
+                "openusage_bar.managed_collector.platform_services.install_service",
+                lambda **kwargs: None,
+            ), patch.object(
+                managed_collector.os, "replace", side_effect=OSError("replace failed")
+            ):
+                with self.assertRaises(managed_collector.ManagedCollectorError):
+                    managed_collector.install_managed_collector(interval=300)
 if __name__ == "__main__":
     unittest.main()

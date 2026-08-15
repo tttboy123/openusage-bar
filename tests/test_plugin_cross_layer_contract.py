@@ -453,3 +453,88 @@ process.stdout.write(JSON.stringify({ nativeToken, windowsToken }));
 
 if __name__ == "__main__":
     unittest.main()
+
+class PluginContractFailClosedBatteryTests(unittest.TestCase):
+    """Feed malformed payloads through the shared plugin contract surface."""
+
+    API = "plugin.openusage/v1"
+
+    def test_sanitize_response_fails_closed_for_malformed_payloads(self) -> None:
+        from openusage_bar.plugin.contracts import ContractError, sanitize_response
+
+        bad = [
+            ("not-a-route", 200, {}),
+            ("/plugin/v1/route-advice", "200", {}),
+            ("/plugin/v1/route-advice", 200, "not-a-dict"),
+            ("/plugin/v1/unknown", 200, {}),
+            ("/plugin/v1/route-advice", 200, {"apiVersion": self.API, "object": "wrong"}),
+            ("/plugin/v1/route-advice", 200, {"apiVersion": "9.9", "object": "plugin.route_advice", "decision": {}}),
+            ("/plugin/v1/outcomes", 200, {"apiVersion": self.API, "object": "plugin.outcome_receipt", "receipt": {"bad": True}}),
+            ("/plugin/v1/health/query", 200, {"apiVersion": self.API, "object": "plugin.health", "observedAt": "not-a-date", "listener": "ready", "observerApi": "ready", "gatewayApi": "ready"}),
+            ("/plugin/v1/schema", 200, {}),
+            ("/plugin/v1/capabilities", 200, {"apiVersion": self.API, "object": "plugin.capabilities", "principal": "loom", "capabilities": ["unknown"]}),
+            ("/plugin/v1/quotas/query", 200, {"bad": True}),
+            ("/plugin/v1/usage/query", 200, {"bad": True}),
+            ("/plugin/v1/connections", 200, {"bad": True}),
+            ("/plugin/v1/decisions/x", 200, {"apiVersion": self.API, "object": "plugin.decision", "decision": {"bad": True}, "outcome": None}),
+        ]
+        for route, status, payload in bad:
+            with self.subTest(route=route, status=status):
+                with self.assertRaises(ContractError):
+                    sanitize_response(route, status, payload)
+        with self.assertRaises(ContractError):
+            sanitize_response("/plugin/v1/route-advice", 201, {})
+
+    def test_request_validators_reject_malformed_bodies(self) -> None:
+        from openusage_bar.plugin.contracts import (
+            ContractError,
+            validate_advice_request,
+            validate_health_request,
+            validate_outcome_request,
+            validate_quotas_request,
+            validate_usage_request,
+        )
+
+        for validator in (
+            validate_advice_request,
+            validate_outcome_request,
+            validate_health_request,
+            validate_usage_request,
+            validate_quotas_request,
+        ):
+            for payload in (None, [], "text", 42, {}, {"apiVersion": "9.9"}, {"apiVersion": self.API, "object": "wrong"}):
+                with self.subTest(validator=validator.__name__, payload=type(payload).__name__):
+                    with self.assertRaises(ContractError):
+                        validator(payload)
+
+    def test_parse_and_identifier_helpers_fail_closed(self) -> None:
+        from openusage_bar.plugin.contracts import (
+            ContractError,
+            _safe_identifier,
+            _nullable_text,
+            _safe_integer,
+            finite_number,
+            parse_fixed6_utc,
+            strict_json_object,
+        )
+
+        with self.assertRaises(ContractError):
+            parse_fixed6_utc("2026-08-10 04:05:06")
+        with self.assertRaises(ContractError):
+            parse_fixed6_utc(12345)
+        with self.assertRaises(ContractError):
+            _safe_identifier("bad value!", 16)
+        with self.assertRaises(ContractError):
+            _safe_identifier(123, 16)
+        with self.assertRaises(ContractError):
+            _nullable_text("x" * 300, 256)
+        with self.assertRaises(ContractError):
+            _nullable_text(123, 256)
+        with self.assertRaises(ContractError):
+            _safe_integer("9", minimum=0)
+        with self.assertRaises(ContractError):
+            finite_number(float("nan"))
+        with self.assertRaises(ContractError):
+            strict_json_object(b"not json {")
+        with self.assertRaises(ContractError):
+            strict_json_object(b"[1,2]")

@@ -349,5 +349,193 @@ class LifecycleStateTests(unittest.TestCase):
             self.assertEqual(str(raised.exception), "state delete unavailable")
 
 
+class LifecycleStateRuntimeTests(unittest.TestCase):
+    def test_runtime_is_active_uses_posix_socket(self) -> None:
+        import socket as socket_module
+
+        directory = tempfile.mkdtemp(prefix="/tmp/ls-")
+        try:
+                home = Path(directory) / "h"
+                state_dir = home / ".local" / "state" / "openusage-bar"
+                state_dir.mkdir(parents=True)
+                paths = LifecycleStatePaths(platform="linux", home=home)
+                socket_path = state_dir / "openusage.sock"
+
+                server = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+                server.bind(str(socket_path))
+                server.listen(1)
+                try:
+                    self.assertTrue(
+                        current_user_runtime_is_active(
+                            paths, service_is_active=lambda: False
+                        )
+                    )
+                finally:
+                    server.close()
+
+                self.assertFalse(
+                    current_user_runtime_is_active(
+                        paths, service_is_active=lambda: False
+                    )
+                )
+        finally:
+            import shutil
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_delete_local_state_fails_closed_on_os_error(self) -> None:
+        import openusage_bar.lifecycle_state as lifecycle
+
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            state_dir = home / ".local" / "state" / "openusage-bar"
+            state_dir.mkdir(parents=True)
+            paths = LifecycleStatePaths(platform="linux", home=home)
+            with patch.object(lifecycle.os, "rmdir", side_effect=OSError("eio")):
+                with self.assertRaisesRegex(LifecycleStateError, "state delete failed"):
+                    lifecycle.delete_local_state(
+                        paths,
+                        confirmation=DELETE_CONFIRMATION,
+                        runtime_is_active=lambda: False,
+                    )
+
+    def test_windows_known_folder_path_fails_closed(self) -> None:
+        import openusage_bar.lifecycle_state as lifecycle
+
+        with patch("ctypes.WinDLL", create=True) as win_dll:
+            shell32 = win_dll.return_value
+            shell32.SHGetKnownFolderPath.return_value = 1
+            with self.assertRaisesRegex(LifecycleStateError, "state path unavailable"):
+                lifecycle._windows_known_folder_path(
+                    lifecycle._WINDOWS_PROFILE_FOLDER_ID
+                )
+
+
+class LifecycleStateEdgeTests(unittest.TestCase):
+    def test_runtime_is_active_default_and_windows_branches(self) -> None:
+        from unittest.mock import patch as _patch
+
+        from openusage_bar.lifecycle_state import current_user_runtime_is_active
+
+        with _patch(
+            "openusage_bar.platform_services.service_is_registered",
+            return_value=False,
+        ):
+            with tempfile.TemporaryDirectory() as directory:
+                home = Path(directory) / "home"
+                home.mkdir()
+                linux = LifecycleStatePaths(platform="linux", home=home)
+                self.assertFalse(current_user_runtime_is_active(linux))
+                win = LifecycleStatePaths(
+                    platform="win32", home=home, local_app_data=home / "appdata"
+                )
+                self.assertFalse(current_user_runtime_is_active(win))
+
+    def test_validate_target_types_rejects_auxiliary_symlink(self) -> None:
+        from openusage_bar.lifecycle_state import _validate_target_types
+
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            home.mkdir()
+            app_data = home / "appdata"
+            app_data.mkdir()
+            auxiliary = app_data / "openusage-bar-task.xml"
+            auxiliary.write_text("<task/>", encoding="utf-8")
+            auxiliary.unlink()
+            auxiliary.symlink_to(home)
+            paths = LifecycleStatePaths(
+                platform="win32", home=home, local_app_data=app_data,
+            )
+            with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+                _validate_target_types(paths)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class LifecycleStateFailClosedTests(unittest.TestCase):
+    def test_validate_parent_rejects_unsafe_inputs(self) -> None:
+        from openusage_bar.lifecycle_state import _validate_parent
+
+        with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+            _validate_parent(Path("relative"))
+        with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+            _validate_parent(Path("/"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.mkdir()
+            link = root / "link"
+            link.symlink_to(target, target_is_directory=True)
+            with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+                _validate_parent(link)
+            missing = root / "missing"
+            with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+                _validate_parent(missing)
+
+    def test_validate_descendant_rejects_unsafe_chains(self) -> None:
+        from openusage_bar.lifecycle_state import _validate_descendant
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent = root / "parent"
+            parent.mkdir()
+            child = parent / "child"
+            child.mkdir()
+            _validate_descendant(child, parent)
+            with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+                _validate_descendant(Path("relative"), parent)
+            with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+                _validate_descendant(parent, parent)
+            outside = root / "outside"
+            outside.mkdir()
+            with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+                _validate_descendant(outside, parent)
+            link = child / "link"
+            link.symlink_to(parent, target_is_directory=True)
+            with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+                _validate_descendant(link, parent)
+
+    def test_validate_paths_and_target_types_fail_closed(self) -> None:
+        from openusage_bar.lifecycle_state import _validate_paths, _validate_target_types
+
+        with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+            _validate_paths(object())
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            home.mkdir()
+            paths = LifecycleStatePaths(platform="plan9", home=home)
+            with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+                _validate_paths(paths)
+            paths_win = LifecycleStatePaths(platform="win32", home=home, local_app_data=None)
+            with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+                _validate_paths(paths_win)
+            state_dir = home / ".local" / "state" / "openusage-bar"
+            state_dir.parent.mkdir(parents=True)
+            state_dir.symlink_to(home, target_is_directory=True)
+            with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
+                _validate_target_types(paths)
+
+    def test_delete_local_state_validation_and_runtime_branches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            home.mkdir()
+            paths = LifecycleStatePaths(platform="linux", home=home)
+            with self.assertRaisesRegex(LifecycleStateError, "state delete rejected"):
+                delete_local_state(paths, confirmation="wrong", runtime_is_active=lambda: False)
+            with self.assertRaisesRegex(LifecycleStateError, "state delete rejected"):
+                delete_local_state(paths, confirmation=DELETE_CONFIRMATION, runtime_is_active=None)
+            with self.assertRaisesRegex(LifecycleStateError, "state runtime active"):
+                delete_local_state(paths, confirmation=DELETE_CONFIRMATION, runtime_is_active=lambda: True)
+            with self.assertRaisesRegex(LifecycleStateError, "state runtime unavailable"):
+                delete_local_state(paths, confirmation=DELETE_CONFIRMATION, runtime_is_active=lambda: (_ for _ in ()).throw(RuntimeError()))
+
+    def test_posix_home_and_known_folder_fail_closed(self) -> None:
+        import openusage_bar.lifecycle_state as lifecycle
+
+        with patch("pwd.getpwuid", side_effect=KeyError("no such user")):
+            with self.assertRaisesRegex(LifecycleStateError, "state path unavailable"):
+                lifecycle._posix_current_home()
+        with self.assertRaisesRegex(LifecycleStateError, "unsupported platform"):
+            lifecycle.LifecycleStatePaths.for_current_user(platform="plan9")
+
