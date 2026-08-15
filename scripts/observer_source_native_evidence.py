@@ -413,7 +413,7 @@ def _probe_moonshot_native(
     if existing is not None:
         raise EvidenceError("credential_state_not_clean")
 
-    secret = "oub-native-evidence-" + secrets.token_hex(16)
+    canary_value = "oub-native-evidence-" + secrets.token_hex(16)
     attempted_write = False
     set_returned = False
     credential_verified = False
@@ -421,11 +421,11 @@ def _probe_moonshot_native(
     cleanup_reason: str | None = None
     try:
         attempted_write = True
-        keychain.set(MOONSHOT_ACCOUNT, secret)
+        keychain.set(MOONSHOT_ACCOUNT, canary_value)
         set_returned = True
-        credential_verified = keychain.get(MOONSHOT_ACCOUNT) == secret
+        credential_verified = keychain.get(MOONSHOT_ACCOUNT) == canary_value
         if credential_verified:
-            verifying_client = _MoonshotRequestVerifier(client, secret)
+            verifying_client = _MoonshotRequestVerifier(client, canary_value)
             adapter = MoonshotBalanceAdapter(
                 MoonshotConfig(
                     provider_id=MOONSHOT_ACCOUNT,
@@ -455,7 +455,7 @@ def _probe_moonshot_native(
             except Exception:
                 cleanup_reason = "credential_cleanup_failed"
             else:
-                if current == secret:
+                if current == canary_value:
                     try:
                         keychain.delete(MOONSHOT_ACCOUNT)
                         if keychain.get(MOONSHOT_ACCOUNT) is not None:

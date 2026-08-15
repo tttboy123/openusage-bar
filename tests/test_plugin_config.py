@@ -232,6 +232,7 @@ class PluginConfigFailClosedTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unsafe Plugin token file"):
                 config._load_or_create_token(directory_path)
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX file semantics")
     def test_read_private_token_fail_closed_branches(self) -> None:
         import openusage_bar.plugin.config as config
         with self.assertRaisesRegex(ValueError, "invalid private token path"):

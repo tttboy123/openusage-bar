@@ -350,6 +350,7 @@ class LifecycleStateTests(unittest.TestCase):
 
 
 class LifecycleStateRuntimeTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "requires AF_UNIX sockets")
     def test_runtime_is_active_uses_posix_socket(self) -> None:
         import socket as socket_module
 
@@ -382,6 +383,7 @@ class LifecycleStateRuntimeTests(unittest.TestCase):
             import shutil
             shutil.rmtree(directory, ignore_errors=True)
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX file semantics")
     def test_delete_local_state_fails_closed_on_os_error(self) -> None:
         import openusage_bar.lifecycle_state as lifecycle
 
@@ -516,6 +518,7 @@ class LifecycleStateFailClosedTests(unittest.TestCase):
             with self.assertRaisesRegex(LifecycleStateError, "state path unsafe"):
                 _validate_target_types(paths)
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX file semantics")
     def test_delete_local_state_validation_and_runtime_branches(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -530,6 +533,7 @@ class LifecycleStateFailClosedTests(unittest.TestCase):
             with self.assertRaisesRegex(LifecycleStateError, "state runtime unavailable"):
                 delete_local_state(paths, confirmation=DELETE_CONFIRMATION, runtime_is_active=lambda: (_ for _ in ()).throw(RuntimeError()))
 
+    @unittest.skipIf(os.name == "nt", "requires the POSIX account database")
     def test_posix_home_and_known_folder_fail_closed(self) -> None:
         import openusage_bar.lifecycle_state as lifecycle
 

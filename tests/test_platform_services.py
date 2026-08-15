@@ -648,6 +648,7 @@ class PlatformServicesRenderTests(unittest.TestCase):
         self.assertIn("--interval", rendered)
         self.assertIn("300", rendered)
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_systemd_unit_contains_exec_and_wanted_by(self):
         unit = platform_services.systemd_unit(interval=300)
 
@@ -703,6 +704,7 @@ class PlatformServicesRenderTests(unittest.TestCase):
         self.assert_flag_value(arguments, "--api-transport", "unix")
         self.assert_flag_value(arguments, "--api-socket", "/state/openusage.sock")
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_systemd_collector_explicitly_uses_unix_local_api(self):
         rendered = platform_services.systemd_unit(
             interval=60,
@@ -723,6 +725,7 @@ class PlatformServicesRenderTests(unittest.TestCase):
         self.assert_flag_value(arguments, "--api-transport", "unix")
         self.assert_flag_value(arguments, "--api-socket", "/state/openusage.sock")
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_systemd_socket_path_with_spaces_remains_one_argument(self):
         socket_path = "/state/Usage Hub/openusage.sock"
         rendered = platform_services.systemd_unit(
@@ -738,6 +741,7 @@ class PlatformServicesRenderTests(unittest.TestCase):
 
         self.assert_flag_value(arguments, "--api-socket", socket_path)
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_systemd_uses_one_validated_packaged_collector_command(self):
         command_path = "/opt/Usage Hub/resources/collector/openusage-collector"
         rendered = platform_services.systemd_unit(
@@ -756,6 +760,7 @@ class PlatformServicesRenderTests(unittest.TestCase):
         self.assertEqual(arguments[1], "daemon")
         self.assertEqual(arguments.count(command_path), 1)
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_service_renderers_reject_untrusted_collector_commands(self):
         for command in (
             "relative/openusage-collector",
@@ -781,6 +786,7 @@ class PlatformServicesRenderTests(unittest.TestCase):
         self.assertIsNotNone(command)
         self.assertEqual(command.text, command_path)
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_systemd_rejects_paths_with_unit_or_expansion_syntax(self):
         unsafe_paths = (
             "/state/openusage.sock\nExecStartPost=/bin/false",
@@ -846,6 +852,7 @@ class PlatformServicesRenderTests(unittest.TestCase):
         self.assertNotIn(private_state, str(raised.exception))
         self.assertNotIn("Users\\Default", str(raised.exception))
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_render_current_platform_matches_active_platform(self):
         rendered = platform_services.render_current_platform(interval=300)
 
@@ -1204,6 +1211,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             self.assertNotIn(str(harness.home), str(unsafe_home.exception))
             self.assertEqual(manager_calls, [])
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_service_state_binds_manager_process_and_unit_facts(self):
         with tempfile.TemporaryDirectory() as directory:
             harness = _LinuxServiceReaderHarness(
@@ -1582,6 +1590,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                 ),
             )
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_service_state_caps_manager_output_before_accumulation(self):
         from openusage_bar.bounded_process import BoundedProcessError
 
@@ -1622,6 +1631,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             )
             self.assertEqual(harness.unit.read_bytes(), unit_bytes)
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_service_state_rejects_unsafe_session_runtime_before_manager(self):
         import errno
         import os
@@ -1719,6 +1729,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             self.assertEqual(closed, [user_fd, run_fd])
             self.assertEqual(unit.read_bytes(), unit_bytes)
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_service_state_rejects_untrusted_runtime_ancestor_before_manager(self):
         import os
         import stat
@@ -1840,6 +1851,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             self.assertEqual(closed, [run_fd])
             self.assertEqual(unit.read_bytes(), unit_bytes)
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_service_state_rejects_unsafe_session_bus_before_manager(self):
         import os
         import stat
@@ -1976,6 +1988,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                     self.assertEqual(closed, [user_fd, run_fd, runtime_fd])
                     self.assertEqual(unit.read_bytes(), unit_bytes)
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_service_registration_probe_uses_systemd_user_manager(self):
         completed = platform_services.subprocess.CompletedProcess(args=[], returncode=0)
         with patch.object(
@@ -1991,6 +2004,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             ["systemctl", "--user", "is-active", "--quiet", "openusage-bar.service"],
         )
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_inactive_service_still_blocks_when_unit_is_installed(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -2007,6 +2021,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
 
         self.assertTrue(registered)
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_service_registration_probe_distinguishes_absent_from_manager_failure(self):
         cases = (
             ("linux", 3, False),
@@ -2047,6 +2062,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
         self.assertIn("/.state/api.sock", rendered)
         self.assertIn("/out.log", rendered)
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_systemd_unit_custom_socket(self):
         unit = platform_services.systemd_unit(
             interval=60, api_socket="~/.state/api.sock"
@@ -2130,6 +2146,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             self.assertEqual(foreign.read_text(encoding="utf-8"), "preserve")
             run.assert_not_called()
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_install_service_linux_writes_unit_and_activates(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -2159,6 +2176,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                 ],
             )
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_install_ignores_hostile_home_for_unit_and_socket(self):
         with tempfile.TemporaryDirectory() as directory:
             authoritative_home = Path(directory) / "authoritative"
@@ -2198,6 +2216,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             )
             self.assertNotIn(str(hostile_home), rendered)
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_install_rejects_symlinked_unit_without_touching_target(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -2217,6 +2236,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             self.assertEqual(foreign.read_text(encoding="utf-8"), "preserve")
             run.assert_not_called()
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_install_rejects_symlinked_config_before_creating_foreign_directories(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2244,6 +2264,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             self.assertNotIn(str(root), str(raised.exception))
             run.assert_not_called()
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_parent_creation_is_bound_from_trusted_root_during_swap(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2285,6 +2306,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve")
             run.assert_not_called()
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_plugin_install_rejects_symlinked_config_without_touching_foreign(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2317,6 +2339,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve")
             run.assert_not_called()
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_plugin_install_activation_failure_removes_owned_definition(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2348,6 +2371,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                 (home / ".config" / "systemd" / "user" / platform_services.PLUGIN_SYSTEMD_UNIT_NAME).exists()
             )
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_plugin_uninstall_rejects_symlinked_ancestor_without_unlinking_foreign(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2373,6 +2397,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             self.assertEqual(unit.read_text(encoding="utf-8"), "preserve")
             run.assert_not_called()
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_plugin_uninstall_manager_failure_preserves_owned_definition(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -2417,6 +2442,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             self.assertEqual(foreign.read_text(encoding="utf-8"), "preserve")
             run.assert_not_called()
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_service_rename_cannot_be_redirected_by_parent_swap(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2459,6 +2485,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
             self.assertTrue(swapped)
             self.assertEqual(foreign_unit.read_text(encoding="utf-8"), "preserve")
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_service_removal_rejects_ancestor_swap_without_unlinking_foreign_unit(self):
         for action in ("install_rollback", "uninstall"):
             with self.subTest(action=action), tempfile.TemporaryDirectory() as directory:
@@ -2519,6 +2546,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                 )
                 self.assertNotIn(str(root), str(raised.exception))
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_activation_failure_rolls_back_unit_and_reloads_manager(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -2550,6 +2578,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                 ],
             )
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_install_service_linux_binds_the_packaged_collector_path(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -2571,6 +2600,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                 unit,
             )
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_install_fails_without_systemctl_and_leaves_no_unit(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -2584,6 +2614,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
 
             self.assertFalse(unit.exists())
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_uninstall_service_linux_removes_unit(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -2614,6 +2645,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
                 ],
             )
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_uninstall_fails_without_systemctl_and_preserves_unit(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
@@ -2628,6 +2660,7 @@ class PlatformServicesBehaviorTests(unittest.TestCase):
 
             self.assertTrue(target.exists())
 
+    @unittest.skipIf(os.name == "nt", "requires systemd / Linux authority")
     def test_linux_uninstall_rejects_broken_unit_symlink(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"

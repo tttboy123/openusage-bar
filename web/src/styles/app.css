@@ -1146,6 +1146,8 @@ select option { background: var(--surface); color: var(--text); }
  }
 
 @media (max-width: 640px) {
+  .toolbar { flex-wrap: wrap; }
+  .toolbar .segmented { flex: 1 1 100%; }
   .shell { grid-template-columns: minmax(0, 1fr); align-content: start; }
   .sidebar, .content { min-width: 0; }
   .sidebar { position: static; height: auto; overflow-y: hidden; flex-direction: row; overflow-x: auto; scroll-snap-type: x proximity; border-right: 0; border-bottom: 1px solid var(--hairline); padding: 10px; }

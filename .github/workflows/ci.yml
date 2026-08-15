@@ -29,6 +29,8 @@ jobs:
           python-version: "3.13"
       - name: Install the core package
         run: pip install -e .
+      - name: Install wheel-builder toolchain
+        run: pip install setuptools wheel
       - name: Install Windows timezone data
         if: runner.os == 'Windows'
         run: pip install tzdata

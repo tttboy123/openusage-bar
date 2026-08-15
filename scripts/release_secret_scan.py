@@ -53,7 +53,11 @@ def _contains_secret(payload: str, *, contextual: bool = True) -> bool:
 
 
 def _is_fixture_path(path: Path) -> bool:
-    return path.parts[0] == "tests" or path.parts[:2] == ("docs", "testing")
+    if path.parts[0] == "tests" or path.parts[:2] == ("docs", "testing"):
+        return True
+    if path.parts[:2] in {("desktop", "tests"), ("web", "tests")}:
+        return True
+    return any(part.endswith((".test.mjs", ".test.ts", ".test.js", ".spec.ts", ".spec.js")) for part in path.parts)
 
 
 def scan_tree(root: Path) -> bool:

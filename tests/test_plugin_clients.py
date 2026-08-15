@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
 
@@ -84,6 +85,7 @@ def _capacity_provider(**overrides):
 
 
 class PluginClientFailClosedTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "requires POSIX file semantics")
     def test_clients_reject_invalid_transport_and_requests(self) -> None:
         from openusage_bar.plugin.clients import (
             BoundedJSONTransport,
