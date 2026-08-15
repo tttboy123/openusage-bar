@@ -14,7 +14,7 @@ from openusage_bar.gateway.config import (
     GatewayMode,
     load_gateway_config,
 )
-from openusage_bar.gateway.pools import PoolStrategy
+from openusage_bar.gateway.pools import AccountPool, PoolMember, PoolStrategy
 
 
 class GatewayConfigTests(unittest.TestCase):
@@ -292,3 +292,149 @@ class GatewayConfigTests(unittest.TestCase):
                 mode=GatewayMode.ADVISE,
                 proxy_enabled=True,
             )
+
+
+    def test_config_rejects_invalid_field_shapes_fail_closed(self) -> None:
+        cases = (
+            {"enabled": 1},
+            {"mode": "advise"},
+            {"host": "0.0.0.0"},
+            {"port": "17823"},
+            {"port": 0},
+            {"proxy_enabled": "yes"},
+            {"cache_enabled": "yes"},
+            {"accounts": []},
+            {"account_pools": []},
+            {"proxy_enabled": True},
+        )
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises((TypeError, ValueError)):
+                    GatewayConfig(**kwargs)
+
+
+
+    def test_config_rejects_duplicate_ids_and_wrong_reference_types(self) -> None:
+        account = ProviderAccountRef(
+            provider_id="openai",
+            account_id="work",
+            alias="Work",
+            credential_account="openai.work.gateway-api-key",
+        )
+        duplicate = ProviderAccountRef(
+            provider_id="openai",
+            account_id="work",
+            alias="Work copy",
+            credential_account="openai.work.gateway-api-key",
+        )
+        with self.assertRaisesRegex(ValueError, "account IDs must be unique"):
+            GatewayConfig(accounts=(account, duplicate))
+        with self.assertRaises(TypeError):
+            GatewayConfig(accounts=(account, object()))
+        with self.assertRaises(TypeError):
+            GatewayConfig(account_pools=(object(),))
+        pool_a = AccountPool(
+            pool_id="pool-a",
+            revision=1,
+            strategy=PoolStrategy.FIXED_FIRST,
+            members=(PoolMember(account_id="work"),),
+        )
+        pool_b = AccountPool(
+            pool_id="pool-a",
+            revision=2,
+            strategy=PoolStrategy.FIXED_FIRST,
+            members=(PoolMember(account_id="work"),),
+        )
+        with self.assertRaisesRegex(ValueError, "pool IDs must be unique"):
+            GatewayConfig(accounts=(account,), account_pools=(pool_a, pool_b))
+
+
+
+    def test_gateway_config_payload_rejects_non_config_and_lock_message(self) -> None:
+        from openusage_bar.gateway.config import (
+            GatewayConfigLockError,
+            _gateway_config_payload,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Gateway configuration is invalid."):
+            _gateway_config_payload(object())
+        self.assertEqual(
+            str(GatewayConfigLockError()),
+            "Gateway configuration lock is unavailable.",
+        )
+
+
+
+    def test_gateway_config_payload_serializes_account_pools(self) -> None:
+        from openusage_bar.gateway.config import _gateway_config_payload
+
+        account = ProviderAccountRef(
+            provider_id="openai",
+            account_id="work",
+            alias="Work",
+            credential_account="openai.work.gateway-api-key",
+        )
+        pool = AccountPool(
+            pool_id="pool-a",
+            revision=3,
+            strategy=PoolStrategy.QUOTA_AWARE,
+            members=(
+                PoolMember(account_id="work", priority=10, weight=2),
+            ),
+            cross_provider_fallback=True,
+            cross_model_fallback=False,
+            cross_region_fallback=True,
+        )
+        payload = _gateway_config_payload(
+            GatewayConfig(accounts=(account,), account_pools=(pool,))
+        )
+        self.assertEqual(payload["account_pools"][0]["pool_id"], "pool-a")
+        self.assertEqual(payload["account_pools"][0]["revision"], 3)
+        self.assertEqual(payload["account_pools"][0]["strategy"], "quota-aware")
+        self.assertEqual(
+            payload["account_pools"][0]["members"][0]["account_id"], "work"
+        )
+        self.assertTrue(payload["account_pools"][0]["cross_provider_fallback"])
+        self.assertTrue(payload["account_pools"][0]["cross_region_fallback"])
+
+
+
+    def test_load_rejects_malformed_config_documents(self) -> None:
+        cases = (
+            b"not json at all",
+            b"[1, 2]",
+            b'{"unknown_field": 1}',
+            b'{"mode": 42}',
+            b'{"mode": "teleport"}',
+            b'{"accounts": {}}',
+            b'{"accounts": [{"provider_id": "openai", "account_id": "a", "alias": "A", "extra": 1}]}',
+            b'{"accounts": [{"provider_id": "openai", "account_id": "a"}]}',
+            b'{"accounts": [{"provider_id": "openai", "account_id": 1, "alias": "A"}]}',
+            b'{"account_pools": {}}',
+            b'{"account_pools": [{"pool_id": "p", "revision": 1, "strategy": "fixed-first", "members": []}]}',
+            b'{"account_pools": [{"pool_id": "p", "revision": 1, "strategy": "fixed-first", "members": [{"account_id": "a"}]}]}',
+            b'{"account_pools": [{"pool_id": "p", "revision": 1, "strategy": "bogus", "members": [{"account_id": "a", "priority": 1, "weight": 1}]}]}',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "gateway.json"
+            for raw in cases:
+                with self.subTest(raw=raw[:28]):
+                    path.write_bytes(raw)
+                    with self.assertRaises(ValueError):
+                        load_gateway_config(path)
+
+
+
+    def test_load_rejects_invalid_pool_member_and_partial_pool(self) -> None:
+        cases = (
+            b'{"account_pools": [{"pool_id": "p", "revision": 1, "strategy": "fixed-first", "members": [{"account_id": "a", "priority": "high", "weight": 1}]}]}',
+            b'{"account_pools": [{"pool_id": "p", "revision": 1}]}',
+            b'{"account_pools": [{"pool_id": "p", "revision": 1, "strategy": "fixed-first", "members": {"account_id": "a"}}]}',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "gateway.json"
+            for raw in cases:
+                with self.subTest(raw=raw[:40]):
+                    path.write_bytes(raw)
+                    with self.assertRaises(ValueError):
+                        load_gateway_config(path)

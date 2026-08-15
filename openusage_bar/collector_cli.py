@@ -1260,6 +1260,7 @@ def main(
     catalog_monitor: Any | None = None,
     gateway_server_factory: Callable[..., Any] | None = None,
     plugin_server_factory: Callable[..., Any] | None = None,
+    dashboard_server_factory: Callable[..., Any] | None = None,
 ) -> int:
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
@@ -1590,7 +1591,20 @@ def main(
                 stderr.write("invalid dashboard port\n")
                 return 2
             today = (clock or (lambda: datetime.now(timezone.utc)))().astimezone().date()
-            server = make_dashboard_server(active_query, port=port, today=today)
+            dashboard_refresher = None
+            if not (offline or args.offline):
+                if refresher is None:
+                    try:
+                        refresher = build_default_refresher(active_store)
+                    except Exception:
+                        refresher = None
+                dashboard_refresher = refresher
+            server = (dashboard_server_factory or make_dashboard_server)(
+                active_query,
+                port=port,
+                today=today,
+                refresher=dashboard_refresher,
+            )
             stdout.write(
                 f"UsageHub dashboard on http://127.0.0.1:{server.server_address[1]}\n"
             )

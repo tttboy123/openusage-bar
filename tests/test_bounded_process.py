@@ -268,3 +268,77 @@ class BoundedProcessTests(unittest.TestCase):
             self.assertNotIn("runner or subprocess.run",source)
             self.assertNotIn("capture_output=True",source)
             self.assertIn("run_bounded",source)
+
+    def test_invalid_requests_and_failing_scope_fail_closed(self) -> None:
+        from openusage_bar.bounded_process import BoundedProcessError, run_bounded
+
+        with self.assertRaisesRegex(ValueError, "invalid bounded process request"):
+            run_bounded([], timeout=1)
+        with self.assertRaisesRegex(ValueError, "invalid bounded process request"):
+            run_bounded(["echo"], timeout=0)
+        with self.assertRaisesRegex(ValueError, "invalid bounded process request"):
+            run_bounded(["echo"], timeout=1, shell=True)
+        with self.assertRaisesRegex(ValueError, "stdout must be PIPE or DEVNULL"):
+            run_bounded(["echo"], timeout=1, stdout=0)
+        with self.assertRaisesRegex(ValueError, "stderr must be PIPE or DEVNULL"):
+            run_bounded(["echo"], timeout=1, stderr=0)
+        with self.assertRaisesRegex(ValueError, "stream limits must be nonnegative"):
+            run_bounded(["echo"], timeout=1, stdout_limit=-1)
+        with self.assertRaisesRegex(ValueError, "stream limits must be nonnegative"):
+            run_bounded(["echo"], timeout=1, stderr_limit=-1)
+        with self.assertRaisesRegex(TypeError, "input_data must be bytes"):
+            run_bounded(["echo"], timeout=1, input_data="text")
+        with self.assertRaisesRegex(ValueError, "input_data owns the child stdin pipe"):
+            run_bounded(["echo"], timeout=1, input_data=b"x", stdin=subprocess.PIPE)
+
+        def failing_scope(_platform):
+            raise RuntimeError("scope unavailable")
+
+        with self.assertRaises(BoundedProcessError) as raised:
+            run_bounded(["echo"], timeout=1, _scope_factory=failing_scope)
+        self.assertEqual(raised.exception.code, "runner_failed")
+
+    def test_windows_scope_factory_and_read_stream_fail_closed(self) -> None:
+        import tempfile
+        import threading
+
+        from openusage_bar.bounded_process import (
+            BoundedProcessError,
+            _make_process_scope,
+            _read_stream,
+        )
+
+        # On non-Windows hosts the win32 scope factory fails closed without
+        # leaking a native handle or diagnostic.
+        with self.assertRaises(BoundedProcessError) as raised:
+            _make_process_scope("win32")
+        self.assertEqual(raised.exception.code, "runner_failed")
+
+        # Read-stream overflow keeps the allowed prefix and flags the event.
+        overflow = threading.Event()
+        reader_failed = threading.Event()
+        target = bytearray()
+        with tempfile.NamedTemporaryFile() as stream:
+            stream.write(b"0123456789")
+            stream.flush()
+            stream.seek(0)
+            _read_stream(
+                stream,
+                target,
+                limit=3,
+                overflow=overflow,
+                reader_failed=reader_failed,
+            )
+        self.assertTrue(overflow.is_set())
+        self.assertFalse(reader_failed.is_set())
+        self.assertEqual(bytes(target), b"012")
+
+        # A broken stream surfaces as a reader failure, never a crash.
+        class BadStream:
+            def fileno(self):
+                raise OSError("descriptor unavailable")
+
+        overflow.clear()
+        reader_failed.clear()
+        _read_stream(BadStream(), bytearray(), 10, overflow, reader_failed)
+        self.assertTrue(reader_failed.is_set())

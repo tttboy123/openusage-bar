@@ -257,10 +257,15 @@ class LedgerRefresher:
         self.eager_usage_provider_ids = tuple(eager_usage_provider_ids)
         self.timing_recorder = timing_recorder
 
-    def refresh(self) -> None:
+    def refresh(self, *, history_days: int | None = None) -> None:
         if self.eager_usage_provider_ids:
             try:
-                self.collector.refresh_usage(self.eager_usage_provider_ids)
+                if history_days is None:
+                    self.collector.refresh_usage(self.eager_usage_provider_ids)
+                else:
+                    self.collector.refresh_usage(
+                        self.eager_usage_provider_ids, history_days=history_days
+                    )
             except Exception:
                 pass
         overview = self.aggregator.refresh()
@@ -274,11 +279,19 @@ class LedgerRefresher:
             for provider_id, source_id, adapter in self.balance_sources
             if (result := getattr(adapter, "last_balance_result", None)) is not None
         )
-        self.collector.refresh(
-            overview,
-            balance_results=balance_results,
-            quota_results=results,
-        )
+        if history_days is None:
+            self.collector.refresh(
+                overview,
+                balance_results=balance_results,
+                quota_results=results,
+            )
+        else:
+            self.collector.refresh(
+                overview,
+                balance_results=balance_results,
+                quota_results=results,
+                history_days=history_days,
+            )
 
     def performance_timing_snapshot(self) -> dict:
         if self.timing_recorder is None:

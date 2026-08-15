@@ -47,6 +47,11 @@ class _Clock:
         self.current += timedelta(**changes)
 
 
+# Fixed clock pinned after the fixture window so the default 7-day retention
+# never deletes fixture records regardless of the wall clock on the runner.
+_FIXED_CLOCK = lambda: datetime(2026, 8, 15, 0, 0, tzinfo=timezone.utc)
+
+
 def _record_request(
     store: GatewayTelemetryStore,
     *,
@@ -255,7 +260,7 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
     def test_request_identifier_is_hashed_before_persistence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "gateway-telemetry.sqlite3"
-            store = GatewayTelemetryStore(path)
+            store = GatewayTelemetryStore(path, clock=_FIXED_CLOCK)
             try:
                 _record_request(
                     store,
@@ -350,7 +355,7 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
         secret_shaped = "sk-" + "A" * 30
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "gateway-telemetry.sqlite3"
-            store = GatewayTelemetryStore(path)
+            store = GatewayTelemetryStore(path, clock=_FIXED_CLOCK)
             try:
                 for index, unsafe in enumerate(
                     (secret_shaped, "arbitrary_but_code_shaped")
@@ -398,7 +403,7 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
                     tempfile.TemporaryDirectory() as directory,
                 ):
                     path = Path(directory) / "gateway-telemetry.sqlite3"
-                    store = GatewayTelemetryStore(path)
+                    store = GatewayTelemetryStore(path, clock=_FIXED_CLOCK)
                     values = {"provider_id": "openai", "model_id": "gpt-5"}
                     values[field] = unsafe
                     rejected = False
@@ -471,12 +476,12 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
         now = datetime(2026, 8, 8, 12, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "gateway-telemetry.sqlite3"
-            initializer = GatewayTelemetryStore(path)
+            initializer = GatewayTelemetryStore(path, clock=_FIXED_CLOCK)
             initializer.close()
             barrier = threading.Barrier(4)
 
             def write(index: int) -> None:
-                store = GatewayTelemetryStore(path)
+                store = GatewayTelemetryStore(path, clock=_FIXED_CLOCK)
                 try:
                     barrier.wait(timeout=5)
                     _record_request(
@@ -504,7 +509,10 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
         now = datetime(2026, 8, 8, 12, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "gateway-telemetry.sqlite3"
-            stores = (GatewayTelemetryStore(path), GatewayTelemetryStore(path))
+            stores = (
+                GatewayTelemetryStore(path, clock=_FIXED_CLOCK),
+                GatewayTelemetryStore(path, clock=_FIXED_CLOCK),
+            )
             original_write_connection = GatewayTelemetryStore._write_connection
             first_entered = threading.Event()
             release_first = threading.Event()
@@ -569,7 +577,10 @@ class GatewayTelemetryStoreTests(unittest.TestCase):
         now = datetime(2026, 8, 8, 12, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "gateway-telemetry.sqlite3"
-            stores = tuple(GatewayTelemetryStore(path) for _index in range(4))
+            stores = tuple(
+                GatewayTelemetryStore(path, clock=_FIXED_CLOCK)
+                for _index in range(4)
+            )
             barrier = threading.Barrier(len(stores))
             writer_lock = threading.Lock()
             active_writers = 0

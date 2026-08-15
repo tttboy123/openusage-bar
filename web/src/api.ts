@@ -342,3 +342,27 @@ export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return (await response.json()) as T;
 }
+
+export interface RefreshStatus {
+  status?: string;
+  lastStartedAt?: string | null;
+  lastFinishedAt?: string | null;
+  succeeded?: boolean | null;
+}
+
+/**
+ * Ask the local dashboard observer to run one bounded refresh with a full
+ * history backfill. The renderer never touches credentials or the ledger
+ * directly; this is a read-only refresh hint handled by the host.
+ */
+export async function triggerRefresh(): Promise<RefreshStatus> {
+  const response = await fetch("/v1/refresh", { method: "POST", cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`/v1/refresh failed: ${response.status}`);
+  }
+  return (await response.json()) as RefreshStatus;
+}
+
+export async function fetchRefreshStatus(): Promise<RefreshStatus> {
+  return getJson<RefreshStatus>("/v1/refresh/status");
+}

@@ -8,7 +8,7 @@ WEB_SOURCE = ROOT / "web/src"
 ADD_PROVIDER_DIALOG = WEB_SOURCE / "components/AddProviderDialog.tsx"
 PROVIDER_ACCOUNT_ACTIONS = WEB_SOURCE / "components/ProviderAccountActions.tsx"
 
-ALLOWED_STORAGE_KEYS = {"usagehub.lang"}
+ALLOWED_STORAGE_KEYS = {"usagehub.lang", "usagehub.providers.layout"}
 FORBIDDEN_VALUE_NAME = re.compile(
     r"api\s*[_-]?\s*key|cookie|session|token|authorization",
     re.IGNORECASE,

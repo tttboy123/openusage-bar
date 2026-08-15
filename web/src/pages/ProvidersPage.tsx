@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, HardDrives, ArrowClockwise, PencilSimple, Trash } from "@phosphor-icons/react";
+import {
+  Plus,
+  HardDrives,
+  ArrowClockwise,
+  PencilSimple,
+  Trash,
+  SquaresFour,
+  List as ListIcon,
+} from "@phosphor-icons/react";
 import {
   fetchProviders,
   fetchSources,
@@ -96,6 +104,13 @@ export default function ProvidersPage({
     GatewayAccountOperationFailureCode | "invalid_intent" | null
   >(null);
   const [gatewayPublicListRefreshFailed, setGatewayPublicListRefreshFailed] = useState(false);
+  const [layout, setLayout] = useState<"grid" | "list">(() => {
+    try {
+      return localStorage.getItem("usagehub.providers.layout") === "list" ? "list" : "grid";
+    } catch {
+      return "grid";
+    }
+  });
 
   const load = async (quiet = false) => {
     if (!quiet) setIsRefreshing(true);
@@ -168,6 +183,14 @@ export default function ProvidersPage({
     const id = setInterval(() => load(true), 60000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("usagehub.providers.layout", layout);
+    } catch {
+      // Preference persistence is best-effort only.
+    }
+  }, [layout]);
 
   const sourcesByProvider = new Map(
     sources.map((s) => [s.providerId, s] as const),
@@ -333,6 +356,28 @@ export default function ProvidersPage({
           <Plus size={16} />
           {t.browseProviderPresets}
         </button>
+        <div
+          className="segmented"
+          role="group"
+          aria-label={t.providerLayoutLabel}
+        >
+          <button
+            type="button"
+            aria-pressed={layout === "grid"}
+            onClick={() => setLayout("grid")}
+          >
+            <SquaresFour size={14} />
+            {t.layoutGrid}
+          </button>
+          <button
+            type="button"
+            aria-pressed={layout === "list"}
+            onClick={() => setLayout("list")}
+          >
+            <ListIcon size={14} />
+            {t.layoutList}
+          </button>
+        </div>
         <div className="toolbar-right">
           <span className="dim">
             {lastRefreshed
@@ -436,7 +481,10 @@ export default function ProvidersPage({
           t={t}
         />
       ) : null}
-      <section className="provider-grid" aria-label={t.navProviders}>
+      <section
+        className={layout === "list" ? "provider-list" : "provider-grid"}
+        aria-label={t.navProviders}
+      >
         {providers.map((item) => (
          <ProviderCard
            key={item.providerId}
@@ -447,7 +495,7 @@ export default function ProvidersPage({
            source={sourcesByProvider.get(item.providerId ?? "")}
            quick={quickByFamily.get(item.familyId ?? "")}
            t={t}
-            isSyncing={isRefreshing}
+           variant={layout}
          />
         ))}
         {providers.length === 0 && !error ? (
@@ -876,5 +924,5 @@ function relativeTime(date: string | null | undefined, t: Messages): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return tpl(t.hoursAgo, { count: hours });
   const days = Math.floor(hours / 24);
-  return tpl(t.daysAgo, { count: days });
+  return tpl(days === 1 ? t.dayAgo : t.daysAgo, { count: days });
 }

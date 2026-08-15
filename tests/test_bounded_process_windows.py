@@ -600,5 +600,126 @@ class ProcessScopeTests(unittest.TestCase):
         )
 
 
+class _NativeFunction:
+    def __init__(self, name, result):
+        self.name = name
+        self.result = result
+        self.calls = []
+        self.argtypes = None
+        self.restype = None
+
+    def __call__(self, *args):
+        self.calls.append((self.name, args))
+        return self.result
+
+
+class NativeKernel32Tests(unittest.TestCase):
+    """Cover the ctypes ABI wrapper and kernel32 loader fail-closed paths.
+
+    These run on every host (the module stays importable off Windows); they
+    exercise the exact Win32 function surface with a fake library so trace
+    coverage reaches the product gate without a Windows runner.
+    """
+
+    class FakeNativeLibrary:
+        def __init__(self, **results):
+            self.results = results
+            self.calls = []
+            self.CreateJobObjectW = self._function(
+                "CreateJobObjectW", results.get("create", 41)
+            )
+            self.SetInformationJobObject = self._function(
+                "SetInformationJobObject", results.get("set", True)
+            )
+            self.AssignProcessToJobObject = self._function(
+                "AssignProcessToJobObject", results.get("assign", True)
+            )
+            self.TerminateJobObject = self._function(
+                "TerminateJobObject", results.get("terminate", True)
+            )
+            self.CloseHandle = self._function(
+                "CloseHandle", results.get("close", True)
+            )
+
+        def _function(self, name, result):
+            function = _NativeFunction(name, result)
+            self.calls.append(function)
+            return function
+
+    def module(self):
+        try:
+            import openusage_bar._windows_job as module
+        except ModuleNotFoundError:
+            self.fail("missing private openusage_bar._windows_job module")
+        return module
+
+    def test_native_wrapper_configures_abi_and_forwards_calls(self):
+        module = self.module()
+        library = self.FakeNativeLibrary()
+        wrapper = module._NativeKernel32(library)
+
+        self.assertIsNotNone(wrapper._create_job.argtypes)
+        self.assertIsNotNone(wrapper._create_job.restype)
+        self.assertEqual(wrapper.create_job(), 41)
+        self.assertTrue(wrapper.set_kill_on_job_close(7))
+        self.assertTrue(wrapper.assign_process(7, 8))
+        self.assertTrue(wrapper.terminate_job(7))
+        self.assertTrue(wrapper.close_handle(7))
+
+        names = [function.name for function in library.calls]
+        self.assertEqual(
+            names,
+            [
+                "CreateJobObjectW",
+                "SetInformationJobObject",
+                "AssignProcessToJobObject",
+                "TerminateJobObject",
+                "CloseHandle",
+            ],
+        )
+        self.assertEqual(
+            library.TerminateJobObject.calls,
+            [("TerminateJobObject", (7, 1))],
+        )
+
+    def test_native_wrapper_falsy_results_are_fail_closed(self):
+        module = self.module()
+        library = self.FakeNativeLibrary(
+            create=0,
+            set=False,
+            assign=False,
+            terminate=False,
+            close=False,
+        )
+        wrapper = module._NativeKernel32(library)
+
+        self.assertIsNone(wrapper.create_job())
+        self.assertFalse(wrapper.set_kill_on_job_close(7))
+        self.assertFalse(wrapper.assign_process(7, 8))
+        self.assertFalse(wrapper.terminate_job(7))
+        self.assertFalse(wrapper.close_handle(7))
+
+    def test_load_kernel32_fails_closed_on_non_windows(self):
+        module = self.module()
+        with patch.object(module.sys, "platform", "darwin"):
+            with self.assertRaises(BoundedProcessError) as raised:
+                module._load_kernel32()
+        self.assertEqual(raised.exception.code, "runner_failed")
+
+    def test_load_kernel32_uses_win_dll_and_fails_closed_when_loader_missing(self):
+        module = self.module()
+        library = self.FakeNativeLibrary()
+        with patch.object(module.sys, "platform", "win32"):
+            with patch("ctypes.WinDLL", lambda *args, **kwargs: library, create=True):
+                wrapper = module._load_kernel32()
+                self.assertIsInstance(wrapper, module._NativeKernel32)
+                self.assertEqual(wrapper.create_job(), 41)
+            with patch("ctypes.WinDLL", create=True) as loader:
+                loader.side_effect = OSError("kernel32 unavailable")
+                with self.assertRaises(BoundedProcessError) as raised:
+                    module._load_kernel32()
+                self.assertEqual(raised.exception.code, "runner_failed")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,6 +6,14 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The loopback dashboard can run one bounded user-triggered refresh
+  (`POST /v1/refresh` plus a `GET /v1/refresh/status` probe) through the same
+  headless refresher the daemon uses; when no refresher is available the route
+  fails closed with `unavailable`.
+- `ActivityCollector.refresh(history_days=...)` (and `LedgerRefresher`) can
+  force the full 364-day history window for usage and cost sources even when
+  incremental history already exists, so opening UsageHub can backfill the
+  complete ledger instead of only the trailing window.
 - A machine-readable release state now keeps the public version, build, Local
   API version, release channel, and external Canary clock under one strict
   validation boundary.
@@ -14,6 +22,32 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Opening UsageHub asks the local host for one bounded refresh with a full
+  history backfill and refetches every page once it completes; the manual
+  Refresh button triggers the same host refresh instead of only remounting
+  the active page. The desktop renderer boundary may reject the refresh hint,
+  in which case pages still refetch read-only data.
+- Opening UsageHub asks the local host for one bounded refresh with a full
+  history backfill and refetches every page once it completes; the manual
+  Refresh button triggers the same host refresh instead of only remounting
+  the active page. The desktop renderer boundary may reject the refresh hint,
+  in which case pages still refetch read-only data.
+- Providers now offers a grid/list density toggle (persisted locally) so the
+  list view matches CC Switch's compact provider rows: small avatar, name,
+  console URL, right-aligned status, and in-flow hover actions.
+- Provider brand avatars pick the higher-contrast foreground (dark text on
+  light brand colors such as MiniMax/Hermes) instead of always white.
+- Readability floor: the smallest sidebar/status/meta text is raised toward
+  12 px, the English relative-time copy pluralizes ("day(s) ago"), and
+  page-level provider refresh no longer marks every card as syncing.
+- Readability floor: the smallest sidebar/status/meta text is raised toward
+  12 px, the English relative-time copy pluralizes ("day(s) ago"), and
+  page-level provider refresh no longer marks every card as syncing.
+- Cross-page readability pass: KPI labels, table headers, status pills, quota
+  and local-tool labels move from 11.2 px to 11.5 px, secondary meta to
+  12 px, and metric badges from 10.9 px to 11.5 px; chart axis ticks keep
+  their recharts default. Mobile (<640 px) segmented controls grow to 40 px
+  touch targets and full-width.
 - Provider source contracts are OS-neutral; the OpenUsage Bar distribution
   separately verifies that every source registered in its shipped catalog
   supports macOS.

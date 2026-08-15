@@ -26,6 +26,7 @@ from openusage_bar.activity_store import (
 from openusage_bar.collector_cli import (
     CLIError,
     DEFAULT_FRESH_TIMEOUT_SECONDS,
+    INTERNAL_GATEWAY_SELF_TEST_COMMAND,
     INTERNAL_REFRESH_COMMAND,
     main,
 )
@@ -2120,6 +2121,64 @@ class CollectorCLITests(unittest.TestCase):
             payload["health"]["openusageCatalog"]["status"],
             "provider_catalog_drift",
         )
+
+
+    def test_dashboard_command_starts_server_with_refresher_factory(self):
+        captured: dict[str, object] = {}
+
+        class FakeDashboardServer:
+            def __init__(self) -> None:
+                self.served = 0
+                self.closed = 0
+                self.server_address = ("127.0.0.1", 0)
+
+            def serve_forever(self) -> None:
+                self.served += 1
+
+            def server_close(self) -> None:
+                self.closed += 1
+
+        server = FakeDashboardServer()
+
+        def fake_factory(query, *, port, today, refresher):
+            captured["query"] = query
+            captured["port"] = port
+            captured["today"] = today
+            captured["refresher"] = refresher
+            return server
+
+        refresher = FakeRefresher()
+        code, out, err = self.run_cli(
+            ["dashboard", "--port", "0"],
+            refresher=refresher,
+            dashboard_server_factory=fake_factory,
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        self.assertIn("UsageHub dashboard", out)
+        self.assertIs(captured["refresher"], refresher)
+        self.assertEqual(captured["port"], 0)
+        self.assertEqual(captured["today"].isoformat(), "2026-07-14")
+        self.assertEqual(server.served, 1)
+        self.assertEqual(server.closed, 1)
+
+
+    def test_internal_self_test_commands_reject_invalid_shape(self):
+        code, out, err = self.run_cli(
+            [INTERNAL_GATEWAY_SELF_TEST_COMMAND, "--bad"],
+        )
+        self.assertEqual((code, err), (2, "invalid command input\n"))
+        code, out, err = self.run_cli(
+            [INTERNAL_REFRESH_COMMAND, "--bad"],
+        )
+        self.assertEqual((code, err), (2, "invalid command input\n"))
+
+    def test_build_default_refresher_constructs_headless_refresher(self):
+        from openusage_bar.collector_cli import build_default_refresher
+
+        refresher = build_default_refresher(self.store)
+        self.assertTrue(callable(getattr(refresher, "refresh", None)))
 
 
 if __name__ == "__main__":

@@ -64,6 +64,20 @@ def make_handler(web_root: Path, api_port: int):
                 self.end_headers()
                 self.wfile.write(b"not found")
 
+        def do_POST(self):
+            if not self.path.startswith("/v1/"):
+                self.send_response(404)
+                self.end_headers()
+                self.wfile.write(b"not found")
+                return
+            _proxy(self, api_port)
+
+        def do_HEAD(self):
+            if self.path.startswith("/v1/"):
+                _proxy(self, api_port)
+                return
+            self.do_GET()
+
     return _Handler
 
 

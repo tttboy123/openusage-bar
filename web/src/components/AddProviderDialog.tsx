@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MagnifyingGlass, X } from "@phosphor-icons/react";
+import { brandTextColorForHex } from "./ProviderCard";
 import type { QuickConnectItem } from "../api";
 import { type Messages } from "../i18n";
 
@@ -224,6 +225,9 @@ export default function AddProviderDialog({ open, presets, onClose, t }: Props) 
                       style={{
                         background:
                           BRAND_COLORS[preset.familyId] ?? "var(--surface-alt)",
+                        color: BRAND_COLORS[preset.familyId]
+                          ? brandTextColorForHex(BRAND_COLORS[preset.familyId])
+                          : "var(--text)",
                       }}
                     >
                       {presetName(preset).slice(0, 2).toUpperCase()}
