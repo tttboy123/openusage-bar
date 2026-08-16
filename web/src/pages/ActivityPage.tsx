@@ -261,11 +261,13 @@ function modelTooltipContent({
   payload,
   label,
   t,
+  dayTotals,
 }: {
   active?: boolean;
   payload?: ReadonlyArray<TooltipPayloadItem>;
   label?: string | number;
   t: Messages;
+  dayTotals?: Record<string, number>;
 }) {
   if (!active || !payload || !payload.length || !label) return null;
   const items = payload
@@ -277,8 +279,14 @@ function modelTooltipContent({
         color: p.color ?? "var(--text-dim)",
       };
     })
-    .filter((p) => p.value > 0);
-  const total = items.reduce((sum, p) => sum + p.value, 0);
+    // Defensively exclude a "total" series if one is ever added to the chart.
+    .filter(
+      (p) => p.value > 0 && String(p.name ?? "") !== "total",
+    );
+  // The chart only plots the top 12 models, so summing the payload would use
+  // partial data. Prefer the true daily total computed from the full row set.
+  const total =
+    dayTotals?.[String(label)] ?? items.reduce((sum, p) => sum + p.value, 0);
   return (
     <div className="model-chart-tip">
       <div className="model-chart-tip-row">
@@ -484,6 +492,15 @@ export default function ActivityPage({ t }: { t: Messages }) {
         : heatmapActivity.filter((r) => r.modelId && modelFilters.has(r.modelId)),
     [heatmapActivity, modelFilters],
   );
+
+  const dayTotals = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const r of filtered) {
+      const day = r.day ?? "unknown";
+      map[day] = (map[day] ?? 0) + (r.totalTokens ?? 0);
+    }
+    return map;
+  }, [filtered]);
 
   const totals = useMemo(() => {
     const byDay: Record<string, number> = {};
@@ -865,7 +882,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
                         />
                         <YAxis tickFormatter={(v: number) => formatCompact(v)} width={70} />
                         <Tooltip
-                          content={(props) => modelTooltipContent({ ...props, t })}
+                          content={(props) => modelTooltipContent({ ...props, t, dayTotals })}
                         />
                         {visibleModels.map((m, i) => (
                           <Line

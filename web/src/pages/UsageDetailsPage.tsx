@@ -88,12 +88,17 @@ function dailyTooltipContent({
             ? t.otherModels
             : (modelNames.get(key) ?? key);
       return {
+        key,
         name,
         value,
         color: String(p.color ?? "var(--text-dim)"),
       };
     })
-    .filter((p) => p.value > 0);
+    // The chart draws a "total" Line on top of the stacked model bars; the
+    // tooltip payload therefore also contains that total series. Exclude it
+    // so the sum is the models only, otherwise "总 Token" would be added to
+    // the model totals and double-counted.
+    .filter((p) => p.value > 0 && p.key !== "total");
   const total = items.reduce((sum, p) => sum + p.value, 0);
   return (
     <div className="model-chart-tip">
