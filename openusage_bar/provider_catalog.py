@@ -101,6 +101,7 @@ _SPECIAL_SOURCE_IDS = {
     "deepseek": ("deepseek_official_api", "openusage"),
     "openai": ("openai_admin_api", "openusage"),
     "codex": ("codex_local_log", "openusage"),
+    "opencode": ("opencode_local_log", "openusage"),
     "kiro_cli": ("kiro_keychain", "kiro_codewhisperer_api", "openusage"),
     "minimax": (
         "minimax_builtin_api",

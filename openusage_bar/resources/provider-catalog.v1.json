@@ -1695,6 +1695,26 @@
       },
       "sources": [
         {
+          "source_id": "opencode_local_log",
+          "kind": "local_log",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "local",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "provider_local",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "provider_local",
+          "account_scope": "local_profile",
+          "model_scope": "mixed",
+          "verification": "live_account"
+        },
+        {
           "source_id": "openusage",
           "kind": "openusage",
           "timeout_seconds": 12,

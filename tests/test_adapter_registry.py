@@ -34,6 +34,7 @@ from openusage_bar.openai_organization import (
 )
 from openusage_bar.openusage_adapter import OpenUsageAdapter
 from openusage_bar.omniroute import OmniRouteCostImporter
+from openusage_bar.opencode_daily import OpenCodeLocalDailyImporter
 from openusage_bar.performance_timing import RefreshTimingRecorder
 from openusage_bar.providers.builtins import default_registry
 from openusage_bar.providers.contracts import ProviderBinding
@@ -97,6 +98,9 @@ class AdapterRegistryTests(unittest.TestCase):
             ),
             "claude_code": (
                 (), (ClaudeCodeLocalDailyImporter,), (),
+            ),
+            "opencode": (
+                (), (OpenCodeLocalDailyImporter,), (),
             ),
             "cc_switch": (
                 (CcSwitchStatusAdapter,), (), (CcSwitchCostImporter,),

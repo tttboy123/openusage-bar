@@ -278,7 +278,7 @@ async function installDataHealthRoutes(
           operatingSystem: "linux",
           support: "supported",
           supportedSourceCount: 2,
-          totalSourceCount: 49,
+          totalSourceCount: 50,
           reasonCode: "supported_sources_available",
         },
       });

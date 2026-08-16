@@ -112,8 +112,8 @@ binding against its collector, final container, and distribution-trust report.
 Both Linux architectures verified `moonshot/moonshot_official_api` and
 `codex/codex_local_log`. Both Windows architectures verified only
 `codex/codex_local_log`; Moonshot remained independently unverified. The
-source-atomic catalog promotion is therefore macOS `49/49`, Windows `1/49`,
-Linux `2/49`, and unknown runtime `null/49`. These counts describe Observer
+source-atomic catalog promotion is therefore macOS `50/50`, Windows `1/50`,
+Linux `2/50`, and unknown runtime `null/50`. These counts describe Observer
 source support only. All four new handoffs remain `releaseEligible=false`, and
 the promotion does not claim artifact signing, notarization, or provenance
 attestation.

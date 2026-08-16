@@ -1385,6 +1385,42 @@
     },
     {
       "family_id": "opencode",
+      "source_id": "opencode_local_log",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "verified"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "opencode",
       "source_id": "openusage",
       "platforms": {
         "darwin": {

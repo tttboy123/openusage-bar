@@ -21,6 +21,7 @@ These adapters fill gaps that OpenUsage does not currently expose:
 | Provider | Available facts |
 |---|---|
 | Codex | Local subscription windows and resets; incremental local session logs are the primary daily Token source, with OpenUsage as fallback |
+| OpenCode | macOS local session log (read-only SQLite) is the daily Token source, with OpenUsage as fallback; no quota or reset is claimed |
 | Cursor | Remaining subscription percentage from OpenUsage auto discovery, with targeted OpenUsage direct-mode enrichment when auto lacks quota |
 | Kiro | AWS CodeWhisperer plan quota and reset when Keychain credentials allow it; OpenUsage fallback |
 | MiniMax | China and International Coding Plan capacity; delayed daily model billing activity only where a separately verified feed exists |

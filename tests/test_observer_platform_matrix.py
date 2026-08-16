@@ -132,7 +132,7 @@ class ObserverPlatformMatrixTests(unittest.TestCase):
             for source in family.sources
         }
 
-        self.assertEqual(len(fixture_pairs), 49)
+        self.assertEqual(len(fixture_pairs), 50)
         self.assertEqual(len(fixture_pairs), len(set(fixture_pairs)))
         self.assertEqual(set(fixture_pairs), catalog_pairs)
         self.assertEqual(
@@ -237,7 +237,7 @@ class ObserverPlatformCapabilityContractTests(unittest.TestCase):
 
                 self.assertIsInstance(first, tuple)
                 self.assertEqual(first, second)
-                self.assertEqual(len(first), 49)
+                self.assertEqual(len(first), 50)
                 self.assertEqual(
                     tuple(
                         (record.family_id, record.source_id)
@@ -327,7 +327,7 @@ class ObserverPlatformCapabilityContractTests(unittest.TestCase):
                     records = catalog.source_platform_capabilities(
                         operating_system
                     )
-                    self.assertEqual(len(records), 49)
+                    self.assertEqual(len(records), 50)
 
     def test_public_query_rejects_unknown_or_runtime_platform_names(self) -> None:
         private_value = "/private/example/runtime"

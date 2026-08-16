@@ -1974,7 +1974,7 @@
                   "const": "supported"
                 },
                 "supportedSourceCount": {
-                  "maximum": 49,
+                  "maximum": 50,
                   "minimum": 1,
                   "type": "integer"
                 }
@@ -2041,7 +2041,7 @@
               ]
             },
             "supportedSourceCount": {
-              "maximum": 49,
+              "maximum": 50,
               "minimum": 0,
               "type": [
                 "integer",
@@ -2049,7 +2049,7 @@
               ]
             },
             "totalSourceCount": {
-              "const": 49
+              "const": 50
             }
           },
           "required": [

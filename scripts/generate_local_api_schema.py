@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "openusage_bar/resources/local-api-v1.schema.json"
-CATALOG_SOURCE_COUNT = 49
+CATALOG_SOURCE_COUNT = 50
 LOCAL_API_ROUTES = [
     "/v1/health",
     "/v1/schema",

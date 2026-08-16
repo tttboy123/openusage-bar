@@ -327,7 +327,10 @@ class ProviderCatalogTests(unittest.TestCase):
 
         for family_id in ("claude_code", "opencode", "hermes", "openclaw"):
             family = self.catalog.require(family_id)
-            source = family.sources[0]
+            source = next(
+                source for source in family.sources
+                if source.source_id == "openusage"
+            )
             with self.subTest(family=family_id):
                 self.assertEqual(family.capabilities.quota_windows.state, "unknown")
                 self.assertEqual(family.capabilities.quota_windows.values, ())
@@ -340,6 +343,23 @@ class ProviderCatalogTests(unittest.TestCase):
                 self.assertEqual(source.account_scope, "local_profile")
                 self.assertEqual(source.model_scope, "per_model")
                 self.assertEqual(source.verification, "live_account")
+
+        opencode_local = next(
+            source for source in self.catalog.require("opencode").sources
+            if source.source_id == "opencode_local_log"
+        )
+        self.assertEqual(
+            opencode_local.fact_families,
+            frozenset({"detection", "token_activity"}),
+        )
+        self.assertEqual(opencode_local.authority, "provider_local")
+        self.assertEqual(opencode_local.account_scope, "local_profile")
+        self.assertEqual(opencode_local.model_scope, "mixed")
+        self.assertEqual(opencode_local.verification, "live_account")
+        self.assertEqual(
+            opencode_local.operating_systems,
+            frozenset({"macos"}),
+        )
 
         for family in self.catalog.families:
             for source in family.sources:
@@ -409,6 +429,7 @@ class ProviderCatalogTests(unittest.TestCase):
             "openusage": ("pinned", "openusage_upstream"),
             "openai_admin_api": ("stable", "provider_official"),
             "codex_local_log": ("stable", "provider_local"),
+            "opencode_local_log": ("stable", "provider_local"),
             "cc_switch.status": ("stable", "openusage_bar_builtin"),
             "cc_switch.rollups": ("stable", "openusage_bar_builtin"),
             "deepseek_official_api": ("stable", "provider_official"),
@@ -757,6 +778,7 @@ class ProviderCatalogTests(unittest.TestCase):
     def test_source_order_and_credential_scopes_are_an_exact_boundary(self):
         special = {
             "codex": ["codex_local_log", "openusage"],
+            "opencode": ["opencode_local_log", "openusage"],
             "cc_switch": ["cc_switch.status", "cc_switch.rollups"],
             "deepseek": ["deepseek_official_api", "openusage"],
             "kiro_cli": [
@@ -775,7 +797,7 @@ class ProviderCatalogTests(unittest.TestCase):
             ],
         }
         for family_id in EXPECTED_UPSTREAM - {
-            "codex", "kiro_cli", "moonshot", "openai", "deepseek"
+            "codex", "kiro_cli", "moonshot", "openai", "deepseek", "opencode"
         }:
             special[family_id] = ["openusage"]
         expected_scopes = {
@@ -1058,6 +1080,7 @@ class ProviderCatalogTests(unittest.TestCase):
             "openusage": ("pinned", "openusage_upstream"),
             "openai_admin_api": ("stable", "provider_official"),
             "codex_local_log": ("stable", "provider_local"),
+            "opencode_local_log": ("stable", "provider_local"),
             "kiro_keychain": ("stable", "provider_local"),
             "kiro_codewhisperer_api": ("stable", "provider_official"),
             "minimax_builtin_api": ("stable", "openusage_bar_builtin"),

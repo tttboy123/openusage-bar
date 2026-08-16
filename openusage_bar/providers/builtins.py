@@ -35,6 +35,7 @@ from ..openai_organization import (
     OpenAIOrganizationCardAdapter,
     OpenAIOrganizationImporter,
 )
+from ..opencode_daily import OpenCodeLocalDailyImporter
 from ..openusage_adapter import OpenUsageAdapter
 from ..omniroute import OmniRouteCostImporter
 from ..step_plan import StepPlanAdapter, endpoints_for_site
@@ -164,6 +165,15 @@ def default_registry(
             ),),
         ),
         supports_legacy_unmodeled,
+    )
+    registry.register_global(
+        lambda: ProviderBinding(
+            provider_id="opencode", family_id="opencode",
+            usage_sources=(_performance_source(
+                OpenCodeLocalDailyImporter(clock=clock), "local_file"
+            ),),
+        ),
+        lambda: supports(("opencode", "opencode_local_log")),
     )
     registry.register_global(
         lambda: ProviderBinding(
