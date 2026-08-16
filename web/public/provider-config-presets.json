@@ -19,10 +19,10 @@
       "category": "gateway",
       "agent": "claude_code",
       "familyId": "moonshot",
-      "consoleUrl": "https://platform.moonshot.cn",
-      "apiKeyUrl": "https://platform.moonshot.cn/console/api-keys",
-      "baseUrl": "https://api.moonshot.cn/anthropic",
-      "model": "kimi-k2.6",
+      "consoleUrl": "https://platform.kimi.ai",
+      "apiKeyUrl": "https://platform.kimi.ai/console/api-keys",
+      "baseUrl": "https://api.moonshot.ai/anthropic",
+      "model": "kimi-k3[1m]",
       "allowCustomEndpoints": true
     },
     {
@@ -46,7 +46,7 @@
       "consoleUrl": "https://siliconflow.cn",
       "apiKeyUrl": "https://cloud.siliconflow.cn/account/ak",
       "baseUrl": "https://api.siliconflow.cn/v1",
-      "model": "anthropic/claude-sonnet-5",
+      "model": "deepseek-ai/DeepSeek-V3",
       "allowCustomEndpoints": true
     },
     {
@@ -55,10 +55,10 @@
       "category": "gateway",
       "agent": "codex",
       "familyId": "moonshot",
-      "consoleUrl": "https://platform.moonshot.cn",
-      "apiKeyUrl": "https://platform.moonshot.cn/console/api-keys",
-      "baseUrl": "https://api.moonshot.cn/v1",
-      "model": "kimi-k2.6",
+      "consoleUrl": "https://platform.kimi.ai",
+      "apiKeyUrl": "https://platform.kimi.ai/console/api-keys",
+      "baseUrl": "https://api.moonshot.ai/v1",
+      "model": "kimi-k3",
       "allowCustomEndpoints": true
     },
     {
@@ -142,7 +142,7 @@
       "consoleUrl": "https://platform.deepseek.com",
       "apiKeyUrl": "https://platform.deepseek.com/api_keys",
       "baseUrl": "https://api.deepseek.com/v1",
-      "model": "deepseek-chat",
+      "model": "deepseek-v4-flash",
       "allowCustomEndpoints": true
     },
     {
@@ -165,7 +165,7 @@
       "familyId": "minimax",
       "consoleUrl": "https://platform.minimaxi.com",
       "apiKeyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-      "baseUrl": "https://api.minimax.chat/v1",
+      "baseUrl": "https://api.minimaxi.com/v1",
       "model": "MiniMax-M2.7",
       "allowCustomEndpoints": true
     },
@@ -177,7 +177,7 @@
       "familyId": "minimax",
       "consoleUrl": "https://platform.minimaxi.com",
       "apiKeyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-      "baseUrl": "https://api.minimax.chat/v1",
+      "baseUrl": "https://api.minimaxi.com/v1",
       "model": "MiniMax-M3",
       "allowCustomEndpoints": true
     },
@@ -189,7 +189,7 @@
       "familyId": "opencode",
       "consoleUrl": "https://opencode.ai",
       "apiKeyUrl": "https://opencode.ai",
-      "baseUrl": "https://opencode.ai/zen/go/v1",
+      "baseUrl": "https://opencode.ai/zen/v1",
       "model": "deepseek-v4-flash-free",
       "allowCustomEndpoints": true
     },
@@ -202,7 +202,7 @@
       "consoleUrl": "https://openrouter.ai",
       "apiKeyUrl": "https://openrouter.ai/settings/keys",
       "baseUrl": "https://openrouter.ai/api/v1",
-      "model": "deepseek/deepseek-chat",
+      "model": "deepseek/deepseek-v4-flash",
       "allowCustomEndpoints": true
     },
     {

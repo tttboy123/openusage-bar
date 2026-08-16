@@ -22,12 +22,12 @@
       "category": "gateway",
       "agent": "claude_code",
       "family_id": "moonshot",
-      "console_url": "https://platform.moonshot.cn",
-      "api_key_url": "https://platform.moonshot.cn/console/api-keys",
+      "console_url": "https://platform.kimi.ai",
+      "api_key_url": "https://platform.kimi.ai/console/api-keys",
       "template": {
         "api_key_env": "ANTHROPIC_AUTH_TOKEN",
-        "base_url": "https://api.moonshot.cn/anthropic",
-        "model": "kimi-k2.6"
+        "base_url": "https://api.moonshot.ai/anthropic",
+        "model": "kimi-k3[1m]"
       },
       "allow_custom_endpoints": true
     },
@@ -57,7 +57,7 @@
       "template": {
         "api_key_env": "ANTHROPIC_AUTH_TOKEN",
         "base_url": "https://api.siliconflow.cn/v1",
-        "model": "anthropic/claude-sonnet-5"
+        "model": "deepseek-ai/DeepSeek-V3"
       },
       "allow_custom_endpoints": true
     },
@@ -67,12 +67,12 @@
       "category": "gateway",
       "agent": "codex",
       "family_id": "moonshot",
-      "console_url": "https://platform.moonshot.cn",
-      "api_key_url": "https://platform.moonshot.cn/console/api-keys",
+      "console_url": "https://platform.kimi.ai",
+      "api_key_url": "https://platform.kimi.ai/console/api-keys",
       "template": {
         "api_key_env": "OPENAI_API_KEY",
-        "base_url": "https://api.moonshot.cn/v1",
-        "model": "kimi-k2.6"
+        "base_url": "https://api.moonshot.ai/v1",
+        "model": "kimi-k3"
       },
       "allow_custom_endpoints": true
     },
@@ -177,7 +177,7 @@
       "template": {
         "api_key_env": "DEEPSEEK_API_KEY",
         "base_url": "https://api.deepseek.com/v1",
-        "model": "deepseek-chat",
+        "model": "deepseek-v4-flash",
         "npm": "@ai-sdk/openai-compatible"
       },
       "allow_custom_endpoints": true
@@ -208,7 +208,7 @@
       "api_key_url": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
       "template": {
         "api_key_env": "MINIMAX_API_KEY",
-        "base_url": "https://api.minimax.chat/v1",
+        "base_url": "https://api.minimaxi.com/v1",
         "model": "MiniMax-M2.7",
         "npm": "@ai-sdk/openai-compatible"
       },
@@ -224,7 +224,7 @@
       "api_key_url": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
       "template": {
         "api_key_env": "MINIMAX_API_KEY",
-        "base_url": "https://api.minimax.chat/v1",
+        "base_url": "https://api.minimaxi.com/v1",
         "model": "MiniMax-M3",
         "npm": "@ai-sdk/openai-compatible"
       },
@@ -240,7 +240,7 @@
       "api_key_url": "https://opencode.ai",
       "template": {
         "api_key_env": "OPENCODE_API_KEY",
-        "base_url": "https://opencode.ai/zen/go/v1",
+        "base_url": "https://opencode.ai/zen/v1",
         "model": "deepseek-v4-flash-free",
         "npm": "@ai-sdk/openai-compatible"
       },
@@ -257,7 +257,7 @@
       "template": {
         "api_key_env": "OPENROUTER_API_KEY",
         "base_url": "https://openrouter.ai/api/v1",
-        "model": "deepseek/deepseek-chat",
+        "model": "deepseek/deepseek-v4-flash",
         "npm": "@ai-sdk/openai-compatible"
       },
       "allow_custom_endpoints": true

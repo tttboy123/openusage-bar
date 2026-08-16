@@ -1116,7 +1116,7 @@ public enum GeneratedProviderCatalog {
         "gemini_api": "https://aistudio.google.com",
         "google": "https://aistudio.google.com",
         "minimax": "https://platform.minimaxi.com",
-        "moonshot": "https://platform.moonshot.cn",
+        "moonshot": "https://platform.kimi.ai",
         "omniroute": "http://localhost:20128",
         "openai": "https://platform.openai.com",
         "step_plan": "https://platform.stepfun.com",
@@ -1127,7 +1127,7 @@ public enum GeneratedProviderCatalog {
         "gemini_api": "https://aistudio.google.com/app/apikey",
         "google": "https://aistudio.google.com/app/apikey",
         "minimax": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-        "moonshot": "https://platform.moonshot.cn/console/api-keys",
+        "moonshot": "https://platform.kimi.ai/console/api-keys",
         "openai": "https://platform.openai.com/api-keys",
         "step_plan": "https://platform.stepfun.com/api-keys",
     ]
