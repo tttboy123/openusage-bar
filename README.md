@@ -19,7 +19,7 @@
 
 </div>
 
-UsageHub（原 OpenUsage Bar）把 AI 订阅额度、API 消耗、本地编码工具和每日 Token 活动统一到一个原生 SwiftUI 客户端里：菜单栏用于快速判断，详情页用于分析，CLI JSON 和本地只读 API 供调度平台读取。
+UsageHub（原 OpenUsage Bar）把 AI 订阅额度、API 消耗、本地编码工具和每日 Token 活动统一到本地客户端：菜单栏图标实时显示今日用量简况，单击展开余额与额度，详情页用于分析，CLI JSON 和本地只读 API 供调度平台读取。当前发布形态为桌面客户端（Electron 封装本地 Web 仪表盘）；仓库同步维护原生 SwiftUI 版本。
 
 <p align="center">
   <img src="docs/assets/openusage-bar-activity-demo-zh.png" width="1160" alt="OpenUsage Bar 中文 Activity 界面，展示年度 Token 热力图与每日模型趋势">
@@ -76,10 +76,10 @@ flowchart LR
 
 | 能力 | 说明 |
 | --- | --- |
-| 菜单栏总览 | Today Token、最紧急 Capacity、刷新状态和详情入口 |
-| Usage Details | Activity、Capacity、API Spend、Local Tools、Providers、Data Health |
-| 每日 Token 活动 | 日、周、月、年维度聚合；支持每日总量、模型堆叠趋势和年度方格热力图 |
-| Provider Center | 添加、编辑、隐藏、恢复 Provider；支持多账号；凭证只写入 Keychain |
+| 菜单栏简况 | 图标旁实时显示今日 Token（🟢/🟡/🔴 状态点），单击弹出简况菜单：今日 Token、实测余额、额度；双击打开仪表盘 |
+| Usage Details | Activity、Capacity、API Spend、Local Tools、Providers、Data Health；用量详情为堆叠柱状图，同时展示每日总量与各模型明细 |
+| 每日 Token 活动 | 日、周、月、年维度聚合；支持每日总量、模型堆叠趋势和年度方格热力图；打开 App 自动刷新并补齐历史 |
+| Provider Center | 添加、编辑、隐藏、恢复 Provider；支持多账号；凭证只写入 Keychain；预设与各 Provider 官网对齐，真实品牌图标，网格/列表视图，codex 显示为 ChatGPT |
 | 订阅额度 | Codex、Cursor、Kiro、MiniMax、StepFun 等可用时显示真实剩余容量 |
 | API 消耗 | OpenAI Organization、Generic HTTPS Provider、Daily Token Feed 等结构化接入 |
 | 调度接口 | Unix socket 本地只读 API、CLI JSON/JSONL、离线快速读取 |
@@ -87,12 +87,14 @@ flowchart LR
 
 ## 快速安装
 
-[下载 OpenUsage Bar v0.8.6 候选 DMG（发布后可用，Apple Silicon）](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg)
+[下载 UsageHub v0.8.6 候选 DMG（当前发布形态，Apple Silicon）](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/UsageHub-0.8.6-mac-arm64.dmg)
 
 1. 打开下载的 DMG。
-2. 将 **OpenUsage Bar** 拖入 **Applications**。
-3. 从访达的“应用程序”打开 **OpenUsage Bar**。
-4. App 自动注册登录启动项和后台采集器，不需要打开终端。
+2. 将 **UsageHub** 拖入 **Applications**。
+3. 从访达的“应用程序”打开 **UsageHub**。
+4. 打开后自动注册登录启动项和后台采集器，不需要打开终端；菜单栏图标随即显示今日用量简况。
+
+原生 SwiftUI 版本：[OpenUsage Bar v0.8.6 候选 DMG](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg)（候选发布后可用）。
 
 如果 macOS 提示 **“OpenUsage Bar 已损坏”**，这是尚未公证的开源预发布包被添加了
 下载隔离属性。确认 DMG 来自本仓库并已校验 SHA-256 后，在终端中只对该 App 执行：
@@ -107,10 +109,10 @@ xattr -dr com.apple.quarantine "/Applications/OpenUsage Bar.app"
 
 首次打开后：
 
-1. 点击菜单栏里的 **OpenUsage Bar**。
-2. 进入 **Open Usage Details** 查看账本。
-3. 进入 **Settings / Providers** 添加或编辑 Provider。
-4. 后续通常只需查看菜单栏；登录后自动启动，采集器每五分钟刷新。
+1. 单击菜单栏里的 **UsageHub** 图标查看今日简况（今日 Token、实测余额、额度）。
+2. 双击图标（或菜单中的“打开 UsageHub”）进入详情页查看账本。
+3. 进入 **设置 / Provider** 添加或编辑 Provider。
+4. 后续通常只需查看菜单栏；打开 App 会自动刷新数据并补齐历史。
 
 更多细节、SHA-256 校验和高级修复脚本见[安装指南](docs/release-quick-start.md)。
 
@@ -133,13 +135,32 @@ scripts/install_app.sh
 - Release 构建与 nested helper 签名
 - 安装事务、回滚备份和本地 API 健康检查
 
-生成发布包：
+生成原生发布包：
 
 ```bash
 scripts/package_release.sh
 ```
 
+构建桌面客户端（当前发布形态）：
+
+```bash
+cd desktop && npm run dist:mac
+```
+
 ## 产品结构
+
+当前发布形态（桌面客户端）：
+
+```text
+UsageHub.app（Electron）
+├─ 菜单栏托盘：品牌图标 + 实时今日 Token 简况，单击弹出简况菜单
+├─ 本地仪表盘：Web 前端（活动 / 用量详情 / 额度 / API 消耗 / 本地工具 / Provider / 数据健康 / 自动化）
+├─ collector：后台采集与本地只读 API（openusage-collector）
+├─ settings：Provider 配置与受控命令（openusage-settings）
+└─ bridge：插件桥（openusage-plugin-bridge）
+```
+
+原生菜单栏版本（同步维护）：
 
 ```text
 OpenUsage Bar.app

@@ -18,7 +18,7 @@ A native macOS menu-bar utility. Data stays local; people read the UI and schedu
 
 </div>
 
-UsageHub (formerly OpenUsage Bar) is a local-first native macOS dashboard for AI subscriptions, API providers, local coding tools, and daily token activity.
+UsageHub (formerly OpenUsage Bar) is a local-first dashboard for AI subscriptions, API providers, local coding tools, and daily token activity. The menu-bar icon shows today's usage summary live; a single click expands balances and capacity, and detail pages are for analysis, while CLI JSON and the local read-only API serve schedulers. The current release form is the desktop client (Electron wrapping the local web dashboard); the native SwiftUI version is maintained in parallel.
 
 <p align="center">
   <img src="docs/assets/openusage-bar-activity-demo-zh.png" width="1160" alt="OpenUsage Bar Activity view showing the yearly token heatmap and daily model trend">
@@ -49,9 +49,10 @@ are not broken by this stage.
 
 ## What it does
 
-- Menu bar: today token total, urgent capacity, refresh state, and details entry.
-- Activity app: token activity, capacity, API spend, local tools, providers, accounts, and data health.
-- Provider center: add, edit, hide, restore, and manage multiple accounts without echoing credentials.
+- Menu bar: live today-token count next to the brand icon (🟢/🟡/🔴 status dot); a single click opens the summary menu with today tokens, real balances, and capacity; double-click opens the dashboard.
+- Auto-refresh: opening the app refreshes all data and backfills history (`history_days`).
+- Usage details: stacked daily chart shows totals and per-model breakdown, with per-provider aggregation and multi-select filters.
+- Provider center: add, edit, hide, restore, and manage multiple accounts without echoing credentials; presets aligned with official provider sites, real brand icons, grid/list views, codex displayed as ChatGPT.
 - Local automation surface: stable CLI JSON/JSONL and a private read-only Unix-socket API.
 - Privacy boundary: credentials stay in macOS Keychain; prompts, responses, raw provider payloads, cookies, sessions, and direct account identity are not exported.
 
@@ -67,12 +68,15 @@ flowchart LR
 
 ## Quick install
 
-[Download the OpenUsage Bar v0.8.6 candidate DMG after publication](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg)
+[Download the UsageHub v0.8.6 candidate DMG (current release form, Apple Silicon)](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/UsageHub-0.8.6-mac-arm64.dmg)
 
 1. Open the downloaded DMG.
-2. Drag **OpenUsage Bar** onto **Applications**.
+2. Drag **UsageHub** onto **Applications**.
 3. Open it from Finder's Applications folder. The app registers its login item
-   and bundled collector automatically; Terminal is not required.
+   and bundled collector automatically; the menu-bar icon immediately shows
+   today's usage summary. Terminal is not required.
+
+Native SwiftUI build: [OpenUsage Bar v0.8.6 candidate DMG](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg) (available after publication).
 
 If macOS says **“OpenUsage Bar is damaged”**, verify that the DMG came from this
 repository and matches its SHA-256 file, then remove quarantine from this app
@@ -99,10 +103,16 @@ scripts/build_app.sh
 scripts/install_app.sh
 ```
 
-Package a release artifact:
+Package the native release artifact:
 
 ```bash
 scripts/package_release.sh
+```
+
+Build the desktop client (current release form):
+
+```bash
+cd desktop && npm run dist:mac
 ```
 
 ## Local data and API
@@ -147,7 +157,7 @@ HELPER="$APP/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/Ope
 
 OpenUsage Bar is an independent repository and release. OpenUsage.sh is an optional CLI data source consumed through validated JSON only; its Go internals, credentials, and release lifecycle are not embedded here.
 
-Version 0.6.0 includes the OpenUsage 0.23.0 provider catalog plus built-in enhancements for MiniMax, StepFun, Codex, Cursor, Kiro, OpenAI Organization, Generic HTTPS Provider, and Custom Daily Token Feed. See [Provider support](docs/provider-support.md).
+Version 0.8.6 includes the OpenUsage provider catalog plus built-in enhancements for MiniMax, StepFun, Codex, Cursor, Kiro, OpenAI Organization, Generic HTTPS Provider, Custom Daily Token Feed, and provider-config presets aligned with each provider's official site. See [Provider support](docs/provider-support.md).
 
 ## License
 
