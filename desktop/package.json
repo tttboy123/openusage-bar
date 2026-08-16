@@ -69,8 +69,17 @@
         {
           "from": "../dist-bridge/openusage-plugin-bridge",
           "to": "bridge/openusage-plugin-bridge"
+        },
+        {
+          "from": "assets/trayTemplate.png",
+          "to": "trayTemplate.png"
+        },
+        {
+          "from": "assets/trayTemplate@2x.png",
+          "to": "trayTemplate@2x.png"
         }
-      ]
+      ],
+      "icon": "assets/icon.icns"
     },
     "win": {
       "target": [

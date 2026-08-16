@@ -413,11 +413,19 @@ function showMainWindow() {
 }
 
 function trayIcon() {
-  const installed =
-    "/Applications/OpenUsage Bar.app/Contents/Resources/icon.icns";
-  const icon = nativeImage.createFromPath(installed);
-  if (!icon.isEmpty()) {
-    return icon;
+  // Prefer the brand template image shipped inside this app bundle
+  // (Contents/Resources/trayTemplate.png, auto-loaded at @2x by Electron);
+  // fall back to the bundled app icon, then the legacy native install path.
+  const candidates = [
+    path.join(process.resourcesPath, "trayTemplate.png"),
+    path.join(process.resourcesPath, "electron.icns"),
+    "/Applications/OpenUsage Bar.app/Contents/Resources/icon.icns",
+  ];
+  for (const candidate of candidates) {
+    const icon = nativeImage.createFromPath(candidate);
+    if (!icon.isEmpty()) {
+      return icon;
+    }
   }
   // Minimal 1x1 PNG fallback so the tray does not fail on platforms without
   // the macOS icon bundle.
