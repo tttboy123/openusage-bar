@@ -499,7 +499,9 @@ function createTray() {
   tray = new Tray(trayIcon());
   tray.setToolTip("UsageHub");
   updateTray();
-  tray.on("click", () => showMainWindow());
+  // Left-click shows the usage summary menu; double-click opens the dashboard.
+  tray.on("click", () => showTrayMenu());
+  tray.on("double-click", () => showMainWindow());
 }
 
 function showAboutUsageHub() {
