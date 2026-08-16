@@ -446,7 +446,19 @@ struct MenuLogicTests {
         #expect(RefreshRunner().run(command) == .timedOut)
         let childPID = try #require(Int32(try String(contentsOf: pidFile, encoding: .utf8)))
         defer { cleanupOwnedTestProcess(childPID, marker: ownershipMarker.path) }
-        #expect(Darwin.kill(childPID, 0) != 0)
+        // The tree kill is sent when the timeout fires; on a loaded shared
+        // runner the child may take a few hundred ms to actually be reaped.
+        // Poll briefly instead of asserting an immediate corpse.
+        let reapDeadline = Date().addingTimeInterval(3)
+        var reaped = false
+        while Date() < reapDeadline {
+            if Darwin.kill(childPID, 0) != 0 {
+                reaped = true
+                break
+            }
+            usleep(50_000)
+        }
+        #expect(reaped)
     }
 
     @Test("Process runner reports a nonzero collector exit")
