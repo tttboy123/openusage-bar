@@ -1,5 +1,8 @@
 import http.client
+import json
+import tempfile
 import threading
+import time
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -7,11 +10,13 @@ from pathlib import Path
 from openusage_bar.activity_records import BalanceObservation, ProviderInstance
 from openusage_bar.activity_records import DailyUsageRow
 from openusage_bar.activity_store import ActivityStore
+from openusage_bar.local_api import LocalAPIRouter, create_tcp_server
 from openusage_bar.query import QueryService, to_wire
 from openusage_bar.web_dashboard import make_dashboard_server, render_dashboard
 
 
 NOW = datetime(2026, 7, 29, 12, 0, tzinfo=timezone.utc)
+TOKEN = "t" * 43
 
 
 class WebDashboardTests(unittest.TestCase):
@@ -128,6 +133,280 @@ class WebDashboardTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertIn(b'"quotaHub"', payload)
         finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(3)
+
+
+    def test_dashboard_matches_local_api_envelopes(self):
+        server = make_dashboard_server(self.query, port=0, today=date(2026, 7, 29))
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        temp = tempfile.TemporaryDirectory()
+        local_api = create_tcp_server(
+            self.query,
+            port=0,
+            bearer_token=TOKEN,
+            token_path=Path(temp.name) / "api.token",
+            clock=lambda: NOW,
+        )
+        local_thread = threading.Thread(target=local_api.serve_forever, daemon=True)
+        local_thread.start()
+        local_port = local_api.server_address[1]
+        try:
+            cases = (
+                "/v1/summary?today=2026-07-29",
+                "/v1/sources/status",
+                "/v1/providers",
+                "/v1/capabilities",
+                "/v1/balances",
+                "/v1/quick-connect",
+                "/v1/changes?after=0&limit=10",
+            )
+            for path in cases:
+                with self.subTest(path=path):
+                    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+                    connection.request("GET", path)
+                    response = connection.getresponse()
+                    body = response.read()
+                    connection.close()
+                    self.assertEqual(response.status, 200, path)
+                    dashboard_payload = json.loads(body)
+
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", local_port, timeout=3
+                    )
+                    connection.request(
+                        "GET",
+                        path,
+                        headers={
+                            "Host": f"127.0.0.1:{local_port}",
+                            "Authorization": f"Bearer {TOKEN}",
+                        },
+                    )
+                    response = connection.getresponse()
+                    body = response.read()
+                    connection.close()
+                    self.assertEqual(response.status, 200, path)
+                    local_payload = json.loads(body)
+                    self.assertEqual(dashboard_payload, local_payload, path)
+        finally:
+            local_api.shutdown()
+            local_api.server_close()
+            local_thread.join(3)
+            temp.cleanup()
+            server.shutdown()
+            server.server_close()
+            thread.join(3)
+
+    def test_dashboard_invalid_integer_query_returns_json_error(self):
+        server = make_dashboard_server(self.query, port=0, today=date(2026, 7, 29))
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for path in (
+                "/v1/changes?after=nope&limit=10",
+                "/v1/quotas/history?limit=nope",
+            ):
+                with self.subTest(path=path):
+                    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+                    connection.request("GET", path)
+                    response = connection.getresponse()
+                    body = response.read()
+                    connection.close()
+                    self.assertEqual(response.status, 400)
+                    payload = json.loads(body)
+                    self.assertEqual(payload["error"]["code"], "invalid_parameter")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(3)
+
+    def test_loopback_server_exposes_readonly_v1_endpoints(self):
+        server = make_dashboard_server(self.query, port=0, today=date(2026, 7, 29))
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for path, field in (
+                ("/v1/sources/status", "sources"),
+                ("/v1/providers", "providers"),
+                ("/v1/capabilities", "providers"),
+                ("/v1/balances", "balances"),
+                ("/v1/quick-connect", "providers"),
+            ):
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+                connection.request("GET", path)
+                response = connection.getresponse()
+                body = response.read()
+                connection.close()
+                self.assertEqual(response.status, 200, path)
+                self.assertIn(f'"schemaVersion"'.encode(), body, path)
+                self.assertIn(f'"{field}"'.encode(), body, path)
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("GET", "/v1/capacity")
+            response = connection.getresponse()
+            body = response.read().decode("utf-8")
+            connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertIn('"providers"', body)
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request(
+                "GET", "/v1/activity/daily?from=2026-07-01&to=2026-07-29"
+            )
+            response = connection.getresponse()
+            body = response.read().decode("utf-8")
+            connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertIn('"rows"', body)
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request(
+                "GET", "/v1/costs/daily?from=2026-07-01&to=2026-07-29"
+            )
+            response = connection.getresponse()
+            body = response.read().decode("utf-8")
+            connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertIn('"rows"', body)
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("GET", "/v1/activity/daily")
+            response = connection.getresponse()
+            body = response.read()
+            connection.close()
+            self.assertEqual(response.status, 400)
+            self.assertEqual(
+                json.loads(body)["error"]["code"],
+                "invalid_parameter",
+            )
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("GET", "/v1/schema")
+            response = connection.getresponse()
+            schema = json.loads(response.read())
+            connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(schema["routes"], list(LocalAPIRouter.ROUTES))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(3)
+
+    def test_refresh_route_is_unavailable_without_refresher(self):
+        server = make_dashboard_server(self.query, port=0, today=date(2026, 7, 29))
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("POST", "/v1/refresh")
+            response = connection.getresponse()
+            body = json.loads(response.read())
+            connection.close()
+            self.assertEqual(response.status, 503)
+            self.assertEqual(body["status"], "unavailable")
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("GET", "/v1/refresh/status")
+            response = connection.getresponse()
+            body = json.loads(response.read())
+            connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(body["status"], "unavailable")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(3)
+
+    def test_refresh_route_runs_bounded_background_refresh_with_history(self):
+        calls: list[dict] = []
+
+        class FakeRefresher:
+            def refresh(self, *, history_days=None):
+                calls.append({"history_days": history_days})
+
+        server = make_dashboard_server(
+            self.query,
+            port=0,
+            today=date(2026, 7, 29),
+            refresher=FakeRefresher(),
+        )
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("POST", "/v1/refresh")
+            response = connection.getresponse()
+            body = json.loads(response.read())
+            connection.close()
+            self.assertEqual(response.status, 202)
+            self.assertEqual(body["status"], "started")
+
+            deadline = time.monotonic() + 5
+            status = None
+            while time.monotonic() < deadline:
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1", port, timeout=3
+                )
+                connection.request("GET", "/v1/refresh/status")
+                response = connection.getresponse()
+                status = json.loads(response.read())
+                connection.close()
+                if status["status"] == "idle":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(status["status"], "idle")
+            self.assertIs(status["succeeded"], True)
+            self.assertEqual(calls, [{"history_days": 364}])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(3)
+
+    def test_refresh_route_reports_in_progress_and_does_not_stack(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        class BlockingRefresher:
+            def refresh(self, *, history_days=None):
+                started.set()
+                release.wait(5)
+
+        server = make_dashboard_server(
+            self.query,
+            port=0,
+            today=date(2026, 7, 29),
+            refresher=BlockingRefresher(),
+        )
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("POST", "/v1/refresh")
+            response = connection.getresponse()
+            body = json.loads(response.read())
+            connection.close()
+            self.assertEqual(response.status, 202)
+            self.assertTrue(started.wait(3))
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("POST", "/v1/refresh")
+            response = connection.getresponse()
+            body = json.loads(response.read())
+            connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(body["status"], "in_progress")
+
+            release.set()
+        finally:
+            release.set()
             server.shutdown()
             server.server_close()
             thread.join(3)

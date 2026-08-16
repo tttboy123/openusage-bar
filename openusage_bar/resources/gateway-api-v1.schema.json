@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "apiVersion": "gateway.openusage/v1",
+  "routes": [
+    "GET /gateway/v1/account-pools",
+    "GET /gateway/v1/decision-traces",
+    "GET /gateway/v1/health",
+    "GET /gateway/v1/schema",
+    "POST /gateway/v1/should-send",
+    "POST /gateway/v1/responses"
+  ],
+  "modes": [
+    "observe",
+    "advise",
+    "gateway"
+  ],
+  "healthRepresentations": {
+    "default": {
+      "contentType": "application/json",
+      "apiVersion": "gateway.openusage/v1"
+    },
+    "runtimeCapability": {
+      "accept": "application/vnd.openusage.runtime-capability+json",
+      "contentType": "application/json",
+      "apiVersion": "runtime-capability.openusage/v1",
+      "object": "runtime.capability"
+    }
+  },
+  "varyByRoute": {
+    "GET /gateway/v1/health": [
+      "Accept"
+    ],
+    "POST /gateway/v1/responses": [
+      "Accept"
+    ]
+  },
+  "errorShape": {
+    "error": {
+      "code": "string",
+      "message": "string",
+      "retryable": "boolean"
+    }
+  }
+}

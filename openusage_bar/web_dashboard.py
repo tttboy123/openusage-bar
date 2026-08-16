@@ -10,14 +10,47 @@ primary surfaces; this page exists for cross-platform and headless users.
 from __future__ import annotations
 
 import html
-from datetime import date, timedelta
+import json
+import re
+import threading
+from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from importlib import resources
+from urllib.parse import parse_qs, urlparse
+from typing import Any, Callable
 
-from .query import QueryService, to_wire
+from .query import QueryService, to_wire, SCHEMA_VERSION
+from .quick_connect import QUICK_CONNECT
 
 
 DEFAULT_DASHBOARD_PORT = 17822
+
+
+def _css_token_key(key: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "-", key).lower()
+
+
+def _design_tokens() -> dict[str, Any]:
+    try:
+        text = (
+            resources.files("openusage_bar.resources")
+            .joinpath("design-tokens.v1.json")
+            .read_text(encoding="utf-8")
+        )
+        return json.loads(text)
+    except Exception:
+        return {}
+
+
+def _token_css(mode: str) -> str:
+    colors = _design_tokens().get("color", {})
+    lines: list[str] = []
+    for key, entry in colors.items():
+        css_key = _css_token_key(key)
+        value = entry.get(mode)
+        if value:
+            lines.append(f"      --{css_key}: {value};")
+    return "\n".join(lines)
 
 
 def _pill(state: str) -> str:
@@ -33,6 +66,8 @@ def _pill(state: str) -> str:
 def render_dashboard(
     snapshot: dict[str, Any], today: str, model_summary: tuple[dict[str, Any], ...] = ()
 ) -> str:
+    light_tokens = _token_css("light")
+    dark_tokens = _token_css("dark")
     summary = snapshot.get("summary") or {}
     today_tokens = summary.get("todayTokens")
     model_count = summary.get("modelCount")
@@ -107,19 +142,7 @@ def render_dashboard(
   <style>
     :root {{
       color-scheme: light dark;
-      --bg: #F7F7F5;
-      --surface: #FFFFFF;
-      --surface-alt: #F0F0EE;
-      --text: #1A1B1E;
-      --text-dim: #5B5F66;
-      --text-faint: #6A707A;
-      --hairline: #E3E4E1;
-      --accent: #087F52;
-      --accent-soft: rgba(8, 127, 82, 0.12);
-      --warn: #B45309;
-      --warn-soft: rgba(180, 83, 9, 0.12);
-      --bad: #C0392B;
-      --bad-soft: rgba(192, 57, 43, 0.12);
+{light_tokens}
       --radius: 12px;
       --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
         "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -128,19 +151,7 @@ def render_dashboard(
     }}
     @media (prefers-color-scheme: dark) {{
       :root {{
-        --bg: #0B0C0E;
-        --surface: #121316;
-        --surface-alt: #181A1E;
-        --text: #E8EAED;
-        --text-dim: #A7ADB8;
-        --text-faint: #7B818C;
-        --hairline: #23262C;
-        --accent: #34D399;
-        --accent-soft: rgba(52, 211, 153, 0.14);
-        --warn: #FBBF24;
-        --warn-soft: rgba(251, 191, 36, 0.14);
-        --bad: #F87171;
-        --bad-soft: rgba(248, 113, 113, 0.14);
+{dark_tokens}
       }}
     }}
     * {{ box-sizing: border-box; }}
@@ -349,16 +360,93 @@ def render_dashboard(
 """
 
 
+class _RefreshCoordinator:
+    """Bound one user-triggered refresh to a single in-flight worker.
+
+    The dashboard stays read-only: the worker only reads provider facts and
+    writes to the local ledger through the same headless refresher the daemon
+    uses. Responses never expose socket paths, credentials, or raw payloads.
+    """
+
+    DEFAULT_HISTORY_DAYS = 364
+
+    def __init__(self, refresher: Any | None) -> None:
+        self.refresher = refresher
+        self._lock = threading.Lock()
+        self._worker: threading.Thread | None = None
+        self._last_started_at: str | None = None
+        self._last_finished_at: str | None = None
+        self._last_succeeded: bool | None = None
+
+    def start(self) -> tuple[int, dict[str, Any]]:
+        if self.refresher is None:
+            return 503, {"status": "unavailable"}
+        with self._lock:
+            if self._worker is not None and self._worker.is_alive():
+                return 200, {"status": "in_progress"}
+            self._last_started_at = datetime.now(timezone.utc).isoformat()
+            self._worker = threading.Thread(
+                target=self._run,
+                name="usagebar-dashboard-refresh",
+                daemon=True,
+            )
+            self._worker.start()
+        return 202, {"status": "started"}
+
+    def status(self) -> dict[str, Any]:
+        if self.refresher is None:
+            return {"status": "unavailable"}
+        with self._lock:
+            running = self._worker is not None and self._worker.is_alive()
+        return {
+            "status": "running" if running else "idle",
+            "lastStartedAt": self._last_started_at,
+            "lastFinishedAt": self._last_finished_at,
+            "succeeded": self._last_succeeded,
+        }
+
+    def _run(self) -> None:
+        succeeded = False
+        try:
+            self._refresh()
+            succeeded = True
+        except Exception:
+            succeeded = False
+        finally:
+            with self._lock:
+                self._last_finished_at = datetime.now(timezone.utc).isoformat()
+                self._last_succeeded = succeeded
+
+    def _refresh(self) -> None:
+        refresher = self.refresher
+        if refresher is None:
+            return
+        try:
+            refresher.refresh(history_days=self.DEFAULT_HISTORY_DAYS)
+            return
+        except TypeError:
+            # Fall back for refreshers that only support the no-argument form.
+            pass
+        refresher.refresh()
+
+
 def make_dashboard_server(
     query: QueryService,
     *,
     port: int = DEFAULT_DASHBOARD_PORT,
     today: date | None = None,
+    refresher: Any | None = None,
 ) -> ThreadingHTTPServer:
-    """Create the loopback dashboard server (caller owns serve/shutdown)."""
+    """Create the loopback dashboard server (caller owns serve/shutdown).
+
+    ``refresher`` is an optional headless refresher with ``refresh``; it is
+    used only when the renderer asks for a bounded refresh via
+    ``POST /v1/refresh``.
+    """
+    refresh = _RefreshCoordinator(refresher)
 
     def handler_factory(*args: Any, **kwargs: Any) -> BaseHTTPRequestHandler:
-        return _DashboardHandler(query, today, *args, **kwargs)
+        return _DashboardHandler(query, today, refresh, *args, **kwargs)
 
     return ThreadingHTTPServer(("127.0.0.1", port), handler_factory)
 
@@ -370,15 +458,17 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self,
         query: QueryService,
         today: date | None,
+        refresh: _RefreshCoordinator | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
         self._query = query
         self._today = today or date.today()
+        self._refresh = refresh or _RefreshCoordinator(None)
         super().__init__(*args, **kwargs)
 
-    def _write(self, body: bytes, content_type: str) -> None:
-        self.send_response(200)
+    def _write(self, body: bytes, content_type: str, *, status: int = 200) -> None:
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -386,12 +476,16 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        try:
-            snapshot = to_wire(self._query.resource_snapshot(self._today))
-        except Exception:
-            self.send_error(500, "snapshot unavailable")
-            return
-        if self.path in {"/", "/index.html"}:
+        parsed = urlparse(self.path)
+        path = parsed.path
+        params = parse_qs(parsed.query)
+
+        if path in {"/", "/index.html"}:
+            try:
+                snapshot = to_wire(self._query.resource_snapshot(self._today))
+            except Exception:
+                self.send_error(500, "snapshot unavailable")
+                return
             self._write(
                 render_dashboard(
                     snapshot,
@@ -401,15 +495,199 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "text/html; charset=utf-8",
             )
             return
-        if self.path == "/v1/snapshot":
-            import json
-
-            body = json.dumps(snapshot, ensure_ascii=True, separators=(",", ":")).encode(
-                "utf-8"
+        if path == "/v1/snapshot":
+            self._handle_json(lambda: to_wire(self._query.resource_snapshot(self._today)))
+            return
+        if path == "/v1/summary":
+            self._handle_json(
+                lambda: to_wire(
+                    self._query.summary(
+                        self._day(params, "today", default=self._today)
+                    )
+                )
             )
-            self._write(body, "application/json")
+            return
+        if path == "/v1/capacity":
+            self._handle_json(lambda: to_wire(self._query.capacity()))
+            return
+        if path == "/v1/balances":
+            self._handle_json(
+                lambda: to_wire(
+                    self._query.balances(
+                        self._integer(params, "limit", default=1000)
+                        if "limit" in params
+                        else None
+                    )
+                )
+            )
+            return
+        if path == "/v1/activity/daily":
+            self._handle_json(
+                lambda: to_wire(self._query.activity(*self._day_range(params)))
+            )
+            return
+        if path == "/v1/costs/daily":
+            self._handle_json(
+                lambda: to_wire(self._query.costs(*self._day_range(params)))
+            )
+            return
+        if path == "/v1/sources/status":
+            self._handle_json(lambda: to_wire(self._query.source_status()))
+            return
+        if path == "/v1/providers":
+            self._handle_json(lambda: to_wire(self._query.provider_instances()))
+            return
+        if path == "/v1/capabilities":
+            from .local_api import LocalAPIRouter
+
+            self._handle_json(lambda: LocalAPIRouter(self._query)._payload(path, {}))
+            return
+        if path == "/v1/quotas/history":
+            provider_id = params.get("providerId", [None])[0]
+            account_ref = params.get("accountRef", [None])[0]
+            from_time = params.get("from", [None])[0]
+            to_time = params.get("to", [None])[0]
+            self._handle_json(
+                lambda: to_wire(
+                    self._query.quota_history(
+                        provider_id=provider_id or None,
+                        account_ref=account_ref or None,
+                        from_time=from_time,
+                        to_time=to_time,
+                        limit=self._integer(params, "limit", default=1000),
+                    )
+                )
+            )
+            return
+        if path == "/v1/changes":
+            self._handle_json(lambda: to_wire(self._query.changes(
+                self._integer(params, "after", default=0),
+                self._integer(params, "limit", default=100),
+            )))
+            return
+        if path in {"/v1/health", "/v1/schema", "/v1/schema.json"}:
+            status = to_wire(self._query.source_status())
+            if path == "/v1/health":
+                status.update({"health": {"ok": True, "status": "ok"}})
+                self._json(status)
+                return
+            if path == "/v1/schema":
+                from .local_api import LocalAPIRouter
+
+                self._json({
+                    "schemaVersion": status["schemaVersion"],
+                    "dataRevision": status["dataRevision"],
+                    "generatedAt": status["generatedAt"],
+                    "routes": list(LocalAPIRouter.ROUTES),
+                    "errorShape": {"error": {"code": "string", "message": "string"}},
+                })
+                return
+            if path == "/v1/schema.json":
+                from .local_api import LOCAL_API_SCHEMA
+                self._json({
+                    "schemaVersion": status["schemaVersion"],
+                    "dataRevision": status["dataRevision"],
+                    "generatedAt": status["generatedAt"],
+                    "schema": LOCAL_API_SCHEMA,
+                })
+                return
+        if path == "/v1/quick-connect":
+            self._handle_json(
+                lambda: {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "providers": [
+                        {
+                            "familyId": family_id,
+                            "consoleUrl": item.console_url,
+                            "authModes": list(item.auth_modes),
+                            "apiKeyUrl": item.api_key_url,
+                        }
+                        for family_id, item in sorted(QUICK_CONNECT.items())
+                    ],
+                }
+            )
+            return
+        if path == "/v1/refresh/status":
+            self._json(self._refresh.status())
             return
         self.send_error(404)
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path != "/v1/refresh":
+            self.send_error(404)
+            return
+        status, payload = self._refresh.start()
+        self._json(payload, status=status)
+
+    def _json(self, payload: Any, *, status: int = 200) -> None:
+        import json
+
+        body = json.dumps(
+            payload, ensure_ascii=True, separators=(",", ":")
+        ).encode("utf-8")
+        self._write(body, "application/json", status=status)
+
+    def _handle_json(self, resolver: Callable[[], Any]) -> None:
+        try:
+            payload = resolver()
+        except ValueError:
+            self._json(
+                {
+                    "error": {
+                        "code": "invalid_parameter",
+                        "message": "Invalid request parameter.",
+                    }
+                },
+                status=400,
+            )
+            return
+        except Exception:
+            self.send_error(500, "unavailable")
+            return
+        self._json(payload)
+
+    @staticmethod
+    def _integer(
+        params: dict[str, list[str]],
+        name: str,
+        *,
+        default: int,
+    ) -> int:
+        values = params.get(name)
+        if not values:
+            return default
+        value = values[0]
+        if not value.isascii() or not value.isdecimal():
+            raise ValueError("invalid integer parameter")
+        return int(value)
+
+    @staticmethod
+    def _day(
+        params: dict[str, list[str]],
+        name: str,
+        *,
+        default: date,
+    ) -> date:
+        values = params.get(name)
+        if not values:
+            return default
+        if len(values) != 1:
+            raise ValueError("invalid day parameter")
+        return date.fromisoformat(values[0])
+
+    def _day_range(self, params: dict[str, list[str]]) -> tuple[date, date]:
+        try:
+            from_day = date.fromisoformat(params["from"][0])
+            to_day = date.fromisoformat(params["to"][0])
+        except (KeyError, IndexError, ValueError) as error:
+            raise ValueError("invalid day range") from error
+        return from_day, to_day
+
+    def _snapshot_part(self, key: str) -> list[Any]:
+        wire = to_wire(self._query.resource_snapshot(self._today))
+        value = wire.get(key)
+        return value if isinstance(value, list) else []
 
     def _model_summary(self) -> tuple[dict[str, Any], ...]:
         """Aggregate last-7-day token and cost facts by (model, source)."""

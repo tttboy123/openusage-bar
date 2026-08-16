@@ -74,7 +74,7 @@ class ProviderConformanceTests(unittest.TestCase):
             {
                 "codex", "claude_code", "kiro", "minimax", "moonshot",
                 "step_plan", "openusage", "custom",
-                "cc_switch", "omniroute", "deepseek",
+                "cc_switch", "omniroute", "deepseek", "opencode",
             },
         )
         for fixture in fixtures:
@@ -94,6 +94,7 @@ class ProviderConformanceTests(unittest.TestCase):
         self.assertIn(("moonshot", "balance", "moonshot.balance"), inventory)
         self.assertIn(("openai", "cost", "custom.cost_feed"), inventory)
         self.assertIn(("openai", "usage", "openai.organization.usage"), inventory)
+        self.assertIn(("opencode", "usage", "opencode.local_sessions"), inventory)
 
     def test_loader_rejects_credentials_identity_and_user_content(self):
         unsafe_values = (

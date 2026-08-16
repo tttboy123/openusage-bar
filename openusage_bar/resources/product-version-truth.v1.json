@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "product-version-truth/v1",
+  "product": {
+    "displayName": "UsageHub",
+    "legacyDisplayName": "OpenUsage Bar",
+    "technicalNamespace": "openusage-bar",
+    "pythonDistribution": "openusage-bar",
+    "cliName": "openusage-bar",
+    "socketName": "openusage.sock",
+    "bundleIdentifier": "com.lune.openusagebar"
+  },
+  "candidate": {
+    "version": "0.8.6",
+    "build": "28",
+    "channel": "rc",
+    "releaseStage": "candidate",
+    "publicationStatus": "not_published",
+    "releaseEligible": false,
+    "publicationReceipt": null,
+    "canary": {
+      "qualifiedMachines": 0,
+      "targetMachines": 5,
+      "clock": "not_started"
+    }
+  },
+  "publishedBaseline": {
+    "version": "0.7.1",
+    "tag": "v0.7.1",
+    "publishedAt": "2026-08-04"
+  },
+  "interfaces": {
+    "localApi": "1.0",
+    "gateway": "gateway.openusage/v1",
+    "runtimeCapability": "runtime-capability.openusage/v1"
+  },
+  "releaseTracks": {
+    "legacyMacNative": {
+      "appBundleName": "OpenUsage Bar.app",
+      "assetTemplate": "OpenUsage-Bar-v{version}-macos-arm64.{ext}",
+      "distributionRole": "legacy_macos_release_track"
+    },
+    "crossPlatformDesktop": {
+      "productName": "UsageHub",
+      "macAppBundleName": "UsageHub.app",
+      "electronArtifactTemplate": "${productName}-${version}-${os}-${arch}.${ext}",
+      "evidenceArtifactTemplate": "UsageHub-{version}-{platform}-{artifactArch}.{ext}",
+      "distributionRole": "local_ci_handoff_only"
+    }
+  }
+}

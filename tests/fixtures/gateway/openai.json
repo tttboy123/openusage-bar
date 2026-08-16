@@ -1,0 +1,21 @@
+{
+  "provider": "openai",
+  "endpoint": "https://api.openai.com/v1/responses",
+  "request": {
+    "model": "gpt-4.1-mini",
+    "input": "hello"
+  },
+  "response": {
+    "id": "response-1",
+    "object": "response",
+    "output": []
+  },
+  "stream": {
+    "wire": "sse",
+    "content_type": "text/event-stream",
+    "chunks": [
+      "event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
+      "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"
+    ]
+  }
+}

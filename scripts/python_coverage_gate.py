@@ -12,10 +12,13 @@ from pathlib import Path
 MAX_REPORT_BYTES = 4 * 1024 * 1024
 TRACE_ROW = re.compile(r"^\s*\d+\s+(\d+)%\s+([A-Za-z0-9_.]+)\s+\(")
 EXCLUDED_RELATIVE_MODULES = frozenset({
-    # Thin macOS boundaries are verified by behavioral contract tests; trace
-    # cannot observe PyObjC callbacks or the Security framework implementation.
+    # Thin platform/GUI boundaries are verified by behavioral contract tests;
+    # trace cannot observe PyObjC callbacks, the Security framework, the Tk
+    # event loop, or Windows ACL/registry APIs on a non-Windows host.
     "keychain.py",
     "ui.py",
+    "gateway/account_editor_tk.py",
+    "windows_file_security.py",
 })
 
 

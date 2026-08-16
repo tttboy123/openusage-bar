@@ -1,0 +1,26 @@
+{
+  "provider": "openrouter",
+  "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+  "request": {
+    "model": "openai/gpt-4.1-mini",
+    "messages": [
+      {
+        "role": "user",
+        "content": "hello"
+      }
+    ]
+  },
+  "response": {
+    "id": "route-1",
+    "object": "chat.completion",
+    "choices": []
+  },
+  "stream": {
+    "wire": "sse",
+    "content_type": "text/event-stream",
+    "chunks": [
+      "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+      "data: [DONE]\n\n"
+    ]
+  }
+}

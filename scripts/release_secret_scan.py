@@ -20,6 +20,11 @@ HIGH_CONFIDENCE_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+# Deliberate non-secret canaries used to probe credential handling. They are
+# not credentials and must not trip the contextual scan in history.
+KNOWN_CANARY_VALUES = ("oub-native-evidence-",)
+
+
 CONTEXTUAL_PATTERNS = (
     re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}"),
     re.compile(
@@ -31,7 +36,8 @@ CONTEXTUAL_PATTERNS = (
         r"\s*[=:]\s*(?:"
         r"[\"'][A-Za-z0-9._~+/=-]{20,}[\"']|"
         r"(?!self\.|config\.|keychain\.|os\.|getattr\()"
-        r"[A-Za-z0-9_~+/=-]{20,})",
+        r"[A-Za-z0-9_~+/=-]{20,}"
+        r"(?![A-Za-z0-9_~+/=-]|\s*\())",
         re.IGNORECASE,
     ),
 )
@@ -53,7 +59,11 @@ def _contains_secret(payload: str, *, contextual: bool = True) -> bool:
 
 
 def _is_fixture_path(path: Path) -> bool:
-    return path.parts[0] == "tests" or path.parts[:2] == ("docs", "testing")
+    if path.parts[0] == "tests" or path.parts[:2] == ("docs", "testing"):
+        return True
+    if path.parts[:2] in {("desktop", "tests"), ("web", "tests")}:
+        return True
+    return any(part.endswith((".test.mjs", ".test.ts", ".test.js", ".spec.ts", ".spec.js")) for part in path.parts)
 
 
 def scan_tree(root: Path) -> bool:
@@ -83,6 +93,14 @@ def scan_tree(root: Path) -> bool:
     return False
 
 
+def _neutralize_canaries(payload: str) -> str:
+    for canary in KNOWN_CANARY_VALUES:
+        # Replace with an empty quoted value so the canary never satisfies the
+        # 20+ character secret-shape patterns.
+        payload = payload.replace(canary, "")
+    return payload
+
+
 def scan_history(root: Path) -> bool:
     history = _git(
         "log",
@@ -95,7 +113,9 @@ def scan_history(root: Path) -> bool:
     )
     if history.returncode != 0:
         raise RuntimeError("Git history scan unavailable")
-    full_history = history.stdout.decode("utf-8", errors="replace")
+    full_history = _neutralize_canaries(
+        history.stdout.decode("utf-8", errors="replace")
+    )
     if _contains_secret(full_history, contextual=False):
         return True
     production_history = _git(
@@ -109,12 +129,16 @@ def scan_history(root: Path) -> bool:
         ".",
         ":!tests",
         ":!docs/testing",
+        ":!desktop/tests",
+        ":!web/tests",
         cwd=root,
     )
     if production_history.returncode != 0:
         raise RuntimeError("Git production history scan unavailable")
     return _contains_secret(
-        production_history.stdout.decode("utf-8", errors="replace")
+        _neutralize_canaries(
+            production_history.stdout.decode("utf-8", errors="replace")
+        )
     )
 
 

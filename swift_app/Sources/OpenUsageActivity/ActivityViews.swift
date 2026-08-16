@@ -3,6 +3,78 @@ import Charts
 import SwiftUI
 import UsageCore
 
+struct ProductBuildIdentityPresentation: Equatable, Sendable {
+    let versionAndBuild: String
+    let lifecycle: String
+    let published: String
+    let canary: String
+
+    var accessibilityLabel: String {
+        [versionAndBuild, lifecycle, published, canary].joined(separator: ". ")
+    }
+
+    static func make(identity: ProductVersionTruth) -> Self {
+        let lifecycle: String
+        switch (identity.releaseStage, identity.publicationStatus, identity.releaseEligible) {
+        case ("candidate", "not_published", false):
+            lifecycle = "\(AppLocalization.text("Candidate")) · \(AppLocalization.text("Not published"))"
+        case ("prerelease_ready", "not_published", true):
+            lifecycle = "\(AppLocalization.text("Pre-release ready")) · \(AppLocalization.text("Not published"))"
+        case ("prerelease_published", "published_prerelease", false):
+            lifecycle = AppLocalization.text("Published pre-release")
+        default:
+            lifecycle = AppLocalization.text("Unknown")
+        }
+
+        let canaryStatus: String
+        switch identity.canaryClock {
+        case "not_started": canaryStatus = AppLocalization.text("Not started")
+        case "running": canaryStatus = AppLocalization.text("Running")
+        case "passed": canaryStatus = AppLocalization.text("Passed")
+        case "blocked": canaryStatus = AppLocalization.text("Blocked")
+        default: canaryStatus = AppLocalization.text("Unknown")
+        }
+
+        return Self(
+            versionAndBuild: AppLocalization.format(
+                "%@ (build %@)", identity.formattedCandidateVersion, identity.candidateBuild
+            ),
+            lifecycle: lifecycle,
+            published: AppLocalization.format(
+                "Published stable: %@", identity.publishedBaselineTag
+            ),
+            canary: AppLocalization.format(
+                "Canary: %@ · %lld/%lld", canaryStatus,
+                Int64(identity.canaryQualifiedMachines), Int64(identity.canaryTargetMachines)
+            )
+        )
+    }
+}
+
+struct ProductBuildIdentityView: View {
+    private let copy: ProductBuildIdentityPresentation
+
+    init(identity: ProductVersionTruth = .current) {
+        copy = ProductBuildIdentityPresentation.make(identity: identity)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(copy.versionAndBuild).font(.caption.weight(.semibold))
+            Text(copy.lifecycle)
+            Text(copy.published)
+            Text(copy.canary)
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(copy.accessibilityLabel)
+    }
+}
+
 struct ActivityRootView: View {
     @Bindable var store: ActivityViewStore
     @Bindable var coordinator: ActivityRouteCoordinator
@@ -34,8 +106,14 @@ struct ActivityRootView: View {
             List(UsageDetailsRoute.allCases, selection: routeBinding) { route in
                 Label(route.title, systemImage: route.symbol).tag(route)
             }
+            .scrollContentBackground(.hidden)
             .navigationTitle(AppLocalization.text("UsageHub"))
             .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 250)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                ProductBuildIdentityView()
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
+            }
         } detail: {
             content
                 .navigationTitle(coordinator.route.title)
@@ -48,6 +126,9 @@ struct ActivityRootView: View {
                     }
                 }
         }
+        .tint(DesignTokens.accent)
+        .background(DesignTokens.bg)
+        .animation(.easeOut(duration: DesignTokens.motionBase), value: coordinator.route)
         .overlay {
             if coordinator.route != .automation, onboardingPhase != .hidden {
                 OnboardingView(

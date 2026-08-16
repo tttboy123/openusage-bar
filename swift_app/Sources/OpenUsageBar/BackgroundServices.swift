@@ -133,7 +133,7 @@ enum BackgroundServicePresenter {
             }
         } else {
             alert.informativeText = AppLocalization.text(
-                "UsageHub could not start its bundled collector. Reinstall the app from the official DMG or use the advanced repair package."
+                "UsageHub could not start its bundled collector. Reinstall from a repository download whose checksum you verified, or use the advanced repair package."
             )
             alert.addButton(withTitle: AppLocalization.text("OK"))
             alert.runModal()

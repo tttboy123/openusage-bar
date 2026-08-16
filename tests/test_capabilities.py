@@ -134,7 +134,13 @@ class ProviderCapabilityTests(unittest.TestCase):
         )
         self.assertEqual(
             codex.sources[0].operating_systems,
-            frozenset({OperatingSystem.MACOS}),
+            frozenset(
+                {
+                    OperatingSystem.LINUX,
+                    OperatingSystem.MACOS,
+                    OperatingSystem.WINDOWS,
+                }
+            ),
         )
         self.assertIs(codex.sources[0].stability, SourceStability.STABLE)
         self.assertIs(

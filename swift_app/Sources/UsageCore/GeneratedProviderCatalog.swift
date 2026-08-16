@@ -236,7 +236,7 @@ public enum GeneratedProviderCatalog {
         "codex": ProviderDisplayDescriptor(
             providerID: "codex",
             familyID: "codex",
-            displayName: "Codex",
+            displayName: "ChatGPT",
             aliases: [],
             category: .subscription,
             metricFamilies: [.subscriptionQuota, .tokenActivity],
@@ -257,7 +257,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "codex_local_log", sourceKind: "local_log", operatingSystems: [.macOS], stability: .stable, provenance: .providerLocal, factFamilies: [.detection, .subscriptionCapacity, .tokenActivity], authority: .providerLocal, accountScope: .localProfile, modelScope: .mixed, verification: .liveAccount),
+                ProviderSourceCapability(sourceID: "codex_local_log", sourceKind: "local_log", operatingSystems: [.linux, .macOS, .windows], stability: .stable, provenance: .providerLocal, factFamilies: [.detection, .subscriptionCapacity, .tokenActivity], authority: .providerLocal, accountScope: .localProfile, modelScope: .mixed, verification: .liveAccount),
                 ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .fixture),
             ]
         ),
@@ -695,7 +695,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
-                ProviderSourceCapability(sourceID: "moonshot_official_api", sourceKind: "official_api", operatingSystems: [.macOS], stability: .stable, provenance: .providerOfficial, factFamilies: [.apiBalance, .detection], authority: .providerOfficial, accountScope: .configuredAccount, modelScope: .aggregate, verification: .fixture),
+                ProviderSourceCapability(sourceID: "moonshot_official_api", sourceKind: "official_api", operatingSystems: [.linux, .macOS], stability: .stable, provenance: .providerOfficial, factFamilies: [.apiBalance, .detection], authority: .providerOfficial, accountScope: .configuredAccount, modelScope: .aggregate, verification: .fixture),
                 ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection], authority: .thirdParty, accountScope: .localProfile, modelScope: .unknown, verification: .upstreamDeclared),
             ]
         ),
@@ -844,8 +844,8 @@ public enum GeneratedProviderCatalog {
             metricFamilies: [.billing, .subscriptionQuota, .tokenActivity],
             regions: [],
             supportsAccounts: false,
-            credentialSourceTypes: [.none],
-            acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
+            credentialSourceTypes: [.local, .none],
+            acceptedIdentitySources: [ProviderIdentitySource(credentialSource: "opencode_local_log", sourceKind: "local_log"), ProviderIdentitySource(credentialSource: "openusage", sourceKind: "openusage")],
             capabilityProfile: ProviderCapabilityProfile(
                 quotaWindows: .unknown,
                 tokenHistory: .supported,
@@ -859,6 +859,7 @@ public enum GeneratedProviderCatalog {
                 serviceStatus: .unknown
             ),
             sourceCapabilities: [
+                ProviderSourceCapability(sourceID: "opencode_local_log", sourceKind: "local_log", operatingSystems: [.macOS], stability: .stable, provenance: .providerLocal, factFamilies: [.detection, .tokenActivity], authority: .providerLocal, accountScope: .localProfile, modelScope: .mixed, verification: .liveAccount),
                 ProviderSourceCapability(sourceID: "openusage", sourceKind: "openusage", operatingSystems: [.macOS], stability: .pinned, provenance: .openUsageUpstream, factFamilies: [.apiSpend, .detection, .tokenActivity], authority: .thirdParty, accountScope: .localProfile, modelScope: .perModel, verification: .liveAccount),
             ]
         ),
@@ -1108,18 +1109,26 @@ public enum GeneratedProviderCatalog {
         ),
     ]
     public static let quickConnectURLs: [String: String] = [
+        "anthropic": "https://console.anthropic.com",
         "cc_switch": "https://ccswitch.io",
         "codex": "https://chatgpt.com/codex",
         "deepseek": "https://platform.deepseek.com",
+        "gemini_api": "https://aistudio.google.com",
+        "google": "https://aistudio.google.com",
         "minimax": "https://platform.minimaxi.com",
-        "moonshot": "https://platform.moonshot.cn",
+        "moonshot": "https://platform.kimi.ai",
         "omniroute": "http://localhost:20128",
+        "openai": "https://platform.openai.com",
         "step_plan": "https://platform.stepfun.com",
     ]
     public static let apiKeyURLs: [String: String] = [
+        "anthropic": "https://console.anthropic.com/settings/keys",
         "deepseek": "https://platform.deepseek.com/api_keys",
+        "gemini_api": "https://aistudio.google.com/app/apikey",
+        "google": "https://aistudio.google.com/app/apikey",
         "minimax": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-        "moonshot": "https://platform.moonshot.cn/console/api-keys",
+        "moonshot": "https://platform.kimi.ai/console/api-keys",
+        "openai": "https://platform.openai.com/api-keys",
         "step_plan": "https://platform.stepfun.com/api-keys",
     ]
 }

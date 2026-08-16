@@ -4,8 +4,94 @@ import sys
 import tempfile
 import time
 import unittest
-import sys
 from pathlib import Path
+from unittest.mock import Mock, patch
+
+
+class BoundedProcessPassFdsTests(unittest.TestCase):
+    class FakeProcess:
+        pid = 1234
+        returncode = 0
+        stdin = None
+        stdout = None
+        stderr = None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            return None
+
+        def poll(self):
+            return 0
+
+    class FakeScope:
+        popen_kwargs = {"start_new_session": True}
+
+        def attach(self, process):
+            self.process = process
+
+        def direct_child_exited(self):
+            return True
+
+        def terminate(self):
+            return None
+
+        def close(self):
+            return None
+
+    def test_pass_fds_is_posix_only_unique_and_forwarded_exactly(self):
+        from openusage_bar.bounded_process import run_bounded
+
+        def run(*, pass_fds=()):
+            with patch(
+                "openusage_bar.bounded_process.subprocess.Popen",
+                return_value=self.FakeProcess(),
+            ) as popen:
+                completed = run_bounded(
+                    ["bounded-helper"],
+                    timeout=1,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    pass_fds=pass_fds,
+                    _platform="linux",
+                    _scope_factory=lambda _platform: self.FakeScope(),
+                )
+            self.assertEqual(completed.returncode, 0)
+            return popen.call_args
+
+        forwarded = run(pass_fds=(7, 9))
+        self.assertEqual(forwarded.args, (["bounded-helper"],))
+        self.assertEqual(forwarded.kwargs["pass_fds"], (7, 9))
+
+        defaulted = run()
+        self.assertNotIn("pass_fds", defaulted.kwargs)
+
+        invalid = (
+            ("duplicate", (7, 7), "linux"),
+            ("bool", (True,), "linux"),
+            ("negative", (-1,), "linux"),
+            ("non_tuple", [7], "linux"),
+            ("windows", (7,), "win32"),
+        )
+        for label, descriptors, active_platform in invalid:
+            with self.subTest(case=label):
+                scope_factory = Mock(
+                    side_effect=AssertionError("scope must not be created")
+                )
+                with patch(
+                    "openusage_bar.bounded_process.subprocess.Popen",
+                    side_effect=AssertionError("Popen must not run"),
+                ) as popen, self.assertRaises(ValueError):
+                    run_bounded(
+                        ["bounded-helper"],
+                        timeout=1,
+                        pass_fds=descriptors,
+                        _platform=active_platform,
+                        _scope_factory=scope_factory,
+                    )
+                scope_factory.assert_not_called()
+                popen.assert_not_called()
 
 
 class BoundedProcessTests(unittest.TestCase):
@@ -52,13 +138,30 @@ class BoundedProcessTests(unittest.TestCase):
             root = Path(directory); pidfile = root / "child.pid"
             helper = self.helper(
                 root,
-                "import os,sys,time\nchild=os.fork()\n"
-                "if child==0: time.sleep(30); raise SystemExit\n"
-                "open(sys.argv[1],'w').write(str(child))\n",
+                "import os,sys,time\n"
+                "release_read,release_write=os.pipe()\n"
+                "child=os.fork()\n"
+                "if child==0:\n"
+                " os.close(release_write)\n"
+                " os.read(release_read,1)\n"
+                " os.close(release_read)\n"
+                " sys.stdout.buffer.write(b'x'*70000)\n"
+                " sys.stdout.flush()\n"
+                " time.sleep(30)\n"
+                " raise SystemExit\n"
+                "os.close(release_read)\n"
+                "with open(sys.argv[1],'w') as pidfile:\n"
+                " pidfile.write(str(child))\n"
+                "os.write(release_write,b'x')\n"
+                "os.close(release_write)\n",
             )
             with self.assertRaises(BoundedProcessError) as raised:
-                run_bounded([str(helper), str(pidfile)], timeout=1)
-            self.assertEqual(raised.exception.code, "timeout")
+                run_bounded(
+                    [str(helper), str(pidfile)],
+                    timeout=30,
+                    stdout_limit=65536,
+                )
+            self.assertEqual(raised.exception.code, "output_overflow")
             pid = int(pidfile.read_text())
             state = ""
             for _ in range(20):
@@ -165,3 +268,77 @@ class BoundedProcessTests(unittest.TestCase):
             self.assertNotIn("runner or subprocess.run",source)
             self.assertNotIn("capture_output=True",source)
             self.assertIn("run_bounded",source)
+
+    def test_invalid_requests_and_failing_scope_fail_closed(self) -> None:
+        from openusage_bar.bounded_process import BoundedProcessError, run_bounded
+
+        with self.assertRaisesRegex(ValueError, "invalid bounded process request"):
+            run_bounded([], timeout=1)
+        with self.assertRaisesRegex(ValueError, "invalid bounded process request"):
+            run_bounded(["echo"], timeout=0)
+        with self.assertRaisesRegex(ValueError, "invalid bounded process request"):
+            run_bounded(["echo"], timeout=1, shell=True)
+        with self.assertRaisesRegex(ValueError, "stdout must be PIPE or DEVNULL"):
+            run_bounded(["echo"], timeout=1, stdout=0)
+        with self.assertRaisesRegex(ValueError, "stderr must be PIPE or DEVNULL"):
+            run_bounded(["echo"], timeout=1, stderr=0)
+        with self.assertRaisesRegex(ValueError, "stream limits must be nonnegative"):
+            run_bounded(["echo"], timeout=1, stdout_limit=-1)
+        with self.assertRaisesRegex(ValueError, "stream limits must be nonnegative"):
+            run_bounded(["echo"], timeout=1, stderr_limit=-1)
+        with self.assertRaisesRegex(TypeError, "input_data must be bytes"):
+            run_bounded(["echo"], timeout=1, input_data="text")
+        with self.assertRaisesRegex(ValueError, "input_data owns the child stdin pipe"):
+            run_bounded(["echo"], timeout=1, input_data=b"x", stdin=subprocess.PIPE)
+
+        def failing_scope(_platform):
+            raise RuntimeError("scope unavailable")
+
+        with self.assertRaises(BoundedProcessError) as raised:
+            run_bounded(["echo"], timeout=1, _scope_factory=failing_scope)
+        self.assertEqual(raised.exception.code, "runner_failed")
+
+    def test_windows_scope_factory_and_read_stream_fail_closed(self) -> None:
+        import tempfile
+        import threading
+
+        from openusage_bar.bounded_process import (
+            BoundedProcessError,
+            _make_process_scope,
+            _read_stream,
+        )
+
+        # On non-Windows hosts the win32 scope factory fails closed without
+        # leaking a native handle or diagnostic.
+        with self.assertRaises(BoundedProcessError) as raised:
+            _make_process_scope("win32")
+        self.assertEqual(raised.exception.code, "runner_failed")
+
+        # Read-stream overflow keeps the allowed prefix and flags the event.
+        overflow = threading.Event()
+        reader_failed = threading.Event()
+        target = bytearray()
+        with tempfile.NamedTemporaryFile() as stream:
+            stream.write(b"0123456789")
+            stream.flush()
+            stream.seek(0)
+            _read_stream(
+                stream,
+                target,
+                limit=3,
+                overflow=overflow,
+                reader_failed=reader_failed,
+            )
+        self.assertTrue(overflow.is_set())
+        self.assertFalse(reader_failed.is_set())
+        self.assertEqual(bytes(target), b"012")
+
+        # A broken stream surfaces as a reader failure, never a crash.
+        class BadStream:
+            def fileno(self):
+                raise OSError("descriptor unavailable")
+
+        overflow.clear()
+        reader_failed.clear()
+        _read_stream(BadStream(), bytearray(), 10, overflow, reader_failed)
+        self.assertTrue(reader_failed.is_set())

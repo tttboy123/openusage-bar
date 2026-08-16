@@ -1,0 +1,90 @@
+{
+ "schemaVersion": 1,
+ "color": {
+  "bg": {
+   "light": "#F4F5F7",
+   "dark": "#0C0E12"
+  },
+  "surface": {
+   "light": "#FFFFFF",
+   "dark": "#13161B"
+  },
+  "surfaceAlt": {
+   "light": "#ECEEF1",
+   "dark": "#1A1D23"
+  },
+  "text": {
+   "light": "#111114",
+   "dark": "#EAECEF"
+  },
+  "textDim": {
+   "light": "#454A55",
+   "dark": "#A7ADB8"
+  },
+  "textFaint": {
+   "light": "#5F6570",
+   "dark": "#8A909B"
+  },
+  "hairline": {
+   "light": "#D9DDE2",
+   "dark": "#252A31"
+  },
+  "accent": {
+   "light": "#087F52",
+   "dark": "#34D399"
+  },
+  "accentSoft": {
+   "light": "rgba(8,127,82,0.10)",
+   "dark": "rgba(52,211,153,0.12)"
+  },
+  "warn": {
+   "light": "#B45309",
+   "dark": "#FBBF24"
+  },
+  "warnSoft": {
+   "light": "rgba(180,83,9,0.10)",
+   "dark": "rgba(251,191,36,0.12)"
+  },
+  "bad": {
+   "light": "#C0392B",
+   "dark": "#F87171"
+  },
+  "badSoft": {
+   "light": "rgba(192,57,43,0.10)",
+   "dark": "rgba(248,113,113,0.12)"
+  }
+ },
+ "font": {
+  "sans": [
+   "-apple-system",
+   "BlinkMacSystemFont",
+   "Segoe UI",
+   "PingFang SC",
+   "Hiragino Sans GB",
+   "Microsoft YaHei",
+   "sans-serif"
+  ],
+  "mono": [
+   "ui-monospace",
+   "SFMono-Regular",
+   "SF Mono",
+   "Menlo",
+   "Consolas",
+   "Liberation Mono",
+   "monospace"
+  ]
+ },
+ "radius": 12,
+ "spacing": {
+  "dense": 4,
+  "control": 8,
+  "panel": 16,
+  "section": 26
+ },
+ "motion": {
+  "fast": 150,
+  "base": 200,
+  "slow": 300,
+  "ease": "cubic-bezier(0.16, 1, 0.3, 1)"
+ }
+}

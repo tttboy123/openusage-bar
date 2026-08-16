@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openusage.bar/schemas/product-version-truth-v1.schema.json",
+  "title": "UsageHub product and version truth v1",
+  "$defs": {
+    "publicationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "repository",
+        "releaseId",
+        "tag",
+        "sourceSha",
+        "publishedAt",
+        "prerelease",
+        "manifestSha256",
+        "assetSetSha256",
+        "provenanceAttestation"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "github-release-receipt/v1" },
+        "repository": { "const": "tttboy123/openusage-bar" },
+        "releaseId": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "tag": {
+          "type": "string",
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "sourceSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "publishedAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "format": "date-time"
+        },
+        "prerelease": { "const": true },
+        "manifestSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "assetSetSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "provenanceAttestation": { "const": "verified" }
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "product",
+    "candidate",
+    "publishedBaseline",
+    "interfaces",
+    "releaseTracks"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "product-version-truth/v1"
+    },
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "displayName",
+        "legacyDisplayName",
+        "technicalNamespace",
+        "pythonDistribution",
+        "cliName",
+        "socketName",
+        "bundleIdentifier"
+      ],
+      "properties": {
+        "displayName": { "const": "UsageHub" },
+        "legacyDisplayName": { "const": "OpenUsage Bar" },
+        "technicalNamespace": { "const": "openusage-bar" },
+        "pythonDistribution": { "const": "openusage-bar" },
+        "cliName": { "const": "openusage-bar" },
+        "socketName": { "const": "openusage.sock" },
+        "bundleIdentifier": { "const": "com.lune.openusagebar" }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "build",
+        "channel",
+        "releaseStage",
+        "publicationStatus",
+        "releaseEligible",
+        "publicationReceipt",
+        "canary"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "releaseStage": { "const": "candidate" },
+            "publicationStatus": { "const": "not_published" },
+            "releaseEligible": { "const": false },
+            "publicationReceipt": { "type": "null" }
+          }
+        },
+        {
+          "properties": {
+            "releaseStage": { "const": "prerelease_ready" },
+            "publicationStatus": { "const": "not_published" },
+            "releaseEligible": { "const": true },
+            "publicationReceipt": { "type": "null" }
+          }
+        },
+        {
+          "properties": {
+            "releaseStage": { "const": "prerelease_published" },
+            "publicationStatus": { "const": "published_prerelease" },
+            "releaseEligible": { "const": false },
+            "publicationReceipt": { "$ref": "#/$defs/publicationReceipt" }
+          }
+        }
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "build": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "channel": {
+          "enum": ["alpha", "beta", "rc"]
+        },
+        "releaseStage": {
+          "enum": [
+            "candidate",
+            "prerelease_ready",
+            "prerelease_published"
+          ]
+        },
+        "publicationStatus": {
+          "enum": ["not_published", "published_prerelease"]
+        },
+        "releaseEligible": { "type": "boolean" },
+        "publicationReceipt": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/publicationReceipt" }
+          ]
+        },
+        "canary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["qualifiedMachines", "targetMachines", "clock"],
+          "properties": {
+            "qualifiedMachines": { "type": "integer", "minimum": 0 },
+            "targetMachines": { "type": "integer", "minimum": 1 },
+            "clock": {
+              "enum": ["not_started", "running", "passed", "blocked"]
+            }
+          }
+        }
+      }
+    },
+    "publishedBaseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "tag", "publishedAt"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "tag": {
+          "type": "string",
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "publishedAt": {
+          "type": "string",
+          "format": "date"
+        }
+      }
+    },
+    "interfaces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["localApi", "gateway", "runtimeCapability"],
+      "properties": {
+        "localApi": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*\\.[0-9]+$"
+        },
+        "gateway": { "const": "gateway.openusage/v1" },
+        "runtimeCapability": {
+          "const": "runtime-capability.openusage/v1"
+        }
+      }
+    },
+    "releaseTracks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["legacyMacNative", "crossPlatformDesktop"],
+      "properties": {
+        "legacyMacNative": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["appBundleName", "assetTemplate", "distributionRole"],
+          "properties": {
+            "appBundleName": { "const": "OpenUsage Bar.app" },
+            "assetTemplate": {
+              "const": "OpenUsage-Bar-v{version}-macos-arm64.{ext}"
+            },
+            "distributionRole": {
+              "const": "legacy_macos_release_track"
+            }
+          }
+        },
+        "crossPlatformDesktop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "productName",
+            "macAppBundleName",
+            "electronArtifactTemplate",
+            "evidenceArtifactTemplate",
+            "distributionRole"
+          ],
+          "properties": {
+            "productName": { "const": "UsageHub" },
+            "macAppBundleName": { "const": "UsageHub.app" },
+            "electronArtifactTemplate": {
+              "const": "${productName}-${version}-${os}-${arch}.${ext}"
+            },
+            "evidenceArtifactTemplate": {
+              "const": "UsageHub-{version}-{platform}-{artifactArch}.{ext}"
+            },
+            "distributionRole": { "const": "local_ci_handoff_only" }
+          }
+        }
+      }
+    }
+  }
+}

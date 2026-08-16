@@ -75,7 +75,7 @@ class BuildScriptContractTests(unittest.TestCase):
         self.assertIn("GeneratedActivitySchema.swift", source)
         self.assertIn("local-api-v1.schema.json", source)
         self.assertIn("python_coverage_gate.py", source)
-        self.assertIn("--module unittest discover -s tests -v", source)
+        self.assertIn("scripts/traced_test_runner.py", source)
         self.assertIn('--package-root "$ROOT/openusage_bar"', source)
         self.assertNotIn("PYTHON_TOUCHED_MODULES", source)
         self.assertIn('actual=${SWIFT_LINE_COVERAGE}%', source)

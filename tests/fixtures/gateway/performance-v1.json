@@ -1,0 +1,56 @@
+{
+  "clockUtc": "2026-08-09T12:00:00Z",
+  "facts": {
+    "activityQuotaStateRows": 1000,
+    "cacheEntries": 1000,
+    "cachePrefixesPerEntry": 0,
+    "hotCacheEntryIndex": 500,
+    "providerOutputTextUtf8Bytes": 4096,
+    "responsesBodyBytes": 4096,
+    "shouldSendBodyBytes": 82,
+    "telemetryMatchingInWindowRows": 1000,
+    "telemetryMatchingOutsideWindowRows": 1000,
+    "telemetryOtherModelRows": 1000,
+    "telemetryOtherProviderRows": 1000,
+    "telemetryRequestAggregateRows": 4000
+  },
+  "measurementVersion": "gateway-performance-v1",
+  "plan": {
+    "admissionRateLimitCapacity": 10000,
+    "admissionRateLimitRefillPerSecond": 10000,
+    "clock": "monotonic_ns",
+    "httpConnectionPolicy": "connection-close",
+    "p99Method": "nearest-rank-ceil",
+    "requestTimeoutSeconds": 5,
+    "roundCount": 3,
+    "sampleCount": 2000,
+    "serverMaxThreads": 32,
+    "throughputBucketSeconds": 1,
+    "throughputConcurrency": 16,
+    "throughputDurationSeconds": 30,
+    "warmupCount": 100
+  },
+  "schemaVersion": 1,
+  "thresholds": {
+    "cacheCoreLookupP99Ns": 5000000,
+    "proxyOverheadP99Ns": 200000000,
+    "shouldSendP99Ns": 50000000,
+    "throughputMinimumSuccessesPerSecond": 100
+  },
+  "workloads": {
+    "responses": {
+      "inputBytes": 3992,
+      "inputFill": "x",
+      "model": "gpt-4.1-mini",
+      "provider": "openai",
+      "providerOutputFill": "o",
+      "stream": true
+    },
+    "shouldSend": {
+      "estimated_tokens": 8000,
+      "model": "gpt-4.1-mini",
+      "provider": "openai",
+      "window": "5m"
+    }
+  }
+}

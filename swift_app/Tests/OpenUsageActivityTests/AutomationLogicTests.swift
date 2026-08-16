@@ -23,15 +23,34 @@ struct AutomationLogicTests {
         #expect(!preview.lowercased().contains("token\""))
     }
 
-    @Test("Copy commands are exact quoted read-only commands")
-    func commands() {
-        let socket = URL(fileURLWithPath: "/Users/test user/openusage.sock")
-        let helper = URL(fileURLWithPath: "/Applications/OpenUsage Bar.app/Contents/Helpers/OpenUsage Provider Settings.app/Contents/MacOS/OpenUsage Provider Settings")
-        let commands = AutomationPresentation.commands(socketURL: socket, helperURL: helper)
-        #expect(commands.curl == "curl --unix-socket '/Users/test user/openusage.sock' http://localhost/v1/snapshot")
-        #expect(commands.helper.hasSuffix(" snapshot --format json --offline"))
-        #expect(!commands.curl.contains("Authorization"))
-        #expect(!commands.helper.contains("provider-mutate"))
+    @Test("Loaded state carries only safe aggregate Automation facts")
+    func loadedStateCarriesOnlySafeFacts() {
+        let health = LocalAPIHealth(
+            schemaVersion: "1.0", dataRevision: 42,
+            generatedAt: "2026-07-18T02:00:00Z", ok: true, status: "ok"
+        )
+        let schema = LocalAPISchema(
+            schemaVersion: "1.0", dataRevision: 42,
+            generatedAt: "2026-07-18T02:00:00Z", routes: ["/v1/snapshot"]
+        )
+        let snapshot = LocalAPIResourceSnapshot(
+            schemaVersion: "1.0", dataRevision: 42,
+            generatedAt: "2026-07-18T02:00:00Z", localDay: "2026-07-18",
+            todayTokens: 123, modelCount: 3, coveredDayCount: 1,
+            balances: [],
+            quotaWindowCount: 4, providerCount: 5, sourceCount: 6
+        )
+        let loaded = AutomationLoadedState(
+            health: health, schema: schema, snapshot: snapshot,
+            preview: AutomationPresentation.snapshotPreview(snapshot)
+        )
+        let visible = String(describing: loaded)
+        for forbidden in [
+            "socket", "localhost", "curl", "unix-socket", "helper",
+            "OpenUsage Provider Settings", "/Users/", "/Applications/",
+        ] {
+            #expect(!visible.localizedCaseInsensitiveContains(forbidden))
+        }
     }
 
     @Test("Failures become stable sanitized states")

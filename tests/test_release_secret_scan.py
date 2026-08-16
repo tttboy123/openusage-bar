@@ -68,6 +68,20 @@ class ReleaseSecretScanTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_function_call_assignment_is_not_a_credential(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+            (repo / "gateway.js").write_text(
+                "const apiKey = boundedProviderConfigText(request.apiKey, 256);\n",
+                encoding="utf-8",
+            )
+            self.commit(repo, "safe function call")
+
+            result = self.run_scan(repo)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_contextual_literal_credential_still_fails(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)

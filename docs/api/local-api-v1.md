@@ -4,6 +4,14 @@ This is a read-only, single-version API for local schedulers and native clients.
 It uses HTTP/1.1 over a user-only Unix domain socket by default. TCP is an
 explicit IPv4-loopback opt-in and always requires bearer authentication.
 
+## Boundary with the optional Gateway
+
+Local API v1 remains GET/HEAD-only. Its listener never serves, advertises, or
+dispatches `/gateway/*` routes, and no POST request is accepted through this
+API. The optional [Gateway API v1](gateway-api-v1.md) runs as a separate process
+on a separate loopback listener with its own bearer token. Enabling, disabling,
+restarting, or failing the Gateway does not change this Local API contract.
+
 The published additive/deprecation/breaking rules, N-1 test contract, and
 version upgrade procedure are frozen in the
 [Local API v1 compatibility policy](compatibility-v1.md). Consumers must
@@ -20,6 +28,10 @@ camelCase envelope. Every response starts with these stable fields:
 | `dataRevision` | integer | Ledger high-water revision used by the response |
 | `generatedAt` | RFC 3339 string | Time the query result was generated |
 
+`/v1/quick-connect` is the static-catalog exception: its successful payload is
+exactly `schemaVersion` plus `providers`. It does not read ledger state, so it
+does not include `dataRevision` or `generatedAt`.
+
 The remaining fields are the same fields emitted by the existing collector CLI:
 
 | Route | Query parameters | Data fields and ordering |
@@ -30,7 +42,7 @@ The remaining fields are the same fields emitted by the existing collector CLI:
 | `GET /schema` | none | Compatibility alias of `/v1/schema` |
 | `GET /v1/summary` | optional `today=YYYY-MM-DD` | `todayTokens` (`integer | null`), `modelCount`, `coveredDayCount` |
 | `GET /v1/snapshot` | optional `today=YYYY-MM-DD` | one-revision resource view: `localDay`, `summary`, every `quotaWindow`, `quotaHub` (measured balance aggregation with provenance), `providers`, `sources`, `catalogRevision` |
-| `GET /v1/capabilities` | none | `providers`, sorted by `familyId`; nested sources retain declared priority |
+| `GET /v1/capabilities` | none | additive `observerPlatform` summary plus `providers`, sorted by `familyId`; nested sources retain declared priority and add `platformSupport` |
 | `GET /v1/providers` | optional comma-separated `providerIds` | observed/configured provider instances, sorted by `providerId` |
 | `GET /v1/capacity` | optional `limit=1..1000` | `providers`, in canonical urgency order |
 | `GET /v1/activity/daily` | required `from`, `to`; optional comma-separated `providerIds`, `modelIds` | `rows`, `coverage`, canonical chronological order; at most 731 days |
@@ -110,6 +122,25 @@ status text. For schema v1 compatibility, every family also retains
 `providerId` with the same canonical value as `familyId`; `providerId` is a
 deprecated alias and will be removed only in a later schema version.
 
+The additive top-level `observerPlatform` projection describes only the
+Observer support proven for the injected application runtime:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `operatingSystem` | `macos` \| `windows` \| `linux` \| `null` | Closed mapping of the application runtime; `null` means the runtime is unknown. |
+| `support` | `supported` \| `unsupported` \| `unknown` | Aggregate source-evidence state for this runtime. |
+| `supportedSourceCount` | integer \| `null` | Verified source count. A known platform may report verified zero; an unknown platform always reports `null`. |
+| `totalSourceCount` | integer | Number of catalog sources evaluated. |
+| `reasonCode` | string | Stable machine reason from the vocabulary below. |
+
+Each source adds `platformSupport={state,reasonCode}`. The stable reason
+vocabulary is `supported_sources_available`,
+`source_level_evidence_unverified`, and `runtime_platform_unknown`. Consumers
+must preserve the distinction between a known-platform verified zero
+(`support=unsupported`, `supportedSourceCount=0`) and an unknown runtime
+(`support=unknown`, `supportedSourceCount=null`). Unknown is not zero and must
+not be rendered as a confirmed lack of support.
+
 The `capabilities` object has these exact fields:
 
 | Field | Type | Meaning |
@@ -150,16 +181,20 @@ Each source retains the existing `sourceId`, `kind`, `timeoutSeconds`,
 | `accountScope` | string | `local_profile`, `configured_account`, `organization`, `provider`, `unknown` |
 | `modelScope` | string | `per_model`, `aggregate`, `mixed`, `unknown` |
 | `verification` | string | `live_account`, `fixture`, `upstream_declared`, `unverified` |
+| `platformSupport` | object | Runtime projection `{state, reasonCode}` derived from verified source evidence. |
 
 All sources in the current catalog are macOS-only, so their
 `operatingSystems` value is currently `["macos"]`; the enum is intentionally
 extensible to the declared Windows and Linux values. Source array order is the
 catalog's declared priority. Credential scopes, credential/account values,
 local paths, tokens, and raw provider data are never serialized.
+`operatingSystems` remains static declaration evidence; it is neither a
+runtime health probe nor proof that credentials or an account are currently
+available. `platformSupport` is also capability evidence, not health. Runtime
+health remains exclusively available from `/v1/sources/status`. A
 `verification=live_account` means that adapter path has passed a sanitized
 real-account acceptance run; it is not a statement that the current user's
-connection is healthy. Runtime health remains available from
-`/v1/sources/status`. `fixture`, `upstream_declared`, and `unverified` remain
+connection is healthy. `fixture`, `upstream_declared`, and `unverified` remain
 visibly weaker evidence and must not be promoted to real-account support by UI
 or consumers.
 
@@ -177,8 +212,12 @@ use the signed collector launcher so it rebuilds the same minimal non-secret
 environment as the resident service:
 
 ```bash
+# Native build
 APP="/Applications/OpenUsage Bar.app"
 [[ -d "$APP" ]] || APP="$HOME/Applications/OpenUsage Bar.app"
+# Desktop client (current release form)
+DESKTOP_APP="/Applications/UsageHub.app"
+COLLECTOR="$DESKTOP_APP/Contents/Resources/collector/openusage-collector"
 COLLECTOR="$APP/Contents/MacOS/OpenUsage Collector"
 "$COLLECTOR" providers --format json --offline
 ```

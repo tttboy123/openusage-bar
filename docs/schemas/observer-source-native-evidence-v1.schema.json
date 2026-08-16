@@ -1,0 +1,1032 @@
+{
+  "$id": "https://openusagebar.dev/schemas/observer-source-native-evidence-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "sources": {
+          "items": false,
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "catalogSourceId": {
+                  "const": "moonshot_official_api"
+                },
+                "familyId": {
+                  "const": "moonshot"
+                },
+                "reasonCode": {
+                  "const": "all_required_seams_verified"
+                },
+                "runtimeSourceIds": {
+                  "const": [
+                    "moonshot.balance"
+                  ]
+                },
+                "seams": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "credentialBackend": {
+                      "const": "verified"
+                    },
+                    "executableDiscovery": {
+                      "const": "not_applicable"
+                    },
+                    "factParser": {
+                      "const": "verified"
+                    },
+                    "localFileDiscovery": {
+                      "const": "not_applicable"
+                    }
+                  },
+                  "required": [
+                    "executableDiscovery",
+                    "localFileDiscovery",
+                    "credentialBackend",
+                    "factParser"
+                  ],
+                  "type": "object"
+                },
+                "status": {
+                  "const": "verified"
+                }
+              },
+              "required": [
+                "familyId",
+                "catalogSourceId",
+                "runtimeSourceIds",
+                "status",
+                "reasonCode",
+                "seams"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "catalogSourceId": {
+                  "const": "codex_local_log"
+                },
+                "familyId": {
+                  "const": "codex"
+                },
+                "reasonCode": {
+                  "const": "all_required_seams_verified"
+                },
+                "runtimeSourceIds": {
+                  "const": [
+                    "codex.local_rate_limits",
+                    "codex.local_sessions"
+                  ]
+                },
+                "seams": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "credentialBackend": {
+                      "const": "not_applicable"
+                    },
+                    "executableDiscovery": {
+                      "const": "not_applicable"
+                    },
+                    "factParser": {
+                      "const": "verified"
+                    },
+                    "localFileDiscovery": {
+                      "const": "verified"
+                    }
+                  },
+                  "required": [
+                    "executableDiscovery",
+                    "localFileDiscovery",
+                    "credentialBackend",
+                    "factParser"
+                  ],
+                  "type": "object"
+                },
+                "status": {
+                  "const": "verified"
+                }
+              },
+              "required": [
+                "familyId",
+                "catalogSourceId",
+                "runtimeSourceIds",
+                "status",
+                "reasonCode",
+                "seams"
+              ],
+              "type": "object"
+            }
+          ],
+          "type": "array"
+        },
+        "verifiedSourceCount": {
+          "const": 2
+        }
+      },
+      "required": [
+        "verifiedSourceCount",
+        "sources"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "sources": {
+          "items": false,
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "catalogSourceId": {
+                  "const": "moonshot_official_api"
+                },
+                "familyId": {
+                  "const": "moonshot"
+                },
+                "reasonCode": {
+                  "const": "all_required_seams_verified"
+                },
+                "runtimeSourceIds": {
+                  "const": [
+                    "moonshot.balance"
+                  ]
+                },
+                "seams": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "credentialBackend": {
+                      "const": "verified"
+                    },
+                    "executableDiscovery": {
+                      "const": "not_applicable"
+                    },
+                    "factParser": {
+                      "const": "verified"
+                    },
+                    "localFileDiscovery": {
+                      "const": "not_applicable"
+                    }
+                  },
+                  "required": [
+                    "executableDiscovery",
+                    "localFileDiscovery",
+                    "credentialBackend",
+                    "factParser"
+                  ],
+                  "type": "object"
+                },
+                "status": {
+                  "const": "verified"
+                }
+              },
+              "required": [
+                "familyId",
+                "catalogSourceId",
+                "runtimeSourceIds",
+                "status",
+                "reasonCode",
+                "seams"
+              ],
+              "type": "object"
+            },
+            {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "codex_local_log"
+                    },
+                    "familyId": {
+                      "const": "codex"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "codex.local_rate_limits",
+                        "codex.local_sessions"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "not_applicable"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "not_verified"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "codex_local_log"
+                    },
+                    "familyId": {
+                      "const": "codex"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "codex.local_rate_limits",
+                        "codex.local_sessions"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "not_applicable"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "not_verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "verified"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "codex_local_log"
+                    },
+                    "familyId": {
+                      "const": "codex"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "codex.local_rate_limits",
+                        "codex.local_sessions"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "not_applicable"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "not_verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "not_verified"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          ],
+          "type": "array"
+        },
+        "verifiedSourceCount": {
+          "const": 1
+        }
+      },
+      "required": [
+        "verifiedSourceCount",
+        "sources"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "sources": {
+          "items": false,
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "moonshot_official_api"
+                    },
+                    "familyId": {
+                      "const": "moonshot"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "moonshot.balance"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "not_verified"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "not_applicable"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "moonshot_official_api"
+                    },
+                    "familyId": {
+                      "const": "moonshot"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "moonshot.balance"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "verified"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "not_verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "not_applicable"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "moonshot_official_api"
+                    },
+                    "familyId": {
+                      "const": "moonshot"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "moonshot.balance"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "not_verified"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "not_verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "not_applicable"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "catalogSourceId": {
+                  "const": "codex_local_log"
+                },
+                "familyId": {
+                  "const": "codex"
+                },
+                "reasonCode": {
+                  "const": "all_required_seams_verified"
+                },
+                "runtimeSourceIds": {
+                  "const": [
+                    "codex.local_rate_limits",
+                    "codex.local_sessions"
+                  ]
+                },
+                "seams": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "credentialBackend": {
+                      "const": "not_applicable"
+                    },
+                    "executableDiscovery": {
+                      "const": "not_applicable"
+                    },
+                    "factParser": {
+                      "const": "verified"
+                    },
+                    "localFileDiscovery": {
+                      "const": "verified"
+                    }
+                  },
+                  "required": [
+                    "executableDiscovery",
+                    "localFileDiscovery",
+                    "credentialBackend",
+                    "factParser"
+                  ],
+                  "type": "object"
+                },
+                "status": {
+                  "const": "verified"
+                }
+              },
+              "required": [
+                "familyId",
+                "catalogSourceId",
+                "runtimeSourceIds",
+                "status",
+                "reasonCode",
+                "seams"
+              ],
+              "type": "object"
+            }
+          ],
+          "type": "array"
+        },
+        "verifiedSourceCount": {
+          "const": 1
+        }
+      },
+      "required": [
+        "verifiedSourceCount",
+        "sources"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "sources": {
+          "items": false,
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "moonshot_official_api"
+                    },
+                    "familyId": {
+                      "const": "moonshot"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "moonshot.balance"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "not_verified"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "not_applicable"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "moonshot_official_api"
+                    },
+                    "familyId": {
+                      "const": "moonshot"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "moonshot.balance"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "verified"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "not_verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "not_applicable"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "moonshot_official_api"
+                    },
+                    "familyId": {
+                      "const": "moonshot"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "moonshot.balance"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "not_verified"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "not_verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "not_applicable"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "codex_local_log"
+                    },
+                    "familyId": {
+                      "const": "codex"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "codex.local_rate_limits",
+                        "codex.local_sessions"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "not_applicable"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "not_verified"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "codex_local_log"
+                    },
+                    "familyId": {
+                      "const": "codex"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "codex.local_rate_limits",
+                        "codex.local_sessions"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "not_applicable"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "not_verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "verified"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogSourceId": {
+                      "const": "codex_local_log"
+                    },
+                    "familyId": {
+                      "const": "codex"
+                    },
+                    "reasonCode": {
+                      "const": "required_seam_unverified"
+                    },
+                    "runtimeSourceIds": {
+                      "const": [
+                        "codex.local_rate_limits",
+                        "codex.local_sessions"
+                      ]
+                    },
+                    "seams": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "credentialBackend": {
+                          "const": "not_applicable"
+                        },
+                        "executableDiscovery": {
+                          "const": "not_applicable"
+                        },
+                        "factParser": {
+                          "const": "not_verified"
+                        },
+                        "localFileDiscovery": {
+                          "const": "not_verified"
+                        }
+                      },
+                      "required": [
+                        "executableDiscovery",
+                        "localFileDiscovery",
+                        "credentialBackend",
+                        "factParser"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "familyId",
+                    "catalogSourceId",
+                    "runtimeSourceIds",
+                    "status",
+                    "reasonCode",
+                    "seams"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          ],
+          "type": "array"
+        },
+        "verifiedSourceCount": {
+          "const": 0
+        }
+      },
+      "required": [
+        "verifiedSourceCount",
+        "sources"
+      ],
+      "type": "object"
+    }
+  ],
+  "properties": {
+    "evaluatedSourceCount": {
+      "const": 2
+    },
+    "evidenceClass": {
+      "const": "github_hosted_native_fixture"
+    },
+    "platform": {
+      "enum": [
+        "windows",
+        "linux"
+      ]
+    },
+    "runnerEnvironment": {
+      "const": "github-hosted"
+    },
+    "schemaVersion": {
+      "const": "observer-source-native-evidence/v1"
+    },
+    "sources": {
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "verifiedSourceCount": {
+      "maximum": 2,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "evidenceClass",
+    "platform",
+    "runnerEnvironment",
+    "evaluatedSourceCount",
+    "verifiedSourceCount",
+    "sources"
+  ],
+  "title": "OpenUsage Bar Observer source native evidence v1",
+  "type": "object"
+}

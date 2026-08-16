@@ -1,0 +1,1819 @@
+{
+  "schema_version": 1,
+  "platforms": {
+    "darwin": {
+      "catalog_operating_system": "macos",
+      "runtime_platform": "darwin"
+    },
+    "linux": {
+      "catalog_operating_system": "linux",
+      "runtime_platform": "linux"
+    },
+    "windows": {
+      "catalog_operating_system": "windows",
+      "runtime_platform": "win32"
+    }
+  },
+  "sources": [
+    {
+      "family_id": "alibaba_cloud",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "amp",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "anthropic",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "azure_openai",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "cc_switch",
+      "source_id": "cc_switch.rollups",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "verified"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "cc_switch",
+      "source_id": "cc_switch.status",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "verified"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "claude_code",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "codebuff",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "codex",
+      "source_id": "codex_local_log",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "verified"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "verified"
+          },
+          "reason_code": "hosted_native_evidence",
+          "supported": true
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "verified"
+          },
+          "reason_code": "hosted_native_evidence",
+          "supported": true
+        }
+      }
+    },
+    {
+      "family_id": "codex",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "copilot",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "crush",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "cursor",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "deepseek",
+      "source_id": "deepseek_official_api",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "verified",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "deepseek",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "droid",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "gemini_api",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "gemini_cli",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "goose",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "groq",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "hermes",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "kilo_code",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "kimi_cli",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "kiro_cli",
+      "source_id": "kiro_codewhisperer_api",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "verified",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "kiro_cli",
+      "source_id": "kiro_keychain",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "verified",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "kiro_cli",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "minimax",
+      "source_id": "minimax_builtin_api",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "verified",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "minimax",
+      "source_id": "minimax_china_billing_web",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "verified",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "minimax",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "mistral",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "moonshot",
+      "source_id": "moonshot_official_api",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "verified",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "verified",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "hosted_native_evidence",
+          "supported": true
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "moonshot",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "mux",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "ollama",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "omniroute",
+      "source_id": "omniroute.usage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "verified"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "openai",
+      "source_id": "openai_admin_api",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "verified",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "openai",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "openclaw",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "opencode",
+      "source_id": "opencode_local_log",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "verified"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "opencode",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "openrouter",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "perplexity",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "pi",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "qwen_cli",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "roocode",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "step_plan",
+      "source_id": "step_plan_browser_session",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "verified",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "verified"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "unverified"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "step_plan",
+      "source_id": "step_plan_official_api",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "verified",
+            "executable": "not_applicable",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "unverified",
+            "executable": "not_applicable",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "xai",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "zai",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    },
+    {
+      "family_id": "zed",
+      "source_id": "openusage",
+      "platforms": {
+        "darwin": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "verified",
+            "fact_parser": "verified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "existing_macos_contract",
+          "supported": true
+        },
+        "linux": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        },
+        "windows": {
+          "evidence": {
+            "credential_backend": "not_applicable",
+            "executable": "unverified",
+            "fact_parser": "unverified",
+            "local_discovery": "not_applicable"
+          },
+          "reason_code": "source_level_evidence_unverified",
+          "supported": false
+        }
+      }
+    }
+  ]
+}

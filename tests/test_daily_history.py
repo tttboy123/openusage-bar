@@ -791,6 +791,52 @@ class ActivityCollectorTests(unittest.TestCase):
 
         importer.fetch.assert_called_once_with("codex", date(2026, 7, 14), date(2026, 7, 14))
 
+    def test_backfill_history_days_forces_full_window_even_with_existing_history(self):
+        store = Mock()
+        store.has_daily_history.return_value = True
+        importer = Mock()
+        importer.fetch.return_value = DailyImportResult(True, ())
+
+        ActivityCollector(store, importer, clock=lambda: NOW).refresh(
+            Overview([card("codex")]), history_days=364
+        )
+
+        importer.fetch.assert_called_once_with(
+            "codex", date(2025, 7, 15), date(2026, 7, 14)
+        )
+
+    def test_backfill_history_days_forces_full_official_window_and_costs(self):
+        store = Mock()
+        store.has_source_success.return_value = True
+        store.has_cost_history.return_value = True
+        official = Mock()
+        official.fetch_usage.return_value = UsageImportSuccess(
+            date(2025, 7, 15),
+            date(2026, 7, 14),
+            (model_row(day="2026-07-14", provider_id="openai"),),
+        )
+        official.fetch_costs.return_value = CostImportSuccess(
+            date(2025, 7, 15), date(2026, 7, 14), (cost_row(),)
+        )
+        openusage = Mock()
+
+        ActivityCollector(
+            store,
+            openusage,
+            official_importers={"openai": official},
+            clock=lambda: NOW,
+        ).refresh(Overview([]), history_days=364)
+
+        openusage.fetch.assert_not_called()
+        self.assertEqual(
+            official.fetch_usage.call_args.args,
+            (date(2025, 7, 15), date(2026, 7, 14)),
+        )
+        self.assertEqual(
+            official.fetch_costs.call_args.args,
+            (date(2025, 7, 15), date(2026, 7, 14)),
+        )
+
     def test_refresh_uses_local_calendar_day_across_utc_boundary(self):
         store = Mock()
         store.has_daily_history.return_value = True

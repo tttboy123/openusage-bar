@@ -8,6 +8,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from .config import ID_PATTERN
+from .provider_ids import OPENUSAGE_PROVIDER_IDS
 
 
 PROVIDER_CATEGORIES = frozenset({"api", "subscription", "local_tool"})
@@ -85,19 +86,7 @@ SOURCE_VERIFICATIONS = frozenset(
     {"live_account", "fixture", "upstream_declared", "unverified"}
 )
 
-_EXPECTED_UPSTREAM_FAMILY_IDS = tuple(
-    sorted(
-        {
-            "openai", "anthropic", "azure_openai", "alibaba_cloud",
-            "openrouter", "perplexity", "groq", "mistral", "moonshot",
-            "deepseek", "xai", "zai", "gemini_api", "opencode",
-            "gemini_cli", "copilot", "cursor", "claude_code", "codex",
-            "amp", "goose", "hermes", "mux", "droid", "crush",
-            "roocode", "kilo_code", "kiro_cli", "zed", "codebuff",
-            "kimi_cli", "openclaw", "pi", "qwen_cli", "ollama",
-        }
-    )
-)
+_EXPECTED_UPSTREAM_FAMILY_IDS = OPENUSAGE_PROVIDER_IDS
 _EXPECTED_BUILTIN_FAMILY_IDS = (
     "cc_switch",
     "minimax",
@@ -112,6 +101,7 @@ _SPECIAL_SOURCE_IDS = {
     "deepseek": ("deepseek_official_api", "openusage"),
     "openai": ("openai_admin_api", "openusage"),
     "codex": ("codex_local_log", "openusage"),
+    "opencode": ("opencode_local_log", "openusage"),
     "kiro_cli": ("kiro_keychain", "kiro_codewhisperer_api", "openusage"),
     "minimax": (
         "minimax_builtin_api",
@@ -224,6 +214,23 @@ class CatalogSource:
 
 
 @dataclass(frozen=True)
+class SourcePlatformCapability:
+    family_id: str
+    source_id: str
+    supported: bool
+    reason_code: str
+
+
+@dataclass(frozen=True)
+class ObserverPlatformSummary:
+    operating_system: str | None
+    support: str
+    supported_source_count: int | None
+    total_source_count: int
+    reason_code: str
+
+
+@dataclass(frozen=True)
 class ProviderFamily:
     family_id: str
     display_name: str
@@ -282,6 +289,35 @@ class ProviderCatalog:
                 f"{selected} distribution cannot register sources: "
                 + ", ".join(unsupported)
             )
+
+    def source_platform_capabilities(
+        self, operating_system: str
+    ) -> tuple[SourcePlatformCapability, ...]:
+        """Return source support for an injected catalog operating system.
+
+        This is a pure catalog query used by cross-platform clients to display
+        capability state. It intentionally does not inspect the host runtime,
+        credential store, filesystem, network, or executable PATH.
+        """
+        selected = _require_enum(
+            operating_system,
+            OPERATING_SYSTEMS,
+            "Source capability operating system",
+        )
+        return tuple(
+            SourcePlatformCapability(
+                family_id=family.family_id,
+                source_id=source.source_id,
+                supported=selected in source.operating_systems,
+                reason_code=(
+                    "supported_sources_available"
+                    if selected in source.operating_systems
+                    else "source_level_evidence_unverified"
+                ),
+            )
+            for family in self.families
+            for source in family.sources
+        )
 
     def search(self, query: str) -> tuple[ProviderFamily, ...]:
         """Search public labels without rewriting a Provider identity."""
@@ -353,6 +389,140 @@ class ProviderCatalog:
         ):
             return family.display_name
         return display_name
+
+
+@dataclass(frozen=True, init=False)
+class ObserverPlatformResolver:
+    """Resolve Observer support from an explicitly injected runtime name.
+
+    The resolver is deliberately a pure, closed catalog projection. It never
+    reads the host platform, environment, filesystem, credential store,
+    executable PATH, or network. Application boundaries own injection of the
+    runtime platform value.
+    """
+
+    operating_system: str | None
+    summary: ObserverPlatformSummary
+    source_capabilities: tuple[SourcePlatformCapability, ...]
+    _source_by_pair: Mapping[
+        tuple[str, str], SourcePlatformCapability
+    ] = field(repr=False, compare=False)
+    _supported_source_ids: frozenset[str] = field(
+        repr=False, compare=False
+    )
+
+    def __init__(
+        self,
+        provider_catalog: ProviderCatalog,
+        *,
+        runtime_platform: object,
+    ) -> None:
+        if not isinstance(provider_catalog, ProviderCatalog):
+            raise TypeError("provider_catalog must be a ProviderCatalog")
+
+        operating_system = _observer_operating_system(runtime_platform)
+        if operating_system is None:
+            records = tuple(
+                SourcePlatformCapability(
+                    family_id=family.family_id,
+                    source_id=source.source_id,
+                    supported=False,
+                    reason_code="runtime_platform_unknown",
+                )
+                for family in provider_catalog.families
+                for source in family.sources
+            )
+            supported_count: int | None = None
+            support = "unknown"
+            reason_code = "runtime_platform_unknown"
+        else:
+            records = provider_catalog.source_platform_capabilities(
+                operating_system
+            )
+            supported_count = sum(record.supported for record in records)
+            support = "supported" if supported_count else "unsupported"
+            reason_code = (
+                "supported_sources_available"
+                if supported_count
+                else "source_level_evidence_unverified"
+            )
+
+        summary = ObserverPlatformSummary(
+            operating_system=operating_system,
+            support=support,
+            supported_source_count=supported_count,
+            total_source_count=len(records),
+            reason_code=reason_code,
+        )
+        source_by_pair = MappingProxyType(
+            {
+                (record.family_id, record.source_id): record
+                for record in records
+            }
+        )
+        supported_source_ids = frozenset(
+            record.source_id for record in records if record.supported
+        )
+
+        object.__setattr__(self, "operating_system", operating_system)
+        object.__setattr__(self, "summary", summary)
+        object.__setattr__(self, "source_capabilities", records)
+        object.__setattr__(self, "_source_by_pair", source_by_pair)
+        object.__setattr__(
+            self, "_supported_source_ids", supported_source_ids
+        )
+
+    def source_capability(
+        self, family_id: str, source_id: str
+    ) -> SourcePlatformCapability | None:
+        """Return the frozen source fact, or ``None`` for an unknown pair."""
+        if type(family_id) is not str or type(source_id) is not str:
+            return None
+        return self._source_by_pair.get((family_id, source_id))
+
+    def supports_source(self, family_id: str, source_id: str) -> bool:
+        record = self.source_capability(family_id, source_id)
+        return record is not None and record.supported
+
+    def supports_any_source_id(self, source_id: str) -> bool:
+        if type(source_id) is not str:
+            return False
+        return source_id in self._supported_source_ids
+
+    def supports_all_source_id(self, source_id: str) -> bool:
+        """Require every catalog use of a shared source to be supported.
+
+        A missing source ID and an unknown runtime both fail closed. This
+        prevents one newly verified family from enabling a shared adapter for
+        other families whose use of the same source remains unverified.
+        """
+        if type(source_id) is not str:
+            return False
+        matched = False
+        for record in self.source_capabilities:
+            if record.source_id != source_id:
+                continue
+            matched = True
+            if not record.supported:
+                return False
+        return matched
+
+    @property
+    def supports_legacy_unmodeled_sources(self) -> bool:
+        """Preserve legacy adapters only inside the established macOS contract."""
+        return self.operating_system == "macos"
+
+
+def _observer_operating_system(runtime_platform: object) -> str | None:
+    if type(runtime_platform) is not str:
+        return None
+    if runtime_platform == "darwin":
+        return "macos"
+    if runtime_platform == "win32":
+        return "windows"
+    if runtime_platform.startswith("linux"):
+        return "linux"
+    return None
 
 
 def load_provider_catalog(path: str | Path | None = None) -> ProviderCatalog:
@@ -723,4 +893,3 @@ def _unknown_capabilities() -> ProviderCapabilities:
 
 
 catalog = load_provider_catalog()
-catalog.require_operating_system("macos")

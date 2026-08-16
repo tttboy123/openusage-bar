@@ -12,6 +12,8 @@ SETTINGS_APP="$APP/Contents/Helpers/OpenUsage Provider Settings.app"
 STATUS_RUNTIME="$APP/Contents/MacOS/OpenUsage Bar.runtime"
 COLLECTOR_LAUNCHER="$APP/Contents/MacOS/OpenUsage Collector"
 RESOURCES="$SWIFT_PACKAGE/Resources"
+BUILD_IDENTITY_SOURCE="$ROOT/openusage_bar/resources/artifact-build-identity.v1.json"
+BUILD_IDENTITY_RESOURCE="$RESOURCES/product-build-identity.v1.json"
 ATOMIC_SWAP="$APP/Contents/Resources/atomic-swap"
 SWIFT_MIN_LINE_COVERAGE=80
 PYTHON_MIN_LINE_COVERAGE=80
@@ -26,16 +28,27 @@ CODESIGN_IDENTITY=${OPENUSAGE_CODESIGN_IDENTITY:--}
 cd "$ROOT"
 "$PYTHON" scripts/release_secret_scan.py
 "$PYTHON" scripts/verify_action_pins.py
+"$PYTHON" scripts/verify_product_version_truth.py
+"$PYTHON" scripts/verify_artifact_build_identity.py --root "$ROOT"
 CATALOG_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-provider-catalog.XXXXXX")
+DESIGN_TOKENS_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-design-tokens.XXXXXX")
 LOCAL_API_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-local-api-schema.XXXXXX")
 ACTIVITY_SCHEMA_TMP=$(mktemp "${TMPDIR:-/tmp}/openusage-activity-schema.XXXXXX")
 PYTHON_COVERAGE_REPORT=$(mktemp "${TMPDIR:-/tmp}/openusage-python-coverage.XXXXXX")
 PYTHON_COVERAGE_DIR="${TMPDIR:-/tmp}/openusage-build-trace-$$"
-trap 'rm -f "$CATALOG_TMP" "$LOCAL_API_SCHEMA_TMP" "$ACTIVITY_SCHEMA_TMP" "$PYTHON_COVERAGE_REPORT"; rm -rf "$PYTHON_COVERAGE_DIR"' EXIT
+trap 'rm -f "$CATALOG_TMP" "$DESIGN_TOKENS_TMP" "$LOCAL_API_SCHEMA_TMP" "$ACTIVITY_SCHEMA_TMP" "$PYTHON_COVERAGE_REPORT"; rm -rf "$PYTHON_COVERAGE_DIR"' EXIT
 "$PYTHON" scripts/generate_swift_provider_catalog.py --output "$CATALOG_TMP"
 if ! cmp -s "$CATALOG_TMP" "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift"; then
   print -u2 "generated Swift provider catalog is stale"
   diff -u "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedProviderCatalog.swift" "$CATALOG_TMP" || true
+  exit 1
+fi
+"$PYTHON" scripts/generate_design_tokens.py \
+  --source "$ROOT/openusage_bar/resources/design-tokens.v1.json" \
+  --output "$DESIGN_TOKENS_TMP"
+if ! cmp -s "$DESIGN_TOKENS_TMP" "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedDesignTokens.swift"; then
+  print -u2 "generated Swift design tokens are stale"
+  diff -u "$SWIFT_PACKAGE/Sources/UsageCore/GeneratedDesignTokens.swift" "$DESIGN_TOKENS_TMP" || true
   exit 1
 fi
 "$PYTHON" scripts/generate_local_api_schema.py --output "$LOCAL_API_SCHEMA_TMP"
@@ -53,15 +66,22 @@ fi
 PYTHON_BASE=$("$PYTHON" -c 'import sys; print(sys.base_prefix)')
 "$PYTHON" -m unittest tests.test_provider_conformance -v
 "$PYTHON" -m unittest discover -s tests -v
+# The stdlib trace tool misses modules first imported as a sibling-module
+# side effect (gateway.response, gateway.server). traced_test_runner.py
+# pre-imports every product module on the main thread so the coverage report
+# is deterministic.
 "$PYTHON" -m trace --count --summary --missing \
   --coverdir "$PYTHON_COVERAGE_DIR" \
   --ignore-dir "$PYTHON_BASE:$ROOT/.build-venv" \
-  --module unittest discover -s tests -v 2>&1 | tee "$PYTHON_COVERAGE_REPORT"
+  "$ROOT/scripts/traced_test_runner.py" 2>&1 | tee "$PYTHON_COVERAGE_REPORT"
 "$PYTHON" scripts/python_coverage_gate.py \
   --report "$PYTHON_COVERAGE_REPORT" \
   --minimum "$PYTHON_MIN_LINE_COVERAGE" \
   --package-root "$ROOT/openusage_bar"
 "$PYTHON" scripts/privacy_scan.py \
+  "$BUILD_IDENTITY_SOURCE" \
+  "$BUILD_IDENTITY_RESOURCE" \
+  "$ROOT/openusage_bar/resources/product-version-truth.v1.json" \
   "$ROOT/openusage_bar/resources/release-state.v1.json" \
   "$ROOT/openusage_bar/resources/provider-catalog.v1.json" \
   "$ROOT/openusage_bar/resources/local-api-v1.schema.json" \
@@ -97,6 +117,10 @@ mkdir -p \
   "$APP/Contents/Helpers" \
   "$APP/Contents/Resources/LaunchAgents" \
   "$APP/Contents/Library/LaunchAgents"
+cp "$BUILD_IDENTITY_SOURCE" \
+  "$APP/Contents/Resources/product-build-identity.v1.json"
+cmp -s "$BUILD_IDENTITY_SOURCE" \
+  "$APP/Contents/Resources/product-build-identity.v1.json"
 /usr/bin/clang -Wall -Wextra -Werror -mmacosx-version-min=15.0 \
   "$ROOT/scripts/atomic_swap.c" -o "$ATOMIC_SWAP"
 chmod 755 "$ATOMIC_SWAP"

@@ -1,0 +1,380 @@
+{
+  "$defs": {
+    "cacheScenario": {
+      "additionalProperties": false,
+      "properties": {
+        "coreLookup": { "$ref": "#/$defs/cacheLatencySummary" },
+        "e2eAuthenticatedLoopback": { "$ref": "#/$defs/informationalLatency" },
+        "status": { "$ref": "#/$defs/status" }
+      },
+      "required": ["status", "e2eAuthenticatedLoopback", "coreLookup"],
+      "type": "object"
+    },
+    "cacheLatencySummary": {
+      "allOf": [
+        { "$ref": "#/$defs/latencySummary" },
+        {
+          "properties": { "thresholdNs": { "const": 5000000 } },
+          "required": ["thresholdNs"]
+        }
+      ]
+    },
+    "informationalLatency": {
+      "additionalProperties": false,
+      "properties": {
+        "informationalOnly": { "const": true },
+        "measurement": { "$ref": "#/$defs/cacheLatencySummary" }
+      },
+      "required": ["informationalOnly", "measurement"],
+      "type": "object"
+    },
+    "fixtures": {
+      "additionalProperties": false,
+      "properties": {
+        "activityQuotaStateRows": { "const": 1000 },
+        "cacheEntries": { "const": 1000 },
+        "cachePrefixesPerEntry": { "const": 0 },
+        "hotCacheEntryIndex": { "const": 500 },
+        "providerOutputTextUtf8Bytes": { "const": 4096 },
+        "responsesBodyBytes": { "const": 4096 },
+        "shouldSendBodyBytes": { "const": 82 },
+        "telemetryMatchingInWindowRows": { "const": 1000 },
+        "telemetryMatchingOutsideWindowRows": { "const": 1000 },
+        "telemetryOtherModelRows": { "const": 1000 },
+        "telemetryOtherProviderRows": { "const": 1000 },
+        "telemetryRequestAggregateRows": { "const": 4000 }
+      },
+      "required": [
+        "activityQuotaStateRows",
+        "telemetryRequestAggregateRows",
+        "telemetryMatchingInWindowRows",
+        "telemetryMatchingOutsideWindowRows",
+        "telemetryOtherModelRows",
+        "telemetryOtherProviderRows",
+        "cacheEntries",
+        "hotCacheEntryIndex",
+        "cachePrefixesPerEntry",
+        "shouldSendBodyBytes",
+        "responsesBodyBytes",
+        "providerOutputTextUtf8Bytes"
+      ],
+      "type": "object"
+    },
+    "latencyRound": {
+      "additionalProperties": false,
+      "properties": {
+        "attemptCount": { "minimum": 0, "type": "integer" },
+        "clockRegressionCount": { "minimum": 0, "type": "integer" },
+        "errorCount": { "minimum": 0, "type": "integer" },
+        "p99Ns": { "type": ["integer", "null"] },
+        "rateLimitCount": { "minimum": 0, "type": "integer" },
+        "round": { "maximum": 3, "minimum": 1, "type": "integer" },
+        "sampleCount": { "minimum": 0, "type": "integer" },
+        "status": { "$ref": "#/$defs/status" },
+        "timeoutCount": { "minimum": 0, "type": "integer" },
+        "warmupCount": { "minimum": 0, "type": "integer" },
+        "warmupErrorCount": { "minimum": 0, "type": "integer" }
+      },
+      "required": [
+        "round",
+        "status",
+        "warmupCount",
+        "warmupErrorCount",
+        "attemptCount",
+        "clockRegressionCount",
+        "sampleCount",
+        "p99Ns",
+        "errorCount",
+        "timeoutCount",
+        "rateLimitCount"
+      ],
+      "type": "object"
+    },
+    "latencySummary": {
+      "additionalProperties": false,
+      "properties": {
+        "rounds": {
+          "items": { "$ref": "#/$defs/latencyRound" },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "selectedRound": { "type": ["integer", "null"] },
+        "status": { "$ref": "#/$defs/status" },
+        "thresholdNs": { "enum": [5000000, 50000000] },
+        "worstP99Ns": { "type": ["integer", "null"] }
+      },
+      "required": ["status", "selectedRound", "worstP99Ns", "thresholdNs", "rounds"],
+      "type": "object"
+    },
+    "machineText": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._()+@-]*$",
+      "type": "string"
+    },
+    "pairedRound": {
+      "additionalProperties": false,
+      "properties": {
+        "attemptCount": { "minimum": 0, "type": "integer" },
+        "clockRegressionCount": { "minimum": 0, "type": "integer" },
+        "errorCount": { "minimum": 0, "type": "integer" },
+        "maxDeltaNs": { "type": ["integer", "null"] },
+        "medianDeltaNs": { "type": ["integer", "null"] },
+        "minDeltaNs": { "type": ["integer", "null"] },
+        "negativePairCount": { "minimum": 0, "type": "integer" },
+        "p99DeltaNs": { "type": ["integer", "null"] },
+        "rateLimitCount": { "minimum": 0, "type": "integer" },
+        "round": { "maximum": 3, "minimum": 1, "type": "integer" },
+        "status": { "$ref": "#/$defs/status" },
+        "successfulPairCount": { "minimum": 0, "type": "integer" },
+        "timeoutCount": { "minimum": 0, "type": "integer" },
+        "warmupCount": { "minimum": 0, "type": "integer" },
+        "warmupErrorCount": { "minimum": 0, "type": "integer" }
+      },
+      "required": [
+        "round",
+        "status",
+        "warmupCount",
+        "warmupErrorCount",
+        "attemptCount",
+        "clockRegressionCount",
+        "successfulPairCount",
+        "negativePairCount",
+        "minDeltaNs",
+        "medianDeltaNs",
+        "p99DeltaNs",
+        "maxDeltaNs",
+        "errorCount",
+        "timeoutCount",
+        "rateLimitCount"
+      ],
+      "type": "object"
+    },
+    "pairedSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "rounds": {
+          "items": { "$ref": "#/$defs/pairedRound" },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "selectedRound": { "type": ["integer", "null"] },
+        "status": { "$ref": "#/$defs/status" },
+        "thresholdNs": { "const": 200000000 },
+        "worstP99DeltaNs": { "type": ["integer", "null"] }
+      },
+      "required": ["status", "selectedRound", "worstP99DeltaNs", "thresholdNs", "rounds"],
+      "type": "object"
+    },
+    "plan": {
+      "additionalProperties": false,
+      "properties": {
+        "admissionRateLimitPolicy": { "const": "benchmark-only-capacity-10000-refill-10000-per-second" },
+        "clock": { "const": "monotonic_ns" },
+        "fixtures": { "$ref": "#/$defs/fixtures" },
+        "httpConnectionPolicy": { "const": "connection-close" },
+        "p99Method": { "const": "nearest-rank-ceil" },
+        "requestTimeoutSeconds": { "const": 5 },
+        "roundCount": { "const": 3 },
+        "sampleCount": { "const": 2000 },
+        "serverMaxThreads": { "const": 32 },
+        "throughputBucketSeconds": { "const": 1 },
+        "throughputConcurrency": { "const": 16 },
+        "throughputDurationSeconds": { "const": 30 },
+        "warmupCount": { "const": 100 }
+      },
+      "required": [
+        "roundCount",
+        "warmupCount",
+        "sampleCount",
+        "serverMaxThreads",
+        "throughputDurationSeconds",
+        "throughputConcurrency",
+        "throughputBucketSeconds",
+        "requestTimeoutSeconds",
+        "p99Method",
+        "clock",
+        "httpConnectionPolicy",
+        "admissionRateLimitPolicy",
+        "fixtures"
+      ],
+      "type": "object"
+    },
+    "privacy": {
+      "additionalProperties": false,
+      "properties": {
+        "allowlistOnly": { "const": true },
+        "containsCredentials": { "const": false },
+        "containsLocalPaths": { "const": false },
+        "containsProcessIdentifiers": { "const": false },
+        "containsProviderIdentity": { "const": false },
+        "containsRequestOrResponse": { "const": false },
+        "realCredentialReads": { "const": 0 },
+        "realProviderNetworkCalls": { "const": 0 }
+      },
+      "required": [
+        "allowlistOnly",
+        "containsLocalPaths",
+        "containsProviderIdentity",
+        "containsRequestOrResponse",
+        "containsCredentials",
+        "containsProcessIdentifiers",
+        "realCredentialReads",
+        "realProviderNetworkCalls"
+      ],
+      "type": "object"
+    },
+    "referenceMachine": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": { "$ref": "#/$defs/machineText" },
+        "cpuModel": { "$ref": "#/$defs/machineText" },
+        "filesystem": { "$ref": "#/$defs/machineText" },
+        "logicalCpuCount": { "minimum": 1, "type": "integer" },
+        "memoryBytes": { "minimum": 1, "type": "integer" },
+        "osBuild": { "$ref": "#/$defs/machineText" },
+        "osName": { "enum": ["macos", "windows", "linux"] },
+        "osVersion": { "$ref": "#/$defs/machineText" },
+        "powerState": { "enum": ["ac", "battery", "unknown"] },
+        "pythonVersion": { "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "type": "string" },
+        "storageClass": { "enum": ["ssd", "hdd", "unknown"] }
+      },
+      "required": [
+        "osName",
+        "osVersion",
+        "osBuild",
+        "architecture",
+        "cpuModel",
+        "logicalCpuCount",
+        "memoryBytes",
+        "storageClass",
+        "filesystem",
+        "powerState",
+        "pythonVersion"
+      ],
+      "type": "object"
+    },
+    "scenarios": {
+      "additionalProperties": false,
+      "properties": {
+        "responsesExactCacheHit": { "$ref": "#/$defs/cacheScenario" },
+        "responsesProxyOverheadPaired": { "$ref": "#/$defs/pairedSummary" },
+        "responsesThroughput": { "$ref": "#/$defs/throughputSummary" },
+        "shouldSendAuthenticatedLoopback": { "$ref": "#/$defs/shouldSendSummary" }
+      },
+      "required": [
+        "shouldSendAuthenticatedLoopback",
+        "responsesProxyOverheadPaired",
+        "responsesExactCacheHit",
+        "responsesThroughput"
+      ],
+      "type": "object"
+    },
+    "shouldSendSummary": {
+      "allOf": [
+        { "$ref": "#/$defs/latencySummary" },
+        {
+          "properties": { "thresholdNs": { "const": 50000000 } },
+          "required": ["thresholdNs"]
+        }
+      ]
+    },
+    "status": { "enum": ["pass", "fail", "invalid"] },
+    "throughputRound": {
+      "additionalProperties": false,
+      "properties": {
+        "bucketDurationSeconds": { "const": 1 },
+        "clockRegressionCount": { "minimum": 0, "type": "integer" },
+        "completeBucketCount": { "minimum": 1, "type": "integer" },
+        "completeBucketSuccesses": {
+          "items": { "minimum": 0, "type": "integer" },
+          "type": "array"
+        },
+        "errorCount": { "minimum": 0, "type": "integer" },
+        "lateCompletionCount": { "minimum": 0, "type": "integer" },
+        "minCompleteBucketSuccesses": { "minimum": 0, "type": "integer" },
+        "rateLimitCount": { "minimum": 0, "type": "integer" },
+        "round": { "maximum": 3, "minimum": 1, "type": "integer" },
+        "status": { "$ref": "#/$defs/status" },
+        "timeoutCount": { "minimum": 0, "type": "integer" },
+        "totalCompleted": { "minimum": 0, "type": "integer" },
+        "totalSuccessfulInWindow": { "minimum": 0, "type": "integer" },
+        "warmupCount": { "minimum": 0, "type": "integer" },
+        "warmupErrorCount": { "minimum": 0, "type": "integer" }
+      },
+      "required": [
+        "round",
+        "status",
+        "warmupCount",
+        "warmupErrorCount",
+        "bucketDurationSeconds",
+        "completeBucketCount",
+        "completeBucketSuccesses",
+        "minCompleteBucketSuccesses",
+        "totalSuccessfulInWindow",
+        "totalCompleted",
+        "errorCount",
+        "timeoutCount",
+        "rateLimitCount",
+        "lateCompletionCount",
+        "clockRegressionCount"
+      ],
+      "type": "object"
+    },
+    "throughputSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "minimumCompleteBucketSuccesses": { "type": ["integer", "null"] },
+        "minimumSuccessesPerSecond": { "const": 100 },
+        "rounds": {
+          "items": { "$ref": "#/$defs/throughputRound" },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "selectedRound": { "type": ["integer", "null"] },
+        "status": { "$ref": "#/$defs/status" }
+      },
+      "required": [
+        "status",
+        "selectedRound",
+        "minimumCompleteBucketSuccesses",
+        "minimumSuccessesPerSecond",
+        "rounds"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "capturedAt": { "format": "date-time", "type": "string" },
+    "evidenceClass": { "const": "diagnostic", "type": "string" },
+    "measurementVersion": { "const": "gateway-performance-v1" },
+    "overallStatus": { "$ref": "#/$defs/status" },
+    "plan": { "$ref": "#/$defs/plan" },
+    "privacy": { "$ref": "#/$defs/privacy" },
+    "referenceMachine": { "$ref": "#/$defs/referenceMachine" },
+    "reportKind": { "const": "openusage.gatewayPerformance" },
+    "scenarios": { "$ref": "#/$defs/scenarios" },
+    "schemaVersion": { "const": 1, "type": "integer" },
+    "sourceCommit": { "pattern": "^[0-9a-f]{40}$", "type": "string" },
+    "sourceTreeState": { "enum": ["clean", "dirty", "unknown"] }
+  },
+  "required": [
+    "schemaVersion",
+    "reportKind",
+    "measurementVersion",
+    "evidenceClass",
+    "capturedAt",
+    "sourceCommit",
+    "sourceTreeState",
+    "referenceMachine",
+    "plan",
+    "scenarios",
+    "privacy",
+    "overallStatus"
+  ],
+  "type": "object"
+}

@@ -207,7 +207,7 @@ struct UsageDetailsTests {
         var visibility = ModelSeriesVisibility()
 
         #expect(model.modelSeriesIDs.contains("unattributed:codex"))
-        #expect(DisplayText.model("unattributed:codex") == "Codex · Unattributed")
+        #expect(DisplayText.model("unattributed:codex") == "ChatGPT · Unattributed")
         #expect(!model.modelSeriesIDs.contains("unknown"))
         let hidOverflow = visibility.toggle(
             "additional-models", availableSeriesIDs: model.modelSeriesIDs

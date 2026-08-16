@@ -7,10 +7,11 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, TextIO
 
 from .activity_store import ActivityStore, SCHEMA_VERSION as LEDGER_SCHEMA_VERSION
@@ -23,7 +24,17 @@ from .query import QueryService, SCHEMA_VERSION, to_wire
 
 DEFAULT_LEDGER_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "activity.sqlite3"
 DEFAULT_API_SOCKET_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "openusage.sock"
-DEFAULT_API_TOKEN_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "openusage.token"
+DEFAULT_API_TOKEN_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "api.token"
+DEFAULT_GATEWAY_CONFIG_PATH = Path.home() / ".config" / "openusage-bar" / "gateway.json"
+DEFAULT_GATEWAY_TOKEN_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "gateway.token"
+DEFAULT_GATEWAY_CACHE_PATH = Path.home() / ".local" / "state" / "openusage-bar" / "gateway-cache.sqlite3"
+DEFAULT_GATEWAY_TELEMETRY_PATH = (
+    Path.home()
+    / ".local"
+    / "state"
+    / "openusage-bar"
+    / "gateway-telemetry.sqlite3"
+)
 DEFAULT_API_TCP_PORT = 17821
 # An interactive attempt may legitimately use OpenUsage's bounded auto -> direct
 # fallback (12s + 75s) followed by a bounded daily-history import (60s). One
@@ -32,6 +43,8 @@ DEFAULT_API_TCP_PORT = 17821
 DEFAULT_FRESH_TIMEOUT_SECONDS = 160
 MIN_DAEMON_INTERVAL_SECONDS = 60
 INTERNAL_REFRESH_COMMAND = "__refresh-once"
+INTERNAL_GATEWAY_SELF_TEST_COMMAND = "__gateway-self-test"
+INTERNAL_PLUGIN_SELF_TEST_COMMAND = "__plugin-self-test"
 
 
 class CLIError(ValueError):
@@ -46,6 +59,11 @@ class SafeArgumentParser(argparse.ArgumentParser):
 class UnavailableRefresher:
     def refresh(self) -> None:
         raise RuntimeError("refresh unavailable")
+
+
+class OfflineRefresher:
+    def refresh(self) -> None:
+        return None
 
 
 def build_default_refresher(
@@ -119,6 +137,151 @@ def _internal_refresh_once(
             store.close()
 
 
+def _gateway_self_test_unavailable_report() -> dict[str, object]:
+    return {
+        "schemaVersion": "gateway-self-test/v1",
+        "object": "gateway.self_test",
+        "ok": False,
+        "checks": {
+            "observe": {
+                "ok": False,
+                "observer": "unavailable",
+                "gateway": "disabled",
+                "credentialReads": 0,
+                "providerCalls": 0,
+            },
+            "advise": {
+                "ok": False,
+                "decision": "defer",
+                "reason": "self_test_failed",
+                "credentialReads": 0,
+                "providerCalls": 0,
+            },
+            "gateway": {
+                "ok": False,
+                "status": "failed",
+                "credentialReads": 0,
+                "providerCalls": 0,
+            },
+            "credentialFailure": {
+                "ok": False,
+                "errorCode": "self_test_failed",
+                "retryable": False,
+                "providerCalls": 0,
+                "observer": "unavailable",
+            },
+        },
+    }
+
+
+def _internal_gateway_self_test(
+    argv: list[str],
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    if argv != [INTERNAL_GATEWAY_SELF_TEST_COMMAND, "--format", "json"]:
+        stderr.write("invalid command input\n")
+        return 2
+    try:
+        from .gateway import self_test as gateway_self_test
+
+        report = gateway_self_test.run_gateway_self_test()
+        if not gateway_self_test.is_gateway_self_test_report(report):
+            report = _gateway_self_test_unavailable_report()
+    except Exception:
+        report = _gateway_self_test_unavailable_report()
+    _write_json(stdout, report)
+    return 0 if report.get("ok") is True else 1
+
+
+def _internal_plugin_self_test(
+    argv: list[str], *, stdout: TextIO, stderr: TextIO,
+) -> int:
+    if argv != [INTERNAL_PLUGIN_SELF_TEST_COMMAND, "--format", "json"]:
+        stderr.write("invalid command input\n")
+        return 2
+    checks = {
+        "principalIsolation": False,
+        "samePayloadReplay": False,
+        "differentPayloadConflict": False,
+        "restartReplay": False,
+    }
+    try:
+        from .plugin.config import PluginPrincipalRegistry
+        from .plugin.store import IdempotencyConflict, PluginStore
+
+        with tempfile.TemporaryDirectory(prefix="openusage-plugin-self-test-") as temporary:
+            registry = PluginPrincipalRegistry.load_or_create(
+                Path(temporary) / "tokens"
+            )
+            token_values = {
+                principal: registry.token_path(principal)
+                .read_text(encoding="ascii")
+                .strip()
+                for principal in ("loom", "codex", "claude_code", "desktop")
+            }
+            tokens_isolated = (
+                len(set(token_values.values())) == 4
+                and all(
+                    registry.authenticate(token) == principal
+                    for principal, token in token_values.items()
+                )
+            )
+            path = Path(temporary) / "plugin.sqlite3"
+            key = "idem_0123456789abcdef0123456789abcdef"
+            projection = {"synthetic": True}
+            calls = 0
+
+            def operation() -> tuple[int, dict[str, object]]:
+                nonlocal calls
+                calls += 1
+                return 200, {"syntheticReceipt": "loom"}
+
+            first_store = PluginStore(path)
+            first = first_store.execute_idempotent(
+                principal="loom", route="/plugin/v1/route-advice", key=key,
+                projection=projection, operation=operation,
+            )
+            second = first_store.execute_idempotent(
+                principal="loom", route="/plugin/v1/route-advice", key=key,
+                projection=projection, operation=operation,
+            )
+            checks["samePayloadReplay"] = first == second and calls == 1
+            try:
+                first_store.execute_idempotent(
+                    principal="loom", route="/plugin/v1/route-advice", key=key,
+                    projection={"synthetic": False}, operation=operation,
+                )
+            except IdempotencyConflict:
+                checks["differentPayloadConflict"] = True
+            codex = first_store.execute_idempotent(
+                principal="codex", route="/plugin/v1/route-advice", key=key,
+                projection=projection,
+                operation=lambda: (200, {"syntheticReceipt": "codex"}),
+            )
+            checks["principalIsolation"] = tokens_isolated and codex != first
+            first_store.close()
+            reopened = PluginStore(path)
+            replay = reopened.execute_idempotent(
+                principal="loom", route="/plugin/v1/route-advice", key=key,
+                projection=projection, operation=operation,
+            )
+            reopened.close()
+            checks["restartReplay"] = replay == first and calls == 1
+    except Exception:
+        pass
+    ok = all(checks.values())
+    _write_json(stdout, {
+        "apiVersion": "plugin-self-test/v1",
+        "object": "plugin.server_self_test",
+        "ok": ok,
+        "synthetic": True,
+        "checks": checks,
+    })
+    return 0 if ok else 1
+
+
 def _parser() -> SafeArgumentParser:
     parser = SafeArgumentParser(prog="openusage-bar")
     parser.add_argument("--offline", action="store_true")
@@ -160,13 +323,26 @@ def _parser() -> SafeArgumentParser:
         default="auto",
     )
     daemon.add_argument("--api-port", type=int, default=0)
-    daemon.add_argument("--api-token-path", default=str(DEFAULT_API_TOKEN_PATH))
+    daemon.add_argument("--api-token-path")
     service = commands.add_parser("service")
     service.add_argument(
         "action",
         choices=("install", "uninstall", "print"),
     )
     service.add_argument("--interval", default="300")
+    service.add_argument("--command", dest="service_command")
+    desktop_service = commands.add_parser("desktop-service")
+    desktop_actions = desktop_service.add_subparsers(
+        dest="desktop_service_action",
+        required=True,
+    )
+    desktop_install = desktop_actions.add_parser("install")
+    desktop_install.add_argument("--interval", choices=("300",), required=True)
+    desktop_actions.add_parser("uninstall")
+    state = commands.add_parser("state")
+    state.add_argument("state_action", choices=("delete",))
+    state.add_argument("--confirm", dest="state_confirmation", required=True)
+    state.add_argument("--format", choices=("json",), required=True)
     reconcile = commands.add_parser("reconcile")
     reconcile.add_argument("--format", choices=("json",), required=True)
     reconcile.add_argument("--from", dest="from_day", required=True)
@@ -185,6 +361,44 @@ def _parser() -> SafeArgumentParser:
     connect = commands.add_parser("connect")
     connect.add_argument("--family", required=True)
     connect.add_argument("--format", choices=("json",), required=True)
+    provider_config = commands.add_parser("provider-config")
+    provider_config_commands = provider_config.add_subparsers(
+        dest="provider_config_command", required=True
+    )
+    provider_config_commands.add_parser("list")
+    provider_config_apply = provider_config_commands.add_parser("apply")
+    provider_config_apply.add_argument("--preset", required=True)
+    provider_config_apply.add_argument("--api-key", required=True)
+    provider_config_apply.add_argument("--base-url")
+    provider_config_apply.add_argument("--model")
+    gateway = commands.add_parser("gateway")
+    gateway_commands = gateway.add_subparsers(
+        dest="gateway_action",
+        required=True,
+    )
+    gateway_commands.add_parser("print-config")
+    gateway_status = gateway_commands.add_parser("status")
+    gateway_status.add_argument(
+        "--config",
+        default=str(DEFAULT_GATEWAY_CONFIG_PATH),
+    )
+    gateway_start = gateway_commands.add_parser("start")
+    gateway_start.add_argument(
+        "--config",
+        default=str(DEFAULT_GATEWAY_CONFIG_PATH),
+    )
+    gateway_start.add_argument(
+        "--token-path",
+    )
+    plugin = commands.add_parser("plugin")
+    plugin_commands = plugin.add_subparsers(
+        dest="plugin_action", required=True,
+    )
+    plugin_commands.add_parser("status")
+    plugin_start = plugin_commands.add_parser("start")
+    plugin_start.add_argument("--state-dir")
+    for action in ("install-service", "uninstall-service", "print-service"):
+        plugin_commands.add_parser(action)
     return parser
 
 
@@ -227,6 +441,47 @@ def _resolve_api_transport(
     return resolved, port
 
 
+def _default_api_token_path() -> str:
+    """Resolve the manual TCP token path from the live runtime environment."""
+
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            raise CLIError("missing local application data directory")
+        return str(
+            PureWindowsPath(local_app_data) / "openusage-bar" / "api.token"
+        )
+    return str(
+        Path.home() / ".local" / "state" / "openusage-bar" / "api.token"
+    )
+
+
+def _default_gateway_token_path() -> str:
+    """Resolve the Gateway token path from the live runtime environment."""
+
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            raise CLIError("missing local application data directory")
+        return str(
+            PureWindowsPath(local_app_data) / "openusage-bar" / "gateway.token"
+        )
+    return str(DEFAULT_GATEWAY_TOKEN_PATH)
+
+
+def _runtime_descriptor() -> Any:
+    from .runtime_descriptor import RuntimeDescriptor
+
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            raise CLIError("missing local application data directory")
+        state_dir: os.PathLike[str] = PureWindowsPath(local_app_data) / "openusage-bar"
+    else:
+        state_dir = Path.home() / ".local" / "state" / "openusage-bar"
+    return RuntimeDescriptor.for_platform(sys.platform, state_dir=state_dir)
+
+
 def _fresh_timeout(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 300:
         raise CLIError("invalid refresh timeout")
@@ -260,6 +515,44 @@ def _default_refresh_command(
     entrypoint: Path | None,
 ) -> list[str]:
     if entrypoint is None and getattr(sys, "frozen", False):
+        # PyInstaller resource collectors are already the trusted executable
+        # that must service the bounded internal refresh.  Unlike py2app they
+        # do not have an outer EXECUTABLEPATH launcher; `_MEIPASS` is the
+        # documented runtime marker and `sys.executable` is the bootloader
+        # path on macOS, Windows, and Linux.
+        raw_pyinstaller_root = getattr(sys, "_MEIPASS", None)
+        if raw_pyinstaller_root is not None:
+            raw_self = sys.executable
+            if (
+                not isinstance(raw_self, str)
+                or not isinstance(raw_pyinstaller_root, str)
+                or not raw_self
+                or not raw_pyinstaller_root
+                or "\x00" in raw_self
+                or "\x00" in raw_pyinstaller_root
+                or not os.path.isabs(raw_self)
+                or not os.path.isabs(raw_pyinstaller_root)
+            ):
+                raise CLIError("invalid frozen runtime")
+            executable = Path(os.path.realpath(raw_self))
+            runtime_root = Path(os.path.realpath(raw_pyinstaller_root))
+            if (
+                not executable.is_absolute()
+                or not runtime_root.is_absolute()
+                or not executable.name
+            ):
+                raise CLIError("invalid frozen runtime")
+            return [
+                str(executable),
+                INTERNAL_REFRESH_COMMAND,
+                "--ledger",
+                ledger_path,
+            ]
+
+        # The legacy native macOS helper remains a py2app bundle.  It has a
+        # separate launcher and embedded interpreter, so retain its stricter
+        # bundle relationship checks instead of treating every frozen runtime
+        # as a self-executable.
         raw_executable = os.environ.get("EXECUTABLEPATH", "")
         raw_resources = os.environ.get("RESOURCEPATH", "")
         raw_interpreter = sys.executable
@@ -650,6 +943,311 @@ def _run_daemon_with_api(
         server_thread.join(5)
 
 
+def _gateway_config_payload(config: Any) -> dict[str, Any]:
+    return {
+        "cache_enabled": config.cache_enabled,
+        "enabled": config.enabled,
+        "host": config.host,
+        "mode": config.mode.value,
+        "port": config.port,
+        "proxy_enabled": config.proxy_enabled,
+    }
+
+
+def _gateway_can_start(config: Any) -> bool:
+    return config.enabled and config.mode.value in ("advise", "gateway")
+
+
+def _build_default_gateway_server(
+    *,
+    config: Any,
+    token_path: Path,
+    query: QueryService,
+) -> Any:
+    """Build the optional Gateway without importing it for read-only commands."""
+    from .gateway.api import GatewayRouter
+    from .gateway.cache import SQLiteGatewayCache
+    from .gateway.decision_trace import DecisionTraceRecorder
+    from .gateway.policy import SnapshottingShouldSendEvaluator
+    from .gateway.pools import account_pools_public_payload
+    from .gateway.runtime import GatewayRuntime
+    from .gateway.server import create_gateway_server
+    from .gateway.telemetry import GatewayTelemetryStore
+
+    telemetry = None
+    if _gateway_can_start(config):
+        try:
+            telemetry = GatewayTelemetryStore(DEFAULT_GATEWAY_TELEMETRY_PATH)
+        except Exception:
+            telemetry = None
+
+    burn_rate = None
+    if telemetry is not None:
+        def burn_rate(provider_id: str, model_id: str) -> float | None:
+            return telemetry.recent_burn_rate(
+                provider_id,
+                model_id,
+                window_minutes=5,
+                max_rows=1_000,
+            )
+
+    should_send = SnapshottingShouldSendEvaluator(
+        capacity=query.capacity,
+        burn_rate=burn_rate,
+        ttl_seconds=10.0,
+    )
+    decision_traces = DecisionTraceRecorder()
+
+    proxy = None
+    if config.mode.value == "gateway" and config.proxy_enabled:
+        cache = None
+        if config.cache_enabled:
+            try:
+                cache = SQLiteGatewayCache(DEFAULT_GATEWAY_CACHE_PATH)
+            except Exception:
+                cache = None
+        proxy = GatewayRuntime(
+            cache=cache,
+            telemetry=telemetry,
+        )
+
+    router = GatewayRouter(
+        mode=config.mode,
+        policy=should_send,
+        proxy=proxy,
+        account_pools=lambda: account_pools_public_payload(
+            accounts=config.accounts,
+            pools=config.account_pools,
+        ),
+        decision_traces=decision_traces,
+    )
+    return create_gateway_server(
+        router,
+        host=config.host,
+        port=config.port,
+        token_path=token_path,
+    )
+
+
+def _run_gateway_server(
+    config: Any,
+    token_path: Path,
+    query: QueryService,
+    *,
+    stop_event: threading.Event | None,
+    server_factory: Callable[..., Any] | None,
+    stderr: TextIO,
+) -> int:
+    active_stop = stop_event or threading.Event()
+    if stop_event is None and threading.current_thread() is threading.main_thread():
+        def stop(*_: object) -> None:
+            active_stop.set()
+
+        signal.signal(signal.SIGTERM, stop)
+        signal.signal(signal.SIGINT, stop)
+
+    factory = server_factory or _build_default_gateway_server
+    try:
+        server = factory(
+            config=config,
+            token_path=token_path,
+            query=query,
+        )
+    except Exception:
+        stderr.write("gateway unavailable\n")
+        return 1
+
+    server_failed = threading.Event()
+
+    def serve() -> None:
+        try:
+            server.serve_forever()
+        except Exception:
+            server_failed.set()
+        finally:
+            if not active_stop.is_set():
+                server_failed.set()
+                active_stop.set()
+
+    server_thread = threading.Thread(
+        target=serve,
+        name="openusage-gateway",
+        daemon=True,
+    )
+    started = False
+    cleanup_failed = False
+    try:
+        server_thread.start()
+        started = True
+        try:
+            active_stop.wait()
+        except KeyboardInterrupt:
+            active_stop.set()
+    except Exception:
+        server_failed.set()
+    finally:
+        if started:
+            try:
+                server.shutdown()
+            except Exception:
+                cleanup_failed = True
+        try:
+            server.server_close()
+        except Exception:
+            cleanup_failed = True
+        if started:
+            server_thread.join(5)
+            if server_thread.is_alive():
+                cleanup_failed = True
+
+    if server_failed.is_set() or cleanup_failed:
+        stderr.write("gateway unavailable\n")
+        return 1
+    return 0
+
+
+class _UnavailablePluginDependency:
+    def request(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("dependency unavailable")
+
+    def query_usage(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("dependency unavailable")
+
+    def query_quotas(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("dependency unavailable")
+
+    def should_send(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("dependency unavailable")
+
+    def health(self) -> str:
+        raise RuntimeError("dependency unavailable")
+
+
+class _LazyPluginFacts:
+    def __init__(self, descriptor: Any) -> None:
+        self._descriptor = descriptor
+
+    def _client(self) -> Any:
+        from .plugin.clients import BoundedJSONTransport, LocalFactsClient
+        from .plugin.config import read_private_token
+
+        if self._descriptor.local_api_transport == "unix":
+            transport = BoundedJSONTransport(
+                unix_socket_path=Path(str(self._descriptor.local_api_socket_path)),
+            )
+        else:
+            transport = BoundedJSONTransport(
+                host="127.0.0.1", port=self._descriptor.local_api_port,
+                bearer_token=read_private_token(
+                    Path(str(self._descriptor.local_api_token_path))
+                ),
+            )
+        return LocalFactsClient(transport)
+
+    def request(self, route: str, query: dict[str, object]) -> dict[str, object]:
+        return self._client().request(route, query)
+
+    def query_usage(self, request: dict[str, object]) -> dict[str, object]:
+        return self._client().query_usage(request)
+
+    def query_quotas(self, request: dict[str, object]) -> dict[str, object]:
+        return self._client().query_quotas(request)
+
+
+class _LazyPluginAdvice:
+    def __init__(self, descriptor: Any) -> None:
+        self._descriptor = descriptor
+
+    def _client(self) -> Any:
+        from .plugin.clients import BoundedJSONTransport, GatewayAdviceClient
+        from .plugin.config import read_private_token
+
+        transport = BoundedJSONTransport(
+            host=self._descriptor.gateway_host, port=self._descriptor.gateway_port,
+            bearer_token=read_private_token(
+                Path(str(self._descriptor.gateway_token_path))
+            ),
+        )
+        return GatewayAdviceClient(transport)
+
+    def should_send(self, request: dict[str, object]) -> dict[str, object]:
+        return self._client().should_send(request)
+
+    def health(self) -> str:
+        return self._client().health()
+
+
+def _build_default_plugin_server(*, descriptor: Any, state_dir: Path) -> Any:
+    from .plugin.api import PluginRouter
+    from .plugin.config import PluginPrincipalRegistry
+    from .plugin.server import create_plugin_server
+    from .plugin.store import PluginStore
+
+    registry = PluginPrincipalRegistry.load_or_create(state_dir)
+    plugin_store = PluginStore(state_dir / "plugin.sqlite3")
+    facts: object = _LazyPluginFacts(descriptor)
+    advice: object = _LazyPluginAdvice(descriptor)
+    router = PluginRouter(
+        store=plugin_store, facts_client=facts, advice_client=advice,
+        configured_principals=(),
+    )
+    try:
+        return create_plugin_server(
+            router, registry=registry, host="127.0.0.1", port=17824,
+        )
+    except Exception:
+        router.close()
+        raise
+
+
+def _run_plugin_server(
+    *, descriptor: Any, state_dir: Path,
+    stop_event: threading.Event | None,
+    server_factory: Callable[..., Any] | None,
+    stderr: TextIO,
+) -> int:
+    active_stop = stop_event or threading.Event()
+    if stop_event is None and threading.current_thread() is threading.main_thread():
+        def stop(*_: object) -> None:
+            active_stop.set()
+        signal.signal(signal.SIGTERM, stop)
+        signal.signal(signal.SIGINT, stop)
+    try:
+        server = (server_factory or _build_default_plugin_server)(
+            descriptor=descriptor, state_dir=state_dir,
+        )
+    except Exception:
+        stderr.write("plugin API unavailable\n")
+        return 1
+    failed = threading.Event()
+
+    def serve() -> None:
+        try:
+            server.serve_forever()
+        except Exception:
+            failed.set()
+            active_stop.set()
+
+    thread = threading.Thread(target=serve, name="openusage-plugin", daemon=True)
+    cleanup_failed = False
+    thread.start()
+    try:
+        active_stop.wait()
+    except KeyboardInterrupt:
+        active_stop.set()
+    finally:
+        try:
+            server.shutdown()
+            server.server_close()
+        except Exception:
+            cleanup_failed = True
+        thread.join(5)
+    if failed.is_set() or cleanup_failed or thread.is_alive():
+        stderr.write("plugin API unavailable\n")
+        return 1
+    return 0
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -670,10 +1268,23 @@ def main(
     refresh_entrypoint: Path | None = None,
     child_environment: dict[str, str] | None = None,
     catalog_monitor: Any | None = None,
+    gateway_server_factory: Callable[..., Any] | None = None,
+    plugin_server_factory: Callable[..., Any] | None = None,
+    dashboard_server_factory: Callable[..., Any] | None = None,
 ) -> int:
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == INTERNAL_PLUGIN_SELF_TEST_COMMAND:
+        return _internal_plugin_self_test(
+            arguments, stdout=stdout, stderr=stderr,
+        )
+    if arguments and arguments[0] == INTERNAL_GATEWAY_SELF_TEST_COMMAND:
+        return _internal_gateway_self_test(
+            arguments,
+            stdout=stdout,
+            stderr=stderr,
+        )
     if arguments and arguments[0] == INTERNAL_REFRESH_COMMAND:
         return _internal_refresh_once(
             arguments,
@@ -684,7 +1295,10 @@ def main(
     parser = _parser()
     try:
         args = parser.parse_args(arguments)
-        if args.command in ("daemon", "service"):
+        if args.command in ("daemon", "service") or (
+            args.command == "desktop-service"
+            and args.desktop_service_action == "install"
+        ):
             interval = _interval(args.interval)
         else:
             interval = None
@@ -692,6 +1306,146 @@ def main(
     except CLIError:
         stderr.write("invalid command input\n")
         return 2
+
+    if args.command == "plugin":
+        try:
+            descriptor = _runtime_descriptor()
+            state_dir = (
+                Path(args.state_dir)
+                if args.plugin_action == "start" and args.state_dir is not None
+                else Path(str(descriptor.plugin_state_dir))
+            )
+            if args.plugin_action == "status":
+                _write_json(stdout, {
+                    "apiVersion": "plugin-runtime/v1", "object": "plugin.runtime",
+                    "host": descriptor.plugin_host, "port": descriptor.plugin_port,
+                    "configured": state_dir.is_dir(),
+                })
+                return 0
+            if args.plugin_action in {"install-service", "uninstall-service", "print-service"}:
+                from . import platform_services
+                if args.plugin_action == "print-service":
+                    stdout.write(platform_services.render_plugin_current_platform() + "\n")
+                elif args.plugin_action == "install-service":
+                    platform_services.install_plugin_service()
+                else:
+                    platform_services.uninstall_plugin_service()
+                return 0
+            if not state_dir.is_absolute() or ".." in state_dir.parts:
+                raise CLIError("invalid Plugin state directory")
+            return _run_plugin_server(
+                descriptor=descriptor, state_dir=state_dir,
+                stop_event=stop_event, server_factory=plugin_server_factory,
+                stderr=stderr,
+            )
+        except CLIError:
+            stderr.write("invalid command input\n")
+            return 2
+        except Exception:
+            stderr.write("plugin API unavailable\n")
+            return 1
+
+    if args.command == "service":
+        from . import platform_services
+
+        if args.action == "print":
+            stdout.write(
+                platform_services.render_current_platform(
+                    interval=interval,
+                    command=args.service_command,
+                )
+            )
+            stdout.write("\n")
+            return 0
+        try:
+            if args.action == "install":
+                platform_services.install_service(
+                    interval=interval,
+                    command=args.service_command,
+                )
+            else:
+                platform_services.uninstall_service()
+        except Exception:
+            stderr.write("service action failed\n")
+            return 1
+        return 0
+
+    if args.command == "desktop-service":
+        from .managed_collector import (
+            install_managed_collector,
+            uninstall_managed_collector,
+        )
+
+        try:
+            if args.desktop_service_action == "install":
+                install_managed_collector(interval=interval)
+            else:
+                uninstall_managed_collector()
+        except Exception:
+            stderr.write("desktop service action failed\n")
+            return 1
+        return 0
+
+    if args.command == "state":
+        from .lifecycle_state import (
+            LifecycleStatePaths,
+            current_user_runtime_is_active,
+            delete_local_state,
+        )
+
+        try:
+            paths = LifecycleStatePaths.for_current_user()
+            result = delete_local_state(
+                paths,
+                confirmation=args.state_confirmation,
+                runtime_is_active=lambda: current_user_runtime_is_active(paths),
+            )
+        except Exception:
+            stderr.write("local state delete failed\n")
+            return 1
+        _write_json(
+            stdout,
+            {
+                "apiVersion": "local-state-lifecycle/v1",
+                "object": "local.state_delete",
+                "deleted": result.deleted,
+            },
+        )
+        return 0
+
+    gateway_config: Any | None = None
+    gateway_token_path: str | None = None
+    if args.command == "gateway":
+        from .gateway.config import GatewayConfig, load_gateway_config
+
+        if args.gateway_action == "print-config":
+            _write_json(stdout, _gateway_config_payload(GatewayConfig()))
+            return 0
+
+        try:
+            gateway_config = load_gateway_config(Path(args.config))
+        except ValueError:
+            stderr.write("invalid gateway configuration\n")
+            return 2
+        payload = _gateway_config_payload(gateway_config)
+        if args.gateway_action == "status":
+            _write_json(
+                stdout,
+                payload | {"can_start": _gateway_can_start(gateway_config)},
+            )
+            return 0
+        if not _gateway_can_start(gateway_config):
+            stderr.write("gateway_disabled\n")
+            return 1
+        try:
+            gateway_token_path = (
+                args.token_path
+                if args.token_path is not None
+                else _default_gateway_token_path()
+            )
+        except CLIError:
+            stderr.write("invalid command input\n")
+            return 2
 
     active_store: ActivityStore | None = store
     refresh_outcome: RefreshOutcome | None = None
@@ -705,24 +1459,17 @@ def main(
                 active_store = ActivityStore(DEFAULT_LEDGER_PATH)
         active_query = query or QueryService(active_store, clock=clock)
 
-        if args.command == "service":
-            from . import platform_services
-
-            if args.action == "print":
-                stdout.write(
-                    platform_services.render_current_platform(interval=interval)
-                )
-                stdout.write("\n")
-                return 0
-            try:
-                if args.action == "install":
-                    platform_services.install_service(interval=interval)
-                else:
-                    platform_services.uninstall_service()
-            except Exception:
-                stderr.write("service action failed\n")
-                return 1
-            return 0
+        if args.command == "gateway":
+            assert gateway_config is not None
+            assert gateway_token_path is not None
+            return _run_gateway_server(
+                gateway_config,
+                Path(gateway_token_path),
+                active_query,
+                stop_event=stop_event,
+                server_factory=gateway_server_factory,
+                stderr=stderr,
+            )
 
         if args.command == "reconcile":
             from .reconciliation import reconciliation_from_local_sources
@@ -842,6 +1589,53 @@ def main(
             stdout.write("\n")
             return 0
 
+        if args.command == "provider-config":
+            from .provider_config import apply_provider_config, load_presets
+
+            if args.provider_config_command == "list":
+                payload = [
+                    {
+                        "presetId": preset.preset_id,
+                        "name": preset.name,
+                        "category": preset.category,
+                        "agent": preset.agent,
+                        "familyId": preset.family_id,
+                        "consoleUrl": preset.console_url,
+                        "apiKeyUrl": preset.api_key_url,
+                        "baseUrl": preset.template_value("base_url"),
+                        "model": preset.template_value("model"),
+                        "allowCustomEndpoints": preset.allow_custom_endpoints,
+                    }
+                    for preset in load_presets()
+                ]
+                stdout.write(
+                    json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+                )
+                stdout.write("\n")
+                return 0
+            try:
+                result = apply_provider_config(
+                    preset_id=args.preset,
+                    api_key=args.api_key,
+                    base_url=args.base_url,
+                    model=args.model,
+                )
+            except ValueError as error:
+                stderr.write(str(error) + "\n")
+                return 2
+            payload = {
+                "agent": result.agent,
+                "presetId": result.preset_id,
+                "name": result.name,
+                "category": result.category,
+                "status": result.status,
+            }
+            stdout.write(
+                json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+            )
+            stdout.write("\n")
+            return 0
+
         if args.command == "dashboard":
             from .web_dashboard import make_dashboard_server
 
@@ -854,7 +1648,20 @@ def main(
                 stderr.write("invalid dashboard port\n")
                 return 2
             today = (clock or (lambda: datetime.now(timezone.utc)))().astimezone().date()
-            server = make_dashboard_server(active_query, port=port, today=today)
+            dashboard_refresher = None
+            if not (offline or args.offline):
+                if refresher is None:
+                    try:
+                        refresher = build_default_refresher(active_store)
+                    except Exception:
+                        refresher = None
+                dashboard_refresher = refresher
+            server = (dashboard_server_factory or make_dashboard_server)(
+                active_query,
+                port=port,
+                today=today,
+                refresher=dashboard_refresher,
+            )
             stdout.write(
                 f"UsageHub dashboard on http://127.0.0.1:{server.server_address[1]}\n"
             )
@@ -868,16 +1675,20 @@ def main(
             return 0
 
         if args.command == "daemon":
-            if catalog_monitor is None:
-                from .daily_history import OpenUsageCatalogMonitor
+            if offline or args.offline:
+                refresher = OfflineRefresher()
+                catalog_monitor = None
+            else:
+                if catalog_monitor is None:
+                    from .daily_history import OpenUsageCatalogMonitor
 
-                catalog_monitor = OpenUsageCatalogMonitor(active_store, clock=clock)
-            if refresher is None:
-                factory = refresher_factory or build_default_refresher
-                try:
-                    refresher = factory(active_store)
-                except Exception:
-                    refresher = UnavailableRefresher()
+                    catalog_monitor = OpenUsageCatalogMonitor(active_store, clock=clock)
+                if refresher is None:
+                    factory = refresher_factory or build_default_refresher
+                    try:
+                        refresher = factory(active_store)
+                    except Exception:
+                        refresher = UnavailableRefresher()
             active_stop = stop_event or threading.Event()
             if stop_event is None and threading.current_thread() is threading.main_thread():
                 def stop(*_: object) -> None:
@@ -889,6 +1700,9 @@ def main(
                 args.api_transport,
                 api_port,
             )
+            api_token_path = args.api_token_path
+            if resolved_transport == "tcp" and api_token_path is None:
+                api_token_path = _default_api_token_path()
             return _run_daemon_with_api(
                 interval or MIN_DAEMON_INTERVAL_SECONDS,
                 refresher,
@@ -896,7 +1710,7 @@ def main(
                 args.api_socket,
                 transport=resolved_transport,
                 api_port=resolved_port,
-                api_token_path=args.api_token_path,
+                api_token_path=api_token_path,
                 stop_event=active_stop,
                 waiter=active_waiter,
                 stderr=stderr,

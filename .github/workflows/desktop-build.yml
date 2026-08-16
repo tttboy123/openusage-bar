@@ -1,0 +1,1592 @@
+name: desktop-build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".gitattributes"
+      - ".github/action-pins.json"
+      - "web/**"
+      - "web/e2e/**"
+      - "web/playwright.config.ts"
+      - "desktop/**"
+      - "build_support.py"
+      - "openusage_bar/**"
+      - "openusage_collector.py"
+      - "openusage_plugin_bridge.py"
+      - "openusage_settings.py"
+      - "requirements-build.txt"
+      - "requirements-linux.txt"
+      - "setup.py"
+      - "docs/native-ci-evidence.md"
+      - "docs/native-lifecycle-evidence.md"
+      - "docs/observer-native-runner-prerequisites.md"
+      - "docs/observer-source-native-evidence.md"
+      - "docs/distribution-trust-posture.md"
+      - "docs/release-handoff.md"
+      - "docs/product-version-truth.md"
+      - "docs/schemas/artifact-build-identity-v1.schema.json"
+      - "docs/gateway-performance.md"
+      - "docs/schemas/distribution-trust-posture-v1.schema.json"
+      - "docs/schemas/gateway-performance-v1.schema.json"
+      - "docs/schemas/native-ci-evidence-v1.schema.json"
+      - "docs/schemas/native-lifecycle-evidence-v1.schema.json"
+      - "docs/schemas/observer-source-native-evidence-v1.schema.json"
+      - "docs/schemas/release-handoff-v1.schema.json"
+      - "docs/schemas/product-version-truth-v1.schema.json"
+      - "scripts/appimage_payload_offset.py"
+      - "scripts/canary_onefile_local_api.py"
+      - "scripts/canary_gateway_egress_topology.py"
+      - "scripts/extract_nsis_payload.py"
+      - "scripts/distribution_trust_posture.py"
+      - "scripts/native_ci_evidence.py"
+      - "scripts/native_lifecycle_evidence.py"
+      - "scripts/canary_linux_service_absence.py"
+      - "scripts/canary_linux_observer_topology.py"
+      - "scripts/observer_source_native_evidence.py"
+      - "scripts/release_handoff.py"
+      - "scripts/measure_gateway_performance.py"
+      - "scripts/release_artifact_audit.py"
+      - "scripts/smoke_gateway_account_credentials.py"
+      - "scripts/smoke_gateway.py"
+      - "scripts/smoke_plugin_api.py"
+      - "scripts/verify_action_pins.py"
+      - "scripts/verify_product_version_truth.py"
+      - "scripts/verify_artifact_build_identity.py"
+      - "tests/test_bounded_process.py"
+      - "tests/test_bounded_process_windows*.py"
+      - "tests/test_canary_onefile_local_api.py"
+      - "tests/test_canary_gateway_egress_topology.py"
+      - "tests/test_collector_cli.py"
+      - "tests/test_desktop_packaging_contract.py"
+      - "tests/test_distribution_trust_posture.py"
+      - "tests/test_extract_nsis_payload.py"
+      - "tests/test_gateway_account_editor_model.py"
+      - "tests/test_gateway_account_editor_tk.py"
+      - "tests/test_gateway_*.py"
+      - "tests/test_decision_trace_cross_layer_contract.py"
+      - "tests/test_plugin_*.py"
+      - "tests/test_smoke_plugin_api.py"
+      - "tests/test_keychain.py"
+      - "tests/fixtures/gateway/performance-v1.json"
+      - "tests/test_local_api.py"
+      - "tests/test_lifecycle_state.py"
+      - "tests/test_managed_collector.py"
+      - "tests/test_native_ci_evidence.py"
+      - "tests/test_native_lifecycle_evidence.py"
+      - "tests/test_canary_linux_service_absence.py"
+      - "tests/test_canary_linux_observer_topology.py"
+      - "tests/test_native_lifecycle_runner.py"
+      - "tests/test_observer_source_native_evidence.py"
+      - "tests/test_release_handoff.py"
+      - "tests/test_product_version_truth.py"
+      - "tests/test_artifact_build_identity.py"
+      - "tests/test_observer_platform_matrix.py"
+      - "tests/test_appimage_payload_offset.py"
+      - "tests/test_python_distribution.py"
+      - "tests/test_release_artifact_audit*.py"
+      - "tests/test_openusage_settings_entrypoint.py"
+      - "tests/test_smoke_gateway_account_credentials.py"
+      - "tests/test_runtime_capabilities.py"
+      - "tests/test_smoke_gateway.py"
+      - ".github/workflows/desktop-build.yml"
+      - "README.md"
+      - "README.en.md"
+      - "ROADMAP.md"
+  pull_request:
+    paths:
+      - ".gitattributes"
+      - ".github/action-pins.json"
+      - "web/**"
+      - "web/e2e/**"
+      - "web/playwright.config.ts"
+      - "desktop/**"
+      - "build_support.py"
+      - "openusage_bar/**"
+      - "openusage_collector.py"
+      - "openusage_plugin_bridge.py"
+      - "openusage_settings.py"
+      - "requirements-build.txt"
+      - "requirements-linux.txt"
+      - "setup.py"
+      - "docs/native-ci-evidence.md"
+      - "docs/native-lifecycle-evidence.md"
+      - "docs/observer-native-runner-prerequisites.md"
+      - "docs/observer-source-native-evidence.md"
+      - "docs/distribution-trust-posture.md"
+      - "docs/release-handoff.md"
+      - "docs/product-version-truth.md"
+      - "docs/schemas/artifact-build-identity-v1.schema.json"
+      - "docs/gateway-performance.md"
+      - "docs/schemas/distribution-trust-posture-v1.schema.json"
+      - "docs/schemas/gateway-performance-v1.schema.json"
+      - "docs/schemas/native-ci-evidence-v1.schema.json"
+      - "docs/schemas/native-lifecycle-evidence-v1.schema.json"
+      - "docs/schemas/observer-source-native-evidence-v1.schema.json"
+      - "docs/schemas/release-handoff-v1.schema.json"
+      - "docs/schemas/product-version-truth-v1.schema.json"
+      - "scripts/appimage_payload_offset.py"
+      - "scripts/canary_onefile_local_api.py"
+      - "scripts/canary_gateway_egress_topology.py"
+      - "scripts/extract_nsis_payload.py"
+      - "scripts/distribution_trust_posture.py"
+      - "scripts/native_ci_evidence.py"
+      - "scripts/native_lifecycle_evidence.py"
+      - "scripts/canary_linux_service_absence.py"
+      - "scripts/canary_linux_observer_topology.py"
+      - "scripts/observer_source_native_evidence.py"
+      - "scripts/release_handoff.py"
+      - "scripts/measure_gateway_performance.py"
+      - "scripts/release_artifact_audit.py"
+      - "scripts/smoke_gateway_account_credentials.py"
+      - "scripts/smoke_gateway.py"
+      - "scripts/smoke_plugin_api.py"
+      - "scripts/verify_action_pins.py"
+      - "scripts/verify_product_version_truth.py"
+      - "scripts/verify_artifact_build_identity.py"
+      - "tests/test_bounded_process.py"
+      - "tests/test_bounded_process_windows*.py"
+      - "tests/test_canary_onefile_local_api.py"
+      - "tests/test_canary_gateway_egress_topology.py"
+      - "tests/test_collector_cli.py"
+      - "tests/test_desktop_packaging_contract.py"
+      - "tests/test_distribution_trust_posture.py"
+      - "tests/test_extract_nsis_payload.py"
+      - "tests/test_gateway_account_editor_model.py"
+      - "tests/test_gateway_account_editor_tk.py"
+      - "tests/test_gateway_*.py"
+      - "tests/test_decision_trace_cross_layer_contract.py"
+      - "tests/test_plugin_*.py"
+      - "tests/test_smoke_plugin_api.py"
+      - "tests/test_keychain.py"
+      - "tests/fixtures/gateway/performance-v1.json"
+      - "tests/test_local_api.py"
+      - "tests/test_lifecycle_state.py"
+      - "tests/test_managed_collector.py"
+      - "tests/test_native_ci_evidence.py"
+      - "tests/test_native_lifecycle_evidence.py"
+      - "tests/test_canary_linux_service_absence.py"
+      - "tests/test_canary_linux_observer_topology.py"
+      - "tests/test_native_lifecycle_runner.py"
+      - "tests/test_observer_source_native_evidence.py"
+      - "tests/test_release_handoff.py"
+      - "tests/test_product_version_truth.py"
+      - "tests/test_artifact_build_identity.py"
+      - "tests/test_observer_platform_matrix.py"
+      - "tests/test_appimage_payload_offset.py"
+      - "tests/test_python_distribution.py"
+      - "tests/test_release_artifact_audit*.py"
+      - "tests/test_openusage_settings_entrypoint.py"
+      - "tests/test_smoke_gateway_account_credentials.py"
+      - "tests/test_runtime_capabilities.py"
+      - "tests/test_smoke_gateway.py"
+      - ".github/workflows/desktop-build.yml"
+      - "README.md"
+      - "README.en.md"
+      - "ROADMAP.md"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package (${{ matrix.platform }}/${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: mac
+            arch: x64
+            os: macos-15-intel
+            runner_arch: X64
+            args: --mac
+            builder_arch: --x64
+            package_root: dist-desktop/mac/UsageHub.app
+            upload_name: usagehub-mac-x64
+            artifact_arch: x64
+            artifact_ext: dmg
+            collector: openusage-collector
+            bridge: openusage-plugin-bridge
+            settings: openusage-settings
+          - platform: mac
+            arch: arm64
+            os: macos-15
+            runner_arch: ARM64
+            args: --mac
+            builder_arch: --arm64
+            package_root: dist-desktop/mac-arm64/UsageHub.app
+            upload_name: usagehub-mac-arm64
+            artifact_arch: arm64
+            artifact_ext: dmg
+            collector: openusage-collector
+            bridge: openusage-plugin-bridge
+            settings: openusage-settings
+          - platform: win
+            arch: x64
+            os: windows-2025
+            runner_arch: X64
+            args: --win
+            builder_arch: --x64
+            package_root: dist-desktop/win-unpacked
+            upload_name: usagehub-win-x64
+            artifact_arch: x64
+            artifact_ext: exe
+            collector: openusage-collector.exe
+            bridge: openusage-plugin-bridge.exe
+            settings: openusage-settings.exe
+          - platform: win
+            arch: arm64
+            os: windows-11-arm
+            runner_arch: ARM64
+            args: --win
+            builder_arch: --arm64
+            package_root: dist-desktop/win-arm64-unpacked
+            upload_name: usagehub-win-arm64
+            artifact_arch: arm64
+            artifact_ext: exe
+            collector: openusage-collector.exe
+            bridge: openusage-plugin-bridge.exe
+            settings: openusage-settings.exe
+          - platform: linux
+            arch: x64
+            os: ubuntu-24.04
+            runner_arch: X64
+            args: --linux
+            builder_arch: --x64
+            package_root: dist-desktop/linux-unpacked
+            upload_name: usagehub-linux-x64
+            artifact_arch: x86_64
+            artifact_ext: AppImage
+            collector: openusage-collector
+            bridge: openusage-plugin-bridge
+            settings: openusage-settings
+          - platform: linux
+            arch: arm64
+            os: ubuntu-24.04-arm
+            runner_arch: ARM64
+            args: --linux
+            builder_arch: --arm64
+            package_root: dist-desktop/linux-arm64-unpacked
+            upload_name: usagehub-linux-arm64
+            artifact_arch: arm64
+            artifact_ext: AppImage
+            collector: openusage-collector
+            bridge: openusage-plugin-bridge
+            settings: openusage-settings
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out source
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Set up pinned Python
+        id: setup_python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          architecture: ${{ matrix.arch }}
+      - name: Set up pinned Node
+        id: setup_node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.16.0"
+          architecture: ${{ matrix.arch }}
+      - name: Verify action pins
+        id: action_pins
+        shell: bash
+        run: python scripts/verify_action_pins.py
+      - name: Verify product and version truth
+        id: product_version_truth
+        shell: bash
+        run: python scripts/verify_product_version_truth.py
+      - name: Verify artifact build identity
+        id: artifact_build_identity
+        shell: bash
+        run: python scripts/verify_artifact_build_identity.py
+      - name: Verify runner identity
+        id: runner_identity
+        shell: bash
+        env:
+          CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CI_RUNNER_OS: ${{ runner.os }}
+          CI_RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          test "$CI_RUNNER_ENVIRONMENT" = "github-hosted"
+          test "$CI_RUNNER_OS" = "$RUNNER_OS"
+          test "$CI_RUNNER_ARCH" = "${{ matrix.runner_arch }}"
+      - name: Install collector build dependencies
+        id: install_collector
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check \
+            "pyinstaller==6.22.0" \
+            "setuptools==83.0.0"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            python -m pip install --require-hashes -r requirements-linux.txt
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            python -m pip install --require-hashes -r requirements-build.txt
+          fi
+      - name: Run portable Observer and Gateway contracts
+        id: contracts
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          python -m unittest -v \
+            tests.test_bounded_process \
+            tests.test_bounded_process_windows \
+            tests.test_appimage_payload_offset \
+            tests.test_artifact_build_identity \
+            tests.test_canary_onefile_local_api \
+            tests.test_collector_cli \
+            tests.test_desktop_packaging_contract \
+            tests.test_distribution_trust_posture \
+            tests.test_extract_nsis_payload \
+            tests.test_gateway_account_editor_model \
+            tests.test_gateway_account_editor_tk \
+            tests.test_gateway_account_pool \
+            tests.test_gateway_account_mutation_commands \
+            tests.test_gateway_api \
+            tests.test_gateway_api_schema \
+            tests.test_gateway_decision_trace \
+            tests.test_decision_trace_cross_layer_contract \
+            tests.test_gateway_cache \
+            tests.test_gateway_config \
+            tests.test_gateway_event_stream_validation \
+            tests.test_gateway_fallback \
+            tests.test_gateway_pipeline \
+            tests.test_gateway_performance_measurement \
+            tests.test_gateway_performance_evidence_contract \
+            tests.test_gateway_pii \
+            tests.test_gateway_response_contract \
+            tests.test_gateway_runtime \
+            tests.test_gateway_runtime_capability \
+            tests.test_gateway_runtime_telemetry \
+            tests.test_gateway_should_send \
+            tests.test_gateway_stream_transport \
+            tests.test_gateway_streaming \
+            tests.test_gateway_telemetry \
+            tests.test_gateway_telemetry_composition \
+            tests.test_gateway_telemetry_hardening \
+            tests.test_gateway_upstream_streaming \
+            tests.test_plugin_api \
+            tests.test_plugin_store \
+            tests.test_plugin_clients \
+            tests.test_plugin_config \
+            tests.test_plugin_server \
+            tests.test_plugin_bridge \
+            tests.test_plugin_cross_layer_contract \
+            tests.test_keychain \
+            tests.test_lifecycle_state \
+            tests.test_local_api \
+            tests.test_managed_collector \
+            tests.test_native_ci_evidence \
+            tests.test_native_lifecycle_evidence \
+            tests.test_canary_gateway_egress_topology \
+            tests.test_canary_linux_service_absence \
+            tests.test_canary_linux_observer_topology \
+            tests.test_native_lifecycle_runner \
+            tests.test_observer_source_native_evidence \
+            tests.test_openusage_settings_entrypoint \
+            tests.test_product_version_truth \
+            tests.test_release_handoff \
+            tests.test_observer_platform_matrix \
+            tests.test_python_distribution \
+            tests.test_release_artifact_audit \
+            tests.test_release_artifact_audit_hardening \
+            tests.test_release_artifact_audit_url_paths \
+            tests.test_runtime_capabilities \
+            tests.test_smoke_gateway_account_credentials \
+            tests.test_smoke_plugin_api \
+            tests.test_smoke_gateway
+      - name: Run native Windows Job contracts
+        id: windows_native
+        if: matrix.platform == 'win'
+        shell: bash
+        run: python -m unittest tests.test_bounded_process_windows_native
+      - name: Install web dependencies
+        id: web_install
+        working-directory: web
+        run: npm ci
+      - name: Install Gateway Account Playwright browser
+        id: gateway_account_playwright_install
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Run Gateway Account browser E2E
+        id: gateway_account_e2e
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        working-directory: web
+        run: npm run test:e2e:gateway-account
+      - name: Run Decision Trace browser E2E
+        id: decision_trace_e2e
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        working-directory: web
+        run: npm run test:e2e:decision-traces
+      - name: Run Plugin Connections browser E2E
+        id: plugin_connections_e2e
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        working-directory: web
+        run: npm run test:e2e:plugin-health
+      - name: Audit web dependencies
+        id: web_audit
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
+      - name: Run web tests
+        id: web_tests
+        working-directory: web
+        run: npm test
+      - name: Build web frontend
+        id: web_build
+        working-directory: web
+        run: npm run build
+      - name: Install desktop dependencies
+        id: desktop_install
+        working-directory: desktop
+        run: npm ci
+      - name: Audit desktop dependencies
+        id: desktop_audit
+        working-directory: desktop
+        run: npm audit --audit-level=high
+      - name: Verify Windows packaging toolchain
+        id: windows_packaging_toolchain
+        if: matrix.platform == 'win'
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          $builderVersion = (node -p "require('./node_modules/electron-builder/package.json').version").Trim()
+          if ($LASTEXITCODE -ne 0 -or $builderVersion -cne "26.15.3") {
+            throw "Unexpected electron-builder version"
+          }
+          $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+          if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
+            throw "Pinned 7-Zip executable is unavailable"
+          }
+          $sevenZipInfo = (& $sevenZip i | Out-String)
+          if (
+            $LASTEXITCODE -ne 0 -or
+            $sevenZipInfo -notmatch '(?m)^7-Zip(?: \(z\))? 26\.02(?:\s|$)'
+          ) {
+            throw "Unexpected 7-Zip version"
+          }
+      - name: Run desktop tests
+        id: desktop_tests
+        working-directory: desktop
+        run: npm test
+      - name: Build bundled collector
+        id: collector_build
+        shell: bash
+        run: |
+          collector_name="${{ matrix.collector }}"
+          collector_name="${collector_name%.exe}"
+          pyinstaller_args=(
+            --clean
+            --noconfirm
+            --onefile
+            --name "$collector_name"
+            --distpath dist-collector
+            --workpath build-collector/work
+            --specpath build-collector
+            --paths .
+            --collect-submodules openusage_bar
+            --collect-data openusage_bar
+          )
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            pyinstaller_args+=(
+              --collect-submodules secretstorage
+              --collect-submodules jeepney
+            )
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            pyinstaller_args+=(--hidden-import Security)
+          fi
+          python -m PyInstaller "${pyinstaller_args[@]}" openusage_collector.py
+          test -f "./dist-collector/${{ matrix.collector }}"
+      - name: Smoke bundled collector status
+        id: collector_status
+        shell: bash
+        run: ./dist-collector/${{ matrix.collector }} --offline status --format json
+      - name: Run onefile Local API canary
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        shell: bash
+        run: |
+          # Ephemeral topology gate only; no lifecycle or release evidence.
+          collector_path="$(realpath --canonicalize-existing "./dist-collector/${{ matrix.collector }}")"
+          python -m scripts.canary_onefile_local_api --collector "$collector_path"
+      - name: Smoke bundled Gateway modes
+        id: gateway_smoke
+        shell: bash
+        run: python scripts/smoke_gateway.py --all --collector "./dist-collector/${{ matrix.collector }}"
+      - name: Build bundled Plugin bridge
+        id: plugin_bridge_build
+        shell: bash
+        run: |
+          bridge_name="${{ matrix.bridge }}"
+          bridge_name="${bridge_name%.exe}"
+          data_sep=":"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            data_sep=";"
+          fi
+          schema_path="$(python -c 'from pathlib import Path; print(Path("openusage_bar/resources/plugin-api-v1.schema.json").resolve(strict=True))')"
+          pyinstaller_args=(
+            --clean
+            --noconfirm
+            --onefile
+            --name "$bridge_name"
+            --distpath dist-bridge
+            --workpath build-bridge/work
+            --specpath build-bridge
+            --paths .
+            --add-data "${schema_path}${data_sep}openusage_bar/resources"
+          )
+          python -m PyInstaller "${pyinstaller_args[@]}" openusage_plugin_bridge.py
+          test -f "./dist-bridge/${{ matrix.bridge }}"
+      - name: Smoke bundled Plugin API
+        id: plugin_smoke
+        shell: bash
+        run: |
+          collector_path="$(python -c 'from pathlib import Path; print(Path("dist-collector/${{ matrix.collector }}").resolve(strict=True))')"
+          bridge_path="$(python -c 'from pathlib import Path; print(Path("dist-bridge/${{ matrix.bridge }}").resolve(strict=True))')"
+          python scripts/smoke_plugin_api.py \
+            --collector "$collector_path" \
+            --bridge "$bridge_path"
+      - name: Build bundled settings helper
+        id: settings_build
+        shell: bash
+        run: |
+          settings_name="${{ matrix.settings }}"
+          settings_name="${settings_name%.exe}"
+          pyinstaller_args=(
+            --clean
+            --noconfirm
+            --onefile
+            --name "$settings_name"
+            --distpath dist-settings
+            --workpath build-settings/work
+            --specpath build-settings
+            --paths .
+            --collect-submodules openusage_bar
+            --collect-data openusage_bar
+            --hidden-import tkinter
+            --hidden-import tkinter.ttk
+          )
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            pyinstaller_args+=(
+              --collect-submodules secretstorage
+              --collect-submodules jeepney
+            )
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            pyinstaller_args+=(--hidden-import Security)
+          fi
+          python -m PyInstaller "${pyinstaller_args[@]}" openusage_settings.py
+          test -f "./dist-settings/${{ matrix.settings }}"
+      - name: Prepare pinned Linux Observer secret service
+        id: linux_observer_secret_service
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            "dbus-user-session=1.14.10-4ubuntu4.1" \
+            "gnome-keyring=46.1-2build1"
+          dbus_version="$(
+            dpkg-query --show --showformat='${Version}' dbus-user-session
+          )"
+          keyring_version="$(
+            dpkg-query --show --showformat='${Version}' gnome-keyring
+          )"
+          test "$dbus_version" = "1.14.10-4ubuntu4.1"
+          test "$keyring_version" = "46.1-2build1"
+      - name: Smoke bundled settings helper
+        id: settings_smoke
+        shell: bash
+        run: |
+          settings_smoke_home="$RUNNER_TEMP/openusage-settings-smoke"
+          mkdir -p "$settings_smoke_home"
+          export HOME="$settings_smoke_home"
+          export USERPROFILE="$settings_smoke_home"
+          editor_expected=$'{"version":1,"event":"ready"}\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}'
+          if [[ "${{ matrix.platform }}" == "win" ]]; then
+            editor_expected=$'{"version":1,"event":"ready"}\r\n{"version":1,"event":"terminal","state":"succeeded","code":"ok"}'
+          fi
+          set +e
+          settings_output="$(printf '%s' '{"version":1,"action":"remove_pool","pool":{"poolId":"ci-smoke"},"expectedRevision":1}' | "./dist-settings/${{ matrix.settings }}" gateway-account-mutate 2>"$RUNNER_TEMP/openusage-settings-smoke.stderr")"
+          settings_status=$?
+          set -e
+          test "$settings_status" -eq 1
+          test "$settings_output" = '{"version":1,"ok":false,"code":"not_found"}'
+          test ! -s "$RUNNER_TEMP/openusage-settings-smoke.stderr"
+          printf '%s\n' 'gateway_settings_mutation_smoke_ok'
+          set +e
+          editor_output="$("./dist-settings/${{ matrix.settings }}" gateway-account-editor --ui-self-test 2>"$RUNNER_TEMP/openusage-settings-editor-smoke.stderr")"
+          editor_status=$?
+          set -e
+          if [[ "$editor_status" -ne 0 || "$editor_output" != "$editor_expected" || -s "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr" ]]; then
+            printf 'gateway_settings_editor_smoke=%s\n' "$editor_output"
+            printf 'gateway_settings_editor_stderr_bytes=%s\n' "$(wc -c < "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr")"
+            test "$editor_status" -eq 0
+            test "$editor_output" = "$editor_expected"
+            test ! -s "$RUNNER_TEMP/openusage-settings-editor-smoke.stderr"
+          fi
+          printf '%s\n' 'gateway_settings_editor_smoke_ok'
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            test -n "$RUNNER_TEMP"
+            account_keyring_root="$(mktemp -d "$RUNNER_TEMP/openusage-account-keyring.XXXXXX")"
+            cleanup_account_keyring() {
+              case "$account_keyring_root" in
+                "$RUNNER_TEMP"/openusage-account-keyring.*)
+                  if [[ -e "$account_keyring_root" ]]; then
+                    for cleanup_attempt in {1..20}; do
+                      if find "$account_keyring_root" -ignore_readdir_race -depth -delete 2>/dev/null; then
+                        return 0
+                      fi
+                      sleep 0.1
+                    done
+                    printf '%s\n' 'native_keyring_cleanup_failed' >&2
+                    return 1
+                  fi
+                  ;;
+                *) return 1 ;;
+              esac
+            }
+            trap cleanup_account_keyring EXIT
+            mkdir -p \
+              "$account_keyring_root/config" \
+              "$account_keyring_root/data" \
+              "$account_keyring_root/runtime"
+            chmod 0700 \
+              "$account_keyring_root/config" \
+              "$account_keyring_root/data" \
+              "$account_keyring_root/runtime"
+            ACCOUNT_SMOKE_HOME="$settings_smoke_home" \
+            ACCOUNT_KEYRING_ROOT="$account_keyring_root" \
+            ACCOUNT_SETTINGS_HELPER="./dist-settings/${{ matrix.settings }}" \
+            ACCOUNT_SMOKE_STDERR="$RUNNER_TEMP/openusage-account-credential-smoke.stderr" \
+              dbus-run-session -- bash -euo pipefail <<'ACCOUNT_CREDENTIAL_SESSION'
+              export HOME="$ACCOUNT_SMOKE_HOME"
+              export USERPROFILE="$ACCOUNT_SMOKE_HOME"
+              export XDG_CONFIG_HOME="$ACCOUNT_KEYRING_ROOT/config"
+              export XDG_DATA_HOME="$ACCOUNT_KEYRING_ROOT/data"
+              export XDG_RUNTIME_DIR="$ACCOUNT_KEYRING_ROOT/runtime"
+              cleanup_keyring() {
+                gnome-keyring-daemon --shutdown >/dev/null 2>&1 || true
+              }
+              trap cleanup_keyring EXIT
+              if ! printf '\n' | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; then
+                echo "gateway_account_credentials_invalid" >&2
+                exit 1
+              fi
+              set +e
+              account_smoke_output="$(
+                python scripts/smoke_gateway_account_credentials.py \
+                  --settings-helper "$ACCOUNT_SETTINGS_HELPER" \
+                  2>"$ACCOUNT_SMOKE_STDERR"
+              )"
+              account_smoke_status=$?
+              set -e
+              if [[ "$account_smoke_status" -ne 0 || "$account_smoke_output" != '{"version":1,"ok":true,"code":"ok"}' || -s "$ACCOUNT_SMOKE_STDERR" ]]; then
+                printf 'gateway_account_credential_smoke=%s\n' "$account_smoke_output"
+                printf 'gateway_account_credential_stderr_bytes=%s\n' "$(wc -c < "$ACCOUNT_SMOKE_STDERR")"
+                test "$account_smoke_status" -eq 0
+                test "$account_smoke_output" = '{"version":1,"ok":true,"code":"ok"}'
+                test ! -s "$ACCOUNT_SMOKE_STDERR"
+              fi
+          ACCOUNT_CREDENTIAL_SESSION
+            trap - EXIT
+            cleanup_account_keyring
+          elif [[ "${{ matrix.platform }}" == "mac" ]]; then
+            test -n "$RUNNER_TEMP"
+            mkdir -p "$settings_smoke_home/Library/Keychains"
+            chmod 0700 "$settings_smoke_home"
+            chmod 0700 "$settings_smoke_home/Library"
+            chmod 0700 "$settings_smoke_home/Library/Keychains"
+            mac_keychain_path="$settings_smoke_home/Library/Keychains/openusage-ci.keychain-db"
+            test -d "$settings_smoke_home"
+            test ! -L "$settings_smoke_home"
+            test ! -L "$settings_smoke_home/Library"
+            test ! -L "$settings_smoke_home/Library/Keychains"
+            mac_keychain_root_identity="$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home")"
+            mac_keychain_library_identity="$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home/Library")"
+            mac_keychain_directory_identity="$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home/Library/Keychains")"
+            mac_keychain_password="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+            mac_keychain_created=0
+            cleanup_macos_keychain() {
+              prior_status=$?
+              cleanup_status=0
+              if [[ "$mac_keychain_created" == "1" ]]; then
+                if [[ "$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home" 2>/dev/null || true)" != "$mac_keychain_root_identity" ]]; then
+                  cleanup_status=1
+                elif [[ "$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home/Library" 2>/dev/null || true)" != "$mac_keychain_library_identity" ]]; then
+                  cleanup_status=1
+                elif [[ "$(/usr/bin/stat -f '%d:%i:%u:%Lp' "$settings_smoke_home/Library/Keychains" 2>/dev/null || true)" != "$mac_keychain_directory_identity" ]]; then
+                  cleanup_status=1
+                elif [[ ! -f "$mac_keychain_path" || -L "$mac_keychain_path" ]]; then
+                  cleanup_status=1
+                elif [[ "$(/usr/bin/stat -f '%u:%Lp:%l' "$mac_keychain_path" 2>/dev/null || true)" != "$(/usr/bin/id -u):600:1" ]]; then
+                  cleanup_status=1
+                elif ! /usr/bin/security delete-keychain "$mac_keychain_path" >/dev/null 2>&1; then
+                  cleanup_status=1
+                elif [[ -e "$mac_keychain_path" ]]; then
+                  cleanup_status=1
+                fi
+              fi
+              mac_keychain_password=""
+              trap - EXIT
+              if [[ "$cleanup_status" != "0" ]]; then
+                printf '%s\n' 'native_keychain_cleanup_failed' >&2
+              fi
+              if [[ "$prior_status" != "0" || "$cleanup_status" != "0" ]]; then
+                exit 1
+              fi
+            }
+            trap cleanup_macos_keychain EXIT
+            /usr/bin/security create-keychain -p "$mac_keychain_password" "$mac_keychain_path" >/dev/null 2>&1
+            mac_keychain_created=1
+            chmod 0600 "$mac_keychain_path"
+            test -f "$mac_keychain_path"
+            test ! -L "$mac_keychain_path"
+            test "$(/usr/bin/stat -f '%u' "$mac_keychain_path")" = "$(/usr/bin/id -u)"
+            test "$(/usr/bin/stat -f '%Lp' "$mac_keychain_path")" = "600"
+            test "$(/usr/bin/stat -f '%l' "$mac_keychain_path")" = "1"
+            /usr/bin/security unlock-keychain -p "$mac_keychain_password" "$mac_keychain_path" >/dev/null 2>&1
+            /usr/bin/security set-keychain-settings -lut 300 "$mac_keychain_path" >/dev/null 2>&1
+            account_smoke_stderr="$RUNNER_TEMP/openusage-account-credential-smoke.stderr"
+            set +e
+            account_smoke_output="$(
+              python scripts/smoke_gateway_account_credentials.py \
+                --settings-helper "./dist-settings/${{ matrix.settings }}" \
+                --macos-keychain "$mac_keychain_path" \
+                2>"$account_smoke_stderr"
+            )"
+            account_smoke_status=$?
+            set -e
+            if [[ "$account_smoke_status" -ne 0 || "$account_smoke_output" != '{"version":1,"ok":true,"code":"ok"}' || -s "$account_smoke_stderr" ]]; then
+              printf 'gateway_account_credential_smoke=%s\n' "$account_smoke_output"
+              printf 'gateway_account_credential_stderr_bytes=%s\n' "$(wc -c < "$account_smoke_stderr")"
+              test "$account_smoke_status" -eq 0
+              test "$account_smoke_output" = '{"version":1,"ok":true,"code":"ok"}'
+              test ! -s "$account_smoke_stderr"
+            fi
+            trap - EXIT
+            cleanup_macos_keychain
+          else
+            account_smoke_stderr="$RUNNER_TEMP/openusage-account-credential-smoke.stderr"
+            set +e
+            account_smoke_output="$(
+              python scripts/smoke_gateway_account_credentials.py \
+                --settings-helper "./dist-settings/${{ matrix.settings }}" \
+                2>"$account_smoke_stderr"
+            )"
+            account_smoke_status=$?
+            set -e
+            if [[ "$account_smoke_status" -ne 0 || "$account_smoke_output" != '{"version":1,"ok":true,"code":"ok"}' || -s "$account_smoke_stderr" ]]; then
+              printf 'gateway_account_credential_smoke=%s\n' "$account_smoke_output"
+              printf 'gateway_account_credential_stderr_bytes=%s\n' "$(wc -c < "$account_smoke_stderr")"
+              test "$account_smoke_status" -eq 0
+              test "$account_smoke_output" = '{"version":1,"ok":true,"code":"ok"}'
+              test ! -s "$account_smoke_stderr"
+            fi
+          fi
+      - name: Smoke desktop runtime capability
+        id: desktop_runtime_capability_smoke
+        shell: bash
+        env:
+          OPENUSAGE_SMOKE_STAGE_DIAGNOSTIC: "1"
+        run: node desktop/scripts/smoke_runtime_capability.mjs --collector "./dist-collector/${{ matrix.collector }}"
+      - name: Package desktop app
+        id: desktop_package
+        working-directory: desktop
+        run: npx electron-builder ${{ matrix.args }} ${{ matrix.builder_arch }} --publish never
+      - name: Audit packaged collector
+        id: unpacked_audit
+        shell: bash
+        run: |
+          package_root="${{ matrix.package_root }}"
+          test -d "$package_root"
+          python scripts/release_artifact_audit.py \
+            --desktop-package "$package_root" \
+            "${{ matrix.collector }}" \
+            --built-collector "./dist-collector/${{ matrix.collector }}" \
+            --built-settings "./dist-settings/${{ matrix.settings }}" \
+            --built-bridge "./dist-bridge/${{ matrix.bridge }}"
+      - name: Run audited Gateway zero-egress workload canary
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        shell: bash
+        run: |
+          # Ephemeral Gateway/Local API topology workload gate only; no lifecycle or release evidence.
+          set -euo pipefail
+          gateway_root="$(mktemp -d "$RUNNER_TEMP/usagehub-gateway-empty.XXXXXX")"
+          gateway_root_identity="$(/usr/bin/stat --format='%d:%i' "$gateway_root")"
+          gateway_cleanup_authorized=0
+          gateway_collector="$gateway_root/openusage-collector"
+          gateway_stdout="$gateway_root/canary.stdout"
+          gateway_stderr="$gateway_root/canary.stderr"
+          source_digest="$(/usr/bin/sha256sum "./dist-collector/${{ matrix.collector }}" | /usr/bin/awk '{print $1}')"
+          cleanup_gateway() {
+            prior_status=$?
+            cleanup_status=0
+            if [[ "$gateway_cleanup_authorized" != "1" ]]; then
+              printf '%s\n' "gateway_empty_window_cleanup_deferred category=unproven" >&2
+              cleanup_status=1
+            elif ! test "$(/usr/bin/stat --format='%d:%i' "$gateway_root")" = "$gateway_root_identity"; then
+              printf '%s\n' "gateway_empty_window_cleanup_failed category=root-identity" >&2
+              cleanup_status=1
+            elif ! /bin/rm -rf --one-file-system "$gateway_root"; then
+              printf '%s\n' "gateway_empty_window_cleanup_failed category=root-remove" >&2
+              cleanup_status=1
+            fi
+            trap - EXIT
+            if [[ "$prior_status" != "0" || "$cleanup_status" != "0" ]]; then
+              exit 1
+            fi
+          }
+          trap cleanup_gateway EXIT
+          /bin/cp "./dist-collector/${{ matrix.collector }}" "$gateway_collector"
+          /usr/bin/cmp -s "./dist-collector/${{ matrix.collector }}" "$gateway_collector"
+          /bin/chmod 0700 "$gateway_collector"
+          /bin/mkdir --mode=0700 "$gateway_root/home" "$gateway_root/data" "$gateway_root/tmp"
+          printf '%s' '{"enabled":true,"mode":"advise"}' > "$gateway_root/gateway.json"
+          python -c 'import secrets, sys; sys.stdout.write(secrets.token_urlsafe(48))' \
+            > "$gateway_root/gateway.token"
+          /bin/chmod 0600 "$gateway_root/gateway.json" "$gateway_root/gateway.token"
+          copied_digest="$(/usr/bin/sha256sum "$gateway_collector" | /usr/bin/awk '{print $1}')"
+          test "$copied_digest" = "$source_digest"
+          set +e
+          python -m scripts.canary_gateway_egress_topology \
+            --collector "$gateway_collector" \
+            --port 17823 \
+            > "$gateway_stdout" \
+            2> "$gateway_stderr"
+          gateway_status=$?
+          set -e
+          test ! -s "$gateway_stdout"
+          test ! -s "$gateway_stderr"
+          if [[ "$gateway_status" != "0" ]]; then
+            case "$gateway_status" in
+              11) gateway_category="launch" ;;
+              12) gateway_category="token" ;;
+              13) gateway_category="readiness" ;;
+              14) gateway_category="counter-window" ;;
+              15) gateway_category="stop" ;;
+              16) gateway_category="cleanup" ;;
+              17) gateway_category="onefile-local-api" ;;
+              *) gateway_category="runtime" ;;
+            esac
+            printf '%s\n' "gateway_empty_window_failed category=$gateway_category" >&2
+            exit 1
+          fi
+          test "$(/usr/bin/sha256sum "./dist-collector/${{ matrix.collector }}" | /usr/bin/awk '{print $1}')" = "$source_digest"
+          test "$(/usr/bin/sha256sum "$gateway_collector" | /usr/bin/awk '{print $1}')" = "$copied_digest"
+          gateway_cleanup_authorized=1
+      - name: Resolve final artifact
+        id: artifact
+        shell: bash
+        run: |
+          version="$(node -p "require('./desktop/package.json').version")"
+          artifact_path="dist-desktop/UsageHub-${version}-${{ matrix.platform }}-${{ matrix.artifact_arch }}.${{ matrix.artifact_ext }}"
+          test -f "$artifact_path"
+          printf 'path=%s\n' "$artifact_path" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+      - name: Audit final macOS DMG
+        id: final_mac
+        if: matrix.platform == 'mac'
+        shell: bash
+        env:
+          FINAL_ARTIFACT: ${{ steps.artifact.outputs.path }}
+          TRUST_REPORT: dist-evidence/usagehub-distribution-trust-${{ matrix.platform }}-${{ matrix.arch }}.json
+        run: |
+          set -euo pipefail
+          artifact="$FINAL_ARTIFACT"
+          snapshot_root="$(mktemp -d "$RUNNER_TEMP/usagehub-dmg-snapshot.XXXXXX")"
+          snapshot="$snapshot_root/${artifact##*/}"
+          mount_root="$(mktemp -d "$RUNNER_TEMP/usagehub-dmg.XXXXXX")"
+          attached=0
+          keep_snapshot=0
+          cleanup() {
+            if [[ "$attached" == "1" ]]; then
+              hdiutil detach "$mount_root" >/dev/null
+            fi
+            rmdir "$mount_root"
+            if [[ "$keep_snapshot" == "0" ]]; then
+              /bin/rm -f "$snapshot"
+              rmdir "$snapshot_root"
+            fi
+          }
+          trap cleanup EXIT
+          /bin/cp "$artifact" "$snapshot"
+          /bin/chmod 0400 "$snapshot"
+          /usr/bin/cmp -s "$artifact" "$snapshot"
+          snapshot_digest="$(/usr/bin/shasum -a 256 "$snapshot" | /usr/bin/awk '{print $1}')"
+          test -n "$snapshot_digest"
+          hdiutil verify "$snapshot"
+          hdiutil attach -readonly -nobrowse -noautoopen -owners off -mountpoint "$mount_root" "$snapshot"
+          attached=1
+          package_root="$mount_root/UsageHub.app"
+          test -d "$package_root"
+          mkdir -p dist-evidence
+          python scripts/release_artifact_audit.py \
+            --desktop-package "$package_root" \
+            "${{ matrix.collector }}" \
+            --built-collector "./dist-collector/${{ matrix.collector }}" \
+            --built-settings "./dist-settings/${{ matrix.settings }}" \
+            --built-bridge "./dist-bridge/${{ matrix.bridge }}" \
+            --require-final-native-metadata
+          python scripts/smoke_gateway.py --all \
+            --collector "$package_root/Contents/Resources/collector/${{ matrix.collector }}"
+          python scripts/distribution_trust_posture.py inspect \
+            --platform mac \
+            --package-root "$package_root" \
+            --artifact "$snapshot" \
+            --output "$TRUST_REPORT"
+          final_snapshot_digest="$(/usr/bin/shasum -a 256 "$snapshot" | /usr/bin/awk '{print $1}')"
+          test "$final_snapshot_digest" = "$snapshot_digest"
+          hdiutil detach "$mount_root"
+          attached=0
+          rmdir "$mount_root"
+          keep_snapshot=1
+          printf 'path=%s\n' "$snapshot" >> "$GITHUB_OUTPUT"
+          trap - EXIT
+      - name: Install pinned Linux final-package audit toolchain
+        id: linux_final_toolchain
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            "squashfs-tools=1:4.6.1-1build1"
+          installed_version="$(dpkg-query --show --showformat='${Version}' squashfs-tools)"
+          test "$installed_version" = "1:4.6.1-1build1"
+      - name: Audit final Windows NSIS payload
+        id: final_win
+        if: matrix.platform == 'win'
+        shell: pwsh
+        env:
+          FINAL_ARTIFACT: ${{ steps.artifact.outputs.path }}
+          OPENUSAGE_TRUST_STAGE_DIAGNOSTIC: "1"
+          TRUST_REPORT: dist-evidence/usagehub-distribution-trust-${{ matrix.platform }}-${{ matrix.arch }}.json
+        run: |
+          $snapshotRoot = Join-Path $env:RUNNER_TEMP ("usagehub-nsis-snapshot-" + [guid]::NewGuid().ToString("N"))
+          New-Item -ItemType Directory -Path $snapshotRoot | Out-Null
+          $snapshot = Join-Path $snapshotRoot ([System.IO.Path]::GetFileName($env:FINAL_ARTIFACT))
+          Copy-Item -LiteralPath $env:FINAL_ARTIFACT -Destination $snapshot
+          [System.IO.File]::SetAttributes($snapshot, [System.IO.FileAttributes]::ReadOnly)
+          $originalHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $env:FINAL_ARTIFACT).Hash
+          $snapshotHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $snapshot).Hash
+          if ($originalHash -cne $snapshotHash) {
+            throw "Final Windows snapshot mismatch"
+          }
+          $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+          $appRoot = Join-Path $env:RUNNER_TEMP ("usagehub-nsis-" + [guid]::NewGuid().ToString("N"))
+          python scripts/extract_nsis_payload.py `
+            --seven-zip "$sevenZip" `
+            --installer "$snapshot" `
+            --arch "${{ matrix.arch }}" `
+            --output "$appRoot" `
+            --expected-seven-zip-version "26.02"
+          if ($LASTEXITCODE -ne 0) {
+            throw "NSIS payload extraction audit failed"
+          }
+          python scripts/release_artifact_audit.py `
+            --desktop-package "$appRoot" `
+            "${{ matrix.collector }}" `
+            --built-collector "./dist-collector/${{ matrix.collector }}" `
+            --built-settings "./dist-settings/${{ matrix.settings }}" `
+            --built-bridge "./dist-bridge/${{ matrix.bridge }}" `
+            --require-final-native-metadata
+          if ($LASTEXITCODE -ne 0) {
+            throw "Final Windows app audit failed"
+          }
+          New-Item -ItemType Directory -Force -Path "dist-evidence" | Out-Null
+          python scripts/distribution_trust_posture.py inspect `
+            --platform win `
+            --package-root "$appRoot" `
+            --artifact "$snapshot" `
+            --output "$env:TRUST_REPORT"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Distribution trust posture inspection failed"
+          }
+          $finalSnapshotHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $snapshot).Hash
+          if ($finalSnapshotHash -cne $snapshotHash) {
+            throw "Final Windows snapshot changed during audit"
+          }
+          "path=$snapshot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Audit final Linux AppImage payload
+        id: final_linux
+        if: matrix.platform == 'linux'
+        shell: bash
+        env:
+          FINAL_ARTIFACT: ${{ steps.artifact.outputs.path }}
+          TRUST_REPORT: dist-evidence/usagehub-distribution-trust-${{ matrix.platform }}-${{ matrix.arch }}.json
+        run: |
+          set -euo pipefail
+          snapshot_root="$(mktemp -d "$RUNNER_TEMP/usagehub-appimage-snapshot.XXXXXX")"
+          snapshot="$snapshot_root/${FINAL_ARTIFACT##*/}"
+          keep_snapshot=0
+          cleanup() {
+            if [[ "$keep_snapshot" == "0" ]]; then
+              /bin/rm -f "$snapshot"
+              rmdir "$snapshot_root"
+            fi
+          }
+          trap cleanup EXIT
+          /bin/cp "$FINAL_ARTIFACT" "$snapshot"
+          /bin/chmod 0400 "$snapshot"
+          /usr/bin/cmp -s "$FINAL_ARTIFACT" "$snapshot"
+          snapshot_digest="$(/usr/bin/sha256sum "$snapshot" | /usr/bin/awk '{print $1}')"
+          test -n "$snapshot_digest"
+          appRoot="$RUNNER_TEMP/usagehub-appimage-${{ matrix.arch }}"
+          test ! -e "$appRoot"
+          payload_offset="$(
+            python scripts/appimage_payload_offset.py \
+              --appimage "$snapshot" \
+              --architecture "${{ matrix.arch }}"
+          )"
+          unsquashfs -no-progress -offset "$payload_offset" \
+            -dest "$appRoot" "$snapshot"
+          test -d "$appRoot"
+          python scripts/release_artifact_audit.py \
+            --desktop-package "$appRoot" \
+            "${{ matrix.collector }}" \
+            --built-collector "./dist-collector/${{ matrix.collector }}" \
+            --built-settings "./dist-settings/${{ matrix.settings }}" \
+            --built-bridge "./dist-bridge/${{ matrix.bridge }}" \
+            --require-final-native-metadata
+          mkdir -p dist-evidence
+          python scripts/distribution_trust_posture.py inspect \
+            --platform linux \
+            --package-root "$appRoot" \
+            --artifact "$snapshot" \
+            --output "$TRUST_REPORT"
+          final_snapshot_digest="$(/usr/bin/sha256sum "$snapshot" | /usr/bin/awk '{print $1}')"
+          test "$final_snapshot_digest" = "$snapshot_digest"
+          keep_snapshot=1
+          printf 'path=%s\n' "$snapshot" >> "$GITHUB_OUTPUT"
+          trap - EXIT
+      - name: Select audited final artifact
+        id: audited_artifact
+        shell: bash
+        env:
+          MAC_SNAPSHOT: ${{ steps.final_mac.outputs.path }}
+          WINDOWS_SNAPSHOT: ${{ steps.final_win.outputs.path }}
+          LINUX_SNAPSHOT: ${{ steps.final_linux.outputs.path }}
+          TARGET_PLATFORM: ${{ matrix.platform }}
+        run: |
+          case "$TARGET_PLATFORM" in
+            mac) final_artifact="$MAC_SNAPSHOT" ;;
+            win) final_artifact="$WINDOWS_SNAPSHOT" ;;
+            linux) final_artifact="$LINUX_SNAPSHOT" ;;
+            *) exit 1 ;;
+          esac
+          test -f "$final_artifact"
+          printf 'path=%s\n' "$final_artifact" >> "$GITHUB_OUTPUT"
+      - name: Verify packaged build identity binding
+        id: packaged_build_identity
+        shell: bash
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          MAC_AUDIT: ${{ steps.final_mac.outcome }}
+          WINDOWS_AUDIT: ${{ steps.final_win.outcome }}
+          LINUX_AUDIT: ${{ steps.final_linux.outcome }}
+        run: |
+          python scripts/verify_artifact_build_identity.py
+          case "$TARGET_PLATFORM" in
+            mac) audit_outcome="$MAC_AUDIT" ;;
+            win) audit_outcome="$WINDOWS_AUDIT" ;;
+            linux) audit_outcome="$LINUX_AUDIT" ;;
+            *) exit 1 ;;
+          esac
+          test "$audit_outcome" = "success"
+      - name: Run audited AppImage preserve uninstall
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        shell: bash
+        env:
+          FINAL_ARTIFACT: ${{ steps.audited_artifact.outputs.path }}
+        run: |
+          # Ephemeral portability gate only; no lifecycle or release evidence.
+          set -euo pipefail
+          preserve_user="usagehub-preserve"
+          if id "$preserve_user" >/dev/null 2>&1; then
+            exit 1
+          fi
+          preserve_root="$(mktemp -d "/tmp/usagehub-preserve-uninstall.XXXXXX")"
+          preserve_root_identity="$(/usr/bin/stat --format='%d:%i' "$preserve_root")"
+          preserve_execution="$preserve_root/execution.AppImage"
+          collector_stdout="$preserve_root/collector.stdout"
+          collector_stderr="$preserve_root/collector.stderr"
+          service_absence_stdout="$preserve_root/service-absence.stdout"
+          service_absence_stderr="$preserve_root/service-absence.stderr"
+          topology_stdout="$preserve_root/topology.stdout"
+          topology_stderr="$preserve_root/topology.stderr"
+          service_absence_source="$preserve_root/service-absence-source"
+          packaged_collector_source="$RUNNER_TEMP/usagehub-appimage-${{ matrix.arch }}/resources/collector/${{ matrix.collector }}"
+          packaged_collector="$preserve_root/openusage-collector"
+          test -x "$packaged_collector_source"
+          preserve_user_created=0
+          current_uid=""
+          cleanup_preserve() {
+            cleanup_failed=0
+            if [[ -n "$current_uid" ]]; then
+              if ! sudo systemctl stop "user@$current_uid.service"; then
+                printf "%s\n" "appimage_preserve_cleanup_failed category=manager" >&2
+                cleanup_failed=1
+              fi
+              sudo loginctl terminate-user "$current_uid" >/dev/null 2>&1 || true
+              for process_attempt in {1..50}; do
+                if ! /usr/bin/pgrep --uid "$current_uid" >/dev/null 2>&1; then
+                  break
+                fi
+                sleep 0.2
+              done
+              if /usr/bin/pgrep --uid "$current_uid" >/dev/null 2>&1; then
+                printf "%s\n" "appimage_preserve_cleanup_failed category=process" >&2
+                cleanup_failed=1
+              fi
+            fi
+            if [[ "$preserve_user_created" == "1" ]]; then
+              if ! sudo userdel "$preserve_user" >/dev/null 2>&1; then
+                printf "%s\n" "appimage_preserve_cleanup_failed category=account" >&2
+                cleanup_failed=1
+              fi
+            fi
+            if ! test "$(/usr/bin/stat --format='%d:%i' "$preserve_root")" = "$preserve_root_identity"; then
+              printf "%s\n" "appimage_preserve_cleanup_failed category=root-identity" >&2
+              cleanup_failed=1
+            else
+              if ! sudo /bin/rm -rf --one-file-system "$preserve_root"; then
+                printf "%s\n" "appimage_preserve_cleanup_failed category=root-remove" >&2
+                cleanup_failed=1
+              fi
+            fi
+            return "$cleanup_failed"
+          }
+          trap cleanup_preserve EXIT
+          sudo useradd --no-create-home --home-dir "$preserve_root/home" "$preserve_user"
+          preserve_user_created=1
+          current_uid="$(id -u "$preserve_user")"
+          test "$(getent passwd "$preserve_user" | cut -d: -f6)" = "$preserve_root/home"
+          sudo mkdir --mode=0700 "$preserve_root/home"
+          sudo mkdir --mode=0700 \
+            "$preserve_root/home/data" \
+            "$preserve_root/home/tmp"
+          test "$(/usr/bin/stat --format='%a' "$FINAL_ARTIFACT")" = "400"
+          source_digest="$(/usr/bin/sha256sum "$FINAL_ARTIFACT" | /usr/bin/awk '{print $1}')"
+          /bin/cp "$FINAL_ARTIFACT" "$preserve_execution"
+          /usr/bin/cmp -s "$FINAL_ARTIFACT" "$preserve_execution"
+          /bin/cp "$packaged_collector_source" "$packaged_collector"
+          /usr/bin/cmp -s "$packaged_collector_source" "$packaged_collector"
+          /bin/mkdir -p "$service_absence_source/scripts"
+          /bin/cp -R "$GITHUB_WORKSPACE/openusage_bar" \
+            "$service_absence_source/openusage_bar"
+          /bin/cp "$GITHUB_WORKSPACE/scripts/canary_linux_service_absence.py" \
+            "$service_absence_source/scripts/canary_linux_service_absence.py"
+          /bin/cp "$GITHUB_WORKSPACE/scripts/canary_linux_observer_topology.py" \
+            "$service_absence_source/scripts/canary_linux_observer_topology.py"
+          /bin/cp "$GITHUB_WORKSPACE/scripts/canary_onefile_local_api.py" \
+            "$service_absence_source/scripts/canary_onefile_local_api.py"
+          /usr/bin/cmp -s \
+            "$GITHUB_WORKSPACE/openusage_bar/platform_services.py" \
+            "$service_absence_source/openusage_bar/platform_services.py"
+          /usr/bin/cmp -s \
+            "$GITHUB_WORKSPACE/scripts/canary_linux_service_absence.py" \
+            "$service_absence_source/scripts/canary_linux_service_absence.py"
+          /usr/bin/cmp -s \
+            "$GITHUB_WORKSPACE/scripts/canary_linux_observer_topology.py" \
+            "$service_absence_source/scripts/canary_linux_observer_topology.py"
+          /usr/bin/cmp -s \
+            "$GITHUB_WORKSPACE/scripts/canary_onefile_local_api.py" \
+            "$service_absence_source/scripts/canary_onefile_local_api.py"
+          execution_digest="$(/usr/bin/sha256sum "$preserve_execution" | /usr/bin/awk '{print $1}')"
+          test "$execution_digest" = "$source_digest"
+          /bin/chmod 0700 "$preserve_execution"
+          /bin/chmod 0700 "$packaged_collector"
+          test -x "$packaged_collector"
+          sudo chown "$preserve_user:$preserve_user" \
+            "$preserve_root" \
+            "$preserve_root/home" \
+            "$preserve_root/home/data" \
+            "$preserve_root/home/tmp" \
+            "$preserve_execution" \
+            "$packaged_collector"
+          sudo chown -R "$preserve_user:$preserve_user" \
+            "$service_absence_source"
+          sudo systemctl start "user@$current_uid.service"
+          for manager_attempt in {1..50}; do
+            if sudo -u "$preserve_user" test -S "/run/user/$current_uid/systemd/private"; then
+              break
+            fi
+            sleep 0.2
+          done
+          sudo -u "$preserve_user" test -S "/run/user/$current_uid/systemd/private"
+          test -x /usr/bin/xvfb-run
+          set +e
+          sudo -u "$preserve_user" /usr/bin/env -i \
+            HOME="$preserve_root/home" \
+            XDG_DATA_HOME="$preserve_root/home/data" \
+            XDG_RUNTIME_DIR="/run/user/$current_uid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$current_uid/systemd/private" \
+            TMPDIR="$preserve_root/home/tmp" \
+            PATH="/usr/bin:/bin" \
+            LANG=C \
+            LC_ALL=C \
+            PYTHONNOUSERSITE=1 \
+            APPIMAGE_EXTRACT_AND_RUN=1 \
+            /bin/bash -c '
+              set -euo pipefail
+              preserve_execution="$1"
+              packaged_collector="$2"
+              collector_stdout="$3"
+              collector_stderr="$4"
+              service_absence_stdout="$5"
+              service_absence_stderr="$6"
+              service_absence_source="$7"
+              topology_stdout="$8"
+              topology_stderr="$9"
+              cd "$service_absence_source"
+              set +e
+              /usr/bin/xvfb-run --auto-servernum /usr/bin/python3 -m \
+                scripts.canary_linux_observer_topology --appimage \
+                "$preserve_execution" \
+                >"$topology_stdout" 2>"$topology_stderr"
+              topology_status=$?
+              set -e
+              if [[ "$topology_status" -ne 0 || -s "$topology_stdout" || -s "$topology_stderr" ]]; then
+                topology_category="unknown"
+                case "$topology_status" in
+                  10) topology_category="initial-absence" ;;
+                  11) topology_category="launch" ;;
+                  12) topology_category="runtime-before" ;;
+                  13) topology_category="stop" ;;
+                  14) topology_category="runtime-after" ;;
+                  15) topology_category="preserve" ;;
+                  16) topology_category="final-absence" ;;
+                  17) topology_category="runtime-before-ui-exited" ;;
+                  18) topology_category="runtime-before-service" ;;
+                  19) topology_category="runtime-before-local" ;;
+                  20) topology_category="runtime-before-service-after" ;;
+                  21) topology_category="runtime-before-mapping" ;;
+                  22) topology_category="runtime-before-local-authority" ;;
+                  23) topology_category="runtime-before-local-socket" ;;
+                  24) topology_category="runtime-before-local-connect-peer" ;;
+                  25) topology_category="runtime-before-local-proc" ;;
+                  26) topology_category="runtime-before-local-http" ;;
+                  27) topology_category="runtime-before-local-revalidate" ;;
+                  28) topology_category="runtime-before-local-cleanup" ;;
+                  29) topology_category="runtime-before-local-authority-home" ;;
+                  30) topology_category="runtime-before-local-authority-local" ;;
+                  31) topology_category="runtime-before-local-authority-state" ;;
+                  32) topology_category="runtime-before-local-authority-root" ;;
+                  33) topology_category="runtime-before-local-authority-local-open" ;;
+                  34) topology_category="runtime-before-local-authority-local-type" ;;
+                  35) topology_category="runtime-before-local-authority-local-identity" ;;
+                  36) topology_category="runtime-before-local-authority-local-owner" ;;
+                  37) topology_category="runtime-before-local-authority-local-writable" ;;
+                  38) topology_category="runtime-before-boundary" ;;
+                esac
+                printf "%s\n" "appimage_observer_topology_failed category=$topology_category" >&2
+                exit 1
+              fi
+              test ! -s "$topology_stdout"
+              test ! -s "$topology_stderr"
+              set +e
+              "$packaged_collector" desktop-service uninstall \
+                >"$collector_stdout" 2>"$collector_stderr"
+              collector_status=$?
+              set -e
+              if [[ "$collector_status" -ne 0 || -s "$collector_stdout" || -s "$collector_stderr" ]]; then
+                printf "%s\n" "appimage_preserve_uninstall_failed category=collector" >&2
+                exit 1
+              fi
+              test ! -s "$collector_stdout"
+              test ! -s "$collector_stderr"
+              cd "$service_absence_source"
+              set +e
+              /usr/bin/python3 -m scripts.canary_linux_service_absence \
+                >"$service_absence_stdout" 2>"$service_absence_stderr"
+              service_absence_status=$?
+              set -e
+              if [[ "$service_absence_status" -ne 0 || -s "$service_absence_stdout" || -s "$service_absence_stderr" ]]; then
+                service_absence_category="unknown"
+                case "$service_absence_status" in
+                  10) service_absence_category="authority" ;;
+                  11) service_absence_category="runtime-peer" ;;
+                  12) service_absence_category="manager-provenance" ;;
+                  13) service_absence_category="manager-binary-readlink" ;;
+                  14) service_absence_category="manager-binary-path-value" ;;
+                  15) service_absence_category="manager-binary-metadata" ;;
+                  16) service_absence_category="manager-binary-public-identity" ;;
+                  17) service_absence_category="systemctl-binding" ;;
+                  18) service_absence_category="unit-absence" ;;
+                  19) service_absence_category="manager-query" ;;
+                  20) service_absence_category="sandwich" ;;
+                  21) service_absence_category="cleanup" ;;
+                esac
+                printf "%s\n" "appimage_preserve_uninstall_failed category=service-absence-$service_absence_category" >&2
+                exit 1
+              fi
+              test ! -s "$service_absence_stdout"
+              test ! -s "$service_absence_stderr"
+              exec {appimage_fd}<"$preserve_execution"
+              set +e
+              timeout --signal=TERM --kill-after=10s 180s /usr/bin/xvfb-run --auto-servernum "/proc/self/fd/$appimage_fd" --usagehub-uninstall \
+                >/dev/null 2>&1
+              preserve_status=$?
+              set -e
+              exec {appimage_fd}<&-
+              if [[ "$preserve_status" -eq 2 ]]; then
+                printf "%s\n" "appimage_preserve_uninstall_failed category=wrapper-request" >&2
+                exit 1
+              fi
+              if [[ "$preserve_status" -eq 3 ]]; then
+                printf "%s\n" "appimage_preserve_uninstall_failed category=wrapper-plan" >&2
+                exit 1
+              fi
+              if [[ "$preserve_status" -eq 4 ]]; then
+                printf "%s\n" "appimage_preserve_uninstall_failed category=wrapper-collector" >&2
+                exit 1
+              fi
+              if [[ "$preserve_status" -ne 0 ]]; then
+                printf "%s\n" "appimage_preserve_uninstall_failed category=wrapper" >&2
+                exit 1
+              fi
+              exit 0
+            ' bash \
+              "$preserve_execution" \
+              "$packaged_collector" \
+              "$collector_stdout" \
+              "$collector_stderr" \
+              "$service_absence_stdout" \
+              "$service_absence_stderr" \
+              "$service_absence_source" \
+              "$topology_stdout" \
+              "$topology_stderr"
+          preserve_status=$?
+          set -e
+          test "$preserve_status" -eq 0
+          final_source_digest="$(/usr/bin/sha256sum "$FINAL_ARTIFACT" | /usr/bin/awk '{print $1}')"
+          test "$final_source_digest" = "$source_digest"
+          trap - EXIT
+          cleanup_preserve
+      - name: Verify distribution trust posture
+        id: distribution_trust_posture
+        shell: bash
+        env:
+          FINAL_ARTIFACT: ${{ steps.audited_artifact.outputs.path }}
+          TRUST_REPORT: dist-evidence/usagehub-distribution-trust-${{ matrix.platform }}-${{ matrix.arch }}.json
+        run: |
+          python scripts/distribution_trust_posture.py verify \
+            --report "$TRUST_REPORT" \
+            --platform "${{ matrix.platform }}" \
+            --artifact "$FINAL_ARTIFACT"
+          printf 'path=%s\n' "$TRUST_REPORT" >> "$GITHUB_OUTPUT"
+      - name: Probe and verify Observer source evidence
+        id: observer_source_evidence
+        if: matrix.platform != 'mac'
+        shell: bash
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          source_evidence_path="dist-evidence/observer-source-native-evidence-${{ matrix.platform }}-${{ matrix.arch }}.json"
+          mkdir -p dist-evidence
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            test -n "$RUNNER_TEMP"
+            session_root="$(mktemp -d "$RUNNER_TEMP/openusage-observer-keyring.XXXXXX")"
+            cleanup_session() {
+              case "$session_root" in
+                "$RUNNER_TEMP"/openusage-observer-keyring.*)
+                  if [[ -e "$session_root" ]]; then
+                    for cleanup_attempt in {1..20}; do
+                      if find "$session_root" -ignore_readdir_race -depth -delete 2>/dev/null; then
+                        return 0
+                      fi
+                      sleep 0.1
+                    done
+                    printf '%s\n' 'native_keyring_cleanup_failed' >&2
+                    return 1
+                  fi
+                  ;;
+                *) return 1 ;;
+              esac
+            }
+            trap cleanup_session EXIT
+            mkdir -p \
+              "$session_root/config" \
+              "$session_root/data" \
+              "$session_root/runtime"
+            chmod 0700 \
+              "$session_root/config" \
+              "$session_root/data" \
+              "$session_root/runtime"
+            OBSERVER_KEYRING_ROOT="$session_root" \
+            OBSERVER_SOURCE_EVIDENCE="$source_evidence_path" \
+              dbus-run-session -- bash -euo pipefail <<'OBSERVER_SOURCE_SESSION'
+              export XDG_CONFIG_HOME="$OBSERVER_KEYRING_ROOT/config"
+              export XDG_DATA_HOME="$OBSERVER_KEYRING_ROOT/data"
+              export XDG_RUNTIME_DIR="$OBSERVER_KEYRING_ROOT/runtime"
+              cleanup_keyring() {
+                gnome-keyring-daemon --shutdown >/dev/null 2>&1 || true
+              }
+              trap cleanup_keyring EXIT
+              if ! printf '\n' | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; then
+                echo "observer_source_evidence_invalid reason=secret_service_start_failed" >&2
+                exit 1
+              fi
+              python scripts/observer_source_native_evidence.py probe \
+                --output "$OBSERVER_SOURCE_EVIDENCE"
+              python scripts/observer_source_native_evidence.py verify \
+                --evidence "$OBSERVER_SOURCE_EVIDENCE"
+          OBSERVER_SOURCE_SESSION
+            trap - EXIT
+            cleanup_session
+          else
+            python scripts/observer_source_native_evidence.py probe \
+              --output "$source_evidence_path"
+            python scripts/observer_source_native_evidence.py verify \
+              --evidence "$source_evidence_path"
+          fi
+          printf 'path=%s\n' "$source_evidence_path" >> "$GITHUB_OUTPUT"
+      - name: Generate native CI evidence
+        id: evidence
+        shell: bash
+        env:
+          CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CI_RUNNER_OS: ${{ runner.os }}
+          CI_RUNNER_ARCH: ${{ runner.arch }}
+          CI_SOURCE_SHA: ${{ github.sha }}
+          CI_SOURCE_EVENT: ${{ github.event_name }}
+          CI_RUN_ID: ${{ github.run_id }}
+          CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+          TRUST_POSTURE_REPORT: ${{ steps.distribution_trust_posture.outputs.path }}
+        run: |
+          evidence_path="dist-evidence/usagehub-native-evidence-${{ matrix.platform }}-${{ matrix.arch }}.json"
+          mkdir -p dist-evidence
+          python_version="$(python -c 'import platform; print(platform.python_version())')"
+          node_version="$(node -p 'process.versions.node')"
+          pyinstaller_version="$(python -c 'import PyInstaller; print(PyInstaller.__version__)')"
+          electron_builder_version="$(node -p "require('./desktop/node_modules/electron-builder/package.json').version")"
+          observer_source_args=()
+          if [[ "${{ matrix.platform }}" != "mac" ]]; then
+            observer_source_args=(
+              --observer-source-evidence "${{ steps.observer_source_evidence.outputs.path }}"
+            )
+          fi
+          python scripts/native_ci_evidence.py generate \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --runner-label "${{ matrix.os }}" \
+            --runner-environment "$CI_RUNNER_ENVIRONMENT" \
+            --runner-os "$CI_RUNNER_OS" \
+            --runner-arch "$CI_RUNNER_ARCH" \
+            --collector "./dist-collector/${{ matrix.collector }}" \
+            --artifact "${{ steps.audited_artifact.outputs.path }}" \
+            --trust-posture-report "$TRUST_POSTURE_REPORT" \
+            --build-identity "openusage_bar/resources/artifact-build-identity.v1.json" \
+            --product-truth "openusage_bar/resources/product-version-truth.v1.json" \
+            --version "${{ steps.artifact.outputs.version }}" \
+            --source-sha "$CI_SOURCE_SHA" \
+            --source-event "$CI_SOURCE_EVENT" \
+            --run-id "$CI_RUN_ID" \
+            --run-attempt "$CI_RUN_ATTEMPT" \
+            --python-version "$python_version" \
+            --node-version "$node_version" \
+            --pyinstaller-version "$pyinstaller_version" \
+            --electron-builder-version "$electron_builder_version" \
+            --check "actionPins=${{ steps.action_pins.outcome }}" \
+            --check "productVersionTruth=${{ steps.product_version_truth.outcome }}" \
+            --check "runnerArchitecture=${{ steps.runner_identity.outcome }}" \
+            --check "pythonContracts=${{ steps.contracts.outcome }}" \
+            --check "windowsNativeProcessTests=${{ steps.windows_native.outcome }}" \
+            --check "webDependencyAudit=${{ steps.web_audit.outcome }}" \
+            --check "webTests=${{ steps.web_tests.outcome }}" \
+            --check "webBuild=${{ steps.web_build.outcome }}" \
+            --check "desktopDependencyAudit=${{ steps.desktop_audit.outcome }}" \
+            --check "desktopTests=${{ steps.desktop_tests.outcome }}" \
+            --check "collectorStatus=${{ steps.collector_status.outcome }}" \
+            --check "gatewaySelfTest=${{ steps.gateway_smoke.outcome }}" \
+            --check "desktopRuntimeCapabilitySmoke=${{ steps.desktop_runtime_capability_smoke.outcome }}" \
+            --check "unpackedPackageAudit=${{ steps.unpacked_audit.outcome }}" \
+            --check "distributionTrustPosture=${{ steps.distribution_trust_posture.outcome }}" \
+            --check "packagedBuildIdentity=${{ steps.packaged_build_identity.outcome }}" \
+            --check "finalMacContainerAudit=${{ steps.final_mac.outcome }}" \
+            --check "finalWindowsContainerAudit=${{ steps.final_win.outcome }}" \
+            --check "finalLinuxContainerAudit=${{ steps.final_linux.outcome }}" \
+            "${observer_source_args[@]}" \
+            --output "$evidence_path"
+          printf 'path=%s\n' "$evidence_path" >> "$GITHUB_OUTPUT"
+      - name: Verify native CI evidence
+        id: evidence_verify
+        shell: bash
+        env:
+          TRUST_POSTURE_REPORT: ${{ steps.distribution_trust_posture.outputs.path }}
+        run: |
+          python scripts/native_ci_evidence.py verify \
+            --evidence "${{ steps.evidence.outputs.path }}" \
+            --collector "./dist-collector/${{ matrix.collector }}" \
+            --artifact "${{ steps.audited_artifact.outputs.path }}" \
+            --trust-posture-report "$TRUST_POSTURE_REPORT"
+      - name: Assemble and verify local release handoff
+        id: release_handoff
+        shell: bash
+        env:
+          TRUST_POSTURE_REPORT: ${{ steps.distribution_trust_posture.outputs.path }}
+        run: |
+          handoff_parent="dist-handoff"
+          bundle_dir="$handoff_parent/${{ matrix.platform }}-${{ matrix.arch }}"
+          mkdir -p "$handoff_parent"
+          test ! -e "$bundle_dir"
+          python scripts/release_handoff.py assemble \
+            --bundle-dir "$bundle_dir" \
+            --collector "./dist-collector/${{ matrix.collector }}" \
+            --artifact "${{ steps.audited_artifact.outputs.path }}" \
+            --evidence "${{ steps.evidence.outputs.path }}" \
+            --trust-posture-report "$TRUST_POSTURE_REPORT"
+          python scripts/release_handoff.py verify \
+            --bundle-dir "$bundle_dir"
+          printf 'path=%s\n' "$bundle_dir" >> "$GITHUB_OUTPUT"
+      - name: Upload artifact and evidence
+        id: upload_bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.upload_name }}
+          path: ${{ steps.release_handoff.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+  gateway-performance:
+    name: gateway performance diagnostic (manual/non-blocking)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up pinned Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          architecture: x64
+      - name: Verify action pins
+        run: python scripts/verify_action_pins.py
+      - name: Verify performance evidence contracts
+        run: |
+          python -m unittest \
+            tests.test_gateway_performance_measurement \
+            tests.test_gateway_performance_evidence_contract
+          python scripts/measure_gateway_performance.py smoke
+      - name: Measure Gateway performance
+        env:
+          CI_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          mkdir -p dist-evidence
+          python scripts/measure_gateway_performance.py run \
+            --source-commit "$CI_SOURCE_SHA" \
+            --source-tree-state clean \
+            --output dist-evidence/gateway-performance-v1.json
+      - name: Verify Gateway performance report
+        run: |
+          python scripts/measure_gateway_performance.py verify \
+            --report dist-evidence/gateway-performance-v1.json
+      - name: Upload Gateway performance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: usagehub-gateway-performance-linux-x64
+          path: dist-evidence/gateway-performance-v1.json
+          if-no-files-found: error

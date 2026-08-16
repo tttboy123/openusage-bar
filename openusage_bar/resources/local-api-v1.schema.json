@@ -783,42 +783,329 @@
     },
     {
       "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "coverage": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "accountRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "covered": {
+                    "type": "boolean"
+                  },
+                  "day": {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "day",
+                  "providerId",
+                  "accountRef",
+                  "covered",
+                  "sourceId"
+                ],
+                "type": "object"
+              }
+            },
+            "rows": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "accountRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "cacheCreationTokens": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "cacheReadTokens": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "costAmount": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "costBasis": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "costCurrency": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "day": {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "importedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "inputTokens": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "modelFamily": {
+                    "type": "string"
+                  },
+                  "modelId": {
+                    "type": "string"
+                  },
+                  "outputTokens": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "quality": {
+                    "type": "string"
+                  },
+                  "reasoningTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "recordId": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  },
+                  "tokenCountingConvention": {
+                    "enum": [
+                      "input_includes_cache",
+                      "components_disjoint",
+                      "provider_reported",
+                      "unknown"
+                    ]
+                  },
+                  "totalTokens": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "day",
+                  "providerId",
+                  "accountRef",
+                  "modelId",
+                  "inputTokens",
+                  "outputTokens",
+                  "cacheReadTokens",
+                  "cacheCreationTokens",
+                  "reasoningTokens",
+                  "totalTokens",
+                  "tokenCountingConvention",
+                  "costAmount",
+                  "costCurrency",
+                  "costBasis",
+                  "quality",
+                  "importedAt",
+                  "revision",
+                  "recordId",
+                  "sourceId",
+                  "modelFamily"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "coverage": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "accountRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "covered": {
+                    "type": "boolean"
+                  },
+                  "day": {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "day",
+                  "providerId",
+                  "accountRef",
+                  "covered"
+                ],
+                "type": "object"
+              }
+            },
+            "rows": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "accountRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "amount": {
+                    "type": "string"
+                  },
+                  "basis": {
+                    "type": "string"
+                  },
+                  "costKind": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "day": {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "importedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "quality": {
+                    "type": "string"
+                  },
+                  "recordId": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "day",
+                  "providerId",
+                  "accountRef",
+                  "costKind",
+                  "amount",
+                  "currency",
+                  "basis",
+                  "quality",
+                  "importedAt",
+                  "revision",
+                  "recordId"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "coverage": {
           "items": {
-            "additionalProperties": false,
-            "properties": {
-              "accountRef": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "accountRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "covered": {
+                    "type": "boolean"
+                  },
+                  "day": {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "day",
+                  "providerId",
+                  "accountRef",
+                  "covered",
+                  "sourceId"
+                ],
+                "type": "object"
               },
-              "covered": {
-                "type": "boolean"
-              },
-              "day": {
-                "format": "date",
-                "type": "string"
-              },
-              "providerId": {
-                "type": "string"
-              },
-              "sourceId": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "accountRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "covered": {
+                    "type": "boolean"
+                  },
+                  "day": {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "day",
+                  "providerId",
+                  "accountRef",
+                  "covered"
+                ],
+                "type": "object"
               }
-            },
-            "required": [
-              "day",
-              "providerId",
-              "accountRef",
-              "covered",
-              "sourceId"
-            ],
-            "type": "object"
+            ]
           },
           "type": "array"
         },
@@ -832,116 +1119,182 @@
         },
         "rows": {
           "items": {
-            "additionalProperties": false,
-            "properties": {
-              "accountRef": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "accountRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "cacheCreationTokens": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "cacheReadTokens": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "costAmount": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "costBasis": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "costCurrency": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "day": {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "importedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "inputTokens": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "modelFamily": {
+                    "type": "string"
+                  },
+                  "modelId": {
+                    "type": "string"
+                  },
+                  "outputTokens": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "quality": {
+                    "type": "string"
+                  },
+                  "reasoningTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "recordId": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  },
+                  "tokenCountingConvention": {
+                    "enum": [
+                      "input_includes_cache",
+                      "components_disjoint",
+                      "provider_reported",
+                      "unknown"
+                    ]
+                  },
+                  "totalTokens": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "day",
+                  "providerId",
+                  "accountRef",
+                  "modelId",
+                  "inputTokens",
+                  "outputTokens",
+                  "cacheReadTokens",
+                  "cacheCreationTokens",
+                  "reasoningTokens",
+                  "totalTokens",
+                  "tokenCountingConvention",
+                  "costAmount",
+                  "costCurrency",
+                  "costBasis",
+                  "quality",
+                  "importedAt",
+                  "revision",
+                  "recordId",
+                  "sourceId",
+                  "modelFamily"
+                ],
+                "type": "object"
               },
-              "cacheCreationTokens": {
-                "minimum": 0,
-                "type": "integer"
-              },
-              "cacheReadTokens": {
-                "minimum": 0,
-                "type": "integer"
-              },
-              "costAmount": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "costBasis": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "costCurrency": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "day": {
-                "format": "date",
-                "type": "string"
-              },
-              "importedAt": {
-                "format": "date-time",
-                "type": "string"
-              },
-              "inputTokens": {
-                "minimum": 0,
-                "type": "integer"
-              },
-              "modelId": {
-                "type": "string"
-              },
-              "outputTokens": {
-                "minimum": 0,
-                "type": "integer"
-              },
-              "providerId": {
-                "type": "string"
-              },
-              "quality": {
-                "type": "string"
-              },
-              "reasoningTokens": {
-                "type": [
-                  "integer",
-                  "null"
-                ]
-              },
-              "recordId": {
-                "type": "string"
-              },
-              "revision": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "sourceId": {
-                "type": "string"
-              },
-              "tokenCountingConvention": {
-                "enum": [
-                  "input_includes_cache",
-                  "components_disjoint",
-                  "provider_reported",
-                  "unknown"
-                ]
-              },
-              "totalTokens": {
-                "minimum": 0,
-                "type": "integer"
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "accountRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "amount": {
+                    "type": "string"
+                  },
+                  "basis": {
+                    "type": "string"
+                  },
+                  "costKind": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "day": {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "importedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "quality": {
+                    "type": "string"
+                  },
+                  "recordId": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "day",
+                  "providerId",
+                  "accountRef",
+                  "costKind",
+                  "amount",
+                  "currency",
+                  "basis",
+                  "quality",
+                  "importedAt",
+                  "revision",
+                  "recordId"
+                ],
+                "type": "object"
               }
-            },
-            "required": [
-              "day",
-              "providerId",
-              "accountRef",
-              "modelId",
-              "inputTokens",
-              "outputTokens",
-              "cacheReadTokens",
-              "cacheCreationTokens",
-              "reasoningTokens",
-              "totalTokens",
-              "tokenCountingConvention",
-              "costAmount",
-              "costCurrency",
-              "costBasis",
-              "quality",
-              "importedAt",
-              "revision",
-              "recordId",
-              "sourceId"
-            ],
-            "type": "object"
+            ]
           },
           "type": "array"
         },
@@ -1036,6 +1389,1586 @@
         "records",
         "nextCursor",
         "hasMore"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "providers": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "category": {
+                    "type": "string"
+                  },
+                  "credentialSource": {
+                    "type": "string"
+                  },
+                  "displayName": {
+                    "type": "string"
+                  },
+                  "familyId": {
+                    "type": "string"
+                  },
+                  "observedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "sourceKind": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "providerId",
+                  "familyId",
+                  "displayName",
+                  "category",
+                  "credentialSource",
+                  "sourceKind",
+                  "observedAt",
+                  "revision"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "providers": {
+              "items": {
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "state": {
+                          "const": "unknown"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "quotaLimit": {
+                          "type": "null"
+                        },
+                        "remaining": {
+                          "type": "null"
+                        },
+                        "remainingRatio": {
+                          "type": "null"
+                        },
+                        "used": {
+                          "type": "null"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "properties": {
+                  "accountRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "appliesTo": {
+                    "additionalProperties": false,
+                    "allOf": [
+                      {
+                        "else": {
+                          "properties": {
+                            "modelIds": {
+                              "maxItems": 0
+                            }
+                          }
+                        },
+                        "if": {
+                          "properties": {
+                            "kind": {
+                              "const": "model"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ]
+                        },
+                        "then": {
+                          "properties": {
+                            "modelIds": {
+                              "minItems": 1
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "subscription",
+                          "account",
+                          "model"
+                        ]
+                      },
+                      "modelIds": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "modelIds"
+                    ],
+                    "type": "object"
+                  },
+                  "constraints": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "estimatedCostPerMillionTokens": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "freshnessSeconds": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "observedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "periodEnd": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "periodStart": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "quality": {
+                    "type": "string"
+                  },
+                  "quotaLimit": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "quotaName": {
+                    "type": "string"
+                  },
+                  "quotaWindow": {
+                    "type": "string"
+                  },
+                  "recordId": {
+                    "type": "string"
+                  },
+                  "remaining": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "remainingRatio": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "resetsAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  },
+                  "stale": {
+                    "type": "boolean"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "used": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "recordId",
+                  "providerId",
+                  "accountRef",
+                  "quotaName",
+                  "unit",
+                  "used",
+                  "quotaLimit",
+                  "remaining",
+                  "remainingRatio",
+                  "resetsAt",
+                  "periodStart",
+                  "periodEnd",
+                  "observedAt",
+                  "freshnessSeconds",
+                  "state",
+                  "quality",
+                  "stale",
+                  "revision",
+                  "sourceId",
+                  "quotaWindow",
+                  "appliesTo",
+                  "estimatedCostPerMillionTokens",
+                  "constraints"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "providers": {
+          "items": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "category": {
+                    "type": "string"
+                  },
+                  "credentialSource": {
+                    "type": "string"
+                  },
+                  "displayName": {
+                    "type": "string"
+                  },
+                  "familyId": {
+                    "type": "string"
+                  },
+                  "observedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "sourceKind": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "providerId",
+                  "familyId",
+                  "displayName",
+                  "category",
+                  "credentialSource",
+                  "sourceKind",
+                  "observedAt",
+                  "revision"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "state": {
+                          "const": "unknown"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "quotaLimit": {
+                          "type": "null"
+                        },
+                        "remaining": {
+                          "type": "null"
+                        },
+                        "remainingRatio": {
+                          "type": "null"
+                        },
+                        "used": {
+                          "type": "null"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "properties": {
+                  "accountRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "appliesTo": {
+                    "additionalProperties": false,
+                    "allOf": [
+                      {
+                        "else": {
+                          "properties": {
+                            "modelIds": {
+                              "maxItems": 0
+                            }
+                          }
+                        },
+                        "if": {
+                          "properties": {
+                            "kind": {
+                              "const": "model"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ]
+                        },
+                        "then": {
+                          "properties": {
+                            "modelIds": {
+                              "minItems": 1
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "subscription",
+                          "account",
+                          "model"
+                        ]
+                      },
+                      "modelIds": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "modelIds"
+                    ],
+                    "type": "object"
+                  },
+                  "constraints": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "estimatedCostPerMillionTokens": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "freshnessSeconds": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "observedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "periodEnd": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "periodStart": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "quality": {
+                    "type": "string"
+                  },
+                  "quotaLimit": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "quotaName": {
+                    "type": "string"
+                  },
+                  "quotaWindow": {
+                    "type": "string"
+                  },
+                  "recordId": {
+                    "type": "string"
+                  },
+                  "remaining": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "remainingRatio": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "resetsAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  },
+                  "stale": {
+                    "type": "boolean"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "used": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "recordId",
+                  "providerId",
+                  "accountRef",
+                  "quotaName",
+                  "unit",
+                  "used",
+                  "quotaLimit",
+                  "remaining",
+                  "remainingRatio",
+                  "resetsAt",
+                  "periodStart",
+                  "periodEnd",
+                  "observedAt",
+                  "freshnessSeconds",
+                  "state",
+                  "quality",
+                  "stale",
+                  "revision",
+                  "sourceId",
+                  "quotaWindow",
+                  "appliesTo",
+                  "estimatedCostPerMillionTokens",
+                  "constraints"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "providers"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "observerPlatform": {
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "properties": {
+                "operatingSystem": {
+                  "enum": [
+                    "macos",
+                    "windows",
+                    "linux"
+                  ]
+                },
+                "reasonCode": {
+                  "const": "supported_sources_available"
+                },
+                "support": {
+                  "const": "supported"
+                },
+                "supportedSourceCount": {
+                  "maximum": 50,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            },
+            {
+              "properties": {
+                "operatingSystem": {
+                  "enum": [
+                    "macos",
+                    "windows",
+                    "linux"
+                  ]
+                },
+                "reasonCode": {
+                  "const": "source_level_evidence_unverified"
+                },
+                "support": {
+                  "const": "unsupported"
+                },
+                "supportedSourceCount": {
+                  "const": 0
+                }
+              }
+            },
+            {
+              "properties": {
+                "operatingSystem": {
+                  "const": null
+                },
+                "reasonCode": {
+                  "const": "runtime_platform_unknown"
+                },
+                "support": {
+                  "const": "unknown"
+                },
+                "supportedSourceCount": {
+                  "const": null
+                }
+              }
+            }
+          ],
+          "properties": {
+            "operatingSystem": {
+              "enum": [
+                "macos",
+                "windows",
+                "linux",
+                null
+              ]
+            },
+            "reasonCode": {
+              "enum": [
+                "supported_sources_available",
+                "source_level_evidence_unverified",
+                "runtime_platform_unknown"
+              ]
+            },
+            "support": {
+              "enum": [
+                "supported",
+                "unsupported",
+                "unknown"
+              ]
+            },
+            "supportedSourceCount": {
+              "maximum": 50,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "totalSourceCount": {
+              "const": 50
+            }
+          },
+          "required": [
+            "operatingSystem",
+            "support",
+            "supportedSourceCount",
+            "totalSourceCount",
+            "reasonCode"
+          ],
+          "type": "object"
+        },
+        "providers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "capabilities": {
+                "additionalProperties": false,
+                "properties": {
+                  "balance": {
+                    "enum": [
+                      "supported",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "billing": {
+                    "enum": [
+                      "supported",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "cost": {
+                    "enum": [
+                      "supported",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "credits": {
+                    "enum": [
+                      "supported",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "modelBreakdown": {
+                    "enum": [
+                      "supported",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "quotaWindows": {
+                    "additionalProperties": false,
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "state": {
+                            "const": "supported"
+                          },
+                          "values": {
+                            "minItems": 1
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "state": {
+                            "const": "unsupported"
+                          },
+                          "values": {
+                            "maxItems": 0
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "state": {
+                            "const": "unknown"
+                          },
+                          "values": {
+                            "maxItems": 0
+                          }
+                        }
+                      }
+                    ],
+                    "properties": {
+                      "state": {
+                        "enum": [
+                          "supported",
+                          "unsupported",
+                          "unknown"
+                        ]
+                      },
+                      "values": {
+                        "items": {
+                          "enum": [
+                            "session",
+                            "five_hour",
+                            "weekly",
+                            "monthly",
+                            "billing_cycle",
+                            "model_specific"
+                          ]
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "values"
+                    ],
+                    "type": "object"
+                  },
+                  "rateLimits": {
+                    "enum": [
+                      "supported",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "resetTimestamps": {
+                    "enum": [
+                      "supported",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "serviceStatus": {
+                    "enum": [
+                      "supported",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "tokenHistory": {
+                    "enum": [
+                      "supported",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  }
+                },
+                "required": [
+                  "quotaWindows",
+                  "tokenHistory",
+                  "modelBreakdown",
+                  "resetTimestamps",
+                  "billing",
+                  "credits",
+                  "balance",
+                  "cost",
+                  "rateLimits",
+                  "serviceStatus"
+                ],
+                "type": "object"
+              },
+              "category": {
+                "enum": [
+                  "api",
+                  "local_tool",
+                  "subscription"
+                ]
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "familyId": {
+                "type": "string"
+              },
+              "metricFamilies": {
+                "items": {
+                  "enum": [
+                    "billing",
+                    "operational",
+                    "subscription_quota",
+                    "token_activity"
+                  ]
+                },
+                "minItems": 1,
+                "type": "array",
+                "uniqueItems": true
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "regions": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              "sources": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "accountScope": {
+                      "enum": [
+                        "local_profile",
+                        "configured_account",
+                        "organization",
+                        "provider",
+                        "unknown"
+                      ]
+                    },
+                    "authority": {
+                      "enum": [
+                        "provider_official",
+                        "provider_local",
+                        "third_party",
+                        "user_supplied",
+                        "unknown"
+                      ]
+                    },
+                    "credentialType": {
+                      "enum": [
+                        "api_key",
+                        "browser_session",
+                        "keychain",
+                        "local",
+                        "oauth",
+                        "provider_owned"
+                      ]
+                    },
+                    "factFamilies": {
+                      "items": {
+                        "enum": [
+                          "detection",
+                          "token_activity",
+                          "subscription_capacity",
+                          "api_balance",
+                          "api_spend"
+                        ]
+                      },
+                      "minItems": 1,
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "freshnessSeconds": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "kind": {
+                      "enum": [
+                        "browser_session",
+                        "builtin_api",
+                        "keychain",
+                        "local_database",
+                        "local_log",
+                        "official_api",
+                        "openusage"
+                      ]
+                    },
+                    "modelScope": {
+                      "enum": [
+                        "per_model",
+                        "aggregate",
+                        "mixed",
+                        "unknown"
+                      ]
+                    },
+                    "operatingSystems": {
+                      "items": {
+                        "enum": [
+                          "macos",
+                          "windows",
+                          "linux"
+                        ]
+                      },
+                      "minItems": 1,
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "platformSupport": {
+                      "additionalProperties": false,
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "reasonCode": {
+                              "const": "supported_sources_available"
+                            },
+                            "state": {
+                              "const": "supported"
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "reasonCode": {
+                              "const": "source_level_evidence_unverified"
+                            },
+                            "state": {
+                              "const": "unsupported"
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "reasonCode": {
+                              "const": "runtime_platform_unknown"
+                            },
+                            "state": {
+                              "const": "unknown"
+                            }
+                          }
+                        }
+                      ],
+                      "properties": {
+                        "reasonCode": {
+                          "enum": [
+                            "supported_sources_available",
+                            "source_level_evidence_unverified",
+                            "runtime_platform_unknown"
+                          ]
+                        },
+                        "state": {
+                          "enum": [
+                            "supported",
+                            "unsupported",
+                            "unknown"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "reasonCode"
+                      ],
+                      "type": "object"
+                    },
+                    "provenance": {
+                      "enum": [
+                        "openusage_upstream",
+                        "openusage_bar_builtin",
+                        "provider_official",
+                        "provider_local",
+                        "user_session"
+                      ]
+                    },
+                    "requiresCredential": {
+                      "type": "boolean"
+                    },
+                    "sourceId": {
+                      "type": "string"
+                    },
+                    "stability": {
+                      "enum": [
+                        "stable",
+                        "experimental",
+                        "pinned",
+                        "opaque"
+                      ]
+                    },
+                    "timeoutSeconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "verification": {
+                      "enum": [
+                        "live_account",
+                        "fixture",
+                        "upstream_declared",
+                        "unverified"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "sourceId",
+                    "kind",
+                    "timeoutSeconds",
+                    "freshnessSeconds",
+                    "credentialType",
+                    "requiresCredential",
+                    "operatingSystems",
+                    "stability",
+                    "provenance",
+                    "factFamilies",
+                    "authority",
+                    "accountScope",
+                    "modelScope",
+                    "verification",
+                    "platformSupport"
+                  ],
+                  "type": "object"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "supportsAccounts": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "providerId",
+              "familyId",
+              "displayName",
+              "category",
+              "metricFamilies",
+              "regions",
+              "supportsAccounts",
+              "capabilities",
+              "sources"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "upstream": {
+          "additionalProperties": false,
+          "properties": {
+            "familyCount": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "name": {
+              "const": "openusage"
+            },
+            "revision": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "version",
+            "revision",
+            "familyCount"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "upstream",
+        "observerPlatform",
+        "providers"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "snapshots": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "accountRef": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "appliesTo": {
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "else": {
+                      "properties": {
+                        "modelIds": {
+                          "maxItems": 0
+                        }
+                      }
+                    },
+                    "if": {
+                      "properties": {
+                        "kind": {
+                          "const": "model"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "modelIds": {
+                          "minItems": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "subscription",
+                      "account",
+                      "model"
+                    ]
+                  },
+                  "modelIds": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "kind",
+                  "modelIds"
+                ],
+                "type": "object"
+              },
+              "observedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "quotaName": {
+                "type": "string"
+              },
+              "quotaWindow": {
+                "type": "string"
+              },
+              "recordId": {
+                "type": "string"
+              },
+              "remainingRatio": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "snapshotId": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "stale": {
+                "type": "boolean"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "snapshotId",
+              "recordId",
+              "observedAt",
+              "providerId",
+              "accountRef",
+              "quotaName",
+              "remainingRatio",
+              "state",
+              "stale",
+              "sourceId",
+              "quotaWindow",
+              "appliesTo"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "snapshots"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "sources": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "errorCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lastAttemptAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "lastSuccessAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "staleAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "providerId",
+              "sourceId",
+              "state",
+              "lastAttemptAt",
+              "lastSuccessAt",
+              "staleAt",
+              "errorCode"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "sources"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "health": {
+          "additionalProperties": false,
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "status": {
+              "const": "ok"
+            }
+          },
+          "required": [
+            "ok",
+            "status"
+          ],
+          "type": "object"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "sources": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "errorCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lastAttemptAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "lastSuccessAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "staleAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "providerId",
+              "sourceId",
+              "state",
+              "lastAttemptAt",
+              "lastSuccessAt",
+              "staleAt",
+              "errorCode"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "sources",
+        "health"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "errorShape": {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "const": "string"
+                },
+                "message": {
+                  "const": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "routes": {
+          "const": [
+            "/v1/health",
+            "/v1/schema",
+            "/v1/schema.json",
+            "/v1/summary",
+            "/v1/snapshot",
+            "/v1/capabilities",
+            "/v1/providers",
+            "/v1/capacity",
+            "/v1/activity/daily",
+            "/v1/balances",
+            "/v1/costs/daily",
+            "/v1/quotas/history",
+            "/v1/sources/status",
+            "/v1/changes",
+            "/v1/quick-connect"
+          ]
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "routes",
+        "errorShape"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "$id": {
+              "const": "https://openusage.bar/schemas/local-api-v1.schema.json"
+            },
+            "$schema": {
+              "const": "https://json-schema.org/draft/2020-12/schema"
+            },
+            "oneOf": {
+              "items": {
+                "type": "object"
+              },
+              "maxItems": 14,
+              "minItems": 14,
+              "type": "array"
+            },
+            "title": {
+              "const": "OpenUsage Bar Local API v1"
+            }
+          },
+          "required": [
+            "$schema",
+            "$id",
+            "title",
+            "oneOf"
+          ],
+          "type": "object"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "schema"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "providers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "apiKeyUrl": {
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "authModes": {
+                "items": {
+                  "enum": [
+                    "api_key",
+                    "oauth",
+                    "auto_detect"
+                  ]
+                },
+                "minItems": 1,
+                "type": "array",
+                "uniqueItems": true
+              },
+              "consoleUrl": {
+                "format": "uri",
+                "type": "string"
+              },
+              "familyId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "familyId",
+              "consoleUrl",
+              "authModes",
+              "apiKeyUrl"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "providers"
       ],
       "type": "object"
     },

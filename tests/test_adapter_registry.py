@@ -34,6 +34,7 @@ from openusage_bar.openai_organization import (
 )
 from openusage_bar.openusage_adapter import OpenUsageAdapter
 from openusage_bar.omniroute import OmniRouteCostImporter
+from openusage_bar.opencode_daily import OpenCodeLocalDailyImporter
 from openusage_bar.performance_timing import RefreshTimingRecorder
 from openusage_bar.providers.builtins import default_registry
 from openusage_bar.providers.contracts import ProviderBinding
@@ -97,6 +98,9 @@ class AdapterRegistryTests(unittest.TestCase):
             ),
             "claude_code": (
                 (), (ClaudeCodeLocalDailyImporter,), (),
+            ),
+            "opencode": (
+                (), (OpenCodeLocalDailyImporter,), (),
             ),
             "cc_switch": (
                 (CcSwitchStatusAdapter,), (), (CcSwitchCostImporter,),
@@ -229,11 +233,20 @@ class AdapterRegistryTests(unittest.TestCase):
         self.assertEqual(ordered[0][2], "OpenUsageAdapter")
         self.assertTrue(all(priority > ordered[0][0] for priority, _, _ in ordered[1:]))
 
+        # The observer platform resolver only exposes sources the host OS can
+        # actually observe (OpenUsage is macOS-only). Pin a platform-agnostic
+        # observer here so the base-vs-override ordering is tested everywhere.
+        platform = Mock()
+        platform.supports_source.return_value = True
+        platform.supports_all_source_id.return_value = True
+        platform.supports_legacy_unmodeled_sources = True
         with patch(
             "openusage_bar.config.ProviderConfigStore.load",
             return_value=self.configs(),
         ):
-            refresher = build_headless_refresher(Mock())
+            refresher = build_headless_refresher(
+                Mock(), observer_platform=platform
+            )
         runtime_types = [type(adapter) for adapter in refresher.aggregator.adapters]
         self.assertIs(runtime_types[0], OpenUsageAdapter)
         self.assertGreater(runtime_types.index(CodexSubscriptionAdapter), 0)

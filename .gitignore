@@ -11,12 +11,34 @@ __pycache__/
 *.egg-info/
 *.py[cod]
 build/
+!desktop/build/
+desktop/build/*
+!desktop/build/installer.nsh
+build-collector/
 build.failed-*/
 build.pre-*/
 dist/
+dist-collector/
 dist.failed-*/
 dist.pre-*/
 deployed-backups/
+dist-desktop/
 installed-python.pre-*/
 swift_app/.build/
 *.xcresult
+
+# Internal working documents kept locally, not published
+docs/CONTEXT-HANDOFF-*.md
+docs/superpowers/
+
+outputs/
+output/
+.playwright-cli/
+
+web/.test-dist/
+
+# PyInstaller work/output for desktop helper bundles
+build-bridge/
+build-settings/
+dist-bridge/
+dist-settings/

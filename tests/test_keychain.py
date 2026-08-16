@@ -1,3 +1,5 @@
+import builtins
+import ctypes
 import io
 import json
 import subprocess
@@ -6,9 +8,10 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from openusage_bar.bounded_process import BoundedProcessError
+import openusage_bar.keychain as keychain_module
 from openusage_bar.keychain import (
     BoundedMacOSKeychain,
     HeadlessKeychain,
@@ -17,14 +20,89 @@ from openusage_bar.keychain import (
     KeychainError,
     LinuxSecretServiceAPI,
     MacOSKeychain,
+    SecurityFrameworkAPI,
     UnsupportedPlatformKeychainError,
     WindowsCredentialManagerAPI,
+    default_keychain,
     run_native_keychain_write,
 )
 
 
 @unittest.skipIf(sys.platform == "win32", "macOS bounded keychain behavior")
 class KeychainTests(unittest.TestCase):
+    def test_security_framework_api_binds_all_operations_to_one_explicit_keychain(self):
+        class FakeSecurity:
+            errSecSuccess = 0
+            errSecItemNotFound = -25300
+            kSecValueRef = "value-ref"
+            kSecValueData = "value-data"
+
+            def __init__(self) -> None:
+                self.item = object()
+                self.value: bytes | None = None
+                self.events: list[tuple[object, ...]] = []
+
+            def SecKeychainOpen(self, path, output):
+                self.events.append(("open", path, output))
+                return self.errSecSuccess, "held-keychain"
+
+            def SecKeychainFindGenericPassword(
+                self, keychain, service_length, service, account_length, account,
+                password_length, password_data, item,
+            ):
+                self.events.append(("find", keychain, service, account))
+                if self.value is None:
+                    return self.errSecItemNotFound, 0, None, None
+                return self.errSecSuccess, len(self.value), self.value, self.item
+
+            def SecKeychainAddGenericPassword(
+                self, keychain, service_length, service, account_length, account,
+                password_length, password, item,
+            ):
+                self.events.append(("add", keychain, service, account, password))
+                self.value = bytes(password)
+                return self.errSecSuccess, self.item
+
+            def SecItemUpdate(self, query, attributes):
+                self.events.append(("update", query, attributes))
+                self.value = bytes(attributes[self.kSecValueData])
+                return self.errSecSuccess
+
+            def SecKeychainItemDelete(self, item):
+                self.events.append(("delete", item))
+                self.value = None
+                return self.errSecSuccess
+
+        security = FakeSecurity()
+        with patch.dict(sys.modules, {"Security": security}):
+            api = SecurityFrameworkAPI(
+                keychain_path="/private/tmp/openusage-ci.keychain-db"
+            )
+            query = {
+                "service": "com.lune.openusage-menubar",
+                "account": "openai.account-ci.gateway-api-key",
+            }
+
+            self.assertIsNone(api.get(query))
+            api.add(query, b"first")
+            self.assertEqual(api.get(query), b"first")
+            self.assertTrue(api.update(query, b"second"))
+            self.assertEqual(api.get(query), b"second")
+            api.delete(query)
+            self.assertIsNone(api.get(query))
+
+        self.assertEqual(
+            security.events[0],
+            ("open", b"/private/tmp/openusage-ci.keychain-db", None),
+        )
+        self.assertTrue(
+            all(
+                event[1] == "held-keychain"
+                for event in security.events
+                if event[0] in {"find", "add"}
+            )
+        )
+
     def test_uses_fixed_service_and_provider_account(self):
         api = Mock()
         api.update.return_value = True
@@ -140,7 +218,7 @@ class KeychainTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     authorizer.authorize(service=service, account=account)
 
-    def test_native_helper_rejects_reads_and_only_writes_step_plan_token(self):
+    def test_native_helper_rejects_reads_and_mutates_allowlisted_credentials(self):
         keychain = Mock()
         keychain.get.return_value = "密钥"
         output = io.BytesIO()
@@ -179,6 +257,42 @@ class KeychainTests(unittest.TestCase):
         )
 
         output = io.BytesIO()
+        gateway_account = "openai.account-0123456789abcdef0123456789abcdef.gateway-api-key"
+        code = run_native_keychain_write(
+            io.BytesIO(json.dumps({
+                "version": 1,
+                "action": "set",
+                "account": gateway_account,
+                "secret": "sk-private-gateway",
+            }).encode()),
+            output,
+            keychain=keychain,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "version": 1, "ok": True,
+        })
+        keychain.set.assert_called_with(
+            gateway_account, "sk-private-gateway"
+        )
+
+        output = io.BytesIO()
+        code = run_native_keychain_write(
+            io.BytesIO(json.dumps({
+                "version": 1,
+                "action": "delete",
+                "account": gateway_account,
+            }).encode()),
+            output,
+            keychain=keychain,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "version": 1, "ok": True,
+        })
+        keychain.delete.assert_called_once_with(gateway_account)
+
+        output = io.BytesIO()
         code = run_native_keychain_write(
             io.BytesIO(json.dumps({
                 "version": 1,
@@ -193,17 +307,49 @@ class KeychainTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), {
             "version": 1, "ok": False,
         })
-        self.assertEqual(keychain.set.call_count, 1)
+        self.assertEqual(keychain.set.call_count, 2)
 
-    def test_bounded_keychain_reads_via_reader_and_privately_writes_session(self):
+    def test_native_helper_rejects_gateway_default_and_malformed_mutable_accounts(self):
+        keychain = Mock()
+
+        for account in (
+            "openai.gateway-api-key",
+            "openai.work.gateway-api-key",
+            "ollama.account-0123456789abcdef0123456789abcdef.gateway-api-key",
+            "unknown.account-0123456789abcdef0123456789abcdef.gateway-api-key",
+            "openai.account-0123456789abcdef0123456789abcdeg.gateway-api-key",
+        ):
+            with self.subTest(account=account):
+                output = io.BytesIO()
+                code = run_native_keychain_write(
+                    io.BytesIO(json.dumps({
+                        "version": 1,
+                        "action": "set",
+                        "account": account,
+                        "secret": "must-not-be-written",
+                    }).encode()),
+                    output,
+                    keychain=keychain,
+                )
+
+                self.assertEqual(code, 1)
+                self.assertEqual(json.loads(output.getvalue()), {
+                    "version": 1, "ok": False,
+                })
+
+        keychain.set.assert_not_called()
+
+    def test_bounded_keychain_reads_via_reader_and_privately_mutates_credentials(self):
         with tempfile.TemporaryDirectory() as directory:
             helper = Path(directory) / "keychain-helper.py"
             capture = Path(directory) / "capture.json"
             helper.write_text(
-                "import json,sys\n"
+                "import json,sys,pathlib\n"
                 "request=json.loads(sys.stdin.buffer.read())\n"
-                f"open({str(capture)!r},'w').write(json.dumps({{"
-                "'argv':sys.argv[1:],'request':request}))\n"
+                f"path=pathlib.Path({str(capture)!r})\n"
+                "items=json.loads(path.read_text()) if path.exists() else []\n"
+                "items.append({'argv':sys.argv[1:],'request':request})\n"
+                "path.write_text(json.dumps(items))\n"
                 "response={'version':1,'ok':True}\n"
                 "sys.stdout.write(json.dumps(response))\n",
                 encoding="utf-8",
@@ -221,11 +367,28 @@ class KeychainTests(unittest.TestCase):
             self.assertFalse(capture.exists())
             secret = "rotated-private-token"
             keychain.set("step-plan-main.oasis-token", secret)
+            gateway_secret = "sk-private-gateway"
+            gateway_account = (
+                "openai.account-0123456789abcdef0123456789abcdef.gateway-api-key"
+            )
+            keychain.set(gateway_account, gateway_secret)
+            keychain.delete(gateway_account)
             captured = json.loads(capture.read_text(encoding="utf-8"))
 
-        self.assertEqual(captured["argv"], ["__keychain-write"])
-        self.assertEqual(captured["request"]["secret"], secret)
+        self.assertEqual([item["argv"] for item in captured], [
+            ["__keychain-write"],
+            ["__keychain-write"],
+            ["__keychain-write"],
+        ])
+        self.assertEqual(captured[0]["request"]["secret"], secret)
+        self.assertEqual(captured[1]["request"]["secret"], gateway_secret)
+        self.assertEqual(captured[2]["request"], {
+            "version": 1,
+            "action": "delete",
+            "account": gateway_account,
+        })
         self.assertNotIn(secret, " ".join(keychain.command))
+        self.assertNotIn(gateway_secret, " ".join(keychain.command))
 
     def test_bounded_keychain_timeout_is_sanitized_and_reaped(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -244,8 +407,73 @@ class KeychainTests(unittest.TestCase):
                 keychain.set("step-plan-main.oasis-token", "never-in-error")
             self.assertNotIn("never-in-error", str(raised.exception))
 
+    def test_bounded_keychain_rejects_malformed_gateway_write_accounts_before_helper(self):
+        helper = Mock()
+        keychain = BoundedMacOSKeychain(
+            helper_command=(sys.executable, "-c"),
+            reader=Mock(get=Mock(return_value=None)),
+        )
+        keychain._request = helper
+
+        for account in (
+            "openai.gateway-api-key",
+            "openai.work.gateway-api-key",
+            "ollama.account-0123456789abcdef0123456789abcdef.gateway-api-key",
+        ):
+            with self.subTest(account=account):
+                with self.assertRaises(KeychainError):
+                    keychain.set(account, "private-secret")
+                with self.assertRaises(KeychainError):
+                    keychain.delete(account)
+
+        helper.assert_not_called()
+
 
 class CrossPlatformKeychainTests(unittest.TestCase):
+    def test_linux_default_keychain_construction_does_not_import_secretstorage(self):
+        real_import = builtins.__import__
+        secretstorage_imports = []
+
+        def guarded_import(name, *args, **kwargs):
+            if name == "secretstorage":
+                secretstorage_imports.append(name)
+                raise ImportError("secretstorage must remain lazy")
+            return real_import(name, *args, **kwargs)
+
+        with (
+            patch("openusage_bar.keychain.sys.platform", "linux"),
+            patch("builtins.__import__", side_effect=guarded_import),
+        ):
+            keychain = default_keychain()
+
+        self.assertIsInstance(keychain, HeadlessKeychain)
+        self.assertEqual(secretstorage_imports, [])
+
+    def test_linux_credential_read_fails_closed_when_secretstorage_is_missing(self):
+        real_import = builtins.__import__
+        private_path = "/Users/private/.local/lib/python/secretstorage.py"
+
+        def unavailable_import(name, *args, **kwargs):
+            if name == "secretstorage":
+                raise ImportError(f"missing optional module at {private_path}")
+            return real_import(name, *args, **kwargs)
+
+        with (
+            patch("openusage_bar.keychain.sys.platform", "linux"),
+            patch("builtins.__import__", side_effect=unavailable_import),
+        ):
+            keychain = default_keychain()
+            with self.assertRaises(KeychainError) as raised:
+                keychain.get("provider-main")
+
+        public_error = str(raised.exception)
+        self.assertEqual(
+            public_error,
+            "Linux Secret Service requires the optional 'secretstorage' dependency",
+        )
+        self.assertNotIn("ImportError", public_error)
+        self.assertNotIn(private_path, public_error)
+
     def test_headless_keychain_maps_account_to_fixed_service(self):
         api = Mock()
         api.get.return_value = b"secret"
@@ -291,6 +519,17 @@ class CrossPlatformKeychainTests(unittest.TestCase):
         api.add(query, b"value")
         api.delete(query)
         native.delete.assert_called_once_with("com.lune.openusage-menubar\\demo")
+
+    def test_windows_native_read_uses_its_bound_ctypes_runtime(self):
+        native_type = keychain_module._WinCredentialNative
+        native = native_type.__new__(native_type)
+        native._ctypes = Mock(wraps=ctypes)
+        native._cred_read = Mock(return_value=False)
+        native._get_last_error = Mock(return_value=native.ERROR_NOT_FOUND)
+        native._cred_free = Mock()
+
+        self.assertIsNone(native.read("com.lune.openusage-menubar\\missing"))
+        native._ctypes.byref.assert_called_once()
 
     @unittest.skipIf(sys.platform.startswith("linux"), "Linux backend is native on Linux")
     def test_linux_backend_requires_linux(self):

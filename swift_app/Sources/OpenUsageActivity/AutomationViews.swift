@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 import UsageCore
 
@@ -10,18 +9,12 @@ private enum AutomationViewState: Sendable {
 
 struct AutomationPage: View {
     let reader: any LocalAPIReading
-    let socketURL: URL
-    let helperURL: URL
     @State private var state = AutomationViewState.loading
 
     init(
-        reader: any LocalAPIReading = LocalAPIClient(),
-        socketURL: URL = LocalAPIClient.defaultSocketURL,
-        helperURL: URL = AutomationPresentation.helperURL()
+        reader: any LocalAPIReading = LocalAPIClient()
     ) {
         self.reader = reader
-        self.socketURL = socketURL
-        self.helperURL = helperURL
     }
 
     var body: some View {
@@ -52,11 +45,10 @@ struct AutomationPage: View {
     @ViewBuilder private func loadedView(_ loaded: AutomationLoadedState) -> some View {
         AutomationSection(
             title: "Local API",
-            detail: "This endpoint is read only and bound to a private Unix socket."
+            detail: "This surface shows read-only local facts from the private Observer service."
         ) {
             Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 12) {
                 row("State", loaded.health.ok ? "Available" : "Unavailable")
-                row("Socket", socketURL.path)
                 row("Schema version", loaded.schema.schemaVersion)
                 row("Data revision", String(loaded.snapshot.dataRevision))
                 row("Generated", loaded.snapshot.generatedAt)
@@ -75,21 +67,13 @@ struct AutomationPage: View {
             .frame(maxHeight: 280)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
         }
-        AutomationSection(
-            title: "Read-only commands",
-            detail: "Use either command to read the same local data contract."
-        ) {
-            commandRow("Unix socket", command: loaded.commands.curl)
-            Divider()
-            commandRow("Bundled helper", command: loaded.commands.helper)
-        }
     }
 
     private func failureView(_ failure: AutomationFailureState) -> some View {
         let copy: (String, String) = switch failure {
         case .unavailable: (
             "Local API unavailable",
-            "The background collector is not serving its private Unix socket."
+            "The private Observer service is not available."
         )
         case .timedOut: ("Local API timed out", "The local API did not respond within three seconds.")
         case .schemaMismatch: (
@@ -119,30 +103,6 @@ struct AutomationPage: View {
         }
     }
 
-    private func commandRow(_ label: String, command: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(AppLocalization.text(label)).font(.callout.weight(.medium))
-                Spacer()
-                Button("Copy", systemImage: "doc.on.doc") { copy(command) }
-                    .controlSize(.small)
-                    .accessibilityLabel(
-                        AppLocalization.format("Copy %@", AppLocalization.text(label))
-                    )
-            }
-            Text(verbatim: command)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .lineLimit(2)
-        }
-    }
-
-    private func copy(_ value: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
-    }
-
     private func load() async {
         do {
             let health = try await reader.health()
@@ -150,10 +110,7 @@ struct AutomationPage: View {
             let snapshot = try await reader.snapshot(localDay: nil)
             state = .loaded(.init(
                 health: health, schema: schema, snapshot: snapshot,
-                preview: AutomationPresentation.snapshotPreview(snapshot),
-                commands: AutomationPresentation.commands(
-                    socketURL: socketURL, helperURL: helperURL
-                )
+                preview: AutomationPresentation.snapshotPreview(snapshot)
             ))
         } catch let error as LocalAPIClientError {
             state = .failed(AutomationPresentation.failure(error))

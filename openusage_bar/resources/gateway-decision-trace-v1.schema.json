@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openusage.dev/schemas/gateway-decision-trace-v1.schema.json",
+  "title": "OpenUsage Gateway Decision Trace v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "traces"],
+  "properties": {
+    "apiVersion": {"const": "gateway-decision-trace.openusage/v1"},
+    "traces": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/trace"}
+    }
+  },
+  "$defs": {
+    "traceBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "traceId", "occurredAt", "kind", "execution", "outcome", "reason",
+        "pool", "selected", "exclusions", "fallback", "factsWindow"
+      ],
+      "properties": {
+        "traceId": {"type": "string", "pattern": "^trace_[0-9a-f]{32}$"},
+        "occurredAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$"
+        },
+        "kind": {"enum": ["route_advice", "gateway_execution", "pool_selection"]},
+        "execution": {"enum": ["advice_only", "executed"]},
+        "outcome": {"enum": ["yes", "no", "defer", "selected", "unavailable", "succeeded", "failed"]},
+        "reason": {
+          "enum": ["approaching_limit", "burn_rate_too_high", "quota_healthy", "quota_low", "quota_unknown", null]
+        },
+        "pool": {"oneOf": [{"$ref": "#/$defs/pool"}, {"type": "null"}]},
+        "selected": {"oneOf": [{"$ref": "#/$defs/selected"}, {"type": "null"}]},
+        "exclusions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/exclusion"}
+        },
+        "fallback": {"oneOf": [{"$ref": "#/$defs/fallback"}, {"type": "null"}]},
+        "factsWindow": {"oneOf": [{"$ref": "#/$defs/factsWindow"}, {"type": "null"}]}
+      }
+    },
+    "trace": {
+      "allOf": [
+        {"$ref": "#/$defs/traceBase"},
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "kind": {"const": "route_advice"},
+                "execution": {"const": "advice_only"},
+                "outcome": {"enum": ["yes", "no", "defer"]},
+                "reason": {"enum": ["approaching_limit", "burn_rate_too_high", "quota_healthy", "quota_low", "quota_unknown"]},
+                "pool": {"type": "null"},
+                "selected": {"type": "null"},
+                "exclusions": {"maxItems": 0},
+                "fallback": {"type": "null"}
+              }
+            },
+            {
+              "properties": {
+                "kind": {"const": "gateway_execution"},
+                "execution": {"const": "executed"},
+                "outcome": {"enum": ["succeeded", "failed"]},
+                "reason": {"type": "null"},
+                "pool": {"type": "null"},
+                "selected": {"$ref": "#/$defs/gatewaySelected"},
+                "exclusions": {"maxItems": 0},
+                "fallback": {"$ref": "#/$defs/fallback"},
+                "factsWindow": {"type": "null"}
+              }
+            },
+            {
+              "properties": {
+                "kind": {"const": "pool_selection"},
+                "execution": {"const": "executed"},
+                "outcome": {"const": "selected"},
+                "reason": {"type": "null"},
+                "pool": {"$ref": "#/$defs/pool"},
+                "selected": {"$ref": "#/$defs/poolSelected"},
+                "fallback": {"type": "null"},
+                "factsWindow": {"type": "null"}
+              }
+            },
+            {
+              "properties": {
+                "kind": {"const": "pool_selection"},
+                "execution": {"const": "executed"},
+                "outcome": {"const": "unavailable"},
+                "reason": {"type": "null"},
+                "pool": {"$ref": "#/$defs/pool"},
+                "selected": {"type": "null"},
+                "fallback": {"type": "null"},
+                "factsWindow": {"type": "null"}
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "pool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["poolId", "revision", "strategy"],
+      "properties": {
+        "poolId": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+        "revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "strategy": {"enum": ["fixed-first", "round-robin", "sticky", "quota-aware", "cost", "latency", "reliability"]}
+      }
+    },
+    "selected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerId", "accountDisplayId"],
+      "properties": {
+        "providerId": {"enum": ["anthropic", "deepseek", "ollama", "openai", "openrouter", null]},
+        "accountDisplayId": {
+          "oneOf": [
+            {"type": "string", "pattern": "^acct_[0-9a-f]{12}$"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "gatewaySelected": {
+      "allOf": [
+        {"$ref": "#/$defs/selected"},
+        {
+          "properties": {
+            "providerId": {"enum": ["anthropic", "deepseek", "ollama", "openai", "openrouter"]},
+            "accountDisplayId": {"type": "null"}
+          }
+        }
+      ]
+    },
+    "poolSelected": {
+      "allOf": [
+        {"$ref": "#/$defs/selected"},
+        {
+          "properties": {
+            "providerId": {"enum": ["anthropic", "deepseek", "ollama", "openai", "openrouter"]},
+            "accountDisplayId": {"type": "string", "pattern": "^acct_[0-9a-f]{12}$"}
+          }
+        }
+      ]
+    },
+    "exclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountDisplayId", "reason"],
+      "properties": {
+        "accountDisplayId": {"type": "string", "pattern": "^acct_[0-9a-f]{12}$"},
+        "reason": {
+          "enum": ["cooldown", "credential_backend_unavailable", "cross_model_unconfirmed", "cross_provider_unconfirmed", "cross_region_unconfirmed", "disabled", "health_unknown", "metric_unknown", "quota_unknown", "unhealthy"]
+        }
+      }
+    },
+    "fallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "attemptCount", "finalAction"],
+      "properties": {
+        "attempted": {"type": "boolean"},
+        "attemptCount": {"type": "integer", "minimum": 0, "maximum": 2},
+        "finalAction": {"enum": ["none", "retry", "fail", "degrade_to_cheap"]}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "attempted": {"const": false},
+            "attemptCount": {"maximum": 1},
+            "finalAction": {"const": "none"}
+          }
+        },
+        {
+          "properties": {
+            "attempted": {"const": true},
+            "attemptCount": {"minimum": 1},
+            "finalAction": {"enum": ["fail"]}
+          }
+        },
+        {
+          "properties": {
+            "attempted": {"const": true},
+            "attemptCount": {"const": 2},
+            "finalAction": {"enum": ["retry", "degrade_to_cheap"]}
+          }
+        }
+      ]
+    },
+    "factsWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["durationSeconds"],
+      "properties": {
+        "durationSeconds": {"type": "integer", "minimum": 1, "maximum": 2678400}
+      }
+    }
+  }
+}

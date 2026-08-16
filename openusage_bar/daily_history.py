@@ -455,7 +455,7 @@ class ActivityCollector:
     def __init__(
         self,
         store: ActivityStore,
-        importer: OpenUsageDailyImporter,
+        importer: OpenUsageDailyImporter | None,
         *,
         official_importers: Mapping[str, Any] | None = None,
         clock: Callable[[], datetime] | None = None,
@@ -588,6 +588,8 @@ class ActivityCollector:
         source_id: str,
         today: date,
         attempted_at: datetime,
+        *,
+        history_days: int | None = None,
     ) -> None:
         try:
             account_ref = self._account_ref(importer)
@@ -600,7 +602,13 @@ class ActivityCollector:
             has_cost_history = self.store.has_cost_history(provider_id, account_ref)
         except Exception:
             has_cost_history = True
-        cost_since = today - timedelta(days=6 if has_cost_history else 364)
+        cost_since = today - timedelta(
+            days=(
+                history_days
+                if history_days is not None
+                else (6 if has_cost_history else 364)
+            )
+        )
         try:
             official_cost = measure_source_call(
                 self.timing_recorder,
@@ -898,6 +906,8 @@ class ActivityCollector:
         provider_ids: tuple[str, ...],
         today: date,
         attempted_at: datetime,
+        *,
+        history_days: int | None = None,
     ) -> None:
         fallback_families = {
             card.provider_id: card.family_id or card.provider_id
@@ -957,7 +967,11 @@ class ActivityCollector:
                         if stored_contract_revision != history_contract_revision:
                             had_official_usage = False
                     usage_since = today - timedelta(
-                        days=6 if had_official_usage else 364
+                        days=(
+                            history_days
+                            if history_days is not None
+                            else (6 if had_official_usage else 364)
+                        )
                     )
                     try:
                         official_usage = measure_source_call(
@@ -1015,6 +1029,11 @@ class ActivityCollector:
 
             if not use_openusage_fallback:
                 continue
+            if self.importer is None:
+                # A verified empty platform source set is a valid Observer
+                # state.  Do not synthesize an importer failure or probe a
+                # provider when the shared fallback was never constructed.
+                continue
             openusage_provider_id = fallback_families.get(provider_id, provider_id)
             if (
                 openusage_provider_id != provider_id
@@ -1029,9 +1048,15 @@ class ActivityCollector:
                 continue
             try:
                 since = today - timedelta(
-                    days=0
-                    if self.store.has_daily_history(provider_id, account_ref)
-                    else 364
+                    days=(
+                        history_days
+                        if history_days is not None
+                        else (
+                            0
+                            if self.store.has_daily_history(provider_id, account_ref)
+                            else 364
+                        )
+                    )
                 )
                 result = measure_source_call(
                     self.timing_recorder,
@@ -1090,7 +1115,12 @@ class ActivityCollector:
                 )
 
     def _refresh_cost_sources(
-        self, provider_ids: tuple[str, ...], today: date, attempted_at: datetime
+        self,
+        provider_ids: tuple[str, ...],
+        today: date,
+        attempted_at: datetime,
+        *,
+        history_days: int | None = None,
     ) -> None:
         for provider_id in provider_ids:
             official = self.official_importers.get(provider_id)
@@ -1102,7 +1132,12 @@ class ActivityCollector:
             if cost_source_id is None:
                 continue
             self._refresh_official_costs(
-                provider_id, official, cost_source_id, today, attempted_at
+                provider_id,
+                official,
+                cost_source_id,
+                today,
+                attempted_at,
+                history_days=history_days,
             )
 
     def refresh(
@@ -1111,7 +1146,15 @@ class ActivityCollector:
         *,
         balance_results: tuple[tuple[str, str, object], ...] = (),
         quota_results: tuple[tuple[str, str, object], ...] = (),
+        history_days: int | None = None,
     ) -> bool:
+        if history_days is not None and (
+            isinstance(history_days, bool)
+            or not isinstance(history_days, int)
+            or history_days < 0
+            or history_days > MAX_HISTORY_CONTRACT_REVISION
+        ):
+            raise ValueError("invalid history window")
         if not self._lock.acquire(blocking=False):
             return False
         try:
@@ -1123,9 +1166,13 @@ class ActivityCollector:
             self._refresh_balance_sources(attempted_at, balance_results)
             self._refresh_quota_sources(overview, attempted_at, quota_results)
             self._refresh_usage_sources(
-                overview, provider_ids, today, attempted_at
+                overview, provider_ids, today, attempted_at,
+                history_days=history_days,
             )
-            self._refresh_cost_sources(provider_ids, today, attempted_at)
+            self._refresh_cost_sources(
+                provider_ids, today, attempted_at,
+                history_days=history_days,
+            )
             try:
                 self.store.apply_retention(730, attempted_at)
             except Exception:
@@ -1134,7 +1181,9 @@ class ActivityCollector:
         finally:
             self._lock.release()
 
-    def refresh_usage(self, provider_ids: tuple[str, ...]) -> bool:
+    def refresh_usage(
+        self, provider_ids: tuple[str, ...], *, history_days: int | None = None
+    ) -> bool:
         """Refresh selected local usage sources without waiting for quota I/O."""
         if not self._lock.acquire(blocking=False):
             return False
@@ -1150,7 +1199,8 @@ class ActivityCollector:
             attempted_at = current.astimezone(timezone.utc)
             today = current.astimezone(self.local_timezone).date()
             self._refresh_usage_sources(
-                Overview([]), selected, today, attempted_at
+                Overview([]), selected, today, attempted_at,
+                history_days=history_days,
             )
             return True
         finally:

@@ -1,7 +1,7 @@
 import io
 import json
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from openusage_bar.config import (
     DailyUsageFeedConfig,
@@ -11,7 +11,11 @@ from openusage_bar.config import (
     OpenAIOrganizationConfig,
     StepPlanConfig,
 )
-from openusage_bar.provider_commands import run_provider_mutation
+from openusage_bar.provider_commands import (
+    run_provider_config_apply,
+    run_provider_config_list,
+    run_provider_mutation,
+)
 
 
 class ProviderMutationCommandTests(unittest.TestCase):
@@ -308,6 +312,37 @@ class ProviderMutationCommandTests(unittest.TestCase):
         self.assertEqual(saved[1].name, "Work Updated")
         self.assertEqual(saved[1].site, "international")
 
+    def test_uses_platform_default_keychain_when_not_injected(self):
+        store = Mock()
+        store.load.return_value = []
+        platform_keychain = Mock()
+        output = io.StringIO()
+
+        with patch(
+            "openusage_bar.provider_commands.default_keychain",
+            create=True,
+            return_value=platform_keychain,
+        ) as default_keychain_factory:
+            status = run_provider_mutation(
+                io.StringIO(json.dumps({
+                    "version": 1,
+                    "action": "update_connection",
+                    "providerId": "minimax-missing",
+                    "name": "MiniMax",
+                    "apiKey": "",
+                    "sessionCookie": "",
+                })),
+                output,
+                store=store,
+            )
+
+        default_keychain_factory.assert_called_once_with()
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            json.loads(output.getvalue())["message"],
+            "Provider connection was not found",
+        )
+
     def test_updates_non_step_plan_connection_without_accepting_a_client_type(self):
         store = Mock()
         store.load.return_value = [MiniMaxConfig("minimax-main", "MiniMax")]
@@ -404,6 +439,76 @@ class ProviderMutationCommandTests(unittest.TestCase):
             json.loads(output.getvalue())["message"],
             "Provider connection was not found",
         )
+
+
+class ProviderConfigCommandTests(unittest.TestCase):
+    def test_provider_config_list_returns_presets(self):
+        out = io.StringIO()
+        code = run_provider_config_list(out)
+        self.assertEqual(code, 0)
+        payload = json.loads(out.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["version"], 1)
+        self.assertGreater(len(payload["presets"]), 0)
+        first = payload["presets"][0]
+        for field in (
+            "presetId",
+            "name",
+            "category",
+            "agent",
+            "familyId",
+            "consoleUrl",
+            "baseUrl",
+            "model",
+            "allowCustomEndpoints",
+        ):
+            self.assertIn(field, first)
+
+    def test_provider_config_apply_rejects_invalid_payload(self):
+        out = io.StringIO()
+        code = run_provider_config_apply(
+            io.StringIO('{"version":1,"action":"apply","presetId":42}'),
+            out,
+        )
+        self.assertEqual(code, 0)
+        payload = json.loads(out.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["code"], "failed")
+
+    def test_provider_config_apply_writes_agent_config_in_isolated_home(self):
+        import tempfile
+        from pathlib import Path as _Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            # apply_provider_config resolves the agent config root with
+            # Path.home(); pin it to a temp dir so the real ~/.claude is
+            # never touched.
+            with patch("pathlib.Path.home", return_value=_Path(directory)):
+                out = io.StringIO()
+                request = {
+                    "version": 1,
+                    "action": "provider_config_apply",
+                    "presetId": "claude-anthropic-official",
+                    "apiKey": "sk-test-1234567890",
+                    "baseUrl": None,
+                    "model": None,
+                }
+                code = run_provider_config_apply(
+                    io.StringIO(json.dumps(request)),
+                    out,
+                )
+                self.assertEqual(code, 0)
+                payload = json.loads(out.getvalue())
+                self.assertTrue(payload["ok"], payload)
+                self.assertEqual(payload["code"], "ok")
+                self.assertEqual(payload["agent"], "claude_code")
+                claude_settings = _Path(directory) / ".claude" / "settings.json"
+                self.assertTrue(claude_settings.is_file())
+                written = json.loads(claude_settings.read_text())
+                self.assertEqual(
+                    written["env"]["ANTHROPIC_AUTH_TOKEN"],
+                    "sk-test-1234567890",
+                )
 
 
 if __name__ == "__main__":

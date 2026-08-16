@@ -36,10 +36,11 @@ struct ActivityHeader: View {
                 if store.isLoading { ProgressView().controlSize(.small) }
             }
             HStack(spacing: 12) {
-                Picker("Period", selection: $store.period) {
-                    ForEach(UsagePeriod.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented).frame(width: 270)
+                UnifiedSegmentedControl(
+                    options: UsagePeriod.allCases.map { ($0, $0.title) },
+                    selection: $store.period
+                )
+                .frame(width: 270)
                 Picker("Provider", selection: $store.providerID) {
                     Text("All Providers").tag(String?.none)
                     ForEach(store.providers, id: \.self) {
@@ -233,14 +234,18 @@ private struct MetricValue: View {
             Text(value).font(.title2.weight(.medium)).monospacedDigit()
             Text(AppLocalization.text(label)).font(.caption).foregroundStyle(.secondary)
             if let state {
-                Label(
-                    AppLocalization.text(state),
-                    systemImage: state == "Partial" ? "circle.lefthalf.filled" : "info.circle"
-                )
-                    .font(.caption2).foregroundStyle(.secondary)
+                UnifiedStatusBadge(status: metricStatus(state), title: AppLocalization.text(state))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func metricStatus(_ state: String) -> UnifiedStatusBadge.Status {
+        switch state {
+        case "Partial": .warning
+        case "Missing": .critical
+        default: .neutral
+        }
     }
 }
 

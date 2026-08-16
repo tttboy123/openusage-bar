@@ -45,7 +45,9 @@ def _build_db(path: Path, *, current_codex: str = "DeepSeek") -> None:
     connection.execute(
         "INSERT INTO usage_daily_rollups VALUES "
         "('2026-07-05','codex','_codex_session','deepseek-v4-flash',"
-        "10,10,100,50,0,0,'1.2500',12.3,'unknown')"
+        "10,10,100,50,0,0,'1.2500',12.3,'unknown'),"
+        "('2026-07-05','grok','_grok_session','grok-4.5',"
+        "5,5,200,80,0,0,'2.0000',9.9,'unknown')"
     )
     connection.commit()
     connection.close()
@@ -65,7 +67,7 @@ class CcSwitchCostImporterTests(unittest.TestCase):
             self.assertEqual(len(result.rows), 1)
             row = result.rows[0]
             self.assertEqual(row.provider_id, "cc_switch")
-            self.assertEqual(row.amount, "1.25")
+            self.assertEqual(row.amount, "2")
             self.assertEqual(row.currency, "USD")
             self.assertEqual(row.basis, "cc_switch.rollups")
             self.assertEqual(row.account_ref, "cc_switch")
@@ -94,14 +96,16 @@ class CcSwitchCostImporterTests(unittest.TestCase):
             )
 
             self.assertIsInstance(result, UsageImportSuccess)
+            # The codex rollup duplicates codex.local_sessions and is skipped;
+            # only the grok rollup (no local reader) is imported.
             self.assertEqual(len(result.rows), 1)
             row = result.rows[0]
             self.assertEqual(row.provider_id, "cc_switch")
-            self.assertEqual(row.model_id, "_codex_session.deepseek-v4-flash")
-            self.assertEqual(row.input_tokens, 100)
-            self.assertEqual(row.output_tokens, 50)
-            self.assertEqual(row.total_tokens, 150)
-            self.assertEqual(row.cost_amount, "1.25")
+            self.assertEqual(row.model_id, "_grok_session.grok-4.5")
+            self.assertEqual(row.input_tokens, 200)
+            self.assertEqual(row.output_tokens, 80)
+            self.assertEqual(row.total_tokens, 280)
+            self.assertEqual(row.cost_amount, "2")
             self.assertEqual(row.cost_currency, "USD")
             self.assertEqual(row.cost_basis, "cc_switch.rollups")
             self.assertEqual(row.token_counting_convention, "components_disjoint")

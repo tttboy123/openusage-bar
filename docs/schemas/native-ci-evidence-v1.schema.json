@@ -1,0 +1,1879 @@
+{
+  "$id": "https://openusage.bar/schemas/native-ci-evidence-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/macX64Row"
+        },
+        {
+          "$ref": "#/$defs/macArm64Row"
+        },
+        {
+          "$ref": "#/$defs/winX64Row"
+        },
+        {
+          "$ref": "#/$defs/winArm64Row"
+        },
+        {
+          "$ref": "#/$defs/linuxX64Row"
+        },
+        {
+          "$ref": "#/$defs/linuxArm64Row"
+        }
+      ]
+    },
+    {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/macChecks"
+        },
+        {
+          "$ref": "#/$defs/winChecks"
+        },
+        {
+          "$ref": "#/$defs/linuxChecks"
+        }
+      ]
+    },
+    {
+      "else": {
+        "properties": {
+          "distributionTrust": {
+            "properties": {
+              "platformNotarization": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "target": {
+            "properties": {
+              "platform": {
+                "const": "mac"
+              }
+            },
+            "required": [
+              "platform"
+            ]
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "then": {
+        "properties": {
+          "distributionTrust": {
+            "properties": {
+              "platformNotarization": {
+                "const": "not_verified"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "artifacts": {
+      "additionalProperties": false,
+      "properties": {
+        "collector": {
+          "additionalProperties": false,
+          "properties": {
+            "arch": {
+              "enum": [
+                "arm64",
+                "x64"
+              ],
+              "type": "string"
+            },
+            "format": {
+              "enum": [
+                "elf64",
+                "macho64",
+                "pe32+"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "pattern": "^openusage-collector(?:\\.exe)?$",
+              "type": "string"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "sizeBytes": {
+              "$ref": "#/$defs/positiveInteger"
+            }
+          },
+          "required": [
+            "arch",
+            "format",
+            "name",
+            "sha256",
+            "sizeBytes"
+          ],
+          "type": "object"
+        },
+        "finalContainer": {
+          "additionalProperties": false,
+          "properties": {
+            "format": {
+              "enum": [
+                "appimage",
+                "dmg",
+                "nsis"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 160,
+              "minLength": 20,
+              "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-(?:mac-(?:arm64|x64)\\.dmg|win-(?:arm64|x64)\\.exe|linux-(?:arm64|x86_64)\\.AppImage)$",
+              "type": "string"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "sizeBytes": {
+              "$ref": "#/$defs/positiveInteger"
+            }
+          },
+          "required": [
+            "format",
+            "name",
+            "sha256",
+            "sizeBytes"
+          ],
+          "type": "object"
+        },
+        "distributionTrustPosture": {
+          "additionalProperties": false,
+          "properties": {
+            "format": {
+              "const": "json",
+              "type": "string"
+            },
+            "name": {
+              "pattern": "^usagehub-distribution-trust-(?:mac|win|linux)-(?:arm64|x64)\\.json$",
+              "type": "string"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "sizeBytes": {
+              "$ref": "#/$defs/positiveInteger"
+            }
+          },
+          "required": [
+            "format",
+            "name",
+            "sha256",
+            "sizeBytes"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "collector",
+        "distributionTrustPosture",
+        "finalContainer"
+      ],
+      "type": "object"
+    },
+    "buildIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "const": "product-build-identity.v1.json",
+              "type": "string"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "sizeBytes": {
+              "$ref": "#/$defs/positiveInteger"
+            }
+          },
+          "required": [
+            "name",
+            "sha256",
+            "sizeBytes"
+          ],
+          "type": "object"
+        },
+        "identity": {
+          "$ref": "#/$defs/artifactBuildIdentity"
+        }
+      },
+      "required": [
+        "artifact",
+        "identity"
+      ],
+      "type": "object"
+    },
+    "checks": {
+      "additionalProperties": false,
+      "properties": {
+        "actionPins": {
+          "$ref": "#/$defs/passed"
+        },
+        "productVersionTruth": {
+          "$ref": "#/$defs/passed"
+        },
+        "collectorStatus": {
+          "$ref": "#/$defs/passed"
+        },
+        "desktopDependencyAudit": {
+          "$ref": "#/$defs/passed"
+        },
+        "desktopTests": {
+          "$ref": "#/$defs/passed"
+        },
+        "desktopRuntimeCapabilitySmoke": {
+          "$ref": "#/$defs/passed"
+        },
+        "distributionTrustPosture": {
+          "$ref": "#/$defs/passed"
+        },
+        "packagedBuildIdentity": {
+          "$ref": "#/$defs/passed"
+        },
+        "finalLinuxContainerAudit": {
+          "$ref": "#/$defs/platformCheck"
+        },
+        "finalMacContainerAudit": {
+          "$ref": "#/$defs/platformCheck"
+        },
+        "finalWindowsContainerAudit": {
+          "$ref": "#/$defs/platformCheck"
+        },
+        "gatewaySelfTest": {
+          "$ref": "#/$defs/passed"
+        },
+        "pythonContracts": {
+          "$ref": "#/$defs/passed"
+        },
+        "runnerArchitecture": {
+          "$ref": "#/$defs/passed"
+        },
+        "unpackedPackageAudit": {
+          "$ref": "#/$defs/passed"
+        },
+        "webBuild": {
+          "$ref": "#/$defs/passed"
+        },
+        "webDependencyAudit": {
+          "$ref": "#/$defs/passed"
+        },
+        "webTests": {
+          "$ref": "#/$defs/passed"
+        },
+        "windowsNativeProcessTests": {
+          "$ref": "#/$defs/platformCheck"
+        }
+      },
+      "required": [
+        "actionPins",
+        "productVersionTruth",
+        "runnerArchitecture",
+        "pythonContracts",
+        "windowsNativeProcessTests",
+        "webDependencyAudit",
+        "webTests",
+        "webBuild",
+        "desktopDependencyAudit",
+        "desktopTests",
+        "collectorStatus",
+        "gatewaySelfTest",
+        "desktopRuntimeCapabilitySmoke",
+        "unpackedPackageAudit",
+        "distributionTrustPosture",
+        "packagedBuildIdentity",
+        "finalMacContainerAudit",
+        "finalWindowsContainerAudit",
+        "finalLinuxContainerAudit"
+      ],
+      "type": "object"
+    },
+    "distributionTrust": {
+      "additionalProperties": false,
+      "properties": {
+        "platformCodeSigning": {
+          "const": "not_verified",
+          "type": "string"
+        },
+        "platformNotarization": {
+          "enum": [
+            "not_applicable",
+            "not_verified"
+          ],
+          "type": "string"
+        },
+        "policy": {
+          "const": "native-distribution-trust-nonclaim/v1",
+          "type": "string"
+        },
+        "provenanceAttestation": {
+          "const": "not_verified",
+          "type": "string"
+        },
+        "releaseEligible": {
+          "const": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "platformCodeSigning",
+        "platformNotarization",
+        "policy",
+        "provenanceAttestation",
+        "releaseEligible"
+      ],
+      "type": "object"
+    },
+    "nativeLifecycleEvidence": {
+      "$ref": "#/$defs/nativeLifecycleEvidence"
+    },
+    "observerSourceEvidence": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "sources": {
+              "prefixItems": [
+                {
+                  "properties": {
+                    "status": {
+                      "const": "verified"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                },
+                {
+                  "properties": {
+                    "status": {
+                      "const": "verified"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              ]
+            },
+            "verifiedSourceCount": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "sources": {
+              "prefixItems": [
+                {
+                  "properties": {
+                    "status": {
+                      "const": "verified"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                },
+                {
+                  "properties": {
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              ]
+            },
+            "verifiedSourceCount": {
+              "const": 1
+            }
+          }
+        },
+        {
+          "properties": {
+            "sources": {
+              "prefixItems": [
+                {
+                  "properties": {
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                },
+                {
+                  "properties": {
+                    "status": {
+                      "const": "verified"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              ]
+            },
+            "verifiedSourceCount": {
+              "const": 1
+            }
+          }
+        },
+        {
+          "properties": {
+            "sources": {
+              "prefixItems": [
+                {
+                  "properties": {
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                },
+                {
+                  "properties": {
+                    "status": {
+                      "const": "unverified"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              ]
+            },
+            "verifiedSourceCount": {
+              "const": 0
+            }
+          }
+        }
+      ],
+      "properties": {
+        "evaluatedSourceCount": {
+          "const": 2
+        },
+        "evidenceClass": {
+          "const": "github_hosted_native_fixture"
+        },
+        "platform": {
+          "enum": [
+            "windows",
+            "linux"
+          ]
+        },
+        "runnerEnvironment": {
+          "const": "github-hosted"
+        },
+        "schemaVersion": {
+          "const": "observer-source-native-evidence/v1"
+        },
+        "sources": {
+          "items": false,
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/observerMoonshotSource"
+            },
+            {
+              "$ref": "#/$defs/observerCodexSource"
+            }
+          ],
+          "type": "array"
+        },
+        "verifiedSourceCount": {
+          "maximum": 2,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "evidenceClass",
+        "platform",
+        "runnerEnvironment",
+        "evaluatedSourceCount",
+        "verifiedSourceCount",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "privacy": {
+      "additionalProperties": false,
+      "properties": {
+        "finalExtractedPackageAudit": {
+          "$ref": "#/$defs/passed"
+        },
+        "finalExtractedPackageAuditPolicy": {
+          "const": "release-artifact-audit/v1",
+          "type": "string"
+        },
+        "frozenSmokeRealCredentialReads": {
+          "const": 0,
+          "type": "integer"
+        },
+        "frozenSmokeRealProviderNetworkCalls": {
+          "const": 0,
+          "type": "integer"
+        },
+        "policy": {
+          "const": "native-ci-evidence-allowlist/v1",
+          "type": "string"
+        }
+      },
+      "required": [
+        "finalExtractedPackageAudit",
+        "finalExtractedPackageAuditPolicy",
+        "frozenSmokeRealCredentialReads",
+        "frozenSmokeRealProviderNetworkCalls",
+        "policy"
+      ],
+      "type": "object"
+    },
+    "product": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "const": "UsageHub",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "runner": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {
+          "enum": [
+            "ARM64",
+            "X64"
+          ],
+          "type": "string"
+        },
+        "environment": {
+          "const": "github-hosted",
+          "type": "string"
+        },
+        "os": {
+          "enum": [
+            "Linux",
+            "Windows",
+            "macOS"
+          ],
+          "type": "string"
+        },
+        "requestedLabel": {
+          "enum": [
+            "macos-15",
+            "macos-15-intel",
+            "ubuntu-24.04",
+            "ubuntu-24.04-arm",
+            "windows-11-arm",
+            "windows-2025"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestedLabel",
+        "environment",
+        "os",
+        "arch"
+      ],
+      "type": "object"
+    },
+    "schemaVersion": {
+      "const": 1,
+      "type": "integer"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "enum": [
+            "pull_request",
+            "push",
+            "workflow_dispatch"
+          ],
+          "type": "string"
+        },
+        "runAttempt": {
+          "pattern": "^[1-9][0-9]*$",
+          "type": "string"
+        },
+        "runId": {
+          "pattern": "^[1-9][0-9]*$",
+          "type": "string"
+        },
+        "sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "event",
+        "runId",
+        "runAttempt"
+      ],
+      "type": "object"
+    },
+    "target": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {
+          "enum": [
+            "arm64",
+            "x64"
+          ],
+          "type": "string"
+        },
+        "builderArch": {
+          "enum": [
+            "arm64",
+            "x64"
+          ],
+          "type": "string"
+        },
+        "collectorMember": {
+          "enum": [
+            "collector/openusage-collector",
+            "collector/openusage-collector.exe"
+          ],
+          "type": "string"
+        },
+        "containerFormat": {
+          "enum": [
+            "appimage",
+            "dmg",
+            "nsis"
+          ],
+          "type": "string"
+        },
+        "platform": {
+          "enum": [
+            "linux",
+            "mac",
+            "win"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform",
+        "arch",
+        "builderArch",
+        "containerFormat",
+        "collectorMember"
+      ],
+      "type": "object"
+    },
+    "toolchain": {
+      "additionalProperties": false,
+      "properties": {
+        "electronBuilder": {
+          "const": "26.15.3",
+          "type": "string"
+        },
+        "node": {
+          "const": "24.16.0",
+          "type": "string"
+        },
+        "pyInstaller": {
+          "const": "6.22.0",
+          "type": "string"
+        },
+        "python": {
+          "pattern": "^3\\.13\\.[0-9]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "python",
+        "node",
+        "pyInstaller",
+        "electronBuilder"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "source",
+    "runner",
+    "target",
+    "product",
+    "toolchain",
+    "artifacts",
+    "buildIdentity",
+    "checks",
+    "distributionTrust",
+    "privacy"
+  ],
+  "title": "OpenUsage Bar native desktop CI evidence v1",
+  "type": "object",
+  "x-openusage-maxUtf8Bytes": 131072,
+  "$defs": {
+    "artifactBuildIdentity": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "publicationStatus": {
+                  "const": "not_published"
+                },
+                "releaseEligible": {
+                  "const": false
+                },
+                "releaseStage": {
+                  "const": "candidate"
+                }
+              }
+            },
+            {
+              "properties": {
+                "publicationStatus": {
+                  "const": "not_published"
+                },
+                "releaseEligible": {
+                  "const": true
+                },
+                "releaseStage": {
+                  "const": "prerelease_ready"
+                }
+              }
+            },
+            {
+              "properties": {
+                "publicationStatus": {
+                  "const": "published_prerelease"
+                },
+                "releaseEligible": {
+                  "const": false
+                },
+                "releaseStage": {
+                  "const": "prerelease_published"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "properties": {
+        "candidateBuild": {
+          "pattern": "^[1-9][0-9]*$",
+          "type": "string"
+        },
+        "candidateVersion": {
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "canaryClock": {
+          "enum": [
+            "not_started",
+            "running",
+            "passed",
+            "blocked"
+          ],
+          "type": "string"
+        },
+        "canaryQualifiedMachines": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "canaryTargetMachines": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "channel": {
+          "enum": [
+            "alpha",
+            "beta",
+            "rc"
+          ],
+          "type": "string"
+        },
+        "displayName": {
+          "const": "UsageHub",
+          "type": "string"
+        },
+        "publicationStatus": {
+          "enum": [
+            "not_published",
+            "published_prerelease"
+          ],
+          "type": "string"
+        },
+        "publishedBaselineTag": {
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "publishedBaselineVersion": {
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "releaseEligible": {
+          "type": "boolean"
+        },
+        "releaseStage": {
+          "enum": [
+            "candidate",
+            "prerelease_ready",
+            "prerelease_published"
+          ],
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "artifact-build-identity/v1",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidateBuild",
+        "candidateVersion",
+        "canaryClock",
+        "canaryQualifiedMachines",
+        "canaryTargetMachines",
+        "channel",
+        "displayName",
+        "publicationStatus",
+        "publishedBaselineTag",
+        "publishedBaselineVersion",
+        "releaseEligible",
+        "releaseStage",
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "lifecycleArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-(win-x64\\.exe|linux-x86_64\\.AppImage)$",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": ["name", "sha256", "sizeBytes"],
+      "type": "object"
+    },
+    "lifecycleChecks": {
+      "additionalProperties": false,
+      "properties": {
+        "finalStateRemoved": {"const": "passed", "type": "string"},
+        "firstRun": {"const": "passed", "type": "string"},
+        "install": {"const": "passed", "type": "string"},
+        "observeDefault": {"const": "passed", "type": "string"},
+        "reinstall": {"const": "passed", "type": "string"},
+        "serviceRegistered": {"const": "passed", "type": "string"},
+        "serviceRemoved": {"const": "passed", "type": "string"},
+        "uninstallDelete": {"const": "passed", "type": "string"},
+        "uninstallPreserve": {"const": "passed", "type": "string"}
+      },
+      "required": [
+        "finalStateRemoved",
+        "firstRun",
+        "install",
+        "observeDefault",
+        "reinstall",
+        "serviceRegistered",
+        "serviceRemoved",
+        "uninstallDelete",
+        "uninstallPreserve"
+      ],
+      "type": "object"
+    },
+    "lifecycleGateway": {
+      "additionalProperties": false,
+      "properties": {
+        "cacheCreated": {"const": false, "type": "boolean"},
+        "defaultMode": {"const": "observe", "type": "string"},
+        "listenerActive": {
+          "const": false,
+          "description": "False means the canonical default Gateway endpoint was inactive during the bounded observation; it does not prove custom Gateway endpoints absent.",
+          "type": "boolean"
+        },
+        "telemetryCreated": {"const": false, "type": "boolean"}
+      },
+      "required": [
+        "cacheCreated",
+        "defaultMode",
+        "listenerActive",
+        "telemetryCreated"
+      ],
+      "type": "object"
+    },
+    "lifecyclePersistence": {
+      "additionalProperties": false,
+      "properties": {
+        "credentialsOnPreserve": {"const": "not_created", "type": "string"},
+        "gatewayCacheOnPreserve": {"const": "not_created", "type": "string"},
+        "gatewayTelemetryOnPreserve": {"const": "not_created", "type": "string"},
+        "ledgerOnPreserve": {"const": "preserved", "type": "string"},
+        "stateAfterDelete": {"const": "removed", "type": "string"}
+      },
+      "required": [
+        "credentialsOnPreserve",
+        "gatewayCacheOnPreserve",
+        "gatewayTelemetryOnPreserve",
+        "ledgerOnPreserve",
+        "stateAfterDelete"
+      ],
+      "type": "object"
+    },
+    "lifecyclePrivacy": {
+      "additionalProperties": false,
+      "properties": {
+        "providerCredentialReads": {"const": 0, "type": "integer"},
+        "providerNetworkCalls": {"const": 0, "type": "integer"}
+      },
+      "required": ["providerCredentialReads", "providerNetworkCalls"],
+      "type": "object"
+    },
+    "lifecycleTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {"const": "x64", "type": "string"},
+        "platform": {"enum": ["linux", "win"], "type": "string"},
+        "serviceManager": {
+          "enum": ["systemd_user", "task_scheduler"],
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "arch": {"const": "x64"},
+            "platform": {"const": "win"},
+            "serviceManager": {"const": "task_scheduler"}
+          }
+        },
+        {
+          "properties": {
+            "arch": {"const": "x64"},
+            "platform": {"const": "linux"},
+            "serviceManager": {"const": "systemd_user"}
+          }
+        }
+      ],
+      "required": ["arch", "platform", "serviceManager"],
+      "type": "object"
+    },
+    "nativeLifecycleEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {"$ref": "#/$defs/lifecycleArtifact"},
+        "checks": {"$ref": "#/$defs/lifecycleChecks"},
+        "gateway": {"$ref": "#/$defs/lifecycleGateway"},
+        "object": {"const": "native.lifecycle", "type": "string"},
+        "observedAt": {
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}Z$",
+          "type": "string"
+        },
+        "persistence": {"$ref": "#/$defs/lifecyclePersistence"},
+        "privacy": {"$ref": "#/$defs/lifecyclePrivacy"},
+        "releaseEligible": {"const": false, "type": "boolean"},
+        "schemaVersion": {
+          "const": "native-lifecycle-evidence/v1",
+          "type": "string"
+        },
+        "sourceCommit": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "synthetic": {"const": false, "type": "boolean"},
+        "target": {"$ref": "#/$defs/lifecycleTarget"}
+      },
+      "required": [
+        "artifact",
+        "checks",
+        "gateway",
+        "object",
+        "observedAt",
+        "persistence",
+        "privacy",
+        "releaseEligible",
+        "schemaVersion",
+        "sourceCommit",
+        "synthetic",
+        "target"
+      ],
+      "type": "object"
+    },
+    "macRow": {
+      "not": {
+        "anyOf": [
+          {"required": ["nativeLifecycleEvidence"]},
+          {"required": ["observerSourceEvidence"]}
+        ]
+      },
+      "properties": {
+        "artifacts": {
+          "properties": {
+            "collector": {
+              "properties": {
+                "format": {
+                  "const": "macho64"
+                },
+                "name": {
+                  "const": "openusage-collector"
+                }
+              }
+            },
+            "finalContainer": {
+              "properties": {
+                "format": {
+                  "const": "dmg"
+                }
+              }
+            }
+          }
+        },
+        "runner": {
+          "properties": {
+            "os": {
+              "const": "macOS"
+            }
+          }
+        },
+        "target": {
+          "properties": {
+            "collectorMember": {
+              "const": "collector/openusage-collector"
+            },
+            "containerFormat": {
+              "const": "dmg"
+            },
+            "platform": {
+              "const": "mac"
+            }
+          }
+        }
+      }
+    },
+    "winRow": {
+      "properties": {
+        "artifacts": {
+          "properties": {
+            "collector": {
+              "properties": {
+                "format": {
+                  "const": "pe32+"
+                },
+                "name": {
+                  "const": "openusage-collector.exe"
+                }
+              }
+            },
+            "finalContainer": {
+              "properties": {
+                "format": {
+                  "const": "nsis"
+                }
+              }
+            }
+          }
+        },
+        "observerSourceEvidence": {
+          "properties": {
+            "platform": {
+              "const": "windows"
+            }
+          }
+        },
+        "nativeLifecycleEvidence": {
+          "properties": {
+            "target": {
+              "properties": {
+                "platform": {"const": "win"},
+                "serviceManager": {"const": "task_scheduler"}
+              }
+            }
+          }
+        },
+        "runner": {
+          "properties": {
+            "os": {
+              "const": "Windows"
+            }
+          }
+        },
+        "target": {
+          "properties": {
+            "collectorMember": {
+              "const": "collector/openusage-collector.exe"
+            },
+            "containerFormat": {
+              "const": "nsis"
+            },
+            "platform": {
+              "const": "win"
+            }
+          }
+        }
+      }
+    },
+    "linuxRow": {
+      "properties": {
+        "artifacts": {
+          "properties": {
+            "collector": {
+              "properties": {
+                "format": {
+                  "const": "elf64"
+                },
+                "name": {
+                  "const": "openusage-collector"
+                }
+              }
+            },
+            "finalContainer": {
+              "properties": {
+                "format": {
+                  "const": "appimage"
+                }
+              }
+            }
+          }
+        },
+        "observerSourceEvidence": {
+          "properties": {
+            "platform": {
+              "const": "linux"
+            }
+          }
+        },
+        "nativeLifecycleEvidence": {
+          "properties": {
+            "target": {
+              "properties": {
+                "platform": {"const": "linux"},
+                "serviceManager": {"const": "systemd_user"}
+              }
+            }
+          }
+        },
+        "runner": {
+          "properties": {
+            "os": {
+              "const": "Linux"
+            }
+          }
+        },
+        "target": {
+          "properties": {
+            "collectorMember": {
+              "const": "collector/openusage-collector"
+            },
+            "containerFormat": {
+              "const": "appimage"
+            },
+            "platform": {
+              "const": "linux"
+            }
+          }
+        }
+      }
+    },
+    "macX64Row": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/macRow"
+        },
+        {
+          "$ref": "#/$defs/x64Row"
+        },
+        {
+          "properties": {
+            "artifacts": {
+              "properties": {
+                "finalContainer": {
+                  "properties": {
+                    "name": {
+                      "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-mac-x64\\.dmg$"
+                    }
+                  }
+                }
+              }
+            },
+            "runner": {
+              "properties": {
+                "requestedLabel": {
+                  "const": "macos-15-intel"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "macArm64Row": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/macRow"
+        },
+        {
+          "$ref": "#/$defs/arm64Row"
+        },
+        {
+          "properties": {
+            "artifacts": {
+              "properties": {
+                "finalContainer": {
+                  "properties": {
+                    "name": {
+                      "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-mac-arm64\\.dmg$"
+                    }
+                  }
+                }
+              }
+            },
+            "runner": {
+              "properties": {
+                "requestedLabel": {
+                  "const": "macos-15"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "winX64Row": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/winRow"
+        },
+        {
+          "$ref": "#/$defs/x64Row"
+        },
+        {
+          "properties": {
+            "artifacts": {
+              "properties": {
+                "finalContainer": {
+                  "properties": {
+                    "name": {
+                      "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-win-x64\\.exe$"
+                    }
+                  }
+                }
+              }
+            },
+            "runner": {
+              "properties": {
+                "requestedLabel": {
+                  "const": "windows-2025"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "winArm64Row": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/winRow"
+        },
+        {
+          "$ref": "#/$defs/arm64Row"
+        },
+        {
+          "properties": {
+            "artifacts": {
+              "properties": {
+                "finalContainer": {
+                  "properties": {
+                    "name": {
+                      "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-win-arm64\\.exe$"
+                    }
+                  }
+                }
+              }
+            },
+            "runner": {
+              "properties": {
+                "requestedLabel": {
+                  "const": "windows-11-arm"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "linuxX64Row": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/linuxRow"
+        },
+        {
+          "$ref": "#/$defs/x64Row"
+        },
+        {
+          "properties": {
+            "artifacts": {
+              "properties": {
+                "finalContainer": {
+                  "properties": {
+                    "name": {
+                      "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-linux-x86_64\\.AppImage$"
+                    }
+                  }
+                }
+              }
+            },
+            "runner": {
+              "properties": {
+                "requestedLabel": {
+                  "const": "ubuntu-24.04"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "linuxArm64Row": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/linuxRow"
+        },
+        {
+          "$ref": "#/$defs/arm64Row"
+        },
+        {
+          "properties": {
+            "artifacts": {
+              "properties": {
+                "finalContainer": {
+                  "properties": {
+                    "name": {
+                      "pattern": "^UsageHub-[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?-linux-arm64\\.AppImage$"
+                    }
+                  }
+                }
+              }
+            },
+            "runner": {
+              "properties": {
+                "requestedLabel": {
+                  "const": "ubuntu-24.04-arm"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "x64Row": {
+      "properties": {
+        "artifacts": {
+          "properties": {
+            "collector": {
+              "properties": {
+                "arch": {
+                  "const": "x64"
+                }
+              }
+            }
+          }
+        },
+        "runner": {
+          "properties": {
+            "arch": {
+              "const": "X64"
+            }
+          }
+        },
+        "target": {
+          "properties": {
+            "arch": {
+              "const": "x64"
+            },
+            "builderArch": {
+              "const": "x64"
+            }
+          }
+        }
+      }
+    },
+    "arm64Row": {
+      "not": {
+        "required": ["nativeLifecycleEvidence"]
+      },
+      "properties": {
+        "artifacts": {
+          "properties": {
+            "collector": {
+              "properties": {
+                "arch": {
+                  "const": "arm64"
+                }
+              }
+            }
+          }
+        },
+        "runner": {
+          "properties": {
+            "arch": {
+              "const": "ARM64"
+            }
+          }
+        },
+        "target": {
+          "properties": {
+            "arch": {
+              "const": "arm64"
+            },
+            "builderArch": {
+              "const": "arm64"
+            }
+          }
+        }
+      }
+    },
+    "macChecks": {
+      "properties": {
+        "checks": {
+          "properties": {
+            "finalLinuxContainerAudit": {
+              "const": "not_applicable"
+            },
+            "finalMacContainerAudit": {
+              "const": "passed"
+            },
+            "finalWindowsContainerAudit": {
+              "const": "not_applicable"
+            },
+            "windowsNativeProcessTests": {
+              "const": "not_applicable"
+            }
+          }
+        },
+        "target": {
+          "properties": {
+            "platform": {
+              "const": "mac"
+            }
+          }
+        }
+      }
+    },
+    "winChecks": {
+      "properties": {
+        "checks": {
+          "properties": {
+            "finalLinuxContainerAudit": {
+              "const": "not_applicable"
+            },
+            "finalMacContainerAudit": {
+              "const": "not_applicable"
+            },
+            "finalWindowsContainerAudit": {
+              "const": "passed"
+            },
+            "windowsNativeProcessTests": {
+              "const": "passed"
+            }
+          }
+        },
+        "target": {
+          "properties": {
+            "platform": {
+              "const": "win"
+            }
+          }
+        }
+      }
+    },
+    "linuxChecks": {
+      "properties": {
+        "checks": {
+          "properties": {
+            "finalLinuxContainerAudit": {
+              "const": "passed"
+            },
+            "finalMacContainerAudit": {
+              "const": "not_applicable"
+            },
+            "finalWindowsContainerAudit": {
+              "const": "not_applicable"
+            },
+            "windowsNativeProcessTests": {
+              "const": "not_applicable"
+            }
+          }
+        },
+        "target": {
+          "properties": {
+            "platform": {
+              "const": "linux"
+            }
+          }
+        }
+      }
+    },
+    "observerMoonshotSource": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "reasonCode": {
+              "const": "all_required_seams_verified"
+            },
+            "seams": {
+              "properties": {
+                "credentialBackend": {
+                  "const": "verified"
+                },
+                "factParser": {
+                  "const": "verified"
+                }
+              }
+            },
+            "status": {
+              "const": "verified"
+            }
+          }
+        },
+        {
+          "properties": {
+            "reasonCode": {
+              "const": "required_seam_unverified"
+            },
+            "seams": {
+              "properties": {
+                "credentialBackend": {
+                  "const": "not_verified"
+                },
+                "factParser": {
+                  "const": "verified"
+                }
+              }
+            },
+            "status": {
+              "const": "unverified"
+            }
+          }
+        },
+        {
+          "properties": {
+            "reasonCode": {
+              "const": "required_seam_unverified"
+            },
+            "seams": {
+              "properties": {
+                "credentialBackend": {
+                  "const": "verified"
+                },
+                "factParser": {
+                  "const": "not_verified"
+                }
+              }
+            },
+            "status": {
+              "const": "unverified"
+            }
+          }
+        },
+        {
+          "properties": {
+            "reasonCode": {
+              "const": "required_seam_unverified"
+            },
+            "seams": {
+              "properties": {
+                "credentialBackend": {
+                  "const": "not_verified"
+                },
+                "factParser": {
+                  "const": "not_verified"
+                }
+              }
+            },
+            "status": {
+              "const": "unverified"
+            }
+          }
+        }
+      ],
+      "properties": {
+        "catalogSourceId": {
+          "const": "moonshot_official_api"
+        },
+        "familyId": {
+          "const": "moonshot"
+        },
+        "reasonCode": {
+          "enum": [
+            "all_required_seams_verified",
+            "required_seam_unverified"
+          ]
+        },
+        "runtimeSourceIds": {
+          "const": [
+            "moonshot.balance"
+          ]
+        },
+        "seams": {
+          "additionalProperties": false,
+          "properties": {
+            "credentialBackend": {
+              "enum": [
+                "not_verified",
+                "verified"
+              ]
+            },
+            "executableDiscovery": {
+              "const": "not_applicable"
+            },
+            "factParser": {
+              "enum": [
+                "not_verified",
+                "verified"
+              ]
+            },
+            "localFileDiscovery": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "executableDiscovery",
+            "localFileDiscovery",
+            "credentialBackend",
+            "factParser"
+          ],
+          "type": "object"
+        },
+        "status": {
+          "enum": [
+            "unverified",
+            "verified"
+          ]
+        }
+      },
+      "required": [
+        "familyId",
+        "catalogSourceId",
+        "runtimeSourceIds",
+        "status",
+        "reasonCode",
+        "seams"
+      ],
+      "type": "object"
+    },
+    "observerCodexSource": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "reasonCode": {
+              "const": "all_required_seams_verified"
+            },
+            "seams": {
+              "properties": {
+                "factParser": {
+                  "const": "verified"
+                },
+                "localFileDiscovery": {
+                  "const": "verified"
+                }
+              }
+            },
+            "status": {
+              "const": "verified"
+            }
+          }
+        },
+        {
+          "properties": {
+            "reasonCode": {
+              "const": "required_seam_unverified"
+            },
+            "seams": {
+              "properties": {
+                "factParser": {
+                  "const": "verified"
+                },
+                "localFileDiscovery": {
+                  "const": "not_verified"
+                }
+              }
+            },
+            "status": {
+              "const": "unverified"
+            }
+          }
+        },
+        {
+          "properties": {
+            "reasonCode": {
+              "const": "required_seam_unverified"
+            },
+            "seams": {
+              "properties": {
+                "factParser": {
+                  "const": "not_verified"
+                },
+                "localFileDiscovery": {
+                  "const": "verified"
+                }
+              }
+            },
+            "status": {
+              "const": "unverified"
+            }
+          }
+        },
+        {
+          "properties": {
+            "reasonCode": {
+              "const": "required_seam_unverified"
+            },
+            "seams": {
+              "properties": {
+                "factParser": {
+                  "const": "not_verified"
+                },
+                "localFileDiscovery": {
+                  "const": "not_verified"
+                }
+              }
+            },
+            "status": {
+              "const": "unverified"
+            }
+          }
+        }
+      ],
+      "properties": {
+        "catalogSourceId": {
+          "const": "codex_local_log"
+        },
+        "familyId": {
+          "const": "codex"
+        },
+        "reasonCode": {
+          "enum": [
+            "all_required_seams_verified",
+            "required_seam_unverified"
+          ]
+        },
+        "runtimeSourceIds": {
+          "const": [
+            "codex.local_rate_limits",
+            "codex.local_sessions"
+          ]
+        },
+        "seams": {
+          "additionalProperties": false,
+          "properties": {
+            "credentialBackend": {
+              "const": "not_applicable"
+            },
+            "executableDiscovery": {
+              "const": "not_applicable"
+            },
+            "factParser": {
+              "enum": [
+                "not_verified",
+                "verified"
+              ]
+            },
+            "localFileDiscovery": {
+              "enum": [
+                "not_verified",
+                "verified"
+              ]
+            }
+          },
+          "required": [
+            "executableDiscovery",
+            "localFileDiscovery",
+            "credentialBackend",
+            "factParser"
+          ],
+          "type": "object"
+        },
+        "status": {
+          "enum": [
+            "unverified",
+            "verified"
+          ]
+        }
+      },
+      "required": [
+        "familyId",
+        "catalogSourceId",
+        "runtimeSourceIds",
+        "status",
+        "reasonCode",
+        "seams"
+      ],
+      "type": "object"
+    },
+    "passed": {
+      "const": "passed",
+      "type": "string"
+    },
+    "platformCheck": {
+      "enum": [
+        "not_applicable",
+        "passed"
+      ],
+      "type": "string"
+    },
+    "positiveInteger": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    }
+  }
+}

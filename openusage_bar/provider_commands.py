@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Callable, TextIO
+from typing import Callable, Protocol, TextIO
 
 from .config import (
     ID_PATTERN,
@@ -13,7 +13,7 @@ from .config import (
     ProviderConfigStore,
     StepPlanConfig,
 )
-from .keychain import MacOSKeychain
+from .keychain import default_keychain
 from .network import resolve_public_addresses
 
 
@@ -32,6 +32,12 @@ MUTATION_V2_KINDS = frozenset({
     "minimax", "moonshot", "step_plan", "openai_organization", "generic",
     "daily_usage_feed",
 })
+
+
+class ProviderCredentialStore(Protocol):
+    def get(self, account: str) -> str | None: ...
+    def set(self, account: str, secret: str) -> None: ...
+    def delete(self, account: str) -> None: ...
 
 
 def _write_response(output: TextIO, ok: bool, message: str) -> int:
@@ -174,7 +180,7 @@ def run_provider_mutation(
     output_stream: TextIO,
     *,
     store: ProviderConfigStore | None = None,
-    keychain: MacOSKeychain | None = None,
+    keychain: ProviderCredentialStore | None = None,
     resolver: Callable[[str], list[str]] = resolve_public_addresses,
 ) -> int:
     """Apply one allowlisted provider mutation from a private stdin pipe.
@@ -191,7 +197,7 @@ def run_provider_mutation(
             raise ValueError("Provider edit request is invalid")
 
         resolved_store = store or ProviderConfigStore()
-        resolved_keychain = keychain or MacOSKeychain()
+        resolved_keychain = keychain if keychain is not None else default_keychain()
         if payload.get("version") == 2:
             _exact_object(payload, MUTATION_V2_FIELDS, "Provider mutation request")
             if payload.get("action") not in MUTATION_V2_ACTIONS:
@@ -259,3 +265,113 @@ def run_provider_mutation(
         return _write_response(output_stream, False, "Provider edit request is invalid")
     except Exception:
         return _write_response(output_stream, False, "Provider connection could not be updated")
+
+
+# ---------------------------------------------------------------------------
+# Provider config presets (CC Switch-style agent config write)
+# ---------------------------------------------------------------------------
+
+PROVIDER_CONFIG_REQUEST_FIELDS = frozenset({
+    "version", "action", "presetId", "apiKey", "baseUrl", "model",
+})
+PROVIDER_CONFIG_ACTIONS = frozenset({"provider_config_apply"})
+
+
+def _read_bounded_json(input_stream: TextIO, *, limit: int = MAX_REQUEST_BYTES) -> dict:
+    raw = input_stream.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError("Provider config request is too large")
+    payload = json.loads(raw) if raw.strip() else {}
+    if not isinstance(payload, dict):
+        raise ValueError("Provider config request is invalid")
+    return payload
+
+
+def run_provider_config_apply(input_stream: TextIO, output_stream: TextIO) -> int:
+    from .provider_config import apply_provider_config
+
+    try:
+        payload = _read_bounded_json(input_stream)
+        if (
+            payload.get("version") != 1
+            or payload.get("action") not in PROVIDER_CONFIG_ACTIONS
+            or set(payload) != PROVIDER_CONFIG_REQUEST_FIELDS
+        ):
+            raise ValueError("Provider config request is invalid")
+        preset_id = payload.get("presetId")
+        api_key = payload.get("apiKey")
+        base_url = payload.get("baseUrl")
+        model = payload.get("model")
+        if not isinstance(preset_id, str):
+            raise ValueError("Provider config request is invalid")
+        result = apply_provider_config(
+            preset_id=preset_id,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+        )
+    except (ValueError, OSError):
+        json.dump(
+            {"version": 1, "ok": False, "code": "failed"},
+            output_stream,
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        output_stream.write("\n")
+        output_stream.flush()
+        return 0
+    json.dump(
+        {
+            "version": 1,
+            "ok": True,
+            "code": "ok",
+            "agent": result.agent,
+            "presetId": result.preset_id,
+            "name": result.name,
+            "category": result.category,
+            "status": result.status,
+        },
+        output_stream,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    output_stream.write("\n")
+    output_stream.flush()
+    return 0
+
+
+def run_provider_config_list(output_stream: TextIO) -> int:
+    from .provider_config import load_presets
+
+    try:
+        presets = load_presets()
+    except (ValueError, OSError):
+        _write_response(output_stream, False, "Provider config presets unavailable.")
+        return 0
+    json.dump(
+        {
+            "version": 1,
+            "ok": True,
+            "presets": [
+                {
+                    "presetId": preset.preset_id,
+                    "name": preset.name,
+                    "category": preset.category,
+                    "agent": preset.agent,
+                    "familyId": preset.family_id,
+                    "consoleUrl": preset.console_url,
+                    "apiKeyUrl": preset.api_key_url,
+                    "baseUrl": preset.template_value("base_url"),
+                    "model": preset.template_value("model"),
+                    "allowCustomEndpoints": preset.allow_custom_endpoints,
+                }
+                for preset in presets
+            ],
+        },
+        output_stream,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    output_stream.write("\n")
+    output_stream.flush()
+    return 0

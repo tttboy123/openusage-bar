@@ -409,7 +409,7 @@
     },
     {
       "id": "codex",
-      "display_name": "Codex",
+      "display_name": "ChatGPT",
       "category": "subscription",
       "metric_families": [
         "subscription_quota",
@@ -443,7 +443,9 @@
           "freshness_seconds": 300,
           "credential_type": "local",
           "operating_systems": [
-            "macos"
+            "linux",
+            "macos",
+            "windows"
           ],
           "stability": "stable",
           "provenance": "provider_local",
@@ -1365,6 +1367,7 @@
           "credential_type": "api_key",
           "credential_scope": "moonshot_api_key",
           "operating_systems": [
+            "linux",
             "macos"
           ],
           "stability": "stable",
@@ -1691,6 +1694,26 @@
         "service_status": "unknown"
       },
       "sources": [
+        {
+          "source_id": "opencode_local_log",
+          "kind": "local_log",
+          "timeout_seconds": 12,
+          "freshness_seconds": 300,
+          "credential_type": "local",
+          "operating_systems": [
+            "macos"
+          ],
+          "stability": "stable",
+          "provenance": "provider_local",
+          "fact_families": [
+            "detection",
+            "token_activity"
+          ],
+          "authority": "provider_local",
+          "account_scope": "local_profile",
+          "model_scope": "mixed",
+          "verification": "live_account"
+        },
         {
           "source_id": "openusage",
           "kind": "openusage",

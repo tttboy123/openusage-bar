@@ -1,0 +1,26 @@
+{
+  "provider": "deepseek",
+  "endpoint": "https://api.deepseek.com/chat/completions",
+  "request": {
+    "model": "deepseek-chat",
+    "messages": [
+      {
+        "role": "user",
+        "content": "hello"
+      }
+    ]
+  },
+  "response": {
+    "id": "chat-1",
+    "object": "chat.completion",
+    "choices": []
+  },
+  "stream": {
+    "wire": "sse",
+    "content_type": "text/event-stream",
+    "chunks": [
+      "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+      "data: [DONE]\n\n"
+    ]
+  }
+}

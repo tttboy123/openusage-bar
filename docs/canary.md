@@ -1,14 +1,62 @@
-# OpenUsage Bar 1.0 canary protocol
+# OpenUsage Bar observation canary protocol
 
-OpenUsage Bar does not collect telemetry. The 1.0 canary is a manual,
-opt-in evidence program: a tester runs the checks below and explicitly submits
-the GitHub canary form. Credentials, Provider responses, prompts, model
-responses, account identity, device serial numbers, and raw logs are never
-requested.
+In `observe` mode OpenUsage Bar does not collect request telemetry. This
+observation canary is a manual, opt-in evidence program: a tester runs the
+checks below and explicitly submits the GitHub canary form. Credentials,
+Provider responses, prompts, model responses, account identity, device serial
+numbers, local Gateway databases, and raw logs are never requested.
 
 The canary also verifies the
 [Local API v1 compatibility policy](api/compatibility-v1.md); UI text is not an
 automation interface.
+
+## Observation and future Gateway cohorts
+
+This file currently activates only the existing observation gate: five
+external Apple Silicon Macs, five Provider configuration classes, and 30
+consecutive days. Adding Windows, Linux, or an opt-in Gateway cohort does not
+reduce or replace that gate.
+
+The future 1.0 Gateway cohort is separate and cannot start until a release
+candidate documents and verifies all of the following:
+
+- Gateway is disabled on fresh install and upgrade, and Observer mode performs
+  no Gateway Provider call or credential read;
+- local `gateway-telemetry.sqlite3` contains no prompt, response, credential,
+  cookie, direct identity, or raw Provider payload;
+- cache is separately opted in, bounded by TTL/LRU/size, bypasses uncertain or
+  side-effecting content, and has a tested clear operation;
+- neither Gateway database is copied into diagnostics, canary reports, crash
+  reports, or release artifacts; submitted evidence contains aggregates only;
+- install, first run, upgrade, rollback, uninstall, service recovery,
+  credential failure, advise mode, and Gateway mode pass their published
+  Windows and Linux matrices; and
+- disabling or uninstalling Gateway has documented and tested cache/telemetry
+  deletion semantics without deleting the observation ledger.
+
+The following native matrix defines the future Gateway evidence; it is not an
+active cohort and a simulated platform result cannot satisfy it:
+
+| Scenario | Windows evidence | Linux evidence | Required invariant |
+| --- | --- | --- | --- |
+| Clean install and first run | Signed/attested NSIS install and Task Scheduler state | Attested AppImage first run and systemd user state | Starts in `observe`; no Gateway listener, credential read, Provider call, cache, or telemetry database. |
+| N-1 upgrade and rollback | Install previous candidate, upgrade, then roll back and relaunch | Run previous AppImage state, upgrade, then roll back and relaunch | Ledger revision and Local API v1 remain readable; Gateway remains disabled until the tester opts in again. |
+| Uninstall and reinstall | Uninstall through the Windows package path, then reinstall | Remove AppImage/service registration, then reinstall | Executables and services are removed; observation ledger/credentials follow the published preserve policy; Gateway cache/telemetry follow the separately confirmed delete choice. |
+| Advise mode | Native loopback Should-Send fixture | Native loopback Should-Send fixture | Uses recorded facts only; zero Provider calls and zero Provider credential reads. |
+| Gateway mode | Five offline Provider protocol fixtures through the packaged Collector | Five offline Provider protocol fixtures through the packaged Collector | Separate bearer, credential isolation, bounded stream/cache/fallback behavior, and Observer continuity. |
+| Cache and telemetry clear | Clear each store independently and restart | Clear each store independently and restart | No activity-ledger deletion; cleared content is not replayed or restored from diagnostics. |
+| Credential backend absent or denied | Missing/denied Windows Credential Manager fixture | Missing/denied Secret Service fixture | Credentialed Gateway fails closed with a sanitized error; Observer and Local API stay available. |
+| Diagnostics and artifact exclusion | Scan installed files, exported diagnostics, and crash fixtures | Scan installed files, exported diagnostics, and crash fixtures | No token, Provider credential, prompt, response, raw chunk, direct identity, cache DB, or telemetry DB crosses the boundary. |
+
+Each row requires install scope, OS version, package digest, aggregate pass/fail,
+and UTC timestamps. Reports do not attach the local databases or raw runtime
+logs. A matrix passes only when both native columns pass the same candidate;
+cross-compilation and macOS mocks remain useful CI checks but are not native
+evidence.
+
+Local bounded Gateway telemetry is functional state, not remote analytics. It
+exists only after explicit opt-in, remains on the tester's machine, and is not
+submitted by this protocol.
 
 ## Intake readiness and clock activation
 
@@ -27,8 +75,11 @@ start the public beta. Publishing a candidate may open intake, but until a
 maintainer explicitly activates the timed cohort, the clock state is
 `not_started`.
 
-The current public intake uses the
-[v0.7.1 pre-release](https://github.com/tttboy123/openusage-bar/releases/tag/v0.7.1).
+The repository is preparing the
+[v0.8.6 RC candidate](https://github.com/tttboy123/openusage-bar/releases/tag/v0.8.6).
+That link becomes an intake surface only after the immutable candidate is
+published; preparing metadata does not activate or qualify the cohort. The
+last published baseline remains v0.7.1.
 Accepted-machine counts, configuration-class coverage, blocking incidents and
 the eventual UTC activation timestamp are recorded in
 [Canary tracking issue #33](https://github.com/tttboy123/openusage-bar/issues/33).
@@ -57,19 +108,21 @@ Record pass/fail and UTC date for each event:
 
 1. Verify the ZIP checksum, manifest, SBOM, and GitHub artifact attestation.
    The first command is the trust bootstrap: verify the ZIP before executing
-   files extracted from it. Replace `0.6.0` with the candidate version:
+   files extracted from it. Use the single candidate version below only after
+   the candidate assets have been published and checksummed.
 
+   The current candidate version is `0.8.6`:
    ```bash
-   gh attestation verify OpenUsage-Bar-v0.7.1-macos-arm64.zip \
+   gh attestation verify OpenUsage-Bar-v0.8.6-macos-arm64.zip \
      --repo tttboy123/openusage-bar \
      --signer-workflow \
        tttboy123/openusage-bar/.github/workflows/release.yml \
-     --source-ref refs/tags/v0.7.1 \
+     --source-ref refs/tags/v0.8.6 \
      --deny-self-hosted-runners
-   shasum -a 256 -c OpenUsage-Bar-v0.7.1-macos-arm64.zip.sha256
-   unzip OpenUsage-Bar-v0.7.1-macos-arm64.zip
-   cd OpenUsage-Bar-v0.7.1-macos-arm64
-   scripts/verify_canary_candidate.py --assets-dir .. --version 0.7.1
+   shasum -a 256 -c OpenUsage-Bar-v0.8.6-macos-arm64.zip.sha256
+   unzip OpenUsage-Bar-v0.8.6-macos-arm64.zip
+   cd OpenUsage-Bar-v0.8.6-macos-arm64
+   scripts/verify_canary_candidate.py --assets-dir .. --version 0.8.6
    ```
 
    The packaged verifier requires the expected version and exactly one release

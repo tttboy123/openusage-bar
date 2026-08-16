@@ -1,0 +1,926 @@
+{
+  "$id": "https://openusage.bar/schemas/gateway-response-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenUsage Bar Gateway response v1",
+  "description": "Strict Gateway-native JSON response and SSE event-data contracts for POST /gateway/v1/responses.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/gatewayResponse"
+    },
+    {
+      "$ref": "#/$defs/gatewayError"
+    }
+  ],
+  "$defs": {
+    "apiVersion": {
+      "const": "gateway.openusage/v1"
+    },
+    "provider": {
+      "enum": [
+        "openai",
+        "anthropic",
+        "deepseek",
+        "openrouter",
+        "ollama"
+      ],
+      "type": "string"
+    },
+    "model": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "complete",
+        "interrupted",
+        "uncertain"
+      ],
+      "type": "string"
+    },
+    "sequence": {
+      "maximum": 4095,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "usage": {
+      "additionalProperties": false,
+      "properties": {
+        "inputTokens": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "outputTokens": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "inputTokens",
+        "outputTokens"
+      ],
+      "type": "object"
+    },
+    "nullableUsage": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/usage"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "toolSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "observed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "observed"
+      ],
+      "type": "object"
+    },
+    "observedToolSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "observed": {
+          "const": true
+        }
+      },
+      "required": [
+        "observed"
+      ],
+      "type": "object"
+    },
+    "stableCode": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "type": "string"
+    },
+    "cacheSummary": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "reason"
+                ]
+              },
+              {
+                "required": [
+                  "hintDepth"
+                ]
+              }
+            ]
+          },
+          "properties": {
+            "outcome": {
+              "enum": [
+                "disabled",
+                "miss",
+                "exact_hit"
+              ]
+            }
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "hintDepth"
+            ]
+          },
+          "properties": {
+            "outcome": {
+              "enum": [
+                "bypass",
+                "store_skipped",
+                "store_failed"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        },
+        {
+          "not": {
+            "required": [
+              "reason"
+            ]
+          },
+          "properties": {
+            "outcome": {
+              "const": "prefix_hint"
+            }
+          },
+          "required": [
+            "hintDepth"
+          ]
+        }
+      ],
+      "properties": {
+        "hintDepth": {
+          "maximum": 64,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "outcome": {
+          "enum": [
+            "disabled",
+            "bypass",
+            "miss",
+            "exact_hit",
+            "prefix_hint",
+            "store_skipped",
+            "store_failed"
+          ],
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/stableCode"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "fallbackSummary": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "attempted": {
+                "const": false
+              }
+            },
+            "required": [
+              "attempted"
+            ]
+          },
+          "then": {
+            "properties": {
+              "attemptCount": {
+                "maximum": 1
+              },
+              "finalAction": {
+                "const": "none"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "finalAction": {
+                "enum": [
+                  "retry",
+                  "queue",
+                  "fail",
+                  "degrade_to_cheap"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "finalAction": {
+                "enum": [
+                  "retry",
+                  "degrade_to_cheap"
+                ]
+              }
+            },
+            "required": [
+              "finalAction"
+            ]
+          },
+          "then": {
+            "properties": {
+              "attemptCount": {
+                "const": 2
+              }
+            }
+          }
+        }
+      ],
+      "dependentRequired": {
+        "errorCode": [
+          "retryable"
+        ],
+        "retryable": [
+          "errorCode"
+        ]
+      },
+      "properties": {
+        "attemptCount": {
+          "maximum": 2,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "attempted": {
+          "type": "boolean"
+        },
+        "errorCode": {
+          "$ref": "#/$defs/stableCode"
+        },
+        "finalAction": {
+          "enum": [
+            "none",
+            "retry",
+            "queue",
+            "fail",
+            "degrade_to_cheap"
+          ],
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "attempted",
+        "attemptCount",
+        "finalAction"
+      ],
+      "type": "object"
+    },
+    "errorDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/stableCode"
+        },
+        "message": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "type": "object"
+    },
+    "responseStateConstraints": {
+      "description": "Cross-field invariants shared by bounded responses and all response terminal SSE events.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "cache": {
+                "properties": {
+                  "outcome": {
+                    "const": "exact_hit"
+                  }
+                },
+                "required": [
+                  "outcome"
+                ]
+              }
+            },
+            "required": [
+              "cache"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fallback": {
+                "properties": {
+                  "attemptCount": {
+                    "const": 0
+                  },
+                  "attempted": {
+                    "const": false
+                  },
+                  "finalAction": {
+                    "const": "none"
+                  }
+                },
+                "required": [
+                  "attempted",
+                  "attemptCount",
+                  "finalAction"
+                ]
+              },
+              "status": {
+                "const": "complete"
+              },
+              "tool": {
+                "properties": {
+                  "observed": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "observed"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "tool",
+              "fallback"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "cache": {
+                "properties": {
+                  "outcome": {
+                    "const": "prefix_hint"
+                  }
+                },
+                "required": [
+                  "outcome"
+                ]
+              }
+            },
+            "required": [
+              "cache"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fallback": {
+                "properties": {
+                  "attemptCount": {
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "attemptCount"
+                ]
+              }
+            },
+            "required": [
+              "fallback"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "properties": {
+                  "observed": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "observed"
+                ]
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "cache": {
+                "properties": {
+                  "outcome": {
+                    "enum": [
+                      "disabled",
+                      "bypass",
+                      "miss",
+                      "prefix_hint",
+                      "store_skipped",
+                      "store_failed"
+                    ]
+                  }
+                },
+                "required": [
+                  "outcome"
+                ]
+              }
+            },
+            "required": [
+              "cache"
+            ]
+          }
+        }
+      ]
+    },
+    "gatewayResponse": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/responseStateConstraints"
+        }
+      ],
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "cache": {
+          "$ref": "#/$defs/cacheSummary"
+        },
+        "fallback": {
+          "$ref": "#/$defs/fallbackSummary"
+        },
+        "model": {
+          "$ref": "#/$defs/model"
+        },
+        "object": {
+          "const": "gateway.response"
+        },
+        "outputText": {
+          "type": "string",
+          "x-openusage-maxUtf8Bytes": 16777216
+        },
+        "provider": {
+          "$ref": "#/$defs/provider"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "stream": {
+          "type": "boolean"
+        },
+        "tool": {
+          "$ref": "#/$defs/toolSummary"
+        },
+        "usage": {
+          "$ref": "#/$defs/nullableUsage"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "object",
+        "provider",
+        "model",
+        "stream",
+        "status",
+        "outputText",
+        "usage",
+        "tool",
+        "cache",
+        "fallback"
+      ],
+      "type": "object"
+    },
+    "gatewayError": {
+      "additionalProperties": false,
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "error": {
+          "$ref": "#/$defs/errorDetail"
+        },
+        "fallback": {
+          "$ref": "#/$defs/fallbackSummary"
+        },
+        "object": {
+          "const": "gateway.error"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "object",
+        "error"
+      ],
+      "type": "object"
+    },
+    "responseStartedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "model": {
+          "$ref": "#/$defs/model"
+        },
+        "provider": {
+          "$ref": "#/$defs/provider"
+        },
+        "sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "stream": {
+          "const": true
+        },
+        "type": {
+          "const": "gateway.response.started"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "type",
+        "sequence",
+        "provider",
+        "model",
+        "stream"
+      ],
+      "type": "object"
+    },
+    "outputTextDeltaEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "text": {
+          "type": "string",
+          "x-openusage-maxUtf8Bytes": 65536
+        },
+        "type": {
+          "const": "gateway.output_text.delta"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "type",
+        "sequence",
+        "text"
+      ],
+      "type": "object"
+    },
+    "usageSnapshotEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "type": {
+          "const": "gateway.usage.snapshot"
+        },
+        "usage": {
+          "$ref": "#/$defs/usage"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "type",
+        "sequence",
+        "usage"
+      ],
+      "type": "object"
+    },
+    "toolObservedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "tool": {
+          "$ref": "#/$defs/observedToolSummary"
+        },
+        "type": {
+          "const": "gateway.tool.observed"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "type",
+        "sequence",
+        "tool"
+      ],
+      "type": "object"
+    },
+    "cacheEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "cache": {
+          "$ref": "#/$defs/cacheSummary"
+        },
+        "sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "type": {
+          "const": "gateway.cache.event"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "type",
+        "sequence",
+        "cache"
+      ],
+      "type": "object"
+    },
+    "fallbackEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "fallback": {
+          "$ref": "#/$defs/fallbackSummary"
+        },
+        "sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "type": {
+          "const": "gateway.fallback.event"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "type",
+        "sequence",
+        "fallback"
+      ],
+      "type": "object"
+    },
+    "responseCompletedEvent": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/responseStateConstraints"
+        }
+      ],
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "cache": {
+          "$ref": "#/$defs/cacheSummary"
+        },
+        "fallback": {
+          "$ref": "#/$defs/fallbackSummary"
+        },
+        "model": {
+          "$ref": "#/$defs/model"
+        },
+        "provider": {
+          "$ref": "#/$defs/provider"
+        },
+        "sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "status": {
+          "const": "complete"
+        },
+        "tool": {
+          "$ref": "#/$defs/toolSummary"
+        },
+        "type": {
+          "const": "gateway.response.completed"
+        },
+        "usage": {
+          "$ref": "#/$defs/nullableUsage"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "type",
+        "sequence",
+        "provider",
+        "model",
+        "status",
+        "usage",
+        "tool",
+        "cache",
+        "fallback"
+      ],
+      "type": "object"
+    },
+    "responseInterruptedEvent": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/responseStateConstraints"
+        }
+      ],
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "cache": {
+          "$ref": "#/$defs/cacheSummary"
+        },
+        "fallback": {
+          "$ref": "#/$defs/fallbackSummary"
+        },
+        "model": {
+          "$ref": "#/$defs/model"
+        },
+        "provider": {
+          "$ref": "#/$defs/provider"
+        },
+        "sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "status": {
+          "const": "interrupted"
+        },
+        "tool": {
+          "$ref": "#/$defs/toolSummary"
+        },
+        "type": {
+          "const": "gateway.response.interrupted"
+        },
+        "usage": {
+          "$ref": "#/$defs/nullableUsage"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "type",
+        "sequence",
+        "provider",
+        "model",
+        "status",
+        "usage",
+        "tool",
+        "cache",
+        "fallback"
+      ],
+      "type": "object"
+    },
+    "responseUncertainEvent": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/responseStateConstraints"
+        }
+      ],
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "cache": {
+          "$ref": "#/$defs/cacheSummary"
+        },
+        "fallback": {
+          "$ref": "#/$defs/fallbackSummary"
+        },
+        "model": {
+          "$ref": "#/$defs/model"
+        },
+        "provider": {
+          "$ref": "#/$defs/provider"
+        },
+        "sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "status": {
+          "const": "uncertain"
+        },
+        "tool": {
+          "$ref": "#/$defs/toolSummary"
+        },
+        "type": {
+          "const": "gateway.response.uncertain"
+        },
+        "usage": {
+          "$ref": "#/$defs/nullableUsage"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "type",
+        "sequence",
+        "provider",
+        "model",
+        "status",
+        "usage",
+        "tool",
+        "cache",
+        "fallback"
+      ],
+      "type": "object"
+    },
+    "gatewayErrorEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/apiVersion"
+        },
+        "error": {
+          "$ref": "#/$defs/errorDetail"
+        },
+        "fallback": {
+          "$ref": "#/$defs/fallbackSummary"
+        },
+        "sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "type": {
+          "const": "gateway.error"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "type",
+        "sequence",
+        "error"
+      ],
+      "type": "object"
+    },
+    "sseEvent": {
+      "description": "The data object for one Gateway-native SSE event. The wire event field MUST equal data.type.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/responseStartedEvent"
+        },
+        {
+          "$ref": "#/$defs/outputTextDeltaEvent"
+        },
+        {
+          "$ref": "#/$defs/usageSnapshotEvent"
+        },
+        {
+          "$ref": "#/$defs/toolObservedEvent"
+        },
+        {
+          "$ref": "#/$defs/cacheEvent"
+        },
+        {
+          "$ref": "#/$defs/fallbackEvent"
+        },
+        {
+          "$ref": "#/$defs/responseCompletedEvent"
+        },
+        {
+          "$ref": "#/$defs/responseInterruptedEvent"
+        },
+        {
+          "$ref": "#/$defs/responseUncertainEvent"
+        },
+        {
+          "$ref": "#/$defs/gatewayErrorEvent"
+        }
+      ]
+    }
+  }
+}
