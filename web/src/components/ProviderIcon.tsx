@@ -38,6 +38,14 @@ const ICON_BY_FAMILY: Record<string, string> = {
   hermes: "/icons/hermes.svg",
   cursor: "/icons/cursor.png",
   kiro_cli: "/icons/kiro.png",
+  step_plan: "/icons/stepfun.png",
+  zai: "/icons/zhipu.png",
+  openclaw: "/icons/openclaw.svg",
+  siliconflow: "/icons/siliconflow.png",
+  xai: "/icons/xai.png",
+  kilo_code: "/icons/kilocode.png",
+  cc_switch: "/icons/cc_switch.png",
+  openusage: "/icons/openusage.svg",
 };
 
 export function providerIconPath(familyId?: string): string | null {
