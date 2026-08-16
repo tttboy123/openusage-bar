@@ -409,7 +409,7 @@
     },
     {
       "id": "codex",
-      "display_name": "Codex",
+      "display_name": "ChatGPT",
       "category": "subscription",
       "metric_families": [
         "subscription_quota",

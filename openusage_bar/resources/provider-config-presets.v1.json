@@ -17,6 +17,21 @@
       "allow_custom_endpoints": true
     },
     {
+      "preset_id": "claude-kimi",
+      "name": "Kimi (Moonshot)",
+      "category": "gateway",
+      "agent": "claude_code",
+      "family_id": "moonshot",
+      "console_url": "https://platform.moonshot.cn",
+      "api_key_url": "https://platform.moonshot.cn/console/api-keys",
+      "template": {
+        "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+        "base_url": "https://api.moonshot.cn/anthropic",
+        "model": "kimi-k2.6"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
       "preset_id": "claude-openrouter",
       "name": "OpenRouter",
       "category": "gateway",
@@ -47,16 +62,16 @@
       "allow_custom_endpoints": true
     },
     {
-      "preset_id": "claude-kimi",
+      "preset_id": "codex-kimi",
       "name": "Kimi (Moonshot)",
       "category": "gateway",
-      "agent": "claude_code",
+      "agent": "codex",
       "family_id": "moonshot",
       "console_url": "https://platform.moonshot.cn",
       "api_key_url": "https://platform.moonshot.cn/console/api-keys",
       "template": {
-        "api_key_env": "ANTHROPIC_AUTH_TOKEN",
-        "base_url": "https://api.moonshot.cn/anthropic",
+        "api_key_env": "OPENAI_API_KEY",
+        "base_url": "https://api.moonshot.cn/v1",
         "model": "kimi-k2.6"
       },
       "allow_custom_endpoints": true
@@ -103,21 +118,6 @@
         "api_key_env": "OPENAI_API_KEY",
         "base_url": "https://api.siliconflow.cn/v1",
         "model": "deepseek-ai/DeepSeek-V3"
-      },
-      "allow_custom_endpoints": true
-    },
-    {
-      "preset_id": "codex-kimi",
-      "name": "Kimi (Moonshot)",
-      "category": "gateway",
-      "agent": "codex",
-      "family_id": "moonshot",
-      "console_url": "https://platform.moonshot.cn",
-      "api_key_url": "https://platform.moonshot.cn/console/api-keys",
-      "template": {
-        "api_key_env": "OPENAI_API_KEY",
-        "base_url": "https://api.moonshot.cn/v1",
-        "model": "kimi-k2.6"
       },
       "allow_custom_endpoints": true
     },
@@ -183,6 +183,38 @@
       "allow_custom_endpoints": true
     },
     {
+      "preset_id": "opencode-deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "category": "official",
+      "agent": "opencode",
+      "family_id": "deepseek",
+      "console_url": "https://platform.deepseek.com",
+      "api_key_url": "https://platform.deepseek.com/api_keys",
+      "template": {
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-v4-pro",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "opencode-minimax-m2.7",
+      "name": "MiniMax M2.7",
+      "category": "official",
+      "agent": "opencode",
+      "family_id": "minimax",
+      "console_url": "https://platform.minimaxi.com",
+      "api_key_url": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+      "template": {
+        "api_key_env": "MINIMAX_API_KEY",
+        "base_url": "https://api.minimax.chat/v1",
+        "model": "MiniMax-M2.7",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
       "preset_id": "opencode-minimax-official",
       "name": "MiniMax Official",
       "category": "official",
@@ -194,22 +226,6 @@
         "api_key_env": "MINIMAX_API_KEY",
         "base_url": "https://api.minimax.chat/v1",
         "model": "MiniMax-M3",
-        "npm": "@ai-sdk/openai-compatible"
-      },
-      "allow_custom_endpoints": true
-    },
-    {
-      "preset_id": "opencode-zhipu-official",
-      "name": "Zhipu GLM",
-      "category": "official",
-      "agent": "opencode",
-      "family_id": "zai",
-      "console_url": "https://open.bigmodel.cn",
-      "api_key_url": "https://open.bigmodel.cn/usercenter/apikeys",
-      "template": {
-        "api_key_env": "ZHIPU_API_KEY",
-        "base_url": "https://open.bigmodel.cn/api/paas/v4",
-        "model": "glm-5.2",
         "npm": "@ai-sdk/openai-compatible"
       },
       "allow_custom_endpoints": true
@@ -263,17 +279,33 @@
       "allow_custom_endpoints": true
     },
     {
-      "preset_id": "opencode-kimi",
-      "name": "Kimi (Moonshot)",
-      "category": "gateway",
+      "preset_id": "opencode-zai-glm-5.1",
+      "name": "Zhipu GLM-5.1",
+      "category": "official",
       "agent": "opencode",
-      "family_id": "moonshot",
-      "console_url": "https://platform.moonshot.cn",
-      "api_key_url": "https://platform.moonshot.cn/console/api-keys",
+      "family_id": "zai",
+      "console_url": "https://open.bigmodel.cn",
+      "api_key_url": "https://open.bigmodel.cn/usercenter/apikeys",
       "template": {
-        "api_key_env": "MOONSHOT_API_KEY",
-        "base_url": "https://api.moonshot.cn/v1",
-        "model": "kimi-k2.6",
+        "api_key_env": "ZHIPU_API_KEY",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-5.1",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "opencode-zhipu-official",
+      "name": "Zhipu GLM",
+      "category": "official",
+      "agent": "opencode",
+      "family_id": "zai",
+      "console_url": "https://open.bigmodel.cn",
+      "api_key_url": "https://open.bigmodel.cn/usercenter/apikeys",
+      "template": {
+        "api_key_env": "ZHIPU_API_KEY",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-5.2",
         "npm": "@ai-sdk/openai-compatible"
       },
       "allow_custom_endpoints": true

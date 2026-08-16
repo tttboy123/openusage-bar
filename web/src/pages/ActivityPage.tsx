@@ -11,6 +11,7 @@ import {
 import { Funnel } from "@phosphor-icons/react";
 import {
   fetchActivity,
+  fetchProviders,
   fetchSnapshot,
   type Snapshot,
   type ActivityRow,
@@ -316,6 +317,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
   const [selectedHeatDay, setSelectedHeatDay] = useState<string | null>(null);
   const [hoveredHeatDay, setHoveredHeatDay] = useState<string | null>(null);
   const [hiddenModels, setHiddenModels] = useState<Set<string>>(new Set());
+  const [providerDisplay, setProviderDisplay] = useState<Map<string, string>>(new Map());
   const [showAllModels, setShowAllModels] = useState(false);
   const [heatmapActivity, setHeatmapActivity] = useState<ActivityRow[]>([]);
   const [heatmapCoverage, setHeatmapCoverage] = useState<ActivityCoverageRow[]>([]);
@@ -333,6 +335,24 @@ export default function ActivityPage({ t }: { t: Messages }) {
 
   useEffect(() => {
     void loadSnapshot();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchProviders()
+      .then((providers) => {
+        if (controller.signal.aborted) return;
+        const map = new Map<string, string>();
+        for (const p of providers) {
+          const id = p.providerId ?? p.familyId ?? "";
+          if (id && p.displayName) map.set(id, p.displayName);
+        }
+        setProviderDisplay(map);
+      })
+      .catch(() => {
+        // Display names are cosmetic; fall back to provider IDs.
+      });
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -435,6 +455,10 @@ export default function ActivityPage({ t }: { t: Messages }) {
     ).sort();
   }, [activity, modelFilters, allProviders]);
 
+
+  function providerLabel(id: string): string {
+    return providerDisplay.get(id) ?? id;
+  }
 
   function toggleModel(model: string) {
     setModelFilters((prev) => {
@@ -714,7 +738,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
               <option value="all">{t.allProviders}</option>
               {modelProviders.map((p) => (
                 <option key={p} value={p}>
-                  {p}
+                  {providerLabel(p)}
                 </option>
               ))}
             </select>
@@ -750,7 +774,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
                   ) : (
                     groupedModels.map((group) => (
                       <div className="model-group" key={group.provider}>
-                        <div className="model-group-name">{group.provider}</div>
+                        <div className="model-group-name">{providerLabel(group.provider)}</div>
                         <div className="model-group-items">
                           {group.models.map((m) => {
                             const checked = modelFilters.has(m);

@@ -106,7 +106,7 @@ struct RepositoryTests {
             #expect(instances.isEmpty)
             #expect(!String(describing: instances).contains(label))
             #expect(try repository.capacity(limit: nil).first { $0.providerID == "codex" }?
-                .providerDescriptor.displayName == "Codex")
+                .providerDescriptor.displayName == "ChatGPT")
             repository.close()
         }
 

@@ -236,7 +236,7 @@ public enum GeneratedProviderCatalog {
         "codex": ProviderDisplayDescriptor(
             providerID: "codex",
             familyID: "codex",
-            displayName: "Codex",
+            displayName: "ChatGPT",
             aliases: [],
             category: .subscription,
             metricFamilies: [.subscriptionQuota, .tokenActivity],

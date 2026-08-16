@@ -14,6 +14,18 @@
       "allowCustomEndpoints": true
     },
     {
+      "presetId": "claude-kimi",
+      "name": "Kimi (Moonshot)",
+      "category": "gateway",
+      "agent": "claude_code",
+      "familyId": "moonshot",
+      "consoleUrl": "https://platform.moonshot.cn",
+      "apiKeyUrl": "https://platform.moonshot.cn/console/api-keys",
+      "baseUrl": "https://api.moonshot.cn/anthropic",
+      "model": "kimi-k2.6",
+      "allowCustomEndpoints": true
+    },
+    {
       "presetId": "claude-openrouter",
       "name": "OpenRouter",
       "category": "gateway",
@@ -38,14 +50,14 @@
       "allowCustomEndpoints": true
     },
     {
-      "presetId": "claude-kimi",
+      "presetId": "codex-kimi",
       "name": "Kimi (Moonshot)",
       "category": "gateway",
-      "agent": "claude_code",
+      "agent": "codex",
       "familyId": "moonshot",
       "consoleUrl": "https://platform.moonshot.cn",
       "apiKeyUrl": "https://platform.moonshot.cn/console/api-keys",
-      "baseUrl": "https://api.moonshot.cn/anthropic",
+      "baseUrl": "https://api.moonshot.cn/v1",
       "model": "kimi-k2.6",
       "allowCustomEndpoints": true
     },
@@ -83,18 +95,6 @@
       "apiKeyUrl": "https://cloud.siliconflow.cn/account/ak",
       "baseUrl": "https://api.siliconflow.cn/v1",
       "model": "deepseek-ai/DeepSeek-V3",
-      "allowCustomEndpoints": true
-    },
-    {
-      "presetId": "codex-kimi",
-      "name": "Kimi (Moonshot)",
-      "category": "gateway",
-      "agent": "codex",
-      "familyId": "moonshot",
-      "consoleUrl": "https://platform.moonshot.cn",
-      "apiKeyUrl": "https://platform.moonshot.cn/console/api-keys",
-      "baseUrl": "https://api.moonshot.cn/v1",
-      "model": "kimi-k2.6",
       "allowCustomEndpoints": true
     },
     {
@@ -146,6 +146,30 @@
       "allowCustomEndpoints": true
     },
     {
+      "presetId": "opencode-deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "category": "official",
+      "agent": "opencode",
+      "familyId": "deepseek",
+      "consoleUrl": "https://platform.deepseek.com",
+      "apiKeyUrl": "https://platform.deepseek.com/api_keys",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "model": "deepseek-v4-pro",
+      "allowCustomEndpoints": true
+    },
+    {
+      "presetId": "opencode-minimax-m2.7",
+      "name": "MiniMax M2.7",
+      "category": "official",
+      "agent": "opencode",
+      "familyId": "minimax",
+      "consoleUrl": "https://platform.minimaxi.com",
+      "apiKeyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+      "baseUrl": "https://api.minimax.chat/v1",
+      "model": "MiniMax-M2.7",
+      "allowCustomEndpoints": true
+    },
+    {
       "presetId": "opencode-minimax-official",
       "name": "MiniMax Official",
       "category": "official",
@@ -155,18 +179,6 @@
       "apiKeyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
       "baseUrl": "https://api.minimax.chat/v1",
       "model": "MiniMax-M3",
-      "allowCustomEndpoints": true
-    },
-    {
-      "presetId": "opencode-zhipu-official",
-      "name": "Zhipu GLM",
-      "category": "official",
-      "agent": "opencode",
-      "familyId": "zai",
-      "consoleUrl": "https://open.bigmodel.cn",
-      "apiKeyUrl": "https://open.bigmodel.cn/usercenter/apikeys",
-      "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
-      "model": "glm-5.2",
       "allowCustomEndpoints": true
     },
     {
@@ -206,15 +218,27 @@
       "allowCustomEndpoints": true
     },
     {
-      "presetId": "opencode-kimi",
-      "name": "Kimi (Moonshot)",
-      "category": "gateway",
+      "presetId": "opencode-zai-glm-5.1",
+      "name": "Zhipu GLM-5.1",
+      "category": "official",
       "agent": "opencode",
-      "familyId": "moonshot",
-      "consoleUrl": "https://platform.moonshot.cn",
-      "apiKeyUrl": "https://platform.moonshot.cn/console/api-keys",
-      "baseUrl": "https://api.moonshot.cn/v1",
-      "model": "kimi-k2.6",
+      "familyId": "zai",
+      "consoleUrl": "https://open.bigmodel.cn",
+      "apiKeyUrl": "https://open.bigmodel.cn/usercenter/apikeys",
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+      "model": "glm-5.1",
+      "allowCustomEndpoints": true
+    },
+    {
+      "presetId": "opencode-zhipu-official",
+      "name": "Zhipu GLM",
+      "category": "official",
+      "agent": "opencode",
+      "familyId": "zai",
+      "consoleUrl": "https://open.bigmodel.cn",
+      "apiKeyUrl": "https://open.bigmodel.cn/usercenter/apikeys",
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+      "model": "glm-5.2",
       "allowCustomEndpoints": true
     }
   ]
