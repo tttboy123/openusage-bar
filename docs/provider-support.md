@@ -3,6 +3,26 @@
 OpenUsage Bar separates four different facts that provider dashboards often
 mix together:
 
+## Provider configuration presets
+
+The Provider page ships editable presets whose Base URL, model, console, and
+API-key links are verified against each provider's official documentation:
+
+- **Official**: Anthropic (`claude-sonnet-5`), OpenAI (`gpt-5.5`), Google
+  (`gemini-2.5-pro`), DeepSeek (`deepseek-v4-flash` / `deepseek-v4-pro`),
+  MiniMax (`MiniMax-M3` / `MiniMax-M2.7`), Zhipu (`glm-5.1` / `glm-5.2`),
+  OpenCode Free (`deepseek-v4-flash-free` on the Zen endpoint).
+- **Gateway**: OpenRouter (`anthropic/claude-sonnet-5`, `openai/gpt-5.5`,
+  `google/gemini-2.5-pro`, `deepseek/deepseek-v4-flash`), SiliconFlow
+  (`deepseek-ai/DeepSeek-V3`, `Qwen/Qwen3-235B-A22B`), Kimi/Moonshot
+  (`kimi-k3[1m]` for Claude Code, `kimi-k3` for Codex).
+
+The web copy (`web/public/provider-config-presets.json`) is the camelCase
+mirror of the Python resource
+(`openusage_bar/resources/provider-config-presets.v1.json`); a sync test keeps
+them in lockstep.
+
+
 | Fact | Meaning |
 |---|---|
 | Detection | A provider or local client is installed or configured |

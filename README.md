@@ -4,288 +4,227 @@
 
 # UsageHub
 
-**一眼掌握 AI 订阅余量、Token 活动与 API 消耗。**
+### The All-in-One AI 用量与 Provider 管理工具 — 菜单栏简况 · 额度 · API 消耗
 
-原生 macOS 菜单栏工具。数据留在本机，人看界面，调度器读 JSON。
+[![Version](https://img.shields.io/github/v/release/tttboy123/openusage-bar?include_prereleases&color=0A84FF&label=version)](https://github.com/tttboy123/openusage-bar/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/tttboy123/openusage-bar/releases)
+[![Built with](https://img.shields.io/badge/built%20with-Electron%20%2B%20SwiftUI-blue.svg)](https://www.electronjs.org/)
+[![Downloads](https://img.shields.io/github/downloads/tttboy123/openusage-bar/total)](https://github.com/tttboy123/openusage-bar/releases/latest)
+[![License](https://img.shields.io/badge/License-Apache--2.0-111111?style=flat-square)](LICENSE)
 
-[![Release](https://img.shields.io/github/v/release/tttboy123/openusage-bar?include_prereleases&style=flat-square&color=0A84FF)](https://github.com/tttboy123/openusage-bar/releases)
-![macOS](https://img.shields.io/badge/macOS-15%2B-111111?style=flat-square&logo=apple&logoColor=white)
-![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-111111?style=flat-square)
-![SwiftUI](https://img.shields.io/badge/SwiftUI-native-111111?style=flat-square&logo=swift&logoColor=white)
-![Local First](https://img.shields.io/badge/Local--First-Keychain%20%2B%20SQLite-111111?style=flat-square)
-![License](https://img.shields.io/badge/License-Apache--2.0-111111?style=flat-square)
-
-[English](README.en.md) | [路线图](ROADMAP.md) | [本地 API](docs/api/local-api-v1.md) | [Provider 支持](docs/provider-support.md) | [性能预算](docs/performance.md) | [安装指南](docs/release-quick-start.md)
+中文 | [English](README.en.md) | [变更日志](CHANGELOG.md) | [安装指南](docs/release-quick-start.md) | [Provider 支持](docs/provider-support.md) | [本地 API](docs/api/local-api-v1.md)
 
 </div>
 
-UsageHub（原 OpenUsage Bar）把 AI 订阅额度、API 消耗、本地编码工具和每日 Token 活动统一到本地客户端：菜单栏图标实时显示今日用量简况，单击展开余额与额度，详情页用于分析，CLI JSON 和本地只读 API 供调度平台读取。当前发布形态为桌面客户端（Electron 封装本地 Web 仪表盘）；仓库同步维护原生 SwiftUI 版本。
+## 为什么需要 UsageHub？
 
-<p align="center">
-  <img src="docs/assets/openusage-bar-activity-demo-zh.png" width="1160" alt="OpenUsage Bar 中文 Activity 界面，展示年度 Token 热力图与每日模型趋势">
-</p>
+AI 工具越来越多，但用量信息分散在各处：Claude Code、Codex、Gemini CLI、OpenCode 各有各的
+配置文件；订阅额度、API 余额、Token 历史散落在不同 Provider 控制台；每次换 Provider 都要
+手改 JSON/TOML。没有人把它们放在一起，还保证"数据只留在本机"。
 
-<p align="center"><sub>真实 SwiftUI 界面，使用隔离的合成账本生成。未读取用户账本、Keychain 或真实额度。</sub></p>
+**UsageHub** 用菜单栏 + 本地仪表盘把它们统一起来：菜单栏图标实时显示今日用量简况，Provider
+预设与各官网对齐、一键写入对应 Agent 的配置，额度/余额/API 消耗/Token 历史一目了然——全部
+本地优先，凭证只进 Keychain。
 
-> 当前仓库预发布候选版：**0.8.6 RC**。它只有在完整验证、原生三平台
-> 打包与候选发布完成后才进入自愿参加、无遥测的外部 Canary；当前已发布
-> 基线仍为 **v0.7.1**。当前合格外部机器仍为 **0 / 5**，30 天时钟为
-> **`not_started`**；实时状态见
-> [Canary 跟踪 Issue #33](https://github.com/tttboy123/openusage-bar/issues/33)。
-> 支持 Apple Silicon Mac 与 macOS 15 或更高版本。暂未提供 Apple
-> Developer ID 公证包；若 macOS 显示“已损坏”，按下方指引仅移除本 App
-> 的下载隔离属性。
-
-## 品牌与命名
-
-产品品牌为 **UsageHub**（原 OpenUsage Bar）。技术命名空间保持兼容：
-`~/.config/openusage-bar`、`~/.local/state/openusage-bar`、`openusage.sock`、
-`openusage-bar` CLI 与 Local API v1 契约在可预见的版本内不变；应用包
-（`OpenUsage Bar.app`）与脚本中的技术标识符随跨平台发布一并迁移，不在此阶段
-改名，避免破坏现有安装、LaunchAgent 与回滚路径。
-
-## 为什么需要它
-
-AI 工具越来越多，但用量信息分散在不同地方：
-
-- Codex、Cursor、Kiro 这类订阅型工具关心剩余额度和重置周期。
-- MiniMax、StepFun、OpenAI Organization 这类 Provider 关心套餐余量、账单和 API 消耗。
-- Claude Code、OpenCode、Hermes、OpenClaw 等本地工具关心本地活动和 Token 历史。
-- 自动调度平台需要结构化数据，而不是去解析 UI 文本。
-
-UsageHub 的定位很明确：
-
-```text
-菜单栏：给人看，快速判断今天还能不能继续跑。
-详情页：给人分析，看每日 Token、模型趋势、额度历史和数据健康。
-本地 API：给调度系统读，稳定 JSON，不依赖 UI 文案。
-Keychain：放密钥；SQLite：放账本；日志：不放凭证。
-```
+- **菜单栏实时简况** — 图标旁直接显示今日 Token（🟢/🟡/🔴 状态点），单击弹出实测余额与额度，双击打开仪表盘
+- **Provider 一键接入** — 选预设（官方/网关）→ 填 API Key / Base URL / 模型 → 保存 → 写入该 Agent 的配置文件；预设与各 Provider 官网逐一核对
+- **用量、额度与成本追踪** — 每日总量 + 各模型堆叠柱状图、实测余额、API 消耗、年度 Token 热力图
+- **覆盖主流 Agent** — Claude Code、Codex、Gemini CLI、OpenCode，以及 Cursor、Kiro、StepFun、MiniMax 等本地工具与 Provider
+- **本地优先** — 数据留在本机，凭证只进 Keychain，只读 Unix socket API 供调度平台读取
+- **跨平台** — macOS 桌面客户端（Electron + 原生 SwiftUI），Windows/Linux 打包基础已就绪
 
 ```mermaid
 flowchart LR
   A[AI Provider 与本地工具] --> B[受限 Python Collector]
   K[(macOS Keychain)] --> B
   B --> D[(本地 SQLite 账本)]
-  D --> E[菜单栏快照]
+  D --> E[菜单栏简况]
   D --> F[Usage Details]
   D --> G[CLI JSON 与只读 API]
 ```
 
-## 核心能力
+## Screenshots
 
-| 能力 | 说明 |
-| --- | --- |
-| 菜单栏简况 | 图标旁实时显示今日 Token（🟢/🟡/🔴 状态点），单击弹出简况菜单：今日 Token、实测余额、额度；双击打开仪表盘 |
-| Usage Details | Activity、Capacity、API Spend、Local Tools、Providers、Data Health；用量详情为堆叠柱状图，同时展示每日总量与各模型明细 |
-| 每日 Token 活动 | 日、周、月、年维度聚合；支持每日总量、模型堆叠趋势和年度方格热力图；打开 App 自动刷新并补齐历史 |
-| Provider Center | 添加、编辑、隐藏、恢复 Provider；支持多账号；凭证只写入 Keychain；预设与各 Provider 官网对齐，真实品牌图标，网格/列表视图，codex 显示为 ChatGPT |
-| 订阅额度 | Codex、Cursor、Kiro、MiniMax、StepFun 等可用时显示真实剩余容量 |
-| API 消耗 | OpenAI Organization、Generic HTTPS Provider、Daily Token Feed 等结构化接入 |
-| 调度接口 | Unix socket 本地只读 API、CLI JSON/JSONL、离线快速读取 |
-| 隐私边界 | 不导出 API Key、Cookie、Session、Prompt、Response 或直接账号身份 |
+|                 活动 / 菜单栏简况                  |                    用量详情（堆叠柱状图）                    |
+| :------------------------------------------------: | :----------------------------------------------------------: |
+| ![Home](docs/assets/usagehub-home.png)             | ![Usage Details](docs/assets/usagehub-usage-details.png)     |
+|                  Provider 预设浏览                  |                    Provider 接入表单（Kimi）                  |
+| ![Provider Presets](docs/assets/usagehub-provider-presets.png) | ![Provider Form](docs/assets/usagehub-provider-form.png) |
 
-## 快速安装
+## Features
 
-[下载 UsageHub v0.8.6 候选 DMG（当前发布形态，Apple Silicon）](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/UsageHub-0.8.6-mac-arm64.dmg)
+### Provider 管理
 
-1. 打开下载的 DMG。
-2. 将 **UsageHub** 拖入 **Applications**。
-3. 从访达的“应用程序”打开 **UsageHub**。
-4. 打开后自动注册登录启动项和后台采集器，不需要打开终端；菜单栏图标随即显示今日用量简况。
+- **4 个 Agent × 20+ 预设** — Claude Code、Codex、Gemini CLI、OpenCode；官方与网关预设齐全，
+  每个预设的 Base URL、模型、控制台与 API Key 链接均已与官网核对
+- **一键接入流程（与 CC Switch 一致）** — 选预设（官方/网关）→ 填 API Key / Base URL / 模型
+  （端点可自定义）→ 保存 → 写入该 Agent 的配置文件
+- 真实品牌图标、网格/列表视图、`codex` 显示为 **ChatGPT**
+- 凭证只写入 Keychain，隐藏 Provider 不影响凭证与历史账本
 
-原生 SwiftUI 版本：[OpenUsage Bar v0.8.6 候选 DMG](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg)（候选发布后可用）。
+### 菜单栏简况
 
-如果 macOS 提示 **“OpenUsage Bar 已损坏”**，这是尚未公证的开源预发布包被添加了
-下载隔离属性。确认 DMG 来自本仓库并已校验 SHA-256 后，在终端中只对该 App 执行：
+- 图标旁实时显示今日 Token（🟢/🟡/🔴 状态点，60 秒自动刷新）
+- 单击弹出简况菜单：今日 Token、实测余额、额度；双击打开仪表盘
+- 深浅色菜单栏自适应（品牌模板图标）
+
+### 用量与成本追踪
+
+- **用量详情**：每日总量 + 各模型明细的堆叠柱状图，支持按 Provider 聚合与多选筛选
+- **额度 / 实测余额**：Codex、Cursor、Kiro、MiniMax、StepFun、Moonshot 等可用时显示真实余量
+- **API 消耗**：OpenAI Organization、Generic HTTPS Provider、Daily Token Feed 等结构化接入
+- **打开自动刷新**：打开 App 自动刷新全部数据并补齐 364 天历史
+
+### 本地工具覆盖
+
+- Claude Code（`claude-sonnet-5` 等）、Codex（`gpt-5.5`）、Gemini CLI（`gemini-2.5-pro`）、OpenCode（`deepseek-v4-flash` 等）
+- Cursor、Kiro、StepFun Step Plan、MiniMax、Moonshot/Kimi、OpenAI Organization 等
+
+### 隐私与安全
+
+- 凭证只进 Keychain，SQLite/JSON/日志/本地 API 均不含 API Key、Cookie、Session、Prompt 或 Response
+- 数据留在本机；只读 Unix socket API（`0700` 目录 + `0600` socket），默认不监听 TCP
+- 未知额度保持 Unknown，绝不伪装成 0；Provider 子进程使用最小 allowlist 环境与超时边界
+
+### 平台
+
+- **macOS**：桌面客户端（Electron 封装本地 Web 仪表盘）+ 原生 SwiftUI 菜单栏版本
+- **Windows / Linux**：Observer 打包基础与系统服务注册已就绪（候选阶段）
+- 深色/浅色主题、中英文界面
+
+## FAQ
+
+<details>
+<summary><strong>UsageHub 支持哪些 Agent / 工具？</strong></summary>
+
+支持 **Claude Code**、**Codex**、**Gemini CLI**、**OpenCode** 四个 Agent 的 Provider 配置接入；
+同时跟踪 Cursor、Kiro、StepFun Step Plan、MiniMax、Moonshot/Kimi、OpenAI Organization 等
+本地工具与 Provider 的额度、余额和 Token 活动。
+
+</details>
+
+<details>
+<summary><strong>预设保存到哪里？</strong></summary>
+
+按 Agent 写入对应的配置文件：
+
+- **Claude Code** → `~/.claude/settings.json`（`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_MODEL`）
+- **Codex** → `~/.codex/config.toml`（`model_providers`）
+- **Gemini CLI** → `~/.gemini/settings.json`（`GOOGLE_API_KEY` / `GOOGLE_GEMINI_MODEL`）
+- **OpenCode** → `~/.config/opencode/opencode.json`（`provider` / `model`）
+
+凭证由桌面宿主写入系统 Keychain，不会出现在渲染端。
+
+</details>
+
+<details>
+<summary><strong>切换 Provider 后需要重启终端吗？</strong></summary>
+
+大多数 CLI 工具需要重启终端或重新打开会话才能生效。保存后重启对应 CLI 即可；配置写入是
+原子操作，不会破坏既有配置。
+
+</details>
+
+<details>
+<summary><strong>我的数据存在哪里？</strong></summary>
+
+- 活动账本：`~/.local/state/openusage-bar/activity.sqlite3`
+- Unix socket：`~/.local/state/openusage-bar/openusage.sock`
+- Provider 配置：`~/.config/openusage-bar/providers.json`
+- 日志：`~/Library/Logs/OpenUsageBar.*.log`
+
+</details>
+
+<details>
+<summary><strong>为什么菜单栏看不到图标？</strong></summary>
+
+菜单栏图标只在 App 运行时显示。请确认 App 已打开（或已加入登录项自动启动）。0.8.6 之前
+存在托盘图标路径硬编码导致的不可见问题，已在此版本修复：图标现在使用随包携带的品牌模板图标。
+
+</details>
+
+<details>
+<summary><strong>macOS 提示“UsageHub 已损坏”怎么办？</strong></summary>
+
+本开源预发布版未使用 Apple Developer ID 公证，提示来自下载隔离属性而非校验失败。确认来源后执行：
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/OpenUsage Bar.app"
+xattr -dr com.apple.quarantine "/Applications/UsageHub.app"
 ```
 
-再从访达的“应用程序”打开。该命令只移除 OpenUsage Bar 的下载隔离属性；不要
-全局关闭 Gatekeeper。DMG 根目录也附带同样的中英文安装说明。首次启动若提示后台访问，请在
-**系统设置 > 通用 > 登录项**中允许 OpenUsage Bar。
+仅移除本 App 的隔离属性，不要全局关闭 Gatekeeper。
 
-首次打开后：
+</details>
 
-1. 单击菜单栏里的 **UsageHub** 图标查看今日简况（今日 Token、实测余额、额度）。
-2. 双击图标（或菜单中的“打开 UsageHub”）进入详情页查看账本。
-3. 进入 **设置 / Provider** 添加或编辑 Provider。
-4. 后续通常只需查看菜单栏；打开 App 会自动刷新数据并补齐历史。
+## Documentation
 
-更多细节、SHA-256 校验和高级修复脚本见[安装指南](docs/release-quick-start.md)。
+- [安装指南](docs/release-quick-start.md) — 安装、校验、回滚、卸载
+- [Provider 支持](docs/provider-support.md) — 适配器矩阵与 Provider 配置预设
+- [本地 API v1](docs/api/local-api-v1.md) — 调度平台读取的只读接口
+- [开源审查](docs/open-source-audit.md) — 开源就绪度审查记录
 
-## 从源码构建
+## Quick Start
 
-需要 Xcode 命令行工具、Swift Package Manager、Python 3.11 或更高版本。
+### 接入 Provider（与 CC Switch 一致的操作流程）
+
+1. **选预设**：进入 **Provider → 浏览 Provider 预设**，选择官方或网关预设
+2. **填参数**：填入 API Key / Base URL / 模型（端点可自定义）
+3. **保存**：保存到该 Agent 的配置文件
+4. **生效**：重启终端或对应 CLI 工具
+5. **回到官方**：选择官方预设后重新登录/OAuth 即可切回
+
+### 日常使用
+
+1. **菜单栏简况**：单击图标查看今日 Token、实测余额与额度；双击打开仪表盘
+2. **用量详情**：查看每日总量与各模型明细、额度历史、API 消耗
+3. **自动刷新**：打开 App 自动刷新全部数据并补齐历史
+
+## Download & Installation
+
+### 系统要求
+
+- **macOS**：macOS 15 或更高版本，Apple Silicon（arm64）
+
+### macOS
+
+从 [Releases](https://github.com/tttboy123/openusage-bar/releases) 下载最新
+`UsageHub-0.8.6-mac-arm64.dmg`，双击打开后把 **UsageHub** 拖入 **Applications**。
+首次打开自动注册登录项与后台采集器，菜单栏图标随即显示今日用量简况。
+
+原生 SwiftUI 版本：[OpenUsage-Bar-v0.8.6-macos-arm64.dmg](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg)（候选发布后可用）。
+
+> 0.8.6 为候选预发布，未做 Developer ID 公证；Windows/Linux 安装包随跨平台发布提供。
+
+## Development
 
 ```bash
 scripts/bootstrap.sh
-scripts/build_app.sh
-scripts/install_app.sh
+scripts/build_app.sh          # 原生 SwiftUI 版本构建
+cd desktop && npm run dist:mac  # 桌面客户端（当前发布形态）
 ```
 
-构建流程会执行：
+质量门禁：Python 全量测试、Web 类型检查 + 测试 + 生产构建、Swift 测试与覆盖率、隐私/密钥扫描、
+发布元数据校验。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-- Python 与 Swift 测试
-- Provider catalog 一致性检查
-- Python 与 Swift 关键模块覆盖率门禁
-- 凭证与隐私扫描
-- Release 构建与 nested helper 签名
-- 安装事务、回滚备份和本地 API 健康检查
-
-生成原生发布包：
-
-```bash
-scripts/package_release.sh
-```
-
-构建桌面客户端（当前发布形态）：
-
-```bash
-cd desktop && npm run dist:mac
-```
-
-## 产品结构
-
-当前发布形态（桌面客户端）：
+## Project Structure
 
 ```text
-UsageHub.app（Electron）
-├─ 菜单栏托盘：品牌图标 + 实时今日 Token 简况，单击弹出简况菜单
-├─ 本地仪表盘：Web 前端（活动 / 用量详情 / 额度 / API 消耗 / 本地工具 / Provider / 数据健康 / 自动化）
-├─ collector：后台采集与本地只读 API（openusage-collector）
-├─ settings：Provider 配置与受控命令（openusage-settings）
-└─ bridge：插件桥（openusage-plugin-bridge）
+├── openusage_bar/          # Python Collector：账本、Provider 适配、只读 API
+├── swift_app/              # 原生 SwiftUI 菜单栏版本（同步维护）
+├── desktop/                # Electron 桌面客户端（当前发布形态）
+├── web/                    # Web 仪表盘（活动 / 用量详情 / 额度 / API 消耗 / Provider / 数据健康）
+├── scripts/                # 构建、审计、发布脚本
+├── docs/                   # 文档（安装、API、Provider、开源审查）
+└── tests/                  # Python / Web / Swift 测试
 ```
 
-原生菜单栏版本（同步维护）：
+## Contributing
 
-```text
-OpenUsage Bar.app
-├─ 菜单栏状态宿主：轻量、常驻、只展示关键事实
-├─ OpenUsage Activity.app：详情窗口，读取同一份 SQLite 账本
-├─ OpenUsage Provider Settings.app：Provider 管理与受控 collector 命令
-└─ LaunchAgents
-   ├─ com.lune.openusagebar：原生菜单栏宿主
-   └─ com.lune.openusagebar.collector：后台采集与本地只读 API
-```
-
-本地数据位置：
-
-| 数据 | 路径 |
-| --- | --- |
-| 活动账本 | `~/.local/state/openusage-bar/activity.sqlite3` |
-| Unix socket | `~/.local/state/openusage-bar/openusage.sock` |
-| Provider 配置 | `~/.config/openusage-bar/providers.json` |
-| Provider 可见性 | `~/.config/openusage-bar/visibility.json` |
-| 日志 | `~/Library/Logs/OpenUsageBar.*.log` |
-| LaunchAgents | `~/Library/LaunchAgents/com.lune.openusagebar*.plist` |
-
-## 本地 API
-
-默认没有 TCP 监听。调度平台通过 mode `0700` 的 socket 目录和 mode `0600` 的 Unix socket 读取数据。
-
-```text
-GET /v1/health
-GET /v1/schema
-GET /v1/schema.json
-GET /v1/summary
-GET /v1/snapshot
-GET /v1/capabilities
-GET /v1/providers
-GET /v1/providers?providerIds=codex,minimax-primary
-GET /v1/capacity
-GET /v1/activity/daily?from=2026-07-01&to=2026-07-14
-GET /v1/costs/daily?from=2026-07-01&to=2026-07-14
-GET /v1/quotas/history
-GET /v1/sources/status
-GET /v1/changes?after=0&limit=100
-```
-
-`/v1/capabilities` 不只返回“是否有代码适配器”，还会按数据源声明
-Detection、Token Activity、Subscription Capacity、API Spend、权威程度、
-账号/模型作用域，以及 `live_account`、`fixture`、`upstream_declared` 或
-`unverified` 验证等级。当前连接是否健康仍以 `/v1/sources/status` 为准；
-两者不能混为一谈。
-
-也可以通过签名的采集器启动器输出 JSON；它会先重建最小非秘密环境：
-
-```bash
-APP="/Applications/OpenUsage Bar.app"
-[[ -d "$APP" ]] || APP="$HOME/Applications/OpenUsage Bar.app"
-COLLECTOR="$APP/Contents/MacOS/OpenUsage Collector"
-"$COLLECTOR" status --format json --offline
-"$COLLECTOR" providers --format json --offline
-"$COLLECTOR" usage --from 2026-07-01 --to 2026-07-14 --format jsonl --offline
-"$COLLECTOR" doctor --format json --offline
-```
-
-`--offline` 适合调度器低延迟读取。显式 `--fresh` 和菜单栏 Refresh 共用
-160 秒交互尝试上限。支持精确 Provider 导出的 OpenUsage 会让 Cursor 使用
-15 秒的独立采集边界；旧版 OpenUsage 继续使用最长 75 秒的全量 direct
-fallback，完整 OpenUsage daily import 最长 60 秒。超时不会把未知额度写成
-0，而是继续提供 last-good ledger 并报告刷新不可用。
-
-## Provider 支持
-
-UsageHub 是独立仓库和独立发布。OpenUsage.sh 是可选数据源，只通过受限 JSON 接入；它的 Go 内部实现、凭证和发布周期不会嵌入本项目。
-
-- OpenUsage 0.23.0 catalog：覆盖 35 个上游 family。
-- 内置增强：MiniMax、StepFun、Codex、Cursor、Kiro、OpenAI Organization、Generic HTTPS Provider、Custom Daily Token Feed。
-- MiniMax：中国站与国际站账号严格隔离，订阅额度与中国站实验性延迟
-  billing feed 分离；国际站未验证的历史用量和当前日缺失都不会显示为 0。
-- StepFun：支持中国站和国际站多账号。
-- Generic HTTPS Provider：校验 endpoint、redirect、响应大小和 JSON path。
-- Daily Token Feed：支持 range-aware HTTPS JSON、字段映射、分页和 Keychain 鉴权。
-
-完整边界见 [Provider support](docs/provider-support.md)。
-
-## 隐私与安全
-
-UsageHub 的安全模型是“凭证只进 Keychain，事实才进账本”：
-
-- 不在 SQLite、JSON、JSONL、本地 API、UI 或日志中保存 API Key、Cookie、Session。
-- 不采集 Prompt、Response 或直接账号身份。
-- Provider 子进程使用最小 allowlist 环境和超时边界。
-- 未知额度保持 Unknown，不伪装成 0。
-- 隐藏 Provider 只影响展示，不删除凭证或历史账本。
-
-安全问题请按 [SECURITY.md](SECURITY.md) 私密上报，不要公开提交含凭证的 issue。
-
-## 卸载与回滚
-
-临时停止：
-
-```bash
-launchctl bootout gui/$(id -u)/com.lune.openusagebar
-launchctl bootout gui/$(id -u)/com.lune.openusagebar.collector
-```
-
-卸载 App 与 LaunchAgents：
-
-```bash
-scripts/uninstall_app.sh
-```
-
-连本地账本和配置一起删除：
-
-```bash
-scripts/uninstall_app.sh --purge-data
-```
-
-Keychain 项不会自动删除。只有确认没有其他本地安装在使用同一 service entry 后，才应该在 Keychain Access 中手动移除。
-
-## 贡献
-
-修改 adapter、账本字段、导出 API 或 Provider 能力前，请先读 [CONTRIBUTING.md](CONTRIBUTING.md)。核心原则：
-
-- SwiftUI 只读展示，Python adapter 负责凭证与账本写入。
-- 新 Provider 优先复用现有工具或官方数据源，无法复用再新增 adapter。
-- 不新增第三方 UI、图表、数据库、状态管理或依赖注入包。
-- 任何 Unknown 都不能被降级成 0。
+欢迎提交 Issue 与 PR。提交 PR 前请确保：`scripts/release_secret_scan.py --history` 通过、
+Python/Web/Swift 测试全绿、不提交真实密钥或凭证。详见 [CONTRIBUTING.md](CONTRIBUTING.md)
+与 [SECURITY.md](SECURITY.md)。
 
 ## License
 
-OpenUsage Bar 使用 [Apache License 2.0](LICENSE)。运行时依赖和互操作边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+[Apache License 2.0](LICENSE)。运行时依赖与互操作边界见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
