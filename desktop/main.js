@@ -8,6 +8,7 @@ const {
 const {
   resolveGatewayAccountEditorExecutor,
   resolveHostActionExecutor,
+  resolveProviderConfigExecutor,
 } = require("./settings_runtime");
 const { app, BrowserWindow, Tray, Menu, dialog, nativeImage, nativeTheme, shell, globalShortcut } = require("electron");
 const http = require("http");
@@ -73,6 +74,12 @@ function createPrivateApiHandler() {
       pathExists: existsSync,
     }),
     hostActionExecutor: resolveHostActionExecutor({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      platform: process.platform,
+      pathExists: existsSync,
+    }),
+    providerConfigExecutor: resolveProviderConfigExecutor({
       isPackaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
       platform: process.platform,

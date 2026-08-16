@@ -55,6 +55,14 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout,
             keychain=MacOSKeychain(keychain_path=arguments[1]),
         )
+    if arguments == ["provider-config-apply"]:
+        from openusage_bar.provider_commands import run_provider_config_apply
+
+        return run_provider_config_apply(sys.stdin, sys.stdout)
+    if arguments == ["provider-config-list"]:
+        from openusage_bar.provider_commands import run_provider_config_list
+
+        return run_provider_config_list(sys.stdout)
     if arguments == ["gateway-account-editor"]:
         from openusage_bar.gateway.account_editor_tk import run_gateway_account_editor
 

@@ -79,6 +79,21 @@ const GATEWAY_ACCOUNT_PRESETS = new Set([
   "openrouter",
 ]);
 const ACCOUNT_POOL_CREATE_ACTION = "accountPool.create";
+const PROVIDER_CONFIG_APPLY_ACTION = "providerConfig.apply";
+const PROVIDER_CONFIG_MUTATE_VERSION = 1;
+const PROVIDER_CONFIG_FIELD_LIMIT = 4096;
+const HOST_ACTION_SUBCOMMANDS = new Set([
+  "gateway-account-mutate",
+  "provider-config-apply",
+]);
+const PROVIDER_CONFIG_AGENTS = new Set([
+  "claude_code",
+  "codex",
+  "gemini_cli",
+  "opencode",
+]);
+const PROVIDER_CONFIG_CATEGORIES = new Set(["official", "gateway"]);
+const PROVIDER_CONFIG_STATUSES = new Set(["created", "updated"]);
 const ACCOUNT_POOL_EDIT_ACTION = "accountPool.edit";
 const ACCOUNT_POOL_REMOVE_ACTION = "accountPool.remove";
 const ACCOUNT_POOL_MUTATE_VERSION = 1;
@@ -1072,6 +1087,7 @@ async function fetchRendererResponse(
     verifyWindowsAcl,
     deadlineMs = DEFAULT_DEADLINE_MS,
     hostActionExecutor,
+    providerConfigExecutor,
     gatewayAccountEditorExecutor,
     gatewayAccountOperationHost,
     spawnProcess = childProcess.spawn,
@@ -1123,7 +1139,9 @@ async function fetchRendererResponse(
     classified.method === "GET" &&
     classified.target === "/host/v1/capabilities"
   ) {
-    return rendererJsonResponse(hostActionCapabilities({ hostActionExecutor }));
+    return rendererJsonResponse(
+      hostActionCapabilities({ hostActionExecutor, providerConfigExecutor }),
+    );
   }
   if (
     classified.service === "host" &&
@@ -1132,6 +1150,7 @@ async function fetchRendererResponse(
   ) {
     const result = await executeHostActionCommand(classified.actionRequest, {
       hostActionExecutor,
+      providerConfigExecutor,
       spawnProcess,
       deadlineMs,
     });
@@ -2087,7 +2106,66 @@ function sanitizeAccountPoolMemberships(value) {
   return result;
 }
 
+function boundedProviderConfigText(value, limit) {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > limit ||
+    /[\u0000-\u001f\u007f]/u.test(value)
+  ) {
+    return null;
+  }
+  return value;
+}
+
+function sanitizeProviderConfigApplyRequest(body) {
+  const request = ownDataRecord(body, [
+    "apiVersion",
+    "action",
+    "presetId",
+    "apiKey",
+    "baseUrl",
+    "model",
+  ]);
+  if (
+    request === null ||
+    request.apiVersion !== HOST_ACTION_API_VERSION ||
+    request.action !== PROVIDER_CONFIG_APPLY_ACTION
+  ) {
+    return null;
+  }
+  const presetId = boundedProviderConfigText(request.presetId, 256);
+  const apiKey = boundedProviderConfigText(request.apiKey, PROVIDER_CONFIG_FIELD_LIMIT);
+  const baseUrl =
+    request.baseUrl === null
+      ? null
+      : boundedProviderConfigText(request.baseUrl, PROVIDER_CONFIG_FIELD_LIMIT);
+  const model =
+    request.model === null
+      ? null
+      : boundedProviderConfigText(request.model, 1024);
+  if (presetId === null || apiKey === null) return null;
+  if (request.baseUrl !== null && baseUrl === null) return null;
+  if (request.model !== null && model === null) return null;
+  return {
+    apiVersion: HOST_ACTION_API_VERSION,
+    action: PROVIDER_CONFIG_APPLY_ACTION,
+    command: {
+      version: PROVIDER_CONFIG_MUTATE_VERSION,
+      action: "provider_config_apply",
+      presetId,
+      apiKey,
+      baseUrl,
+      model,
+    },
+  };
+}
+
 function sanitizeHostActionRequest(body) {
+  if (body === null || typeof body !== "object") return null;
+  if (body.action === PROVIDER_CONFIG_APPLY_ACTION) {
+    return sanitizeProviderConfigApplyRequest(body);
+  }
   const request = ownDataRecord(body, [
     "apiVersion",
     "action",
@@ -2196,17 +2274,22 @@ function sanitizeHostActionRequestBody(body) {
   return sanitizeHostActionRequest(value);
 }
 
-function hostActionCapabilities({ hostActionExecutor } = {}) {
-  return {
-    apiVersion: HOST_ACTION_API_VERSION,
-    actions: validHostActionExecutor(hostActionExecutor)
-      ? [
-          ACCOUNT_POOL_CREATE_ACTION,
-          ACCOUNT_POOL_EDIT_ACTION,
-          ACCOUNT_POOL_REMOVE_ACTION,
-        ]
-      : [],
-  };
+function hostActionCapabilities({
+  hostActionExecutor,
+  providerConfigExecutor,
+} = {}) {
+  const actions = [];
+  if (validHostActionExecutor(hostActionExecutor)) {
+    actions.push(
+      ACCOUNT_POOL_CREATE_ACTION,
+      ACCOUNT_POOL_EDIT_ACTION,
+      ACCOUNT_POOL_REMOVE_ACTION,
+    );
+  }
+  if (validHostActionExecutor(providerConfigExecutor)) {
+    actions.push(PROVIDER_CONFIG_APPLY_ACTION);
+  }
+  return { apiVersion: HOST_ACTION_API_VERSION, actions };
 }
 
 function gatewayAccountOperationCapabilities({
@@ -2228,14 +2311,21 @@ function executeHostActionCommand(
   actionRequest,
   {
     hostActionExecutor,
+    providerConfigExecutor,
     spawnProcess = childProcess.spawn,
     deadlineMs = DEFAULT_DEADLINE_MS,
   } = {},
 ) {
+  const executor =
+    actionRequest !== null &&
+    typeof actionRequest === "object" &&
+    actionRequest.action === PROVIDER_CONFIG_APPLY_ACTION
+      ? providerConfigExecutor
+      : hostActionExecutor;
   if (
     actionRequest === null ||
     typeof actionRequest !== "object" ||
-    !validHostActionExecutor(hostActionExecutor) ||
+    !validHostActionExecutor(executor) ||
     typeof spawnProcess !== "function"
   ) {
     return Promise.resolve(null);
@@ -2247,7 +2337,7 @@ function executeHostActionCommand(
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawnProcess(hostActionExecutor.command, hostActionExecutor.args, {
+      child = spawnProcess(executor.command, executor.args, {
         shell: false,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
@@ -2337,9 +2427,68 @@ function executeHostActionCommand(
   });
 }
 
+function sanitizeProviderConfigCommandResult(value, action) {
+  if (
+    !hasExactOwnKeys(value, [
+      "version",
+      "ok",
+      "code",
+      "agent",
+      "presetId",
+      "name",
+      "category",
+      "status",
+    ]) ||
+    value.version !== PROVIDER_CONFIG_MUTATE_VERSION ||
+    typeof value.ok !== "boolean" ||
+    typeof value.code !== "string" ||
+    !/^[a-z_]{1,64}$/u.test(value.code)
+  ) {
+    return null;
+  }
+  if (!value.ok) {
+    return {
+      apiVersion: HOST_ACTION_API_VERSION,
+      action,
+      ok: false,
+      code: value.code,
+    };
+  }
+  if (
+    typeof value.agent !== "string" ||
+    !PROVIDER_CONFIG_AGENTS.has(value.agent) ||
+    typeof value.presetId !== "string" ||
+    value.presetId.length === 0 ||
+    value.presetId.length > 256 ||
+    typeof value.name !== "string" ||
+    value.name.length === 0 ||
+    value.name.length > 256 ||
+    typeof value.category !== "string" ||
+    !PROVIDER_CONFIG_CATEGORIES.has(value.category) ||
+    typeof value.status !== "string" ||
+    !PROVIDER_CONFIG_STATUSES.has(value.status)
+  ) {
+    return null;
+  }
+  return {
+    apiVersion: HOST_ACTION_API_VERSION,
+    action,
+    ok: true,
+    code: value.code,
+    agent: value.agent,
+    presetId: value.presetId,
+    name: value.name,
+    category: value.category,
+    status: value.status,
+  };
+}
+
 function sanitizeHostActionCommandResult(body, action) {
   const value = parseStrictJsonObject(body, MAX_HOST_ACTION_RESPONSE_BYTES);
   if (value === null) return null;
+  if (action === PROVIDER_CONFIG_APPLY_ACTION) {
+    return sanitizeProviderConfigCommandResult(value, action);
+  }
   const keys = Object.keys(value);
   if (
     !(
@@ -2392,7 +2541,7 @@ function validHostActionExecutor(value) {
     !(path.isAbsolute(value.command) || path.win32.isAbsolute(value.command)) ||
     !Array.isArray(value.args) ||
     value.args.length !== 1 ||
-    value.args[0] !== "gateway-account-mutate"
+    !HOST_ACTION_SUBCOMMANDS.has(value.args[0])
   ) {
     return false;
   }

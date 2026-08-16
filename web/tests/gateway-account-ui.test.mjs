@@ -91,10 +91,15 @@ test("Gateway account controls remain usable from 320 through desktop widths", (
   assert.match(cssSource, /@media \(max-width: 640px\)[\s\S]*\.gateway-account-dialog\s*\{[^}]*calc\(100vw - 16px\)/);
 });
 
-test("Observer preset dialog describes console reachability, never account or credential health", () => {
-  assert.match(addProviderSource, /checkConsoleReachability/);
-  assert.match(addProviderSource, /t\.checkConsoleReachability/);
+test("Observer preset dialog follows the preset-form-save flow, never endpoint/credential health", () => {
+  assert.match(addProviderSource, /providerConfigSave/);
+  assert.match(addProviderSource, /providerConfigBaseUrl/);
+  assert.match(addProviderSource, /providerConfigModel/);
+  assert.match(providersSource, /applyProviderConfig/);
+  assert.match(providersSource, /fetchProviderConfigPresets/);
+  assert.match(addProviderSource, /preset-category-tabs/);
   assert.doesNotMatch(addProviderSource, /testEndpoint/);
-  assert.match(i18nSource, /checkConsoleReachability: "Check console reachability"/);
-  assert.match(i18nSource, /webPreviewNote: "This browser surface is read-only/);
+  assert.doesNotMatch(addProviderSource, /checkConsoleReachability/);
+  assert.match(i18nSource, /providerConfigSave: "Save to Agent config"/);
+  assert.match(i18nSource, /providerConfigDesktopRequired: "Saving requires the UsageHub desktop app\."/);
 });

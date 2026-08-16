@@ -428,6 +428,80 @@ td { color: var(--text-dim); white-space: nowrap; }
 
 .icon-btn:active:not(:disabled),
 .primary-btn:active:not(:disabled),
+.preset-category-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.preset-category-tab {
+  border: 1px solid var(--hairline);
+  background: var(--surface-alt);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.76rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+.preset-category-tab.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.preset-category-badge {
+  font-size: 0.66rem;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 8px;
+  line-height: 1.6;
+}
+.preset-category-badge.official {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.preset-category-badge.gateway {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--text-faint);
+}
+.field-row:focus-within { border-color: var(--accent); }
+.field-row input {
+  flex: 1;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 0.86rem;
+  padding: 8px 0;
+  outline: none;
+  min-width: 0;
+}
+.field-input {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.86rem;
+  padding: 8px 10px;
+  outline: none;
+  min-width: 0;
+}
+.field-input:focus { border-color: var(--accent); }
+.field-input:disabled {
+  color: var(--text-faint);
+  background: var(--surface-alt);
+  cursor: not-allowed;
+}
+.field-hint { font-size: 0.72rem; color: var(--text-faint); margin: -4px 0 0; }
+.field-error { font-size: 0.74rem; color: var(--bad); margin: 0; }
 .preset-card:active,
 .nav-link:active,
 .lang-switch:active,

@@ -9,12 +9,15 @@ import {
   List as ListIcon,
 } from "@phosphor-icons/react";
 import {
+  applyProviderConfig,
   fetchProviders,
   fetchSources,
   fetchQuickConnect,
+  fetchProviderConfigPresets,
   type ProviderItem,
   type SourceItem,
   type QuickConnectItem,
+  type ProviderConfigPreset,
 } from "../api";
 import {
   accountPoolsViewModel,
@@ -82,6 +85,8 @@ export default function ProvidersPage({
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [quick, setQuick] = useState<QuickConnectItem[]>([]);
+  const [providerPresets, setProviderPresets] = useState<ProviderConfigPreset[]>([]);
+  const [providerConfigCanApply, setProviderConfigCanApply] = useState(false);
   const [accountPoolsSnapshot, setAccountPoolsSnapshot] = useState<unknown>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -115,10 +120,14 @@ export default function ProvidersPage({
   const load = async (quiet = false) => {
     if (!quiet) setIsRefreshing(true);
     try {
-      const [p, s, q, poolResult] = await Promise.all([
+      const [p, s, q, presets, poolResult] = await Promise.all([
         fetchProviders(),
         fetchSources(),
         fetchQuickConnect(),
+        fetchProviderConfigPresets().then(
+          (value) => value,
+          () => [] as ProviderConfigPreset[],
+        ),
         fetchAccountPoolsSnapshot().then(
           (value) => ({ ok: true as const, value }),
           () => ({ ok: false as const, value: null }),
@@ -127,6 +136,7 @@ export default function ProvidersPage({
       setProviders(p);
       setSources(s);
       setQuick(q);
+      setProviderPresets(presets);
       if (poolResult.ok) setAccountPoolsSnapshot(poolResult.value);
       setError(null);
       setLastRefreshed(new Date());
@@ -158,6 +168,31 @@ export default function ProvidersPage({
     );
     return () => controller.abort();
   }, [accountPoolHostAdapter]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/host/v1/capabilities", {
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        const actions =
+          value !== null &&
+          typeof value === "object" &&
+          Array.isArray((value as { actions?: unknown }).actions)
+            ? ((value as { actions: string[] }).actions ?? [])
+            : [];
+        setProviderConfigCanApply(actions.includes("providerConfig.apply"));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setProviderConfigCanApply(false);
+      });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -426,9 +461,11 @@ export default function ProvidersPage({
       />
       <AddProviderDialog
         open={dialogOpen}
-        presets={quick}
+        presets={providerPresets}
         onClose={() => setDialogOpen(false)}
         t={t}
+        canApply={providerConfigCanApply}
+        apply={applyProviderConfig}
       />
       {gatewayAccountCreateOpen ? (
         <GatewayAccountCreateDialog

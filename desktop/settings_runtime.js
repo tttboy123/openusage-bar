@@ -5,6 +5,7 @@ const path = require("path");
 
 const MAX_RUNTIME_PATH_LENGTH = 4096;
 const HOST_ACTION_ARGS = Object.freeze(["gateway-account-mutate"]);
+const PROVIDER_CONFIG_ARGS = Object.freeze(["provider-config-apply"]);
 const GATEWAY_ACCOUNT_EDITOR_ARGS = Object.freeze(["gateway-account-editor"]);
 
 function resolveHostActionExecutor({
@@ -27,6 +28,13 @@ function resolveHostActionExecutor({
     // without reflecting filesystem or environment details to the renderer.
     return null;
   }
+}
+
+function resolveProviderConfigExecutor(options = {}) {
+  const resolved = resolvePackagedSettingsHelper(options);
+  return resolved === null
+    ? null
+    : { command: resolved, args: [...PROVIDER_CONFIG_ARGS] };
 }
 
 function resolveGatewayAccountEditorExecutor(options = {}) {
@@ -89,4 +97,8 @@ function validatedAbsolutePath(value, pathApi) {
   return normalized && pathApi.isAbsolute(normalized) ? normalized : null;
 }
 
-module.exports = { resolveGatewayAccountEditorExecutor, resolveHostActionExecutor };
+module.exports = {
+  resolveGatewayAccountEditorExecutor,
+  resolveHostActionExecutor,
+  resolveProviderConfigExecutor,
+};
