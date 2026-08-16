@@ -278,6 +278,46 @@ function formatTokens(value) {
   return String(n);
 }
 
+function trayCopy() {
+  const zh = app.getLocale().toLowerCase().startsWith("zh");
+  return zh
+    ? {
+        today: "今日 Token",
+        balances: "实测余额",
+        quota: "额度",
+        refresh: "刷新",
+        open: "打开 UsageHub",
+        settings: "设置",
+        quit: "退出",
+      }
+    : {
+        today: "Today",
+        balances: "Balances",
+        quota: "Capacity",
+        refresh: "Refresh",
+        open: "Open UsageHub",
+        settings: "Settings",
+        quit: "Quit",
+      };
+}
+
+function menuLabel() {
+  const { snapshot } = lastTraySnapshot ?? {};
+  const today = snapshot?.summary?.todayTokens;
+  if (today == null) return "";
+  return formatTokens(today);
+}
+
+function trayTitle() {
+  const { snapshot, capacity } = lastTraySnapshot ?? {};
+  const today = snapshot?.summary?.todayTokens;
+  if (today == null) return "";
+  const urgent = mostUrgent(capacity);
+  const ratio = urgent?.remainingRatio ?? 1;
+  const mark = ratio <= 0.2 ? "🔴" : ratio <= 0.4 ? "🟡" : "🟢";
+  return `${mark} ${formatTokens(today)}`;
+}
+
 function mostUrgent(capacity) {
   const providers = capacityProviders(capacity);
   const scored = providers
@@ -291,13 +331,17 @@ function mostUrgent(capacity) {
 }
 
 function buildTrayMenu() {
+  const copy = trayCopy();
   const items = [];
   const { snapshot, capacity } = lastTraySnapshot ?? {};
   const today = snapshot?.summary?.todayTokens;
   const urgent = mostUrgent(capacity);
 
   items.push({
-    label: today != null ? `Today: ${formatTokens(today)} tokens` : "UsageHub",
+    label:
+      today != null
+        ? `${copy.today}: ${formatTokens(today)} tokens`
+        : "UsageHub",
     enabled: false,
   });
   if (urgent) {
@@ -308,8 +352,24 @@ function buildTrayMenu() {
   }
   items.push({ type: "separator" });
 
+  const balances = Array.isArray(snapshot?.balances) ? snapshot.balances : [];
+  const visibleBalances = balances.filter(
+    (b) => b && b.state !== "unknown" && b.available != null
+  );
+  if (visibleBalances.length > 0) {
+    items.push({ label: copy.balances, enabled: false });
+    visibleBalances.slice(0, 6).forEach((b) => {
+      items.push({
+        label: `${b.providerId ?? "Provider"}: ${b.available} ${b.currency ?? ""}`,
+        click: () => showMainWindow(),
+      });
+    });
+    items.push({ type: "separator" });
+  }
+
   const capacityItems = capacityProviders(capacity);
   if (capacityItems.length > 0) {
+    items.push({ label: copy.quota, enabled: false });
     capacityItems.slice(0, 6).forEach((c) => {
       const ratio = c.remainingRatio ?? 1;
       const indicator = ratio <= 0.2 ? "🔴" : ratio <= 0.4 ? "🟡" : "🟢";
@@ -322,17 +382,17 @@ function buildTrayMenu() {
   }
 
   items.push({
-    label: "Refresh",
+    label: copy.refresh,
     accelerator: "CommandOrControl+R",
     click: () => refreshTraySnapshot(),
   });
   items.push({
-    label: "Open UsageHub",
+    label: copy.open,
     accelerator: "CommandOrControl+O",
     click: () => showMainWindow(),
   });
   items.push({
-    label: "Settings",
+    label: copy.settings,
     accelerator: "CommandOrControl+,",
     click: () => {
       showMainWindow();
@@ -341,7 +401,7 @@ function buildTrayMenu() {
   });
   items.push({ type: "separator" });
   items.push({
-    label: "Quit",
+    label: copy.quit,
     accelerator: "CommandOrControl+Q",
     click: () => {
       isQuitting = true;
@@ -354,6 +414,7 @@ function buildTrayMenu() {
 function updateTray() {
   if (!tray) return;
   tray.setContextMenu(buildTrayMenu());
+  tray.setTitle(trayTitle());
 }
 
 function showTrayMenu() {
