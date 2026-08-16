@@ -177,7 +177,7 @@ provider catalog schema）：
 - Python：`python -m unittest tests.test_web_dashboard tests.test_local_api` 通过。
 - 每小时 heartbeat automation `usagehub-v0-7-1-parity-continuation` 已激活，用于在额度中断后自动继续并询问用户状态。
  - 历史实机验证：使用 `scripts/demo_backend.py` 在 macOS 上启动带数据的 demo 后端（TCP 17822 + Unix socket），分别运行当时的 Desktop `UsageHub.app`、Swift `OpenUsage Activity.app` 与菜单栏 `OpenUsage Bar.runtime --background --show-popover` 并截取真实窗口/Popover 图像。当前 packaged Electron 只使用私有 Observer 边界。
- - 截图目录：`/Users/lune/Documents/Codex/2026-08-05/ui-ux-pro-max-users-lune-2/outputs/screenshots/`。
+ - 截图目录：本地工作区 `outputs/screenshots/`（不入库）。
 
  ## 13. 实机验证与 demo 后端
 
@@ -192,7 +192,7 @@ provider catalog schema）：
  启动方式：
 
  ```bash
- cd /Users/lune/Documents/Codex/2026-07-13/new-chat/work/openusage-bar-public-release
+ cd <repo-root>  # 仓库根目录
  .build-venv/bin/python scripts/demo_backend.py dashboard --port 17822
  ```
 
@@ -230,7 +230,7 @@ provider catalog schema）：
  - Swift：`UnifiedStatusBadge` 新增 `isLive` 参数，`ProviderCenterItem` 从 `data.health.sources` 聚合最新 `lastSuccessAt` 并计算 `isLive`，在 `ProviderCenterRow` 与详情页中传入。
  - 实现文件：`web/src/components/ProviderCard.tsx`、`web/src/styles/app.css`、`swift_app/Sources/UsageCore/UnifiedUIComponents.swift`、`swift_app/Sources/OpenUsageActivity/ProviderCenterViews.swift`、`swift_app/Sources/OpenUsageActivity/ActivityAppLogic.swift`。
  - 三端统一：Desktop 通过 Web 前端自动继承该徽标；Swift 原生 Provider Center 使用同一语义。
- - 截图目录：`/Users/lune/Documents/Codex/2026-08-05/ui-ux-pro-max-users-lune-2/outputs/screenshots/`。
+ - 截图目录：本地工作区 `outputs/screenshots/`（不入库）。
  - Storybook：ProviderCard / ProviderGrid 已提供 Live / Connected / Stale / Error / Grid 故事，便于独立设计评审与截图，构建输出到 `outputs/storybook`。
 每小时 heartbeat automation `usagehub-v0-7-1-parity-continuation` 已激活，用于在额度中断后自动继续并询问用户状态。
 - Web：`ProviderCard` 在 `provider-status-ok` 徽标前增加 `.provider-status-live` 脉冲圆点，CSS 动画 `provider-pulse` 1.6s 循环，支持 `prefers-reduced-motion`。

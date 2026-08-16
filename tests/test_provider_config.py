@@ -200,7 +200,7 @@ class ProviderConfigWriterTests(unittest.TestCase):
             'model_provider = "custom"\n'
             '[plugins."sites@openai-bundled"]\n'
             'enabled = true\n'
-            '[projects."/Users/lune"]\n'
+            '[projects."/Users/example"]\n'
             'trust_level = "trusted"\n'
         )
         rendered = render_codex_toml(
@@ -212,7 +212,7 @@ class ProviderConfigWriterTests(unittest.TestCase):
         )
         parsed = tomllib.loads(rendered)
         self.assertEqual(parsed["plugins"]["sites@openai-bundled"]["enabled"], True)
-        self.assertEqual(parsed["projects"]["/Users/lune"]["trust_level"], "trusted")
+        self.assertEqual(parsed["projects"]["/Users/example"]["trust_level"], "trusted")
         self.assertEqual(parsed["model_providers"]["openai"]["base_url"], "https://api.openai.com/v1")
         with self.assertRaisesRegex(ValueError, "valid TOML"):
             render_codex_toml(
