@@ -24,7 +24,7 @@ import PeriodSelector, {
   rangeFor,
   type Period,
 } from "../components/PeriodSelector";
-import { type Messages } from "../i18n";
+import { type Messages, tpl } from "../i18n";
 
 type BadgeState = "partial" | "missing" | "neutral";
 
@@ -311,7 +311,8 @@ export default function ActivityPage({ t }: { t: Messages }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [providerFilter, setProviderFilter] = useState<string>("all");
-  const [modelFilter, setModelFilter] = useState<string>("all");
+  const [modelFilters, setModelFilters] = useState<ReadonlySet<string>>(new Set());
+  const [modelPanelOpen, setModelPanelOpen] = useState(false);
   const [selectedHeatDay, setSelectedHeatDay] = useState<string | null>(null);
   const [hoveredHeatDay, setHoveredHeatDay] = useState<string | null>(null);
   const [hiddenModels, setHiddenModels] = useState<Set<string>>(new Set());
@@ -338,8 +339,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
     const controller = new AbortController();
     setLoading(true);
     const providerIds = providerFilter === "all" ? undefined : [providerFilter];
-    const modelIds = modelFilter === "all" ? undefined : [modelFilter];
-    void fetchActivity(from, to, providerIds, modelIds, controller.signal)
+    void fetchActivity(from, to, providerIds, undefined, controller.signal)
       .then(({ rows }) => setActivity(rows))
       .catch((e) => {
         if (!controller.signal.aborted) {
@@ -350,15 +350,14 @@ export default function ActivityPage({ t }: { t: Messages }) {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [from, to, providerFilter, modelFilter]);
+  }, [from, to, providerFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
     setHeatmapLoading(true);
     const { from: heatFrom, to: heatTo } = yearRange();
     const providerIds = providerFilter === "all" ? undefined : [providerFilter];
-    const modelIds = modelFilter === "all" ? undefined : [modelFilter];
-    void fetchActivity(heatFrom, heatTo, providerIds, modelIds, controller.signal)
+    void fetchActivity(heatFrom, heatTo, providerIds, undefined, controller.signal)
       .then(({ rows, coverage }) => {
         setHeatmapActivity(rows);
         setHeatmapCoverage(coverage);
@@ -372,12 +371,12 @@ export default function ActivityPage({ t }: { t: Messages }) {
         if (!controller.signal.aborted) setHeatmapLoading(false);
       });
     return () => controller.abort();
-  }, [providerFilter, modelFilter]);
+  }, [providerFilter]);
 
   useEffect(() => {
     setSelectedHeatDay(null);
     setHoveredHeatDay(null);
-  }, [providerFilter, modelFilter]);
+  }, [providerFilter, modelFilters]);
 
   useEffect(() => {
     if (
@@ -389,13 +388,17 @@ export default function ActivityPage({ t }: { t: Messages }) {
   }, [activity, providerFilter]);
 
   useEffect(() => {
-    if (
-      modelFilter !== "all" &&
-      !activity.some((r) => r.modelId === modelFilter)
-    ) {
-      setModelFilter("all");
+    if (modelFilters.size === 0) return;
+    const present = new Set(activity.map((r) => r.modelId ?? "").filter(Boolean));
+    const stale = [...modelFilters].filter((m) => !present.has(m));
+    if (stale.length > 0) {
+      setModelFilters((prev) => {
+        const next = new Set(prev);
+        for (const m of stale) next.delete(m);
+        return next;
+      });
     }
-  }, [activity, modelFilter]);
+  }, [activity, modelFilters]);
 
   const allProviders = useMemo(
     () =>
@@ -404,37 +407,59 @@ export default function ActivityPage({ t }: { t: Messages }) {
       ).sort(),
     [activity],
   );
-  const allModels = useMemo(
-    () =>
-      Array.from(
-        new Set(activity.map((r) => r.modelId ?? "").filter(Boolean)),
-      ).sort(),
-    [activity],
-  );
-
-  const providerModels = useMemo(() => {
-    if (providerFilter === "all") return allModels;
-    return Array.from(
-      new Set(
-        activity
-          .filter((r) => r.providerId === providerFilter)
-          .map((r) => r.modelId ?? ""),
-      ),
-    ).sort();
-  }, [activity, providerFilter, allModels]);
+  const groupedModels = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    for (const r of activity) {
+      const provider = r.providerId ?? "unknown";
+      if (providerFilter !== "all" && provider !== providerFilter) continue;
+      const model = r.modelId ?? "unknown";
+      if (!model) continue;
+      const list = groups.get(provider) ?? [];
+      if (!list.includes(model)) list.push(model);
+      groups.set(provider, list);
+    }
+    return [...groups.entries()]
+      .map(([provider, models]) => ({ provider, models: models.sort() }))
+      .sort((a, b) => a.provider.localeCompare(b.provider));
+  }, [activity, providerFilter]);
 
   const modelProviders = useMemo(() => {
-    if (modelFilter === "all") return allProviders;
+    if (modelFilters.size === 0) return allProviders;
+    const selected = new Set(modelFilters);
     return Array.from(
       new Set(
         activity
-          .filter((r) => r.modelId === modelFilter)
+          .filter((r) => r.modelId && selected.has(r.modelId))
           .map((r) => r.providerId ?? ""),
       ),
     ).sort();
-  }, [activity, modelFilter, allProviders]);
+  }, [activity, modelFilters, allProviders]);
 
-  const filtered = activity;
+
+  function toggleModel(model: string) {
+    setModelFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(model)) next.delete(model);
+      else next.add(model);
+      return next;
+    });
+  }
+
+  const filtered = useMemo(
+    () =>
+      modelFilters.size === 0
+        ? activity
+        : activity.filter((r) => r.modelId && modelFilters.has(r.modelId)),
+    [activity, modelFilters],
+  );
+
+  const heatmapFiltered = useMemo(
+    () =>
+      modelFilters.size === 0
+        ? heatmapActivity
+        : heatmapActivity.filter((r) => r.modelId && modelFilters.has(r.modelId)),
+    [heatmapActivity, modelFilters],
+  );
 
   const totals = useMemo(() => {
     const byDay: Record<string, number> = {};
@@ -544,8 +569,8 @@ export default function ActivityPage({ t }: { t: Messages }) {
 
   const heatRange = useMemo(() => yearRange(), []);
   const { days: calendarDays, weeks, monthAnchors } = useMemo(
-    () => buildCalendar(heatRange.from, heatRange.to, heatmapActivity, heatmapCoverage),
-    [heatRange, heatmapActivity, heatmapCoverage],
+    () => buildCalendar(heatRange.from, heatRange.to, heatmapFiltered, heatmapCoverage),
+    [heatRange, heatmapFiltered, heatmapCoverage],
   );
 
   const heatStats = useMemo(() => {
@@ -693,26 +718,68 @@ export default function ActivityPage({ t }: { t: Messages }) {
                 </option>
               ))}
             </select>
-            <select
-              className="filter-select"
-              value={modelFilter}
-              onChange={(e) => setModelFilter(e.target.value)}
-              aria-label={t.modelFilter}
-            >
-              <option value="all">{t.allModels}</option>
-              {providerModels.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-            {(providerFilter !== "all" || modelFilter !== "all") && (
+            <div className="model-multiselect">
+              <button
+                type="button"
+                className="filter-select filter-multiselect-trigger"
+                onClick={() => setModelPanelOpen((v) => !v)}
+                aria-expanded={modelPanelOpen}
+                aria-haspopup="listbox"
+              >
+                {modelFilters.size === 0
+                  ? t.allModels
+                  : tpl(t.modelsSelected, { count: String(modelFilters.size) })}
+              </button>
+              {modelPanelOpen ? (
+                <div className="model-multiselect-panel" role="listbox" aria-multiselectable="true">
+                  <div className="model-multiselect-panel-head">
+                    <span>{t.selectModels}</span>
+                    <button
+                      type="button"
+                      className="btn-link"
+                      onClick={() => {
+                        setModelFilters(new Set());
+                        setModelPanelOpen(false);
+                      }}
+                    >
+                      {t.clearModels}
+                    </button>
+                  </div>
+                  {groupedModels.length === 0 ? (
+                    <p className="empty">{t.noRows}</p>
+                  ) : (
+                    groupedModels.map((group) => (
+                      <div className="model-group" key={group.provider}>
+                        <div className="model-group-name">{group.provider}</div>
+                        <div className="model-group-items">
+                          {group.models.map((m) => {
+                            const checked = modelFilters.has(m);
+                            return (
+                              <label className="model-check" key={m}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleModel(m)}
+                                />
+                                <span>{m}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
+            {(providerFilter !== "all" || modelFilters.size > 0) && (
               <button
                 type="button"
                 className="icon-btn"
                 onClick={() => {
                   setProviderFilter("all");
-                  setModelFilter("all");
+                  setModelFilters(new Set());
+                  setModelPanelOpen(false);
                 }}
               >
                 {t.resetFilters}
