@@ -1,4 +1,5 @@
 import { ArrowSquareOut, Key, CloudArrowUp } from "@phosphor-icons/react";
+import { ProviderIcon } from "./ProviderIcon";
 import { type Messages, tpl } from "../i18n";
 import { type SourceItem, type QuickConnectItem } from "../api";
 
@@ -126,17 +127,15 @@ export default function ProviderCard({
   variant = "grid",
 }: ProviderCardProps) {
   const kind = stateKind(source?.state);
-  const color = brandColor(familyId);
   const live = isLive(source);
   return (
     <article className={variant === "list" ? "provider-row" : "provider-card"}>
-      <span
-        className={variant === "list" ? "provider-icon provider-icon-sm" : "provider-icon"}
-        style={{ background: color, color: brandTextColor(familyId) }}
-        aria-hidden="true"
-      >
-        {(familyId ?? "").slice(0, 2).toUpperCase()}
-      </span>
+      <ProviderIcon
+        familyId={familyId}
+        name={displayName}
+        size={variant === "list" ? 28 : 34}
+        className={variant === "list" ? "provider-icon-sm" : ""}
+      />
       <div className="provider-info">
         <h4 title={displayName}>{displayName}</h4>
         {quick?.consoleUrl ? (

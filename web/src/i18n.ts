@@ -97,6 +97,11 @@ export const messages = {
     apiPaid: "API paid",
     apiPaidHint:
       "Amounts are reported by the provider account (e.g. DeepSeek 30-day window spend), not token × unit price.",
+    apiCreditEstimate: "Credit-window estimate",
+    apiCreditEstimateHint:
+      "Window credit ledger rows (e.g. DeepSeek 30-day window spend). Quality may be partial; keep separate from provider-reported model spend.",
+    estimated: "estimate",
+    costCol: "Cost",
     apiOnlyNote:
       "Only API-billed providers are shown here. Subscription plan quotas live on the Capacity page.",
     apiSpendNoModelDetail:
@@ -706,6 +711,11 @@ export const messages = {
     apiPaid: "API 实付",
     apiPaidHint:
       "金额来自 Provider 账户上报（如 DeepSeek 近 30 天窗口额度），非 Token × 单价。",
+    apiCreditEstimate: "额度窗口估算",
+    apiCreditEstimateHint:
+      "额度窗口账本（如 DeepSeek 近 30 天窗口额度），质量可能为部分估算；与按模型上报的实际花费分开显示。",
+    estimated: "估算",
+    costCol: "成本",
     apiOnlyNote: "此处仅显示 API 计费 Provider；订阅计划额度见「额度」页。",
     apiSpendNoModelDetail:
       "已有 API 实付金额，但账本暂无对应的模型级用量。",

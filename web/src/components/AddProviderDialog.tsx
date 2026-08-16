@@ -1,21 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MagnifyingGlass, X, Key, ArrowLeft } from "@phosphor-icons/react";
-import { brandTextColorForHex } from "./ProviderCard";
+import { ProviderIcon } from "./ProviderIcon";
 import type { ProviderConfigPreset } from "../api";
 import { type Messages, tpl } from "../i18n";
-
-const BRAND_COLORS: Record<string, string> = {
-  deepseek: "#4D6BFE",
-  moonshot: "#1A1A1A",
-  minimax: "#FF6B6B",
-  openai: "#10A37F",
-  anthropic: "#D97757",
-  google: "#4285F4",
-  opencode: "#0066FF",
-  zai: "#4D6BFE",
-  openrouter: "#843DCE",
-  siliconflow: "#00B8D9",
-};
 
 const AGENT_LABELS: Record<string, string> = {
   claude_code: "Claude Code",
@@ -275,18 +262,11 @@ export default function AddProviderDialog({
                   className="preset-card"
                   onClick={() => choose(preset)}
                 >
-                  <span
-                    className="preset-icon"
-                    style={{
-                      background:
-                        BRAND_COLORS[preset.familyId] ?? "var(--surface-alt)",
-                      color: BRAND_COLORS[preset.familyId]
-                        ? brandTextColorForHex(BRAND_COLORS[preset.familyId])
-                        : "var(--text)",
-                    }}
-                  >
-                    {preset.name.slice(0, 2).toUpperCase()}
-                  </span>
+                  <ProviderIcon
+                    familyId={preset.familyId}
+                    name={preset.name}
+                    size={30}
+                  />
                   <span className="preset-card-name">{preset.name}</span>
                   <span className={`preset-category-badge ${preset.category}`}>
                     {preset.category === "official"

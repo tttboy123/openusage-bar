@@ -114,6 +114,8 @@ export interface CostRow {
   providerId?: string;
   amount?: string;
   currency?: string;
+  quality?: string;
+  basis?: string;
 }
 
 export interface SourceItem {
