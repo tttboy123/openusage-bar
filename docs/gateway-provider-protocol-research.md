@@ -16,7 +16,7 @@ Scope: Task 7 adapter fixtures for OpenAI Responses API, Anthropic Messages API,
 - OpenRouter official chat completion reference: <https://openrouter.ai/docs/api-reference/chat-completion>
 - OpenRouter official quickstart / attribution docs: <https://openrouter.ai/docs/quickstart>
 - Ollama official API docs, including `/api/chat`, streaming, and local HTTP API: <https://docs.ollama.com/api>
-- Local code seam audited for Task 7: [openusage_bar/gateway/api.py](/Users/lune/Documents/Codex/2026-07-13/new-chat/work/openusage-bar-public-release/openusage_bar/gateway/api.py), [openusage_bar/network.py](/Users/lune/Documents/Codex/2026-07-13/new-chat/work/openusage-bar-public-release/openusage_bar/network.py), [openusage_bar/keychain.py](/Users/lune/Documents/Codex/2026-07-13/new-chat/work/openusage-bar-public-release/openusage_bar/keychain.py)
+- Local code seam audited for Task 7: [`openusage_bar/gateway/api.py`](openusage_bar/gateway/api.py), [`openusage_bar/network.py`](openusage_bar/network.py), [`openusage_bar/keychain.py`](openusage_bar/keychain.py)
 
 ## Minimum protocol matrix
 

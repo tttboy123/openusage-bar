@@ -42,6 +42,7 @@ REQUIRED_JSON_RESOURCES = {
     "resources/local-api-v1.schema.json",
     "resources/product-version-truth.v1.json",
     "resources/provider-catalog.v1.json",
+    "resources/provider-config-presets.v1.json",
     "resources/release-state.v1.json",
     "resources/runtime-capability-v1.schema.json",
 }

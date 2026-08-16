@@ -3377,3 +3377,173 @@ function requestTcp(
     request.end(body);
   });
 }
+
+test("provider config host action routes to the provider-config-apply helper", async (context) => {
+  const {
+    createRendererApiHandler,
+    isRendererApiTarget,
+  } = require("../gateway_proxy.js");
+  const spawnCalls = [];
+  const spawnProcess = (command, args, options) => {
+    const child = new EventEmitter();
+    child.stdin = {
+      write(chunk) {
+        child.input = `${child.input ?? ""}${chunk.toString("utf8")}`;
+      },
+      end() {
+        process.nextTick(() => {
+          child.stdout.emit(
+            "data",
+            Buffer.from(
+              JSON.stringify({
+                version: 1,
+                ok: true,
+                code: "ok",
+                agent: "claude_code",
+                presetId: "claude-anthropic-official",
+                name: "Anthropic Official",
+                category: "official",
+                status: "created",
+              }),
+            ),
+          );
+          child.emit("close", 0, null);
+        });
+      },
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => {
+      child.killed = true;
+    };
+    spawnCalls.push({ command, args, options, child });
+    return child;
+  };
+  const handler = createRendererApiHandler({
+    runtime: null,
+    hostActionExecutor: {
+      command: "/usr/local/bin/openusage-settings",
+      args: ["gateway-account-mutate"],
+    },
+    providerConfigExecutor: {
+      command: "/usr/local/bin/openusage-settings",
+      args: ["provider-config-apply"],
+    },
+    spawnProcess,
+    deadlineMs: 100,
+  });
+  const server = http.createServer((request, response) => {
+    if (!isRendererApiTarget(request.url)) {
+      response.statusCode = 404;
+      response.end();
+      return;
+    }
+    handler(request, response);
+  });
+  const port = await listenTcp(server);
+  context.after(async () => {
+    await closeServer(server);
+  });
+
+  const requestBody = Buffer.from(
+    JSON.stringify({
+      apiVersion: "host-action.openusage/v1",
+      action: "providerConfig.apply",
+      presetId: "claude-anthropic-official",
+      apiKey: "sk-secret",
+      baseUrl: "https://api.anthropic.com",
+      model: "claude-sonnet-5",
+    }),
+    "utf8",
+  );
+  const ok = await requestTcp(port, "/host/v1/actions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": String(requestBody.length),
+    },
+    body: requestBody,
+  });
+  assert.equal(ok.statusCode, 200);
+  const payload = JSON.parse(ok.body.toString("utf8"));
+  assert.equal(payload.ok, true);
+  assert.equal(payload.agent, "claude_code");
+  assert.equal(spawnCalls.length, 1);
+  assert.deepEqual(spawnCalls[0].args, ["provider-config-apply"]);
+  assert.deepEqual(JSON.parse(spawnCalls[0].child.input), {
+    version: 1,
+    action: "provider_config_apply",
+    presetId: "claude-anthropic-official",
+    apiKey: "sk-secret",
+    baseUrl: "https://api.anthropic.com",
+    model: "claude-sonnet-5",
+  });
+});
+
+test("provider config host action is rejected without a helper or on invalid input", async (context) => {
+  const { createRendererApiHandler, isRendererApiTarget } = require("../gateway_proxy.js");
+  const handler = createRendererApiHandler({
+    runtime: null,
+    hostActionExecutor: {
+      command: "/usr/local/bin/openusage-settings",
+      args: ["gateway-account-mutate"],
+    },
+    spawnProcess: () => {
+      throw new Error("must not spawn");
+    },
+  });
+  const server = http.createServer((request, response) => {
+    if (!isRendererApiTarget(request.url)) {
+      response.statusCode = 404;
+      response.end();
+      return;
+    }
+    handler(request, response);
+  });
+  const port = await listenTcp(server);
+  context.after(async () => {
+    await closeServer(server);
+  });
+
+  const capabilities = await requestTcp(port, "/host/v1/capabilities");
+  const capabilityPayload = JSON.parse(capabilities.body.toString("utf8"));
+  assert.deepEqual(capabilityPayload.actions, [
+    "accountPool.create",
+    "accountPool.edit",
+    "accountPool.remove",
+  ]);
+
+  for (const bad of [
+    { apiVersion: "host-action.openusage/v1", action: "providerConfig.apply" },
+    {
+      apiVersion: "host-action.openusage/v1",
+      action: "providerConfig.apply",
+      presetId: "claude-anthropic-official",
+      apiKey: "",
+    },
+    {
+      apiVersion: "host-action.openusage/v1",
+      action: "providerConfig.apply",
+      presetId: "bad\npreset",
+      apiKey: "sk-x",
+    },
+    {
+      apiVersion: "host-action.openusage/v1",
+      action: "providerConfig.apply",
+      presetId: "claude-anthropic-official",
+      apiKey: "sk-x",
+      baseUrl: "x".repeat(5000),
+    },
+  ]) {
+    const body = Buffer.from(JSON.stringify(bad), "utf8");
+    const response = await requestTcp(port, "/host/v1/actions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": String(body.length),
+      },
+      body,
+    });
+    assert.equal(response.statusCode, 400, JSON.stringify(bad));
+  }
+});

@@ -12,7 +12,8 @@ from __future__ import annotations
 import html
 import json
 import re
-from datetime import date, timedelta
+import threading
+from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from urllib.parse import parse_qs, urlparse
@@ -359,16 +360,93 @@ def render_dashboard(
 """
 
 
+class _RefreshCoordinator:
+    """Bound one user-triggered refresh to a single in-flight worker.
+
+    The dashboard stays read-only: the worker only reads provider facts and
+    writes to the local ledger through the same headless refresher the daemon
+    uses. Responses never expose socket paths, credentials, or raw payloads.
+    """
+
+    DEFAULT_HISTORY_DAYS = 364
+
+    def __init__(self, refresher: Any | None) -> None:
+        self.refresher = refresher
+        self._lock = threading.Lock()
+        self._worker: threading.Thread | None = None
+        self._last_started_at: str | None = None
+        self._last_finished_at: str | None = None
+        self._last_succeeded: bool | None = None
+
+    def start(self) -> tuple[int, dict[str, Any]]:
+        if self.refresher is None:
+            return 503, {"status": "unavailable"}
+        with self._lock:
+            if self._worker is not None and self._worker.is_alive():
+                return 200, {"status": "in_progress"}
+            self._last_started_at = datetime.now(timezone.utc).isoformat()
+            self._worker = threading.Thread(
+                target=self._run,
+                name="usagebar-dashboard-refresh",
+                daemon=True,
+            )
+            self._worker.start()
+        return 202, {"status": "started"}
+
+    def status(self) -> dict[str, Any]:
+        if self.refresher is None:
+            return {"status": "unavailable"}
+        with self._lock:
+            running = self._worker is not None and self._worker.is_alive()
+        return {
+            "status": "running" if running else "idle",
+            "lastStartedAt": self._last_started_at,
+            "lastFinishedAt": self._last_finished_at,
+            "succeeded": self._last_succeeded,
+        }
+
+    def _run(self) -> None:
+        succeeded = False
+        try:
+            self._refresh()
+            succeeded = True
+        except Exception:
+            succeeded = False
+        finally:
+            with self._lock:
+                self._last_finished_at = datetime.now(timezone.utc).isoformat()
+                self._last_succeeded = succeeded
+
+    def _refresh(self) -> None:
+        refresher = self.refresher
+        if refresher is None:
+            return
+        try:
+            refresher.refresh(history_days=self.DEFAULT_HISTORY_DAYS)
+            return
+        except TypeError:
+            # Fall back for refreshers that only support the no-argument form.
+            pass
+        refresher.refresh()
+
+
 def make_dashboard_server(
     query: QueryService,
     *,
     port: int = DEFAULT_DASHBOARD_PORT,
     today: date | None = None,
+    refresher: Any | None = None,
 ) -> ThreadingHTTPServer:
-    """Create the loopback dashboard server (caller owns serve/shutdown)."""
+    """Create the loopback dashboard server (caller owns serve/shutdown).
+
+    ``refresher`` is an optional headless refresher with ``refresh``; it is
+    used only when the renderer asks for a bounded refresh via
+    ``POST /v1/refresh``.
+    """
+    refresh = _RefreshCoordinator(refresher)
 
     def handler_factory(*args: Any, **kwargs: Any) -> BaseHTTPRequestHandler:
-        return _DashboardHandler(query, today, *args, **kwargs)
+        return _DashboardHandler(query, today, refresh, *args, **kwargs)
 
     return ThreadingHTTPServer(("127.0.0.1", port), handler_factory)
 
@@ -380,11 +458,13 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self,
         query: QueryService,
         today: date | None,
+        refresh: _RefreshCoordinator | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
         self._query = query
         self._today = today or date.today()
+        self._refresh = refresh or _RefreshCoordinator(None)
         super().__init__(*args, **kwargs)
 
     def _write(self, body: bytes, content_type: str, *, status: int = 200) -> None:
@@ -527,7 +607,18 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 }
             )
             return
+        if path == "/v1/refresh/status":
+            self._json(self._refresh.status())
+            return
         self.send_error(404)
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path != "/v1/refresh":
+            self.send_error(404)
+            return
+        status, payload = self._refresh.start()
+        self._json(payload, status=status)
 
     def _json(self, payload: Any, *, status: int = 200) -> None:
         import json

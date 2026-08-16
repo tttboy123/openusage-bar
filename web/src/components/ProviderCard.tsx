@@ -1,4 +1,5 @@
 import { ArrowSquareOut, Key, CloudArrowUp } from "@phosphor-icons/react";
+import { ProviderIcon } from "./ProviderIcon";
 import { type Messages, tpl } from "../i18n";
 import { type SourceItem, type QuickConnectItem } from "../api";
 
@@ -27,6 +28,7 @@ export interface ProviderCardProps {
   quick?: QuickConnectItem;
   t: Messages;
   isSyncing?: boolean;
+  variant?: "grid" | "list";
 }
 
 function stateKind(state?: string): ProviderStatusKind {
@@ -72,12 +74,46 @@ function relativeTime(date: string | null | undefined, t: Messages): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return tpl(t.hoursAgo, { count: hours });
   const days = Math.floor(hours / 24);
-  return tpl(t.daysAgo, { count: days });
+  return tpl(days === 1 ? t.dayAgo : t.daysAgo, { count: days });
 }
 
 export function brandColor(familyId?: string): string {
   if (!familyId) return "var(--text-faint)";
   return BRAND_COLORS[familyId.toLowerCase()] ?? "var(--text-faint)";
+}
+
+function brandLuminance(hex: string): number {
+  const value = hex.startsWith("#") ? hex.slice(1) : hex;
+  const channels = [0, 2, 4].map((i) => {
+    const channel = parseInt(value.slice(i, i + 2), 16) / 255;
+    return channel <= 0.03928
+      ? channel / 12.92
+      : Math.pow((channel + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+const BRAND_DARK_TEXT = "#111114";
+const BRAND_LIGHT_TEXT = "#ffffff";
+
+function brandContrast(luminance: number, textLuminance: number): number {
+  const lighter = Math.max(luminance, textLuminance);
+  const darker = Math.min(luminance, textLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/** Readable foreground for a hex avatar color: pick the higher-contrast text. */
+export function brandTextColorForHex(color: string): string {
+  if (!color.startsWith("#") || color.length !== 7) return BRAND_LIGHT_TEXT;
+  const luminance = brandLuminance(color);
+  const dark = brandContrast(luminance, brandLuminance(BRAND_DARK_TEXT));
+  const light = brandContrast(luminance, brandLuminance(BRAND_LIGHT_TEXT));
+  return dark >= light ? BRAND_DARK_TEXT : BRAND_LIGHT_TEXT;
+}
+
+/** Readable foreground for a brand-color avatar (dark text on light brands). */
+export function brandTextColor(familyId?: string): string {
+  return brandTextColorForHex(brandColor(familyId));
 }
 
 export default function ProviderCard({
@@ -88,19 +124,18 @@ export default function ProviderCard({
   quick,
   t,
   isSyncing,
+  variant = "grid",
 }: ProviderCardProps) {
   const kind = stateKind(source?.state);
-  const color = brandColor(familyId);
   const live = isLive(source);
   return (
-    <article className="provider-card">
-      <span
-        className="provider-icon"
-        style={{ background: color }}
-        aria-hidden="true"
-      >
-        {(familyId ?? "").slice(0, 2).toUpperCase()}
-      </span>
+    <article className={variant === "list" ? "provider-row" : "provider-card"}>
+      <ProviderIcon
+        familyId={familyId}
+        name={displayName}
+        size={variant === "list" ? 28 : 34}
+        className={variant === "list" ? "provider-icon-sm" : ""}
+      />
       <div className="provider-info">
         <h4 title={displayName}>{displayName}</h4>
         {quick?.consoleUrl ? (

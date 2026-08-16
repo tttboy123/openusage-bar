@@ -153,3 +153,24 @@ test("desktop main wires the packaged Gateway account editor into the same-origi
   assert.match(main, /resolveGatewayAccountEditorExecutor/u);
   assert.match(main, /gatewayAccountEditorExecutor:\s*resolveGatewayAccountEditorExecutor/u);
 });
+
+test("resolves a packaged provider-config helper executor", () => {
+  const {
+    resolveProviderConfigExecutor,
+  } = require("../settings_runtime.js");
+  const executor = resolveProviderConfigExecutor({
+    isPackaged: true,
+    resourcesPath: "/Applications/UsageHub.app/Contents/Resources",
+    platform: "darwin",
+    pathExists: () => true,
+  });
+  assert.deepEqual(executor, {
+    command:
+      "/Applications/UsageHub.app/Contents/Resources/settings/openusage-settings",
+    args: ["provider-config-apply"],
+  });
+  assert.equal(
+    resolveProviderConfigExecutor({ isPackaged: false, resourcesPath: "/x", pathExists: () => true }),
+    null,
+  );
+});

@@ -233,5 +233,140 @@ class PluginRouterTests(unittest.TestCase):
         self.assertEqual(conflict[1]["error"]["code"], "decision_outcome_conflict")
 
 
+    def test_dispatch_fails_closed_for_invalid_requests(self) -> None:
+        self.assertEqual(self.router.dispatch("unknown", "GET", "/plugin/v1/schema", b"")[0], 401)
+        self.assertEqual(self.router.dispatch("loom", 123, "/plugin/v1/schema", b"")[0], 400)
+        self.assertEqual(self.router.dispatch("loom", "GET", "/plugin/v1/schema?x=1", b"")[0], 400)
+        self.assertEqual(self.router.dispatch("loom", "GET", "/plugin/v1/nope", b"")[0], 404)
+        self.assertEqual(self.router.dispatch("loom", "POST", "/plugin/v1/schema", b"")[0], 405)
+        self.assertEqual(self.router.dispatch("desktop", "GET", "/plugin/v1/schema", b"")[0], 403)
+        self.assertEqual(self.router.dispatch("loom", "GET", "/plugin/v1/connections", b"")[0], 403)
+        self.assertEqual(self.router.dispatch("loom", "GET", "/plugin/v1/schema", b"x")[0], 413)
+        self.assertEqual(
+            self.router.dispatch(
+                "loom", "GET", "/plugin/v1/schema", b"",
+                idempotency_key="idem_0123456789abcdef0123456789abcdef",
+            )[0],
+            400,
+        )
+        self.assertEqual(
+            self.router.dispatch(
+                "loom", "POST", "/plugin/v1/route-advice", b"{}",
+            )[0],
+            400,
+        )
+        self.assertEqual(
+            self.router.dispatch(
+                "loom", "POST", "/plugin/v1/health/query", b"{}",
+                idempotency_key="idem_0123456789abcdef0123456789abcdef",
+            )[0],
+            400,
+        )
+        self.assertEqual(
+            self.router.dispatch("loom", "POST", "/plugin/v1/route-advice", b"{bad json")[0],
+            400,
+        )
+
+    def test_dispatch_health_and_decision_error_paths(self) -> None:
+        code, _ = self.router.dispatch("loom", "GET", "/plugin/v1/decisions/bad", b"")
+        self.assertEqual(code, 404)
+        code, _ = self.router.dispatch(
+            "loom", "POST", "/plugin/v1/outcomes",
+            json.dumps({
+                "apiVersion": API_VERSION,
+                "decisionId": "decision_0123456789abcdef0123456789abcdef",
+                "outcome": "failed",
+                "reason": "unknown",
+                "occurredAt": "2026-08-10T04:05:06.123456Z",
+            }).encode(),
+            idempotency_key="idem_0123456789abcdef0123456789abcdef",
+        )
+        self.assertEqual(code, 404)
+
+    def test_health_reports_dependency_failure_as_503(self) -> None:
+        class BrokenFacts:
+            def request(self, route, query):
+                raise RuntimeError("facts unavailable")
+
+        broken = PluginRouter(
+            store=self.store,
+            facts_client=BrokenFacts(),
+            advice_client=self.advice,
+            configured_principals=("loom",),
+            clock=lambda: NOW,
+        )
+        code, _ = broken.dispatch(
+            "loom", "POST", "/plugin/v1/usage/query",
+            json.dumps({
+                "apiVersion": API_VERSION,
+                "from": "2026-08-01",
+                "to": "2026-08-07",
+            }).encode(),
+        )
+        self.assertEqual(code, 503)
+        broken.close()
+
+    def test_router_constructor_rejects_invalid_configuration(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid Plugin store"):
+            PluginRouter(
+                store=object(),
+                facts_client=FakeFactsClient(),
+                advice_client=FakeAdviceClient(),
+            )
+        with self.assertRaisesRegex(ValueError, "invalid Plugin principals"):
+            PluginRouter(
+                store=self.store,
+                facts_client=FakeFactsClient(),
+                advice_client=FakeAdviceClient(),
+                configured_principals=("not-a-principal",),
+            )
+    def test_route_advice_advice_client_invalid_response_is_sanitized(self) -> None:
+        class BadAdvice:
+            def should_send(self, request):
+                return {"decision": "maybe"}
+
+        router = PluginRouter(
+            store=self.store,
+            facts_client=FakeFactsClient(),
+            advice_client=BadAdvice(),
+            configured_principals=("loom",),
+            clock=lambda: NOW,
+        )
+        code, _ = router.dispatch(
+            "loom", "POST", "/plugin/v1/route-advice",
+            json.dumps({
+                "apiVersion": API_VERSION, "provider": "openai", "model": "gpt-5",
+                "estimatedTokens": 1200, "window": "5m",
+            }).encode(),
+            idempotency_key="idem_0123456789abcdef0123456789abcdef",
+        )
+        self.assertEqual(code, 503)
+        router.close()
+
+    def test_health_query_reports_observer_and_gateway_readiness(self) -> None:
+        class ReadyAdvice:
+            def should_send(self, request):
+                raise AssertionError("should not be called")
+
+            def health(self):
+                return "disabled"
+
+        router = PluginRouter(
+            store=self.store,
+            facts_client=FakeFactsClient(),
+            advice_client=ReadyAdvice(),
+            configured_principals=("loom",),
+            clock=lambda: NOW,
+        )
+        code, payload = router.dispatch(
+            "loom", "POST", "/plugin/v1/health/query",
+            json.dumps({"apiVersion": API_VERSION}).encode(),
+        )
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["observerApi"], "ready")
+        self.assertEqual(payload["gatewayApi"], "disabled")
+        router.close()
 if __name__ == "__main__":
     unittest.main()
+
+

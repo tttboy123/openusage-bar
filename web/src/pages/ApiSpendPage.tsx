@@ -33,7 +33,10 @@ interface ModelRow {
 }
 
 function formatAmount(amount: number, currency: string): string {
-  return `${currency} ${amount.toFixed(4)}`;
+  return `${currency} ${amount.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 export default function ApiSpendPage({ t }: { t: Messages }) {
@@ -67,34 +70,65 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
     [providers],
   );
 
-  const totals = useMemo(() => {
+  // Real provider-reported API spend comes from per-model activity rows.
+  const spendByCurrency = useMemo(() => {
     const byCurrency: Record<string, number> = {};
-    for (const row of costs) {
+    for (const row of activity) {
       if (!apiProviders.has(row.providerId ?? "")) continue;
-      const currency = row.currency ?? "USD";
-      byCurrency[currency] =
-        (byCurrency[currency] ?? 0) + Number(row.amount ?? 0);
+      const amount = Number(row.costAmount ?? 0);
+      if (!(amount > 0)) continue;
+      const currency = row.costCurrency ?? "USD";
+      byCurrency[currency] = (byCurrency[currency] ?? 0) + amount;
     }
     return Object.entries(byCurrency)
       .map(([currency, amount]) => ({ currency, amount }))
-      .filter((entry) => entry.amount > 0);
-  }, [costs, apiProviders]);
+      .filter((entry) => entry.amount > 0)
+      .sort((a, b) => b.amount - a.amount);
+  }, [activity, apiProviders]);
 
-  const providerCost = useMemo(() => {
-    const map = new Map<string, Map<string, number>>();
+  // Credit-window ledger rows (e.g. openusage.window_credit_spend) are a
+  // separate estimate basis and can be partial; show them apart from real
+  // spend instead of blending them in.
+  const creditCosts = useMemo(() => {
+    const byProvider = new Map<string, CostRow[]>();
     for (const row of costs) {
       if (!apiProviders.has(row.providerId ?? "")) continue;
       const provider = row.providerId ?? "unknown";
-      const currency = row.currency ?? "USD";
+      const list = byProvider.get(provider) ?? [];
+      list.push(row);
+      byProvider.set(provider, list);
+    }
+    return [...byProvider.entries()].map(([provider, rows]) => {
+      const byCurrency: Record<string, number> = {};
+      for (const row of rows) {
+        const currency = row.currency ?? "USD";
+        byCurrency[currency] =
+          (byCurrency[currency] ?? 0) + Number(row.amount ?? 0);
+      }
+      return {
+        provider,
+        amounts: Object.entries(byCurrency)
+          .map(([currency, amount]) => ({ currency, amount }))
+          .filter((entry) => entry.amount > 0),
+        partial: rows.some((row) => row.quality === "partial"),
+      };
+    });
+  }, [costs, apiProviders]);
+
+  const providerSpend = useMemo(() => {
+    const map = new Map<string, Map<string, number>>();
+    for (const row of activity) {
+      if (!apiProviders.has(row.providerId ?? "")) continue;
+      const amount = Number(row.costAmount ?? 0);
+      if (!(amount > 0)) continue;
+      const provider = row.providerId ?? "unknown";
+      const currency = row.costCurrency ?? "USD";
       const byCurrency = map.get(provider) ?? new Map<string, number>();
-      byCurrency.set(
-        currency,
-        (byCurrency.get(currency) ?? 0) + Number(row.amount ?? 0),
-      );
+      byCurrency.set(currency, (byCurrency.get(currency) ?? 0) + amount);
       map.set(provider, byCurrency);
     }
     return map;
-  }, [costs, apiProviders]);
+  }, [activity, apiProviders]);
 
   const categoryByProvider = useMemo(
     () => new Map(providers.map((p) => [p.providerId, p.category ?? ""])),
@@ -136,26 +170,15 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
       const provider = row.providerId ?? "unknown";
       tokens.set(provider, (tokens.get(provider) ?? 0) + (row.totalTokens ?? 0));
     }
-    // API providers that reported cost still belong in the summary,
-    // even when no model-level token rows were captured yet.
-    for (const provider of providerCost.keys()) {
-      if (!tokens.has(provider)) tokens.set(provider, 0);
-    }
     return [...tokens.entries()]
       .map(([provider, tokenCount]) => {
-        const amounts = [...(providerCost.get(provider)?.entries() ?? [])].filter(
-          ([, amount]) => amount > 0,
-        );
-        return {
-          provider,
-          tokenCount,
-          amounts: amounts.map(([currency, amount]) =>
-            formatAmount(amount, currency),
-          ),
-        };
+        const spend = [...(providerSpend.get(provider)?.entries() ?? [])]
+          .map(([currency, amount]) => ({ currency, amount }))
+          .filter((entry) => entry.amount > 0);
+        return { provider, tokenCount, spend };
       })
       .sort((a, b) => b.tokenCount - a.tokenCount);
-  }, [activity, providerCost, apiProviders]);
+  }, [activity, providerSpend, apiProviders]);
 
   function modelCostCell(row: ModelRow) {
     const category = categoryByProvider.get(row.provider);
@@ -176,26 +199,11 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
         </span>
       );
     }
-    const amounts = [...(providerCost.get(row.provider)?.entries() ?? [])].filter(
-      ([, amount]) => amount > 0,
-    );
-    if (amounts.length === 0) {
-      return <span className="dim">—</span>;
-    }
-    return (
-      <span className="mono dim" title={t.providerLevelCost}>
-        ≈ {amounts.map(([currency, amount]) => formatAmount(amount, currency)).join(" · ")}
-      </span>
-    );
-  }
-
-  function categoryLabel(category: string | undefined): string {
-    if (category === "subscription") return t.subscription;
-    if (category === "local_tool") return t.localTool;
-    return t.apiPaid;
+    return <span className="dim">—</span>;
   }
 
   const totalTokens = modelRows.reduce((sum, row) => sum + row.tokens, 0);
+  const hasCredit = creditCosts.some((c) => c.amounts.length > 0);
 
   return (
     <>
@@ -207,8 +215,10 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
           <div className="metrics">
             <div className="metric">
               <p className="metric-value">
-                {totals.length > 0
-                  ? totals.map((total) => formatAmount(total.amount, total.currency)).join(" · ")
+                {spendByCurrency.length > 0
+                  ? spendByCurrency
+                      .map((s) => formatAmount(s.amount, s.currency))
+                      .join(" · ")
                   : "—"}
               </p>
               <p className="metric-label">{t.spend}</p>
@@ -233,20 +243,43 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
               <span>{t[PERIOD_LABEL[period]]}</span>
             </div>
             <div className="panel-body">
-              <p className="dim panel-hint">
-                {t.apiPaidHint}
-              </p>
-              {totals.map((total) => (
-                <p
-                  key={total.currency}
-                  className="mono amount-value"
-                >
-                  {formatAmount(total.amount, total.currency)}
-                </p>
-              ))}
-              {totals.length === 0 ? <p className="empty">{t.noSpend}</p> : null}
+              <p className="dim panel-hint">{t.apiPaidHint}</p>
+              {spendByCurrency.length > 0 ? (
+                spendByCurrency.map((s) => (
+                  <p key={s.currency} className="mono amount-value">
+                    {formatAmount(s.amount, s.currency)}
+                  </p>
+                ))
+              ) : (
+                <p className="empty">{t.noSpend}</p>
+              )}
             </div>
           </section>
+
+          {hasCredit ? (
+            <section className="panel">
+              <div className="panel-head">
+                <h3>{t.apiCreditEstimate}</h3>
+                <span>{t[PERIOD_LABEL[period]]}</span>
+              </div>
+              <div className="panel-body">
+                <p className="dim panel-hint">{t.apiCreditEstimateHint}</p>
+                {creditCosts.map((c) => (
+                  <div className="credit-row" key={c.provider}>
+                    <span className="credit-provider">{c.provider}</span>
+                    {c.partial ? (
+                      <span className="credit-quality">{t.estimated}</span>
+                    ) : null}
+                    <span className="mono credit-amount">
+                      {c.amounts
+                        .map((a) => formatAmount(a.amount, a.currency))
+                        .join(" · ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <section className="panel">
             <div className="panel-head">
@@ -260,39 +293,35 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
                   {t.navCapacity}
                 </Link>
               </p>
-            </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th scope="col">{t.providerCol}</th>
-                    <th scope="col">{t.modelCol}</th>
-                    <th scope="col">{t.sourceCol}</th>
-                    <th scope="col">{t.tokensCol}</th>
-                    <th scope="col">{t.amountCol}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {modelRows.map((row) => (
-                    <tr key={`${row.provider}/${row.model}`}>
-                      <th scope="row">{row.provider}</th>
-                      <td className="mono">{row.model}</td>
-                      <td className="mono dim">{row.sources.join(", ")}</td>
-                      <td className="mono">{row.tokens.toLocaleString()}</td>
-                      <td>{modelCostCell(row)}</td>
-                    </tr>
-                  ))}
-                  {modelRows.length === 0 ? (
+              <div className="table-wrap">
+                <table>
+                  <thead>
                     <tr>
-                      <td colSpan={5} className="empty">
-                        {totals.length > 0
-                          ? t.apiSpendNoModelDetail
-                          : t.noSpend}
-                      </td>
+                      <th scope="col">{t.providerCol}</th>
+                      <th scope="col">{t.modelCol}</th>
+                      <th scope="col" className="num">{t.tokensCol}</th>
+                      <th scope="col" className="num">{t.costCol}</th>
                     </tr>
-                  ) : null}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {modelRows.map((row) => (
+                      <tr key={`${row.provider}/${row.model}`}>
+                        <th scope="row">{row.provider}</th>
+                        <td className="mono">{row.model}</td>
+                        <td className="mono num">{row.tokens.toLocaleString()}</td>
+                        <td className="mono num">{modelCostCell(row)}</td>
+                      </tr>
+                    ))}
+                    {modelRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="empty">
+                          {t.noRows}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </section>
 
@@ -306,34 +335,28 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
                 <thead>
                   <tr>
                     <th scope="col">{t.providerCol}</th>
-                    <th scope="col">{t.categoryCol}</th>
-                    <th scope="col">{t.tokensCol}</th>
-                    <th scope="col">{t.amountCol}</th>
+                    <th scope="col" className="num">{t.tokensCol}</th>
+                    <th scope="col" className="num">{t.spend}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {providerRows.map((row) => (
                     <tr key={row.provider}>
                       <th scope="row">{row.provider}</th>
-                      <td>{categoryLabel(categoryByProvider.get(row.provider))}</td>
-                      <td className="mono">{row.tokenCount.toLocaleString()}</td>
-                      <td className="mono">
-                        {categoryByProvider.get(row.provider) === "subscription" ? (
-                          <span className="dim">{t.subscriptionNoApiCost}</span>
-                        ) : row.amounts.length > 0 ? (
-                          row.amounts.join(" · ")
-                        ) : (
-                          "—"
-                        )}
+                      <td className="mono num">{row.tokenCount.toLocaleString()}</td>
+                      <td className="mono num">
+                        {row.spend.length > 0
+                          ? row.spend
+                              .map((s) => formatAmount(s.amount, s.currency))
+                              .join(" · ")
+                          : "—"}
                       </td>
                     </tr>
                   ))}
                   {providerRows.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="empty">
-                        {totals.length > 0
-                          ? t.apiSpendNoModelDetail
-                          : t.noSpend}
+                      <td colSpan={3} className="empty">
+                        {t.noRows}
                       </td>
                     </tr>
                   ) : null}
@@ -341,6 +364,7 @@ export default function ApiSpendPage({ t }: { t: Messages }) {
               </table>
             </div>
           </section>
+
           {error ? <p className="empty">{error}</p> : null}
         </>
       )}

@@ -36,3 +36,9 @@ output/
 .playwright-cli/
 
 web/.test-dist/
+
+# PyInstaller work/output for desktop helper bundles
+build-bridge/
+build-settings/
+dist-bridge/
+dist-settings/

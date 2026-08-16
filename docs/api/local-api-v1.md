@@ -212,8 +212,12 @@ use the signed collector launcher so it rebuilds the same minimal non-secret
 environment as the resident service:
 
 ```bash
+# Native build
 APP="/Applications/OpenUsage Bar.app"
 [[ -d "$APP" ]] || APP="$HOME/Applications/OpenUsage Bar.app"
+# Desktop client (current release form)
+DESKTOP_APP="/Applications/UsageHub.app"
+COLLECTOR="$DESKTOP_APP/Contents/Resources/collector/openusage-collector"
 COLLECTOR="$APP/Contents/MacOS/OpenUsage Collector"
 "$COLLECTOR" providers --format json --offline
 ```

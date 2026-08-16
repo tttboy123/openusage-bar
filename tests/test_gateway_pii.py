@@ -13,8 +13,8 @@ class GatewayPIIRedactionTests(unittest.TestCase):
             ("email", "contact jane@example.com for details", "jane@example.com"),
             (
                 "mac_path",
-                "read /Users/lune/private/notes.txt",
-                "/Users/lune/private/notes.txt",
+                "read /Users/example/private/notes.txt",
+                "/Users/example/private/notes.txt",
             ),
             (
                 "linux_path",

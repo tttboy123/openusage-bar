@@ -60,7 +60,7 @@ class ObserverPlatformResolverTests(unittest.TestCase):
                 macos.summary.total_source_count,
                 macos.summary.reason_code,
             ),
-            ("supported", 49, 49, "supported_sources_available"),
+            ("supported", 50, 50, "supported_sources_available"),
         )
         self.assertEqual(
             (
@@ -69,7 +69,7 @@ class ObserverPlatformResolverTests(unittest.TestCase):
                 windows.summary.total_source_count,
                 windows.summary.reason_code,
             ),
-            ("supported", 1, 49, "supported_sources_available"),
+            ("supported", 1, 50, "supported_sources_available"),
         )
         self.assertEqual(
             (
@@ -78,7 +78,7 @@ class ObserverPlatformResolverTests(unittest.TestCase):
                 linux.summary.total_source_count,
                 linux.summary.reason_code,
             ),
-            ("supported", 2, 49, "supported_sources_available"),
+            ("supported", 2, 50, "supported_sources_available"),
         )
         self.assertEqual(
             (
@@ -87,14 +87,14 @@ class ObserverPlatformResolverTests(unittest.TestCase):
                 unknown.summary.total_source_count,
                 unknown.summary.reason_code,
             ),
-            ("unknown", None, 49, "runtime_platform_unknown"),
+            ("unknown", None, 50, "runtime_platform_unknown"),
         )
 
     def test_source_records_share_the_summary_reason_vocabulary(self) -> None:
         windows = ObserverPlatformResolver(catalog, runtime_platform="win32")
         records = windows.source_capabilities
 
-        self.assertEqual(len(records), 49)
+        self.assertEqual(len(records), 50)
         self.assertEqual(sum(record.supported for record in records), 1)
         self.assertEqual(
             {record.reason_code for record in records},
@@ -203,7 +203,7 @@ class ObserverPlatformResolverTests(unittest.TestCase):
                 catalog, runtime_platform="linux"
             )
             self.assertEqual(resolver.summary.supported_source_count, 2)
-            self.assertEqual(len(resolver.source_capabilities), 49)
+            self.assertEqual(len(resolver.source_capabilities), 50)
 
 
 class ObserverPlatformIntegrationContractTests(unittest.TestCase):
@@ -222,7 +222,7 @@ class ObserverPlatformIntegrationContractTests(unittest.TestCase):
                 "operatingSystem": "windows",
                 "support": "supported",
                 "supportedSourceCount": 1,
-                "totalSourceCount": 49,
+                "totalSourceCount": 50,
                 "reasonCode": "supported_sources_available",
             },
         )
@@ -231,14 +231,14 @@ class ObserverPlatformIntegrationContractTests(unittest.TestCase):
             for provider in payload["providers"]
             for source in provider["sources"]
         ]
-        self.assertEqual(len(projected), 49)
+        self.assertEqual(len(projected), 50)
         self.assertEqual(
             sum(item["state"] == "supported" for item in projected),
             1,
         )
         self.assertEqual(
             sum(item["state"] == "unsupported" for item in projected),
-            48,
+            49,
         )
 
     def test_unknown_runtime_never_serializes_supported_count_as_zero(self) -> None:
@@ -331,6 +331,7 @@ class ObserverPlatformIntegrationContractTests(unittest.TestCase):
                 "deepseek",
                 "kiro_cli",
                 "omniroute",
+                "opencode",
                 "openusage",
             ],
         )

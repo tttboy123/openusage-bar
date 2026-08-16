@@ -2299,5 +2299,26 @@ class GatewayHTTPTests(unittest.TestCase):
         self.assertEqual(provider_calls, [])
 
 
+    def test_gateway_self_test_runs_in_process_and_validates_report(self) -> None:
+        from openusage_bar.gateway.self_test import (
+            is_gateway_self_test_report,
+            run_gateway_self_test,
+        )
+
+        report = run_gateway_self_test()
+        self.assertEqual(report["object"], "gateway.self_test")
+        self.assertEqual(set(report["checks"]), {"observe", "advise", "gateway", "credentialFailure"})
+        self.assertTrue(is_gateway_self_test_report(report))
+        for check in report["checks"].values():
+            self.assertIn(check["ok"], (True, False))
+
+        # Malformed reports are rejected by the strict validator.
+        self.assertFalse(is_gateway_self_test_report(None))
+        self.assertFalse(is_gateway_self_test_report([]))
+        self.assertFalse(is_gateway_self_test_report({"bad": True}))
+        partial = dict(report)
+        partial["checks"] = {"observe": report["checks"]["observe"]}
+        self.assertFalse(is_gateway_self_test_report(partial))
 if __name__ == "__main__":
     unittest.main()
+

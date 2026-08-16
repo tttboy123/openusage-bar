@@ -2782,8 +2782,8 @@ class UnixLocalAPITests(unittest.TestCase):
         self.assertEqual(payload["observerPlatform"], {
             "operatingSystem": "macos",
             "support": "supported",
-            "supportedSourceCount": 49,
-            "totalSourceCount": 49,
+            "supportedSourceCount": 50,
+            "totalSourceCount": 50,
             "reasonCode": "supported_sources_available",
         })
         for family in payload["providers"]:

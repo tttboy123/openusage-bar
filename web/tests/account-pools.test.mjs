@@ -90,7 +90,12 @@ test("Providers embeds account pools without adding a top-level route", () => {
   );
   assert.match(providersSource, /accountPoolsViewModel\(accountPoolsSnapshot\)/);
   assert.match(providersSource, /<AccountPoolsSection\s+t=\{t\}\s+model=\{accountPools\}/);
-  assert.match(providersSource, /<section\s+className="provider-grid"/);
+  assert.match(providersSource, /provider-(grid|list)/);
+  assert.match(
+    providersSource,
+    /"provider-grid"/,
+    "the grid remains the default provider layout",
+  );
   assert.doesNotMatch(
     providersSource,
     /<Route|createBrowserRouter|path:\s*["'][^"']*pool/i,

@@ -139,5 +139,84 @@ class PluginServerTests(unittest.TestCase):
                 thread.join(2)
 
 
+    def test_listener_rejects_malformed_requests_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "plugin"
+            registry = PluginPrincipalRegistry.load_or_create(root)
+            store = PluginStore(root / "plugin.sqlite3", clock=lambda: NOW)
+            router = PluginRouter(
+                store=store, facts_client=Unused(), advice_client=Unused(),
+                configured_principals=("loom",), clock=lambda: NOW,
+            )
+            server = create_plugin_server(router, registry=registry, port=0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            token = registry.token_path("loom").read_text(encoding="ascii").strip()
+            try:
+                cases = (
+                    (("GET", "/plugin/v1/capabilities", {}), 401),
+                    (("GET", "/plugin/v1/capabilities", {"Authorization": "Bearer bad"}), 401),
+                    (("GET", "/plugin/v1/capabilities", {"Authorization": f"Bearer {token}", "Host": "evil.example"}), 403),
+                    (("GET", "/plugin/v1/capabilities", {"Authorization": f"Bearer {token}", "Content-Length": "not-a-number"}), 400),
+                    (("POST", "/plugin/v1/health/query", {"Authorization": f"Bearer {token}", "Content-Type": "text/plain"}), 400),
+                    (("PATCH", "/plugin/v1/capabilities", {"Authorization": f"Bearer {token}"}), 405),
+                    (("POST", "/plugin/v1/health/query", {"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Idempotency-Key": "idem_0123456789abcdef0123456789abcdef"}), 400),
+                    (("POST", "/plugin/v1/health/query", {"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Content-Length": "99999"}), 413),
+                )
+                for (method, path, headers), expected in cases:
+                    with self.subTest(method=method, path=path, headers=headers):
+                        connection = http.client.HTTPConnection(
+                            "127.0.0.1", server.server_port, timeout=2
+                        )
+                        connection.request(method, path, headers=headers)
+                        response = connection.getresponse()
+                        response.read()
+                        connection.close()
+                        self.assertEqual(response.status, expected)
+
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1", server.server_port, timeout=2
+                )
+                connection.request(
+                    "POST", "/plugin/v1/health/query",
+                    body=b"{bad json",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+                response = connection.getresponse()
+                payload = json.loads(response.read())
+                connection.close()
+                self.assertEqual(response.status, 400)
+                self.assertEqual(payload["error"]["code"], "invalid_request")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
+
+
+
+    def test_create_server_rejects_invalid_configuration(self) -> None:
+        from openusage_bar.plugin.server import create_plugin_server
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "plugin"
+            registry = PluginPrincipalRegistry.load_or_create(root)
+            store = PluginStore(root / "plugin.sqlite3", clock=lambda: NOW)
+            router = PluginRouter(
+                store=store, facts_client=Unused(), advice_client=Unused(),
+                configured_principals=("loom",), clock=lambda: NOW,
+            )
+            with self.assertRaisesRegex(ValueError, "invalid Plugin server configuration"):
+                create_plugin_server(object(), registry=registry)
+            with self.assertRaisesRegex(ValueError, "invalid Plugin server configuration"):
+                create_plugin_server(router, registry=object())
+            with self.assertRaisesRegex(ValueError, "invalid Plugin server configuration"):
+                create_plugin_server(router, registry=registry, host="0.0.0.0")
+            with self.assertRaisesRegex(ValueError, "invalid Plugin server configuration"):
+                create_plugin_server(router, registry=registry, port=70000)
+            router.close()
 if __name__ == "__main__":
     unittest.main()

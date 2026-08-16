@@ -114,6 +114,8 @@ export interface CostRow {
   providerId?: string;
   amount?: string;
   currency?: string;
+  quality?: string;
+  basis?: string;
 }
 
 export interface SourceItem {
@@ -131,6 +133,34 @@ export interface QuickConnectItem {
   consoleUrl: string;
   authModes: string[];
   apiKeyUrl?: string | null;
+}
+
+export interface ProviderConfigPreset {
+  presetId: string;
+  name: string;
+  category: "official" | "gateway";
+  agent: "claude_code" | "codex" | "gemini_cli" | "opencode";
+  familyId: string;
+  consoleUrl: string;
+  apiKeyUrl?: string | null;
+  baseUrl: string;
+  model: string;
+  allowCustomEndpoints: boolean;
+}
+
+export interface ProviderConfigApplyRequest {
+  presetId: string;
+  apiKey: string;
+  baseUrl?: string | null;
+  model?: string | null;
+}
+
+export interface ProviderConfigApplyResult {
+  ok: boolean;
+  agent?: string;
+  name?: string;
+  category?: string;
+  status?: string;
 }
 
 export async function fetchSnapshot(): Promise<Snapshot> {
@@ -212,6 +242,45 @@ export async function fetchQuickConnect(): Promise<QuickConnectItem[]> {
     "/v1/quick-connect",
   );
   return payload.providers ?? [];
+}
+
+export async function fetchProviderConfigPresets(): Promise<ProviderConfigPreset[]> {
+  const payload = await getJson<{ presets?: ProviderConfigPreset[] }>(
+    "/provider-config-presets.json",
+  );
+  return payload.presets ?? [];
+}
+
+export async function applyProviderConfig(
+  request: ProviderConfigApplyRequest,
+): Promise<ProviderConfigApplyResult | null> {
+  try {
+    const response = await fetch("/host/v1/actions", {
+      method: "POST",
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiVersion: "host-action.openusage/v1",
+        action: "providerConfig.apply",
+        presetId: request.presetId,
+        apiKey: request.apiKey,
+        baseUrl: request.baseUrl ?? null,
+        model: request.model ?? null,
+      }),
+    });
+    if (!response.ok) return null;
+    const payload: unknown = await response.json();
+    if (!isRecord(payload) || typeof payload.ok !== "boolean") return null;
+    return payload as unknown as ProviderConfigApplyResult;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
  export interface HealthResult {
@@ -341,4 +410,28 @@ export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${path} failed: ${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+export interface RefreshStatus {
+  status?: string;
+  lastStartedAt?: string | null;
+  lastFinishedAt?: string | null;
+  succeeded?: boolean | null;
+}
+
+/**
+ * Ask the local dashboard observer to run one bounded refresh with a full
+ * history backfill. The renderer never touches credentials or the ledger
+ * directly; this is a read-only refresh hint handled by the host.
+ */
+export async function triggerRefresh(): Promise<RefreshStatus> {
+  const response = await fetch("/v1/refresh", { method: "POST", cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`/v1/refresh failed: ${response.status}`);
+  }
+  return (await response.json()) as RefreshStatus;
+}
+
+export async function fetchRefreshStatus(): Promise<RefreshStatus> {
+  return getJson<RefreshStatus>("/v1/refresh/status");
 }

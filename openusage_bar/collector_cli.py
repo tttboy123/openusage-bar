@@ -361,6 +361,16 @@ def _parser() -> SafeArgumentParser:
     connect = commands.add_parser("connect")
     connect.add_argument("--family", required=True)
     connect.add_argument("--format", choices=("json",), required=True)
+    provider_config = commands.add_parser("provider-config")
+    provider_config_commands = provider_config.add_subparsers(
+        dest="provider_config_command", required=True
+    )
+    provider_config_commands.add_parser("list")
+    provider_config_apply = provider_config_commands.add_parser("apply")
+    provider_config_apply.add_argument("--preset", required=True)
+    provider_config_apply.add_argument("--api-key", required=True)
+    provider_config_apply.add_argument("--base-url")
+    provider_config_apply.add_argument("--model")
     gateway = commands.add_parser("gateway")
     gateway_commands = gateway.add_subparsers(
         dest="gateway_action",
@@ -1260,6 +1270,7 @@ def main(
     catalog_monitor: Any | None = None,
     gateway_server_factory: Callable[..., Any] | None = None,
     plugin_server_factory: Callable[..., Any] | None = None,
+    dashboard_server_factory: Callable[..., Any] | None = None,
 ) -> int:
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
@@ -1578,6 +1589,53 @@ def main(
             stdout.write("\n")
             return 0
 
+        if args.command == "provider-config":
+            from .provider_config import apply_provider_config, load_presets
+
+            if args.provider_config_command == "list":
+                payload = [
+                    {
+                        "presetId": preset.preset_id,
+                        "name": preset.name,
+                        "category": preset.category,
+                        "agent": preset.agent,
+                        "familyId": preset.family_id,
+                        "consoleUrl": preset.console_url,
+                        "apiKeyUrl": preset.api_key_url,
+                        "baseUrl": preset.template_value("base_url"),
+                        "model": preset.template_value("model"),
+                        "allowCustomEndpoints": preset.allow_custom_endpoints,
+                    }
+                    for preset in load_presets()
+                ]
+                stdout.write(
+                    json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+                )
+                stdout.write("\n")
+                return 0
+            try:
+                result = apply_provider_config(
+                    preset_id=args.preset,
+                    api_key=args.api_key,
+                    base_url=args.base_url,
+                    model=args.model,
+                )
+            except ValueError as error:
+                stderr.write(str(error) + "\n")
+                return 2
+            payload = {
+                "agent": result.agent,
+                "presetId": result.preset_id,
+                "name": result.name,
+                "category": result.category,
+                "status": result.status,
+            }
+            stdout.write(
+                json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+            )
+            stdout.write("\n")
+            return 0
+
         if args.command == "dashboard":
             from .web_dashboard import make_dashboard_server
 
@@ -1590,7 +1648,20 @@ def main(
                 stderr.write("invalid dashboard port\n")
                 return 2
             today = (clock or (lambda: datetime.now(timezone.utc)))().astimezone().date()
-            server = make_dashboard_server(active_query, port=port, today=today)
+            dashboard_refresher = None
+            if not (offline or args.offline):
+                if refresher is None:
+                    try:
+                        refresher = build_default_refresher(active_store)
+                    except Exception:
+                        refresher = None
+                dashboard_refresher = refresher
+            server = (dashboard_server_factory or make_dashboard_server)(
+                active_query,
+                port=port,
+                today=today,
+                refresher=dashboard_refresher,
+            )
             stdout.write(
                 f"UsageHub dashboard on http://127.0.0.1:{server.server_address[1]}\n"
             )

@@ -36,6 +36,16 @@ def _read_only_connection(path: Path) -> sqlite3.Connection:
     return connection
 
 
+# CC Switch usage rollups group sessions by their originating tool
+# (``_codex_session``, ``_opencode_session``, ``_session``). UsageHub already
+# reads those same sessions directly from each tool's local reader
+# (``codex.local_sessions``, ``opencode.local_sessions``,
+# ``claude_code.local_sessions``), so importing the rollups again would
+# double-count the same tokens. Skip upstreams that have a local reader and
+# keep the rest (e.g. ``_grok_session``), which have no local equivalent.
+_LOCAL_READER_UPSTREAMS = frozenset({"_codex_session", "_opencode_session", "_session"})
+
+
 class CcSwitchCostImporter:
     """Import CC Switch daily cost rollups into the monetary ledger."""
 
@@ -84,6 +94,8 @@ class CcSwitchCostImporter:
         order: list[str] = []
         for raw in connection.execute(sql, (since.isoformat(), until.isoformat())):
             day, app_type, upstream, _model, total = raw
+            if upstream in _LOCAL_READER_UPSTREAMS:
+                continue
             if total is None:
                 amount = Decimal(0)
             else:
@@ -155,6 +167,8 @@ class CcSwitchCostImporter:
                 cache_creation,
                 total_cost_usd,
             ) = raw
+            if upstream in _LOCAL_READER_UPSTREAMS:
+                continue
             input_tokens = 0 if input_tokens is None else int(input_tokens)
             output_tokens = 0 if output_tokens is None else int(output_tokens)
             cache_read = 0 if cache_read is None else int(cache_read)

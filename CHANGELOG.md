@@ -2,18 +2,54 @@
 
 This project follows [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.6 - 2026-08-16
 
 ### Added
 
+- 桌面客户端（Electron）菜单栏简况：品牌图标旁实时显示今日 Token（🟢/🟡/🔴 状态点，60 秒自动刷新）；单击托盘图标弹出简况菜单（今日 Token、实测余额、额度），双击打开仪表盘；启用品牌托盘模板图标与 App/DMG 图标。
+- Provider 配置预设已与各 Provider 官网逐一核对并对齐（DeepSeek V4、Kimi K3、MiniMax M3、SiliconFlow、OpenCode Zen、OpenRouter 等），并补充真实品牌图标；`codex` 显示为 **ChatGPT**。
+- The loopback dashboard can run one bounded user-triggered refresh
+  (`POST /v1/refresh` plus a `GET /v1/refresh/status` probe) through the same
+  headless refresher the daemon uses; when no refresher is available the route
+  fails closed with `unavailable`.
+- `ActivityCollector.refresh(history_days=...)` (and `LedgerRefresher`) can
+  force the full 364-day history window for usage and cost sources even when
+  incremental history already exists, so opening UsageHub can backfill the
+  complete ledger instead of only the trailing window.
 - A machine-readable release state now keeps the public version, build, Local
   API version, release channel, and external Canary clock under one strict
   validation boundary.
 - ADR 0001 freezes ownership of durable resource facts, bounded request
   telemetry, scheduler reservations, and policy decisions.
+- Cross-platform Observer packaging foundations for macOS, Windows, and Linux,
+  including a self-contained native Collector and renderer-isolated Desktop
+  proxy.
+- An optional, disabled-by-default Gateway Core with Should-Send, five Provider
+  adapters, PII-safe caching, bounded fallback, and pull-driven Gateway-native
+  streaming.
+- Observer-first Automation and Data Health capability surfaces with explicit
+  unknown, disabled, partial, degraded, and last-good states.
 
 ### Changed
 
+- Opening UsageHub asks the local host for one bounded refresh with a full
+  history backfill and refetches every page once it completes; the manual
+  Refresh button triggers the same host refresh instead of only remounting
+  the active page. The desktop renderer boundary may reject the refresh hint,
+  in which case pages still refetch read-only data.
+- Providers now offers a grid/list density toggle (persisted locally) so the
+  list view matches CC Switch's compact provider rows: small avatar, name,
+  console URL, right-aligned status, and in-flow hover actions.
+- Provider brand avatars pick the higher-contrast foreground (dark text on
+  light brand colors such as MiniMax/Hermes) instead of always white.
+- Readability floor: the smallest sidebar/status/meta text is raised toward
+  12 px, the English relative-time copy pluralizes ("day(s) ago"), and
+  page-level provider refresh no longer marks every card as syncing.
+- Cross-page readability pass: KPI labels, table headers, status pills, quota
+  and local-tool labels move from 11.2 px to 11.5 px, secondary meta to
+  12 px, and metric badges from 10.9 px to 11.5 px; chart axis ticks keep
+  their recharts default. Mobile (<640 px) segmented controls grow to 40 px
+  touch targets and full-width.
 - Provider source contracts are OS-neutral; the OpenUsage Bar distribution
   separately verifies that every source registered in its shipped catalog
   supports macOS.
@@ -25,19 +61,6 @@ This project follows [Semantic Versioning](https://semver.org/).
   `openusage-bar` CLI, Local API v1 contract) remains compatible; app-bundle
   renaming is scheduled with the cross-platform release.
 
-## 0.8.6 - 2026-08-08
-
-### Added
-
-- Cross-platform Observer packaging foundations for macOS, Windows, and Linux,
-  including a self-contained native Collector and renderer-isolated Desktop
-  proxy.
-- An optional, disabled-by-default Gateway Core with Should-Send, five Provider
-  adapters, PII-safe caching, bounded fallback, and pull-driven Gateway-native
-  streaming.
-- Observer-first Automation and Data Health capability surfaces with explicit
-  unknown, disabled, partial, degraded, and last-good states.
-
 ### Security
 
 - Gateway JSON and SSE are rebuilt from closed versioned contracts; live source
@@ -47,11 +70,22 @@ This project follows [Semantic Versioning](https://semver.org/).
   packaged artifacts reject credentials, token files, private databases,
   prompts, responses, and private home paths.
 
+### Fixed
+
+- Desktop packaging: PyInstaller helper bundles now include all 12 resource
+  files (the spec previously dropped them, crashing the bundled Collector on
+  startup).
+- Menu-bar tray icon: `trayIcon()` hardcoded the legacy native app path, so the
+  tray fell back to a 1×1 transparent pixel and was invisible; it now loads the
+  bundled brand template image, and the app ships a proper brand app/DMG icon.
+- Open-source audit: sanitized author-private absolute paths in docs and test
+  fixtures, and added `CODE_OF_CONDUCT.md`.
+
 ### Release status
 
-- This heading prepares the `0.8.6` RC candidate metadata. It does not assert a
-  published tag, a completed Windows/Linux native run, or an activated external
-  Canary clock.
+- `0.8.6` RC pre-release published on GitHub (unsigned, ad-hoc signed). The
+  external Canary clock remains **not started (0 / 5)**; this heading does not
+  assert a stable publication or an activated Canary.
 
 ## 0.7.1 - 2026-08-04
 

@@ -1158,5 +1158,112 @@ class GatewayProductionResponseContractTests(unittest.TestCase):
                 self.assertFalse(decision.retryable)
 
 
+class ResponseHelperFailClosedTests(unittest.TestCase):
+    """Cover the low-level response helpers' fail-closed branches."""
+
+    def test_sanitized_gateway_error_bounds_every_field(self) -> None:
+        from openusage_bar.gateway.response import sanitized_gateway_error
+
+        result = sanitized_gateway_error(
+            "not a stable code!",
+            message="x" * 1000,
+            retryable="yes",
+            fallback={"not": "a valid fallback"},
+        )
+        self.assertEqual(result["object"], "gateway.error")
+        self.assertEqual(result["error"]["code"], "internal_error")
+        self.assertEqual(
+            result["error"]["message"], "Request could not be completed."
+        )
+        self.assertTrue(result["error"]["retryable"])
+        self.assertNotIn("fallback", result)
+
+        bounded = sanitized_gateway_error(
+            "upstream_timeout",
+            fallback={
+                "attempted": True,
+                "attemptCount": 2,
+                "finalAction": "retry",
+                "errorCode": "rate_limit",
+                "retryable": True,
+            },
+        )
+        self.assertEqual(bounded["error"]["code"], "upstream_timeout")
+        self.assertEqual(bounded["fallback"]["finalAction"], "retry")
+
+    def test_validate_gateway_payload_fails_closed_for_malformed_values(self) -> None:
+        from openusage_bar.gateway.response import validate_gateway_payload
+
+        self.assertIsNone(validate_gateway_payload(["not", "a", "dict"]))
+        self.assertIsNone(
+            validate_gateway_payload({"apiVersion": "9.9", "object": "gateway.error"})
+        )
+        self.assertIsNone(
+            validate_gateway_payload({"apiVersion": API_VERSION, "object": "unknown"})
+        )
+        self.assertIsNone(
+            validate_gateway_payload({**{"apiVersion": API_VERSION}, "object": 123})
+        )
+        self.assertIsNone(validate_gateway_payload(_success(status="invalid_status")))
+        self.assertIsNone(validate_gateway_payload(_error(error="not-a-dict")))
+
+    def test_gateway_events_emits_error_with_fallback(self) -> None:
+        from openusage_bar.gateway.response import gateway_events
+
+        events = gateway_events(
+            _error(
+                fallback={
+                    "attempted": True,
+                    "attemptCount": 2,
+                    "finalAction": "retry",
+                    "errorCode": "rate_limit",
+                    "retryable": True,
+                }
+            )
+        )
+        self.assertIsNotNone(events)
+        first = next(events)
+        self.assertEqual(first["type"], "gateway.error")
+        self.assertEqual(first["sequence"], 0)
+        self.assertEqual(first["fallback"]["finalAction"], "retry")
+        self.assertIsNone(gateway_events({"bad": True}))
+
+    def test_event_iterators_reject_invalid_seals_and_corruption(self) -> None:
+        from openusage_bar.gateway.response import (
+            GatewayEventIterator,
+            ValidatedGatewayEventIterator,
+            gateway_events,
+        )
+
+        with self.assertRaises(TypeError):
+            GatewayEventIterator((), _seal=object())
+        with self.assertRaises(TypeError):
+            ValidatedGatewayEventIterator(
+                (),
+                iter(()),
+                accepted_provider=None,
+                accepted_model=None,
+                _seal=object(),
+            )
+
+        valid = gateway_events(_success())
+        self.assertIsNotNone(valid)
+        self.assertIn("gateway.response.started", [event["type"] for event in valid])
+
+        # A valid iterator whose internal seal is corrupted fails closed.
+        valid = gateway_events(_success())
+        self.assertIsNotNone(valid)
+        valid._seal = object()
+        with self.assertRaises(RuntimeError):
+            valid.__next__()
+
+    def test_validated_gateway_event_stream_fails_closed_for_uniterable(self) -> None:
+        from openusage_bar.gateway.response import validated_gateway_event_stream
+
+        self.assertIsNone(validated_gateway_event_stream({"source": "dict"}))
+        self.assertIsNone(validated_gateway_event_stream(b"bytes"))
+        self.assertIsNone(validated_gateway_event_stream(12345))
+
+
 if __name__ == "__main__":
     unittest.main()

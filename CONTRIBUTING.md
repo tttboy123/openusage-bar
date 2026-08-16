@@ -1,8 +1,11 @@
 # Contributing to OpenUsage Bar
 
-OpenUsage Bar is a macOS-first SwiftUI application with a Python collection
-layer. Keep credentials and network mutation in Python adapters; SwiftUI reads
-only sanitized local facts.
+UsageHub (formerly OpenUsage Bar) is a local-first AI usage dashboard. The
+current release form is the desktop client (Electron wrapping the local web
+dashboard) with the native SwiftUI menu-bar build maintained in parallel; both
+share the Python collection layer. Keep credentials and network mutation in
+Python adapters; renderers (Web/Electron/SwiftUI) read only sanitized local
+facts.
 
 ## Development requirements
 
@@ -17,6 +20,12 @@ Prepare a clean checkout and run the full gate:
 ```bash
 scripts/bootstrap.sh
 scripts/build_app.sh
+```
+
+To build and package the desktop client (current release form):
+
+```bash
+cd desktop && npm run dist:mac
 ```
 
 The build runs Python and Swift tests, coverage gates, privacy scans, the

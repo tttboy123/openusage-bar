@@ -1,0 +1,314 @@
+{
+  "schema_version": 1,
+  "presets": [
+    {
+      "preset_id": "claude-anthropic-official",
+      "name": "Anthropic Official",
+      "category": "official",
+      "agent": "claude_code",
+      "family_id": "anthropic",
+      "console_url": "https://console.anthropic.com",
+      "api_key_url": "https://console.anthropic.com/settings/keys",
+      "template": {
+        "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+        "base_url": "https://api.anthropic.com",
+        "model": "claude-sonnet-5"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "claude-kimi",
+      "name": "Kimi (Moonshot)",
+      "category": "gateway",
+      "agent": "claude_code",
+      "family_id": "moonshot",
+      "console_url": "https://platform.kimi.ai",
+      "api_key_url": "https://platform.kimi.ai/console/api-keys",
+      "template": {
+        "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+        "base_url": "https://api.moonshot.ai/anthropic",
+        "model": "kimi-k3[1m]"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "claude-openrouter",
+      "name": "OpenRouter",
+      "category": "gateway",
+      "agent": "claude_code",
+      "family_id": "openrouter",
+      "console_url": "https://openrouter.ai",
+      "api_key_url": "https://openrouter.ai/settings/keys",
+      "template": {
+        "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+        "base_url": "https://openrouter.ai/api/v1",
+        "model": "anthropic/claude-sonnet-5"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "claude-siliconflow",
+      "name": "SiliconFlow",
+      "category": "gateway",
+      "agent": "claude_code",
+      "family_id": "siliconflow",
+      "console_url": "https://siliconflow.cn",
+      "api_key_url": "https://cloud.siliconflow.cn/account/ak",
+      "template": {
+        "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "deepseek-ai/DeepSeek-V3"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "codex-kimi",
+      "name": "Kimi (Moonshot)",
+      "category": "gateway",
+      "agent": "codex",
+      "family_id": "moonshot",
+      "console_url": "https://platform.kimi.ai",
+      "api_key_url": "https://platform.kimi.ai/console/api-keys",
+      "template": {
+        "api_key_env": "OPENAI_API_KEY",
+        "base_url": "https://api.moonshot.ai/v1",
+        "model": "kimi-k3"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "codex-openai-official",
+      "name": "OpenAI Official",
+      "category": "official",
+      "agent": "codex",
+      "family_id": "openai",
+      "console_url": "https://platform.openai.com",
+      "api_key_url": "https://platform.openai.com/api-keys",
+      "template": {
+        "api_key_env": "OPENAI_API_KEY",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-5.5"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "codex-openrouter",
+      "name": "OpenRouter",
+      "category": "gateway",
+      "agent": "codex",
+      "family_id": "openrouter",
+      "console_url": "https://openrouter.ai",
+      "api_key_url": "https://openrouter.ai/settings/keys",
+      "template": {
+        "api_key_env": "OPENAI_API_KEY",
+        "base_url": "https://openrouter.ai/api/v1",
+        "model": "openai/gpt-5.5"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "codex-siliconflow",
+      "name": "SiliconFlow",
+      "category": "gateway",
+      "agent": "codex",
+      "family_id": "siliconflow",
+      "console_url": "https://siliconflow.cn",
+      "api_key_url": "https://cloud.siliconflow.cn/account/ak",
+      "template": {
+        "api_key_env": "OPENAI_API_KEY",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "deepseek-ai/DeepSeek-V3"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "gemini-google-official",
+      "name": "Google Official",
+      "category": "official",
+      "agent": "gemini_cli",
+      "family_id": "google",
+      "console_url": "https://aistudio.google.com",
+      "api_key_url": "https://aistudio.google.com/app/apikey",
+      "template": {
+        "api_key_env": "GOOGLE_API_KEY",
+        "base_url": "https://generativelanguage.googleapis.com",
+        "model": "gemini-2.5-pro"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "gemini-openrouter",
+      "name": "OpenRouter",
+      "category": "gateway",
+      "agent": "gemini_cli",
+      "family_id": "openrouter",
+      "console_url": "https://openrouter.ai",
+      "api_key_url": "https://openrouter.ai/settings/keys",
+      "template": {
+        "api_key_env": "GOOGLE_API_KEY",
+        "base_url": "https://openrouter.ai/api/v1",
+        "model": "google/gemini-2.5-pro"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "gemini-siliconflow",
+      "name": "SiliconFlow",
+      "category": "gateway",
+      "agent": "gemini_cli",
+      "family_id": "siliconflow",
+      "console_url": "https://siliconflow.cn",
+      "api_key_url": "https://cloud.siliconflow.cn/account/ak",
+      "template": {
+        "api_key_env": "GOOGLE_API_KEY",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "Qwen/Qwen3-235B-A22B"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "opencode-deepseek-official",
+      "name": "DeepSeek Official",
+      "category": "official",
+      "agent": "opencode",
+      "family_id": "deepseek",
+      "console_url": "https://platform.deepseek.com",
+      "api_key_url": "https://platform.deepseek.com/api_keys",
+      "template": {
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-v4-flash",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "opencode-deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "category": "official",
+      "agent": "opencode",
+      "family_id": "deepseek",
+      "console_url": "https://platform.deepseek.com",
+      "api_key_url": "https://platform.deepseek.com/api_keys",
+      "template": {
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-v4-pro",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "opencode-minimax-m2.7",
+      "name": "MiniMax M2.7",
+      "category": "official",
+      "agent": "opencode",
+      "family_id": "minimax",
+      "console_url": "https://platform.minimaxi.com",
+      "api_key_url": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+      "template": {
+        "api_key_env": "MINIMAX_API_KEY",
+        "base_url": "https://api.minimaxi.com/v1",
+        "model": "MiniMax-M2.7",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "opencode-minimax-official",
+      "name": "MiniMax Official",
+      "category": "official",
+      "agent": "opencode",
+      "family_id": "minimax",
+      "console_url": "https://platform.minimaxi.com",
+      "api_key_url": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+      "template": {
+        "api_key_env": "MINIMAX_API_KEY",
+        "base_url": "https://api.minimaxi.com/v1",
+        "model": "MiniMax-M3",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "opencode-opencode-free",
+      "name": "OpenCode Free",
+      "category": "official",
+      "agent": "opencode",
+      "family_id": "opencode",
+      "console_url": "https://opencode.ai",
+      "api_key_url": "https://opencode.ai",
+      "template": {
+        "api_key_env": "OPENCODE_API_KEY",
+        "base_url": "https://opencode.ai/zen/v1",
+        "model": "deepseek-v4-flash-free",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "opencode-openrouter",
+      "name": "OpenRouter",
+      "category": "gateway",
+      "agent": "opencode",
+      "family_id": "openrouter",
+      "console_url": "https://openrouter.ai",
+      "api_key_url": "https://openrouter.ai/settings/keys",
+      "template": {
+        "api_key_env": "OPENROUTER_API_KEY",
+        "base_url": "https://openrouter.ai/api/v1",
+        "model": "deepseek/deepseek-v4-flash",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "opencode-siliconflow",
+      "name": "SiliconFlow",
+      "category": "gateway",
+      "agent": "opencode",
+      "family_id": "siliconflow",
+      "console_url": "https://siliconflow.cn",
+      "api_key_url": "https://cloud.siliconflow.cn/account/ak",
+      "template": {
+        "api_key_env": "SILICONFLOW_API_KEY",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "deepseek-ai/DeepSeek-V3",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "opencode-zai-glm-5.1",
+      "name": "Zhipu GLM-5.1",
+      "category": "official",
+      "agent": "opencode",
+      "family_id": "zai",
+      "console_url": "https://open.bigmodel.cn",
+      "api_key_url": "https://open.bigmodel.cn/usercenter/apikeys",
+      "template": {
+        "api_key_env": "ZHIPU_API_KEY",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-5.1",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    },
+    {
+      "preset_id": "opencode-zhipu-official",
+      "name": "Zhipu GLM",
+      "category": "official",
+      "agent": "opencode",
+      "family_id": "zai",
+      "console_url": "https://open.bigmodel.cn",
+      "api_key_url": "https://open.bigmodel.cn/usercenter/apikeys",
+      "template": {
+        "api_key_env": "ZHIPU_API_KEY",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-5.2",
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "allow_custom_endpoints": true
+    }
+  ]
+}

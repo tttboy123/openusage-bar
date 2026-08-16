@@ -11,7 +11,7 @@ const windowsPayload = {
   operatingSystem: "windows",
   support: "unsupported",
   supportedSourceCount: 0,
-  totalSourceCount: 49,
+  totalSourceCount: 50,
   reasonCode: "source_level_evidence_unverified",
 };
 
@@ -24,7 +24,7 @@ test("preserves a verified zero without presenting it as unknown", () => {
     stateKey: "observerPlatformUnverified",
     detailKey: "observerPlatformVerifiedCount",
     supportedSourceCount: 0,
-    totalSourceCount: 49,
+    totalSourceCount: 50,
     operatingSystemKey: "platformWindows",
   });
 });
@@ -37,7 +37,7 @@ test("preserves exact partial source counts for Windows and Linux", () => {
         operatingSystem: "windows",
         support: "supported",
         supportedSourceCount: 1,
-        totalSourceCount: 49,
+        totalSourceCount: 50,
         reasonCode: "supported_sources_available",
       },
       operatingSystemKey: "platformWindows",
@@ -47,7 +47,7 @@ test("preserves exact partial source counts for Windows and Linux", () => {
         operatingSystem: "linux",
         support: "supported",
         supportedSourceCount: 2,
-        totalSourceCount: 49,
+        totalSourceCount: 50,
         reasonCode: "supported_sources_available",
       },
       operatingSystemKey: "platformLinux",
@@ -62,7 +62,7 @@ test("preserves exact partial source counts for Windows and Linux", () => {
       stateKey: "observerPlatformSupported",
       detailKey: "observerPlatformVerifiedCount",
       supportedSourceCount: payload.supportedSourceCount,
-      totalSourceCount: 49,
+      totalSourceCount: 50,
       operatingSystemKey,
     });
   }
@@ -74,7 +74,7 @@ test("keeps an unknown runtime distinct from a platform with zero evidence", () 
     operatingSystem: null,
     support: "unknown",
     supportedSourceCount: null,
-    totalSourceCount: 49,
+    totalSourceCount: 50,
     reasonCode: "runtime_platform_unknown",
   });
   assert.deepEqual(observerPlatformViewModel(capability), {
@@ -82,7 +82,7 @@ test("keeps an unknown runtime distinct from a platform with zero evidence", () 
     stateKey: "observerPlatformUnknown",
     detailKey: "observerPlatformCountUnknown",
     supportedSourceCount: null,
-    totalSourceCount: 49,
+    totalSourceCount: 50,
     operatingSystemKey: "platformUnknown",
   });
 });
@@ -94,7 +94,7 @@ test("accepts only closed, internally consistent renderer-safe states", () => {
     {},
     { ...windowsPayload, support: "supported" },
     { ...windowsPayload, supportedSourceCount: -1 },
-    { ...windowsPayload, supportedSourceCount: 50 },
+    { ...windowsPayload, supportedSourceCount: 51 },
     { ...windowsPayload, totalSourceCount: 0 },
     { ...windowsPayload, reasonCode: "private/runtime/path" },
     { ...windowsPayload, token: "renderer-secret" },
@@ -102,7 +102,7 @@ test("accepts only closed, internally consistent renderer-safe states", () => {
       operatingSystem: null,
       support: "unknown",
       supportedSourceCount: 0,
-      totalSourceCount: 49,
+      totalSourceCount: 50,
       reasonCode: "runtime_platform_unknown",
     },
   ];
@@ -123,7 +123,7 @@ test("maps all supported runtime platforms without reflecting raw values", () =>
       operatingSystem,
       support: "supported",
       supportedSourceCount: 1,
-      totalSourceCount: 49,
+      totalSourceCount: 50,
       reasonCode: "supported_sources_available",
     });
     assert.equal(

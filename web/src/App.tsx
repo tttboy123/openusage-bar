@@ -22,7 +22,12 @@ import ProvidersPage from "./pages/ProvidersPage";
 import DataHealthPage from "./pages/DataHealthPage";
 import AutomationPage from "./pages/AutomationPage";
 import UsageDetailsPage from "./pages/UsageDetailsPage";
-import { fetchQuickConnect, type QuickConnectItem } from "./api";
+import {
+  fetchQuickConnect,
+  fetchRefreshStatus,
+  triggerRefresh,
+  type QuickConnectItem,
+} from "./api";
 import Reveal from "./components/Reveal";
 import { detectLang, setLang, messages, type Lang, type Messages } from "./i18n";
 import { buildProductIdentityPresentation } from "./productBuildIdentity";
@@ -58,6 +63,7 @@ export default function App() {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const activeNavRef = useRef<HTMLAnchorElement>(null);
+  const lastAutoRefreshRef = useRef(0);
   const t: Messages = messages[lang];
   const buildIdentity = buildProductIdentityPresentation(productVersionTruth, t);
 
@@ -67,6 +73,13 @@ export default function App() {
 
   useEffect(() => {
     void fetchQuickConnect().then(setQuick).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    void autoRefreshOnOpen();
+    // Auto-refresh runs once per window/page open; the manual button and the
+    // backend cooldown keep later navigation cheap.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -95,6 +108,42 @@ export default function App() {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [menuOpen]);
+
+  async function refreshAll() {
+    // Ask the local host for one bounded refresh (with history backfill) and
+    // remount every page so all surfaces refetch with fresh data. The desktop
+    // renderer boundary may reject the hint; a renderer-only refetch is fine.
+    try {
+      await triggerRefresh();
+    } catch {
+      // fall through: pages still refetch below
+    }
+    setRefreshNonce((n) => n + 1);
+  }
+
+  async function autoRefreshOnOpen() {
+    const AUTO_REFRESH_COOLDOWN_MS = 60_000;
+    const now = Date.now();
+    if (now - lastAutoRefreshRef.current < AUTO_REFRESH_COOLDOWN_MS) return;
+    lastAutoRefreshRef.current = now;
+    try {
+      await triggerRefresh();
+    } catch {
+      // The desktop renderer boundary or an offline dashboard may reject the
+      // refresh hint; the pages still refetch their data below.
+    }
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      try {
+        const status = await fetchRefreshStatus();
+        if (status.status === "idle" || status.status === "unavailable") break;
+      } catch {
+        break;
+      }
+    }
+    setRefreshNonce((n) => n + 1);
+  }
 
   function switchLang() {
     const next: Lang = lang === "zh" ? "en" : "zh";
@@ -220,7 +269,7 @@ export default function App() {
             <button
               type="button"
               className="icon-btn"
-              onClick={() => setRefreshNonce((n) => n + 1)}
+              onClick={() => void refreshAll()}
             >
               <ArrowClockwise size={16} />
               {t.refresh}

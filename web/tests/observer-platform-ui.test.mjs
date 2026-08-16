@@ -127,7 +127,7 @@ test("observer platform fetch is one credential-free GET with a closed result", 
     operatingSystem: "windows",
     support: "unsupported",
     supportedSourceCount: 0,
-    totalSourceCount: 49,
+    totalSourceCount: 50,
     reasonCode: "source_level_evidence_unverified",
   };
   const calls = [];

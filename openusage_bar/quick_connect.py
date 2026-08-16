@@ -35,8 +35,8 @@ QUICK_CONNECT: dict[str, QuickConnect] = {
         api_key_url="https://platform.stepfun.com/api-keys",
     ),
     "moonshot": QuickConnect(
-        "moonshot", "https://platform.moonshot.cn", ("api_key", "auto_detect"),
-        api_key_url="https://platform.moonshot.cn/console/api-keys",
+        "moonshot", "https://platform.kimi.ai", ("api_key", "auto_detect"),
+        api_key_url="https://platform.kimi.ai/console/api-keys",
     ),
     "omniroute": QuickConnect(
         "omniroute", "http://localhost:20128", ("auto_detect",)

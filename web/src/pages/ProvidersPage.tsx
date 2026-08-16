@@ -1,12 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, HardDrives, ArrowClockwise, PencilSimple, Trash } from "@phosphor-icons/react";
 import {
+  Plus,
+  HardDrives,
+  ArrowClockwise,
+  PencilSimple,
+  Trash,
+  SquaresFour,
+  List as ListIcon,
+} from "@phosphor-icons/react";
+import {
+  applyProviderConfig,
   fetchProviders,
   fetchSources,
   fetchQuickConnect,
+  fetchProviderConfigPresets,
   type ProviderItem,
   type SourceItem,
   type QuickConnectItem,
+  type ProviderConfigPreset,
 } from "../api";
 import {
   accountPoolsViewModel,
@@ -74,6 +85,8 @@ export default function ProvidersPage({
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [quick, setQuick] = useState<QuickConnectItem[]>([]);
+  const [providerPresets, setProviderPresets] = useState<ProviderConfigPreset[]>([]);
+  const [providerConfigCanApply, setProviderConfigCanApply] = useState(false);
   const [accountPoolsSnapshot, setAccountPoolsSnapshot] = useState<unknown>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,14 +109,25 @@ export default function ProvidersPage({
     GatewayAccountOperationFailureCode | "invalid_intent" | null
   >(null);
   const [gatewayPublicListRefreshFailed, setGatewayPublicListRefreshFailed] = useState(false);
+  const [layout, setLayout] = useState<"grid" | "list">(() => {
+    try {
+      return localStorage.getItem("usagehub.providers.layout") === "list" ? "list" : "grid";
+    } catch {
+      return "grid";
+    }
+  });
 
   const load = async (quiet = false) => {
     if (!quiet) setIsRefreshing(true);
     try {
-      const [p, s, q, poolResult] = await Promise.all([
+      const [p, s, q, presets, poolResult] = await Promise.all([
         fetchProviders(),
         fetchSources(),
         fetchQuickConnect(),
+        fetchProviderConfigPresets().then(
+          (value) => value,
+          () => [] as ProviderConfigPreset[],
+        ),
         fetchAccountPoolsSnapshot().then(
           (value) => ({ ok: true as const, value }),
           () => ({ ok: false as const, value: null }),
@@ -112,6 +136,7 @@ export default function ProvidersPage({
       setProviders(p);
       setSources(s);
       setQuick(q);
+      setProviderPresets(presets);
       if (poolResult.ok) setAccountPoolsSnapshot(poolResult.value);
       setError(null);
       setLastRefreshed(new Date());
@@ -146,6 +171,31 @@ export default function ProvidersPage({
 
   useEffect(() => {
     const controller = new AbortController();
+    fetch("/host/v1/capabilities", {
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        const actions =
+          value !== null &&
+          typeof value === "object" &&
+          Array.isArray((value as { actions?: unknown }).actions)
+            ? ((value as { actions: string[] }).actions ?? [])
+            : [];
+        setProviderConfigCanApply(actions.includes("providerConfig.apply"));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setProviderConfigCanApply(false);
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
     setGatewayAccountHostAvailability("checking");
     gatewayAccountHostAdapter.readCapability(controller.signal).then(
       (value) => {
@@ -168,6 +218,14 @@ export default function ProvidersPage({
     const id = setInterval(() => load(true), 60000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("usagehub.providers.layout", layout);
+    } catch {
+      // Preference persistence is best-effort only.
+    }
+  }, [layout]);
 
   const sourcesByProvider = new Map(
     sources.map((s) => [s.providerId, s] as const),
@@ -333,6 +391,28 @@ export default function ProvidersPage({
           <Plus size={16} />
           {t.browseProviderPresets}
         </button>
+        <div
+          className="segmented"
+          role="group"
+          aria-label={t.providerLayoutLabel}
+        >
+          <button
+            type="button"
+            aria-pressed={layout === "grid"}
+            onClick={() => setLayout("grid")}
+          >
+            <SquaresFour size={14} />
+            {t.layoutGrid}
+          </button>
+          <button
+            type="button"
+            aria-pressed={layout === "list"}
+            onClick={() => setLayout("list")}
+          >
+            <ListIcon size={14} />
+            {t.layoutList}
+          </button>
+        </div>
         <div className="toolbar-right">
           <span className="dim">
             {lastRefreshed
@@ -381,9 +461,11 @@ export default function ProvidersPage({
       />
       <AddProviderDialog
         open={dialogOpen}
-        presets={quick}
+        presets={providerPresets}
         onClose={() => setDialogOpen(false)}
         t={t}
+        canApply={providerConfigCanApply}
+        apply={applyProviderConfig}
       />
       {gatewayAccountCreateOpen ? (
         <GatewayAccountCreateDialog
@@ -436,7 +518,10 @@ export default function ProvidersPage({
           t={t}
         />
       ) : null}
-      <section className="provider-grid" aria-label={t.navProviders}>
+      <section
+        className={layout === "list" ? "provider-list" : "provider-grid"}
+        aria-label={t.navProviders}
+      >
         {providers.map((item) => (
          <ProviderCard
            key={item.providerId}
@@ -447,7 +532,7 @@ export default function ProvidersPage({
            source={sourcesByProvider.get(item.providerId ?? "")}
            quick={quickByFamily.get(item.familyId ?? "")}
            t={t}
-            isSyncing={isRefreshing}
+           variant={layout}
          />
         ))}
         {providers.length === 0 && !error ? (
@@ -876,5 +961,5 @@ function relativeTime(date: string | null | undefined, t: Messages): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return tpl(t.hoursAgo, { count: hours });
   const days = Math.floor(hours / 24);
-  return tpl(t.daysAgo, { count: days });
+  return tpl(days === 1 ? t.dayAgo : t.daysAgo, { count: days });
 }
