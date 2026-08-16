@@ -36,7 +36,8 @@ CONTEXTUAL_PATTERNS = (
         r"\s*[=:]\s*(?:"
         r"[\"'][A-Za-z0-9._~+/=-]{20,}[\"']|"
         r"(?!self\.|config\.|keychain\.|os\.|getattr\()"
-        r"[A-Za-z0-9_~+/=-]{20,})",
+        r"[A-Za-z0-9_~+/=-]{20,}"
+        r"(?![A-Za-z0-9_~+/=-]|\s*\())",
         re.IGNORECASE,
     ),
 )
