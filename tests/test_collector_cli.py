@@ -27,10 +27,12 @@ from openusage_bar.collector_cli import (
     CLIError,
     DEFAULT_FRESH_TIMEOUT_SECONDS,
     INTERNAL_GATEWAY_SELF_TEST_COMMAND,
+    INTERNAL_PLUGIN_SELF_TEST_COMMAND,
     INTERNAL_REFRESH_COMMAND,
     main,
 )
 from openusage_bar.collector_cli import _default_refresh_command
+from openusage_bar.collector_cli import _gateway_self_test_unavailable_report
 from openusage_bar.daily_history import DAILY_TIMEOUT_SECONDS
 from openusage_bar.lifecycle_state import LifecycleStatePaths
 from openusage_bar.openusage_adapter import AUTO_TIMEOUT_SECONDS, DIRECT_TIMEOUT_SECONDS
@@ -2179,6 +2181,30 @@ class CollectorCLITests(unittest.TestCase):
 
         refresher = build_default_refresher(self.store)
         self.assertTrue(callable(getattr(refresher, "refresh", None)))
+
+
+class CollectorCliCoverageTests(unittest.TestCase):
+    def test_plugin_self_test_happy_path_via_main(self):
+        out = io.StringIO()
+        err = io.StringIO()
+        code = main(
+            [INTERNAL_PLUGIN_SELF_TEST_COMMAND, "--format", "json"],
+            stdout=out,
+            stderr=err,
+        )
+        self.assertEqual(code, 0, err.getvalue())
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["apiVersion"], "plugin-self-test/v1")
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["synthetic"])
+        self.assertTrue(all(payload["checks"].values()))
+
+    def test_gateway_self_test_unavailable_report(self):
+        report = _gateway_self_test_unavailable_report()
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["schemaVersion"], "gateway-self-test/v1")
+        self.assertEqual(report["checks"]["observe"]["observer"], "unavailable")
+        self.assertEqual(report["checks"]["gateway"]["status"], "failed")
 
 
 if __name__ == "__main__":

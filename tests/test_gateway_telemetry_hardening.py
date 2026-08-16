@@ -32,7 +32,10 @@ _DIRECT_MODEL = "Jane-Smith"
 _LEGACY_MODEL = "Legacy-Jane-Smith"
 _SCOPE_SHAPED_RAW_MODEL = "model-sha256:" + ("a" * 64)
 _CONTENDED_MODEL = "safe-contended-model"
-_MAX_COMPLETED_RESPONSE_SECONDS = 0.75
+_MAX_COMPLETED_RESPONSE_SECONDS = 2.0
+# Loose upper bound: completed responses must fail fast instead of
+# blocking on the locked telemetry database for SQLite's 5s timeout.
+# 2.0s is well below that while leaving headroom for CI timing jitter.
 
 
 def _payload(model: str) -> dict[str, object]:
