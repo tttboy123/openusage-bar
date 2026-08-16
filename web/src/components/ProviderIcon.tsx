@@ -36,6 +36,8 @@ const ICON_BY_FAMILY: Record<string, string> = {
   qwen_cli: "/icons/qwen.svg",
   zed: "/icons/zedindustries.svg",
   hermes: "/icons/hermes.svg",
+  cursor: "/icons/cursor.png",
+  kiro_cli: "/icons/kiro.png",
 };
 
 export function providerIconPath(familyId?: string): string | null {
