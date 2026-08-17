@@ -6,10 +6,10 @@
 
 ### The All-in-One AI 用量与 Provider 管理工具 — 菜单栏简况 · 额度 · API 消耗
 
-[![Version](https://img.shields.io/github/v/release/tttboy123/openusage-bar?include_prereleases&color=0A84FF&label=version)](https://github.com/tttboy123/openusage-bar/releases)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/tttboy123/openusage-bar/releases)
+[![Version](https://img.shields.io/github/v/release/tttboy123/usagehub?include_prereleases&color=0A84FF&label=version)](https://github.com/tttboy123/usagehub/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/tttboy123/usagehub/releases)
 [![Built with](https://img.shields.io/badge/built%20with-Electron%20%2B%20SwiftUI-blue.svg)](https://www.electronjs.org/)
-[![Downloads](https://img.shields.io/github/downloads/tttboy123/openusage-bar/total)](https://github.com/tttboy123/openusage-bar/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/tttboy123/usagehub/total)](https://github.com/tttboy123/usagehub/releases/latest)
 [![License](https://img.shields.io/badge/License-Apache--2.0-111111?style=flat-square)](LICENSE)
 
 中文 | [English](README.en.md) | [变更日志](CHANGELOG.md) | [安装指南](docs/release-quick-start.md) | [Provider 支持](docs/provider-support.md) | [本地 API](docs/api/local-api-v1.md)
@@ -187,11 +187,11 @@ xattr -dr com.apple.quarantine "/Applications/UsageHub.app"
 
 ### macOS
 
-从 [Releases](https://github.com/tttboy123/openusage-bar/releases) 下载最新
+从 [Releases](https://github.com/tttboy123/usagehub/releases) 下载最新
 `UsageHub-0.8.6-mac-arm64.dmg`，双击打开后把 **UsageHub** 拖入 **Applications**。
 首次打开自动注册登录项与后台采集器，菜单栏图标随即显示今日用量简况。
 
-原生 SwiftUI 版本：[OpenUsage-Bar-v0.8.6-macos-arm64.dmg](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg)（候选发布后可用）。
+原生 SwiftUI 版本：[OpenUsage-Bar-v0.8.6-macos-arm64.dmg](https://github.com/tttboy123/usagehub/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg)（候选发布后可用）。
 
 > 0.8.6 为候选预发布，未做 Developer ID 公证；Windows/Linux 安装包随跨平台发布提供。
 
