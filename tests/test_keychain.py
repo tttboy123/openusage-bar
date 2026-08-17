@@ -550,5 +550,46 @@ class CrossPlatformKeychainTests(unittest.TestCase):
         backend.delete.assert_called_once_with(query)
 
 
+class BoundedKeychainCacheTests(unittest.TestCase):
+    def _keychain(self, reader):
+        return BoundedMacOSKeychain(
+            helper_command=(sys.executable, "-c"),
+            timeout_seconds=2,
+            reader=reader,
+        )
+
+    def test_successful_read_is_cached_until_set_or_delete(self):
+        reader = Mock()
+        reader.get.return_value = "stored-value"
+        keychain = self._keychain(reader)
+
+        self.assertEqual(keychain.get("demo"), "stored-value")
+        self.assertEqual(keychain.get("demo"), "stored-value")
+        reader.get.assert_called_once_with("demo")
+
+        keychain._request = Mock(return_value={"version": 1, "ok": True})
+        keychain.set("step-plan-main.oasis-token", "rotated-secret")
+        self.assertEqual(keychain.get("step-plan-main.oasis-token"), "rotated-secret")
+        reader.get.assert_called_once_with("demo")
+
+        keychain.delete("step-plan-main.oasis-token")
+        reader.get.return_value = None
+        self.assertIsNone(keychain.get("step-plan-main.oasis-token"))
+        self.assertEqual(reader.get.call_count, 2)
+
+    def test_unavailable_read_is_cached_until_negative_ttl_expires(self):
+        reader = Mock()
+        reader.get.return_value = None
+        keychain = self._keychain(reader)
+
+        self.assertIsNone(keychain.get("demo"))
+        self.assertIsNone(keychain.get("demo"))
+        reader.get.assert_called_once_with("demo")
+
+        keychain._negative_cache_seconds = -1
+        self.assertIsNone(keychain.get("demo"))
+        self.assertEqual(reader.get.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

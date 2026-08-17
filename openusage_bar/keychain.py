@@ -44,6 +44,9 @@ class KeychainAPI(Protocol):
     def delete(self, query: dict[str, str]) -> None: ...
 
 
+_ACCESSIBILITY_UPGRADE_ATTEMPTED: set[tuple[str, str]] = set()
+
+
 class SecurityFrameworkAPI:
     def __init__(self, *, keychain_path: str | None = None) -> None:
         import Security
@@ -84,6 +87,27 @@ class SecurityFrameworkAPI:
             return False
         raise KeychainError(f"Keychain {operation} failed with status {status}")
 
+    def _upgrade_accessibility(self, query: dict[str, str]) -> None:
+        # Items written by older builds default to WhenUnlocked and re-prompt
+        # whenever the login keychain auto-locks. Best-effort migrate them to
+        # AfterFirstUnlockThisDeviceOnly on the first successful read of this
+        # process; failures (locked keychain, entitlement) are ignored.
+        key = (query.get("service", ""), query.get("account", ""))
+        if key in _ACCESSIBILITY_UPGRADE_ATTEMPTED:
+            return
+        _ACCESSIBILITY_UPGRADE_ATTEMPTED.add(key)
+        try:
+            self.security.SecItemUpdate(
+                self._native_query(query),
+                {
+                    self.security.kSecAttrAccessible: (
+                        self.security.kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+                    )
+                },
+            )
+        except Exception:
+            pass
+
     def get(self, query: dict[str, str]) -> bytes | None:
         if self.keychain is not None:
             value, _ = self._find_explicit(query)
@@ -94,6 +118,7 @@ class SecurityFrameworkAPI:
         status, result = self.security.SecItemCopyMatching(native, None)
         if not self._check(status, "read", allow_missing=True):
             return None
+        self._upgrade_accessibility(query)
         return bytes(result)
 
     def update(self, query: dict[str, str], value: bytes) -> bool:
@@ -128,6 +153,12 @@ class SecurityFrameworkAPI:
             return
         native = self._native_query(query)
         native[self.security.kSecValueData] = value
+        # Readable without unlocking the login keychain after first device
+        # unlock; otherwise every collector refresh can trigger a "enter login
+        # keychain password" prompt when the keychain has auto-locked.
+        native[self.security.kSecAttrAccessible] = (
+            self.security.kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        )
         status, _ = self.security.SecItemAdd(native, None)
         self._check(status, "add")
 
@@ -544,6 +575,12 @@ class BoundedMacOSKeychain:
         self.reader = reader or BoundedReadOnlyKeychain(
             timeout_seconds=timeout_seconds
         )
+        # account -> (value, monotonic timestamp). A non-None value is cached
+        # until set/delete; a None (unavailable) result is re-validated after
+        # the negative TTL so a transiently locked keychain is retried without
+        # re-prompting on every refresh.
+        self._cache: dict[str, tuple[str | None, float]] = {}
+        self._negative_cache_seconds = 60
 
     def _request(self, payload: dict) -> dict:
         encoded = json.dumps(
@@ -578,10 +615,18 @@ class BoundedMacOSKeychain:
             raise KeychainError("Keychain helper failed") from error
 
     def get(self, account: str) -> str | None:
+        now = time.monotonic()
+        cached = self._cache.get(account)
+        if cached is not None:
+            value, cached_at = cached
+            if value is not None or now - cached_at < self._negative_cache_seconds:
+                return value
         try:
-            return self.reader.get(account)
+            value = self.reader.get(account)
         except (KeychainError, OSError, ValueError):
             return None
+        self._cache[account] = (value, now)
+        return value
 
     def set(self, account: str, secret: str) -> None:
         if not _mutable_keychain_account(account):
@@ -600,6 +645,7 @@ class BoundedMacOSKeychain:
         })
         if set(response) != {"version", "ok"} or response.get("ok") is not True:
             raise KeychainError("Keychain helper failed")
+        self._cache[account] = (secret, time.monotonic())
 
     def delete(self, account: str) -> None:
         if not _mutable_keychain_account(account):
@@ -611,6 +657,7 @@ class BoundedMacOSKeychain:
         })
         if set(response) != {"version", "ok"} or response.get("ok") is not True:
             raise KeychainError("Keychain helper failed")
+        self._cache.pop(account, None)
 
 
 class UnsupportedPlatformKeychainError(KeychainError):
