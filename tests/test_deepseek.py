@@ -1,7 +1,7 @@
 import os
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from openusage_bar.deepseek import DEEPSEEK_API_KEY_ENV, DeepSeekBalanceAdapter
 from openusage_bar.models import ProviderStatus
@@ -97,3 +97,29 @@ class DeepSeekBalanceAdapterTests(unittest.TestCase):
         self.assertEqual(
             adapter.last_balance_result, BalanceFetchFailure("network_error")
         )
+
+
+class DeepSeekCachedCredentialTests(unittest.TestCase):
+    def test_usage_secret_is_served_from_cached_keychain_credential(self):
+        import sys
+        from openusage_bar.keychain import BoundedMacOSKeychain
+
+        reader = Mock()
+        reader.get.return_value = "sk-cached-deepseek"
+        keychain = BoundedMacOSKeychain(
+            helper_command=(sys.executable, "-c"),
+            timeout_seconds=2,
+            reader=reader,
+        )
+        adapter = DeepSeekBalanceAdapter(
+            keychain=keychain,
+            client=Mock(),
+            clock=lambda: datetime(2026, 7, 14, tzinfo=timezone.utc),
+        )
+        with patch.dict(os.environ, {DEEPSEEK_API_KEY_ENV: ""}):
+            # First read hits the keychain and populates the in-memory cache;
+            # the second (e.g. the next collector refresh) is served from cache
+            # and never touches the keychain again.
+            self.assertEqual(adapter._secret(), "sk-cached-deepseek")
+            self.assertEqual(adapter._secret(), "sk-cached-deepseek")
+        reader.get.assert_called_once_with("deepseek")
