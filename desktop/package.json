@@ -79,7 +79,10 @@
           "to": "trayTemplate@2x.png"
         }
       ],
-      "icon": "assets/icon.icns"
+      "icon": "assets/icon.icns",
+      "extendInfo": {
+        "LSUIElement": true
+      }
     },
     "win": {
       "target": [
