@@ -272,10 +272,55 @@ function formatTokens(value) {
   if (value == null) return "—";
   const n = Number(value);
   if (Number.isNaN(n)) return String(value);
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  const compact = (div, suffix) =>
+    `${(n / div).toFixed(1).replace(/\.0$/, "")}${suffix}`;
+  if (n >= 1_000_000_000) return compact(1_000_000_000, "B");
+  if (n >= 1_000_000) return compact(1_000_000, "M");
+  if (n >= 1_000) return compact(1_000, "K");
   return String(n);
+}
+
+function trimNumber(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  return String(Number(n.toFixed(1)));
+}
+
+// Compact capacity unit rendering: "percent" -> "%", token/request counts use
+// compact numbers, anything else keeps its unit (no "left"/verbose suffix).
+function formatUnit(remaining, unit) {
+  const base = trimNumber(remaining);
+  const u = String(unit ?? "").toLowerCase();
+  if (u === "percent" || u === "%") return `${base}%`;
+  if (u === "tokens" || u === "token" || u === "requests" || u === "request") {
+    return formatTokens(Number(remaining));
+  }
+  return `${base} ${unit ?? ""}`.trim();
+}
+
+function trimAmount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  return String(Number(n.toFixed(2)));
+}
+
+const CURRENCY_SYMBOLS = {
+  CNY: "¥",
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+  KRW: "₩",
+  HKD: "HK$",
+  SGD: "S$",
+  AUD: "A$",
+  CAD: "C$",
+};
+
+function formatAmount(amount, currency) {
+  const code = String(currency ?? "").toUpperCase();
+  const symbol = CURRENCY_SYMBOLS[code] ?? `${code} `;
+  return `${symbol}${trimAmount(amount)}`;
 }
 
 function trayCopy() {
@@ -330,26 +375,28 @@ function mostUrgent(capacity) {
   return scored[0] ?? null;
 }
 
+function providerDisplayNames(snapshot) {
+  const map = new Map();
+  for (const p of Array.isArray(snapshot?.providers) ? snapshot.providers : []) {
+    if (p && p.providerId) {
+      map.set(p.providerId, p.displayName || p.name || p.providerId);
+    }
+  }
+  return map;
+}
+
 function buildTrayMenu() {
   const copy = trayCopy();
   const items = [];
   const { snapshot, capacity } = lastTraySnapshot ?? {};
   const today = snapshot?.summary?.todayTokens;
-  const urgent = mostUrgent(capacity);
+  const displayNames = providerDisplayNames(snapshot);
+  const displayName = (id) => displayNames.get(id) ?? id;
 
   items.push({
-    label:
-      today != null
-        ? `${copy.today}: ${formatTokens(today)} tokens`
-        : "UsageHub",
+    label: today != null ? `${copy.today} ${formatTokens(today)}` : "UsageHub",
     enabled: false,
   });
-  if (urgent) {
-    items.push({
-      label: `${urgent.providerId ?? "Provider"}: ${urgent.remaining ?? "—"} ${urgent.unit ?? ""} left`,
-      enabled: false,
-    });
-  }
   items.push({ type: "separator" });
 
   const balances = Array.isArray(snapshot?.balances) ? snapshot.balances : [];
@@ -360,7 +407,7 @@ function buildTrayMenu() {
     items.push({ label: copy.balances, enabled: false });
     visibleBalances.slice(0, 6).forEach((b) => {
       items.push({
-        label: `${b.providerId ?? "Provider"}: ${b.available} ${b.currency ?? ""}`,
+        label: `${displayName(b.providerId)}  ${formatAmount(b.available, b.currency)}`,
         click: () => showMainWindow(),
       });
     });
@@ -374,7 +421,7 @@ function buildTrayMenu() {
       const ratio = c.remainingRatio ?? 1;
       const indicator = ratio <= 0.2 ? "🔴" : ratio <= 0.4 ? "🟡" : "🟢";
       items.push({
-        label: `${indicator} ${c.providerId ?? "Provider"} — ${c.remaining ?? "—"} ${c.unit ?? ""}`,
+        label: `${indicator} ${displayName(c.providerId)} ${formatUnit(c.remaining, c.unit)}`,
         click: () => showMainWindow(),
       });
     });
