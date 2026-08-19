@@ -7,6 +7,7 @@ import os
 import stat
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -68,6 +69,10 @@ class CodexLocalDailyImporter:
     cost_source_id = None
     account_ref = ""
     eager_local = True
+    # A daemon holds one importer for its lifetime. Re-sync the in-memory cache
+    # from the persistent file periodically so a long-running process cannot
+    # drift from a session file that keeps growing across days.
+    CACHE_RELOAD_SECONDS = 600
 
     def __init__(
         self,
@@ -96,6 +101,7 @@ class CodexLocalDailyImporter:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._cache: dict[str, _SessionState] = {}
         self._cache_loaded = False
+        self._cache_loaded_at = 0.0
         self._cache_digest: bytes | None = None
         self._cache_writable = True
         self._lock = threading.Lock()
@@ -564,15 +570,20 @@ class CodexLocalDailyImporter:
             ).digest()
             return state
 
+    def _ensure_cache_loaded(self) -> None:
+        now = time.monotonic()
+        if not self._cache_loaded or now - self._cache_loaded_at >= self.CACHE_RELOAD_SECONDS:
+            self._cache = self._load_persistent_cache()
+            self._cache_loaded = True
+            self._cache_loaded_at = now
+
     def fetch_usage(self, since: date, until: date):
         if not self._valid_range(since, until):
             return ImportFailure("invalid_request")
         if not self._lock.acquire(blocking=False):
             return ImportFailure("import_in_progress")
         try:
-            if not self._cache_loaded:
-                self._cache = self._load_persistent_cache()
-                self._cache_loaded = True
+            self._ensure_cache_loaded()
             try:
                 paths = self._paths()
                 states: dict[str, _SessionState] = {}
@@ -586,6 +597,7 @@ class CodexLocalDailyImporter:
             except (OSError, ValueError, TypeError):
                 return ImportFailure("sessions_invalid")
             self._cache = states
+            self._cache_loaded_at = time.monotonic()
             self._save_persistent_cache(states)
             totals: dict[tuple[str, str], _Aggregate] = {}
             for state in states.values():

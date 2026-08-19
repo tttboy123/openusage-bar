@@ -491,5 +491,42 @@ class CodexLocalDailyImporterTests(unittest.TestCase):
         self.assertEqual(malformed, ImportFailure("sessions_invalid"))
 
 
+    def test_long_lived_importer_resyncs_cache_from_disk_after_ttl(self):
+        if sys.platform == "win32":
+            self.skipTest("incremental cache-resume parity is verified on POSIX")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache_path = Path(directory) / "cache.json"
+            path = root / "session.jsonl"
+            write_events(path, [
+                model_event("2026-07-17T01:00:00Z"),
+                token_event(
+                    "2026-07-17T01:01:00Z", input_tokens=70,
+                    output_tokens=10, cached_input_tokens=50, total_tokens=80,
+                ),
+            ])
+            importer = CodexLocalDailyImporter(
+                session_roots=(root,), cache_path=cache_path,
+                local_timezone=SGT, clock=lambda: NOW,
+            )
+            first = importer.fetch_usage(date(2026, 7, 17), date(2026, 7, 17))
+            self.assertEqual(sum(row.total_tokens for row in first.rows), 80)
+            self.assertGreater(importer._cache_loaded_at, 0)
+
+            # A daemon holds one importer for its whole lifetime. Simulate its
+            # in-memory cache drifting out of sync, then append new events; once
+            # the reload TTL elapses the importer must re-sync from disk and
+            # pick up the appended data.
+            write_events(path, [token_event(
+                "2026-07-17T01:02:00Z", input_tokens=30,
+                output_tokens=10, cached_input_tokens=20, total_tokens=40,
+            )], append=True)
+            importer._cache_loaded_at = 0.0
+            importer._cache = {}
+            recovered = importer.fetch_usage(date(2026, 7, 17), date(2026, 7, 17))
+
+        self.assertEqual(sum(row.total_tokens for row in recovered.rows), 120)
+
+
 if __name__ == "__main__":
     unittest.main()
