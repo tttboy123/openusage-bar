@@ -343,7 +343,19 @@ export default function ActivityPage({ t }: { t: Messages }) {
 
   useEffect(() => {
     void loadSnapshot();
-  }, []);
+    // Keep the summary metrics (今日 Token / Provider / 覆盖天数) live while
+    // the page is open: the collector imports new data every few minutes.
+    const timer = setInterval(() => {
+      void loadSnapshot();
+      const providerIds = providerFilter === "all" ? undefined : [providerFilter];
+      void fetchActivity(from, to, providerIds, undefined)
+        .then(({ rows }) => setActivity(rows))
+        .catch(() => {
+          // Keep the previous rows; the next tick retries.
+        });
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [from, to, providerFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
