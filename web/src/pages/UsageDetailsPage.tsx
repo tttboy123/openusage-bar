@@ -151,6 +151,20 @@ export default function UsageDetailsPage({ t }: { t: Messages }) {
     return () => controller.abort();
   }, [days]);
 
+  // Keep the metrics/chart live while the page is open: the collector imports
+  // new data every few minutes, so a page left open must not show frozen totals.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const { from: liveFrom, to: liveTo } = rangeFor(days);
+      void fetchActivity(liveFrom, liveTo, undefined, undefined)
+        .then(({ rows }) => setRows(rows))
+        .catch(() => {
+          // Keep the previous rows; the next tick retries.
+        });
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [days]);
+
   const totals = useMemo(() => {
     let tokens = 0;
     let input = 0;
