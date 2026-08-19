@@ -265,7 +265,11 @@ async function refreshTraySnapshot() {
     getObserverJSON("/v1/capacity"),
   ]);
   lastTraySnapshot = { snapshot, capacity };
-  updateTray();
+  try {
+    updateTray();
+  } catch {
+    // Keep the previous tray state; the next tick retries.
+  }
 }
 
 function formatTokens(value) {
@@ -464,9 +468,9 @@ function updateTray() {
   tray.setTitle(trayTitle());
 }
 
-function showTrayMenu() {
+async function showTrayMenu() {
   if (!tray) return;
-  updateTray();
+  await refreshTraySnapshot().catch(() => {});
   tray.popUpContextMenu();
 }
 
@@ -681,9 +685,13 @@ async function startUsageHub() {
     createAppMenu();
     createWindow();
     createTray();
-    await refreshTraySnapshot();
+    // Register the periodic tray refresh first so a slow or failed initial
+    // fetch can never leave the tray permanently stale.
+    trayUpdateTimer = setInterval(() => {
+      refreshTraySnapshot().catch(() => {});
+    }, 60_000);
+    await refreshTraySnapshot().catch(() => {});
     globalShortcut.register("CommandOrControl+Shift+T", showTrayMenu);
-    trayUpdateTimer = setInterval(refreshTraySnapshot, 60_000);
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow();
