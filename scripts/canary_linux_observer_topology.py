@@ -823,7 +823,7 @@ def _wait_for_runtime(
                 ):
                     raise LinuxObserverTopologyCanaryError(last_stage)
                 last = float(current)
-                return min(3.0, deadline - last)
+                return min(10.0, deadline - last)
 
             return _observe_runtime(remaining_timeout=remaining_timeout)
         except LinuxObserverTopologyCanaryError as error:

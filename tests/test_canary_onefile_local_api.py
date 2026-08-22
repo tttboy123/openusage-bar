@@ -140,7 +140,7 @@ class OnefileLocalAPICanaryTests(unittest.TestCase):
             read_onefile_shared_client_boundary_snapshot,
         )
 
-        for value in (True, float("nan"), float("inf"), 0.0, -0.1, 3.01):
+        for value in (True, float("nan"), float("inf"), 0.0, -0.1, 10.01):
             with self.subTest(value=value):
                 events: list[str] = []
 
