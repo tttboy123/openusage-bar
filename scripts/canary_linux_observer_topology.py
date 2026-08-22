@@ -136,7 +136,10 @@ class LinuxObserverRuntimeFact:
 
 
 _APPIMAGE_MODE = 0o700
-_READINESS_SECONDS = 30.0
+# Cold AppImage extraction plus first-time user-systemd activation can exceed
+# thirty seconds on hosted runners. Keep the probe bounded, while leaving
+# enough time to evaluate the unchanged zero-network/zero-keychain boundary.
+_READINESS_SECONDS = 60.0
 _STOP_SECONDS = 5.0
 _PRESERVE_SECONDS = 180.0
 
