@@ -16,8 +16,8 @@ public struct ProductVersionTruth: Equatable, Sendable {
     public static let current = ProductVersionTruth(
         displayName: "UsageHub",
         legacyDisplayName: "OpenUsage Bar",
-        candidateVersion: "0.8.6",
-        candidateBuild: "28",
+        candidateVersion: "0.8.7",
+        candidateBuild: "29",
         channel: "rc",
         releaseStage: "candidate",
         publicationStatus: "not_published",

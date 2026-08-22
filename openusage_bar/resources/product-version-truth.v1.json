@@ -10,8 +10,8 @@
     "bundleIdentifier": "com.lune.openusagebar"
   },
   "candidate": {
-    "version": "0.8.6",
-    "build": "28",
+    "version": "0.8.7",
+    "build": "29",
     "channel": "rc",
     "releaseStage": "candidate",
     "publicationStatus": "not_published",

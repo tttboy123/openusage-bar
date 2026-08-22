@@ -1,15 +1,15 @@
-<!-- openusage-release-version: 0.8.6 -->
-<!-- openusage-build-identity: product=UsageHub candidate=0.8.6 build=28 channel=rc stage=candidate publication=not_published published=v0.7.1 -->
+<!-- openusage-release-version: 0.8.7 -->
+<!-- openusage-build-identity: product=UsageHub candidate=0.8.7 build=29 channel=rc stage=candidate publication=not_published published=v0.7.1 -->
 <div align="center">
 
 # UsageHub
 
 ### The All-in-One AI Usage & Provider Manager — Menu-bar Summary · Capacity · API Spend
 
-[![Version](https://img.shields.io/github/v/release/tttboy123/openusage-bar?include_prereleases&color=0A84FF&label=version)](https://github.com/tttboy123/openusage-bar/releases)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/tttboy123/openusage-bar/releases)
+[![Version](https://img.shields.io/github/v/release/tttboy123/usagehub?include_prereleases&color=0A84FF&label=version)](https://github.com/tttboy123/usagehub/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/tttboy123/usagehub/releases)
 [![Built with](https://img.shields.io/badge/built%20with-Electron%20%2B%20SwiftUI-blue.svg)](https://www.electronjs.org/)
-[![Downloads](https://img.shields.io/github/downloads/tttboy123/openusage-bar/total)](https://github.com/tttboy123/openusage-bar/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/tttboy123/usagehub/total)](https://github.com/tttboy123/usagehub/releases/latest)
 [![License](https://img.shields.io/badge/License-Apache--2.0-111111?style=flat-square)](LICENSE)
 
 [中文](README.md) | English | [Changelog](CHANGELOG.md) | [Install guide](docs/release-quick-start.md) | [Provider support](docs/provider-support.md) | [Local API](docs/api/local-api-v1.md)
@@ -140,8 +140,8 @@ corrupt existing configs.
 <summary><strong>Why is the menu-bar icon missing?</strong></summary>
 
 The tray icon only shows while the app is running — open UsageHub (or let it auto-start at login).
-Versions before 0.8.6 had a tray-icon path bug that made it invisible; 0.8.6 ships a bundled brand
-template icon.
+Versions before 0.8.6 had a tray-icon path bug that made it invisible; 0.8.6 fixed it with a bundled
+brand template icon.
 
 </details>
 
@@ -190,13 +190,13 @@ Remove quarantine for this app only; do not disable Gatekeeper system-wide.
 
 ### macOS
 
-Grab the latest `UsageHub-0.8.6-mac-arm64.dmg` from [Releases](https://github.com/tttboy123/openusage-bar/releases),
+Grab the latest `UsageHub-0.8.7-mac-arm64.dmg` from [Releases](https://github.com/tttboy123/usagehub/releases),
 open it, and drag **UsageHub** into **Applications**. First launch registers the login item and
 bundled collector; the menu-bar icon immediately shows today's usage summary.
 
-Native SwiftUI build: [OpenUsage-Bar-v0.8.6-macos-arm64.dmg](https://github.com/tttboy123/openusage-bar/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg) (available after candidate publication).
+Native SwiftUI build: [OpenUsage-Bar-v0.8.7-macos-arm64.dmg](https://github.com/tttboy123/usagehub/releases/download/v0.8.7/OpenUsage-Bar-v0.8.7-macos-arm64.dmg) (available after candidate publication).
 
-> 0.8.6 is a candidate pre-release without Developer ID notarization; Windows/Linux installers
+> 0.8.7 is a candidate pre-release without Developer ID notarization; Windows/Linux installers
 > ship with the cross-platform release.
 
 ## Development

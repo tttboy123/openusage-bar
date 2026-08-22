@@ -9,8 +9,8 @@ import {
 const expectedIdentity = {
   displayName: "UsageHub",
   legacyDisplayName: "OpenUsage Bar",
-  candidateVersion: "0.8.6",
-  candidateBuild: "28",
+  candidateVersion: "0.8.7",
+  candidateBuild: "29",
   channel: "rc",
   releaseStage: "candidate",
   publicationStatus: "not_published",
@@ -35,7 +35,7 @@ test("freezes the renderer projection", () => {
 });
 
 test("formats version and channel without embedding final UI copy", () => {
-  assert.equal(formatCandidateVersion(productVersionTruth), "0.8.6 RC");
+  assert.equal(formatCandidateVersion(productVersionTruth), "0.8.7 RC");
   assert.equal(
     formatCandidateVersion({ candidateVersion: "1.2.3", channel: "beta" }),
     "1.2.3 BETA",

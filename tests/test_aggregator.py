@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -137,6 +138,10 @@ class CurrentRefreshTests(unittest.TestCase):
             self.assertTrue(result.cards[0].stale)
             self.assertEqual(result.cards[0].status, ProviderStatus.STALE)
 
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "fork"),
+        "POSIX process-group test",
+    )
     def test_real_overflow_is_bounded_and_process_group_is_reaped(self):
         with tempfile.TemporaryDirectory() as directory:
             helper = Path(directory) / "security-helper"
@@ -173,6 +178,10 @@ class CurrentRefreshTests(unittest.TestCase):
                 time.sleep(0.05)
             self.assertEqual(state, "")
 
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "fork"),
+        "POSIX process-group test",
+    )
     def test_real_silent_timeout_is_killed_and_reaped(self):
         with tempfile.TemporaryDirectory() as directory:
             helper = Path(directory) / "security-helper"

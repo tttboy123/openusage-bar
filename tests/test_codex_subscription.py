@@ -110,8 +110,8 @@ class CodexSubscriptionTests(unittest.TestCase):
             from openusage_bar.codex_app_server import read_codex_app_server_rate_limits
 
             read_codex_app_server_rate_limits(
-                codex_command=("/bin/sh",),
-                helper_command=("/bin/sh",),
+                codex_command=(sys.executable,),
+                helper_command=(sys.executable,),
                 environment={
                     "HOME": "/tmp/home",
                     "PATH": "/usr/bin",

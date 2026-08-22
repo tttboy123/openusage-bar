@@ -87,13 +87,13 @@ Inspection and immediate binding verification use:
 python scripts/distribution_trust_posture.py inspect \
   --platform linux \
   --package-root dist-desktop/linux-unpacked \
-  --artifact dist-desktop/UsageHub-0.8.6-linux-x86_64.AppImage \
+  --artifact dist-desktop/UsageHub-0.8.7-linux-x86_64.AppImage \
   --output dist-evidence/usagehub-distribution-trust-linux-x64.json
 
 python scripts/distribution_trust_posture.py verify \
   --report dist-evidence/usagehub-distribution-trust-linux-x64.json \
   --platform linux \
-  --artifact dist-desktop/UsageHub-0.8.6-linux-x86_64.AppImage
+  --artifact dist-desktop/UsageHub-0.8.7-linux-x86_64.AppImage
 ```
 
 The CLI intentionally has no option for supplying signing status,

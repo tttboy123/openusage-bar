@@ -8,6 +8,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const capacity = fs.readFileSync(path.join(root, "src/pages/CapacityPage.tsx"), "utf8");
 const app = fs.readFileSync(path.join(root, "src/App.tsx"), "utf8");
 const api = fs.readFileSync(path.join(root, "src/api.ts"), "utf8");
+const desktopMain = fs.readFileSync(path.join(root, "../desktop/main.js"), "utf8");
+const collectorRuntime = fs.readFileSync(
+  path.join(root, "../desktop/collector_runtime.js"),
+  "utf8",
+);
 const i18n = fs.readFileSync(path.join(root, "src/i18n.ts"), "utf8");
 const css = fs.readFileSync(path.join(root, "src/styles/app.css"), "utf8");
 
@@ -30,4 +35,12 @@ test("entering Capacity uses the trusted host refresh and Local API stays read-o
   assert.doesNotMatch(api, /fetch\("\/v1\/refresh"/u);
   assert.match(app, /aria-busy=\{refreshing\}/u);
   assert.match(app, /role="status" aria-live="polite"/u);
+});
+
+test("the user refresh deadline covers the bounded five-minute collector window", () => {
+  assert.match(collectorRuntime, /MAX_COLLECTOR_COMMAND_TIMEOUT_MS = 300_000/u);
+  assert.match(collectorRuntime, /attempts = 150/u);
+  assert.match(collectorRuntime, /attempts > 150/u);
+  assert.match(desktopMain, /timeoutMs: 300_000/u);
+  assert.match(api, /HOST_REFRESH_DEADLINE_MS = 305_000/u);
 });

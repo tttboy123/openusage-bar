@@ -76,7 +76,7 @@ maintainer explicitly activates the timed cohort, the clock state is
 `not_started`.
 
 The repository is preparing the
-[v0.8.6 RC candidate](https://github.com/tttboy123/openusage-bar/releases/tag/v0.8.6).
+[v0.8.7 RC candidate](https://github.com/tttboy123/openusage-bar/releases/tag/v0.8.7).
 That link becomes an intake surface only after the immutable candidate is
 published; preparing metadata does not activate or qualify the cohort. The
 last published baseline remains v0.7.1.
@@ -111,18 +111,18 @@ Record pass/fail and UTC date for each event:
    files extracted from it. Use the single candidate version below only after
    the candidate assets have been published and checksummed.
 
-   The current candidate version is `0.8.6`:
+   The current candidate version is `0.8.7`:
    ```bash
-   gh attestation verify OpenUsage-Bar-v0.8.6-macos-arm64.zip \
+   gh attestation verify OpenUsage-Bar-v0.8.7-macos-arm64.zip \
      --repo tttboy123/openusage-bar \
      --signer-workflow \
        tttboy123/openusage-bar/.github/workflows/release.yml \
-     --source-ref refs/tags/v0.8.6 \
+     --source-ref refs/tags/v0.8.7 \
      --deny-self-hosted-runners
-   shasum -a 256 -c OpenUsage-Bar-v0.8.6-macos-arm64.zip.sha256
-   unzip OpenUsage-Bar-v0.8.6-macos-arm64.zip
-   cd OpenUsage-Bar-v0.8.6-macos-arm64
-   scripts/verify_canary_candidate.py --assets-dir .. --version 0.8.6
+   shasum -a 256 -c OpenUsage-Bar-v0.8.7-macos-arm64.zip.sha256
+   unzip OpenUsage-Bar-v0.8.7-macos-arm64.zip
+   cd OpenUsage-Bar-v0.8.7-macos-arm64
+   scripts/verify_canary_candidate.py --assets-dir .. --version 0.8.7
    ```
 
    The packaged verifier requires the expected version and exactly one release

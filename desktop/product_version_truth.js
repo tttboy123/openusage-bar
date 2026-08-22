@@ -5,8 +5,8 @@
 const productVersionTruth = Object.freeze({
   displayName: "UsageHub",
   legacyDisplayName: "OpenUsage Bar",
-  candidateVersion: "0.8.6",
-  candidateBuild: "28",
+  candidateVersion: "0.8.7",
+  candidateBuild: "29",
   channel: "rc",
   releaseStage: "candidate",
   publicationStatus: "not_published",

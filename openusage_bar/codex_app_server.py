@@ -157,7 +157,7 @@ def run_codex_app_server_helper(
                 "id": 1,
                 "method": "initialize",
                 "params": {
-                    "clientInfo": {"name": "usagehub", "version": "0.8.6"}
+                    "clientInfo": {"name": "usagehub", "version": "0.8.7"}
                 },
             },
         )

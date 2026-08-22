@@ -103,6 +103,32 @@ test("desktop reuses an active scheduled refresh instead of launching a competit
   assert.equal(waits, 2);
 });
 
+test("desktop can wait through a scheduled refresh beyond the old three-minute ceiling", async () => {
+  const { waitForActiveRefresh } = require("../collector_runtime.js");
+  let reads = 0;
+  let waits = 0;
+
+  const result = await waitForActiveRefresh({
+    readStatus: async () => {
+      reads += 1;
+      return reads <= 101
+        ? { phase: "running", state: "attention", succeeded: null }
+        : { phase: "idle", state: "ok", succeeded: true };
+    },
+    wait: async () => {
+      waits += 1;
+    },
+    attempts: 105,
+    intervalMs: 2_000,
+  });
+
+  assert.deepEqual(result, {
+    waited: true,
+    status: { phase: "idle", state: "ok", succeeded: true },
+  });
+  assert.equal(waits, 101);
+});
+
 test("Linux invokes the packaged managed-service command and waits for readiness", {
   skip: process.platform === "win32",
 }, async (context) => {

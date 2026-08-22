@@ -5,7 +5,7 @@ const childProcess = require("child_process");
 const path = require("path");
 
 const MAX_RUNTIME_PATH_LENGTH = 4096;
-const MAX_COLLECTOR_COMMAND_TIMEOUT_MS = 180_000;
+const MAX_COLLECTOR_COMMAND_TIMEOUT_MS = 300_000;
 const COLLECTOR_INTERVAL_SECONDS = "1800";
 const DELETE_STATE_CONFIRMATION = "DELETE-LOCAL-USAGEHUB-STATE";
 const VALID_LIFECYCLE_PLAN = Symbol("validCollectorLifecyclePlan");
@@ -300,7 +300,7 @@ function runCollectorCommand(
 async function waitForActiveRefresh({
   readStatus,
   wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
-  attempts = 90,
+  attempts = 150,
   intervalMs = 2_000,
 } = {}) {
   if (
@@ -308,7 +308,7 @@ async function waitForActiveRefresh({
     typeof wait !== "function" ||
     !Number.isInteger(attempts) ||
     attempts < 1 ||
-    attempts > 90 ||
+    attempts > 150 ||
     !Number.isInteger(intervalMs) ||
     intervalMs < 100 ||
     intervalMs > 2_000

@@ -1,5 +1,5 @@
-<!-- openusage-release-version: 0.8.6 -->
-<!-- openusage-build-identity: product=UsageHub candidate=0.8.6 build=28 channel=rc stage=candidate publication=not_published published=v0.7.1 -->
+<!-- openusage-release-version: 0.8.7 -->
+<!-- openusage-build-identity: product=UsageHub candidate=0.8.7 build=29 channel=rc stage=candidate publication=not_published published=v0.7.1 -->
 <div align="center">
 
 # UsageHub
@@ -139,7 +139,7 @@ flowchart LR
 <summary><strong>为什么菜单栏看不到图标？</strong></summary>
 
 菜单栏图标只在 App 运行时显示。请确认 App 已打开（或已加入登录项自动启动）。0.8.6 之前
-存在托盘图标路径硬编码导致的不可见问题，已在此版本修复：图标现在使用随包携带的品牌模板图标。
+存在托盘图标路径硬编码导致的不可见问题，已在 0.8.6 修复：图标现在使用随包携带的品牌模板图标。
 
 </details>
 
@@ -188,12 +188,12 @@ xattr -dr com.apple.quarantine "/Applications/UsageHub.app"
 ### macOS
 
 从 [Releases](https://github.com/tttboy123/usagehub/releases) 下载最新
-`UsageHub-0.8.6-mac-arm64.dmg`，双击打开后把 **UsageHub** 拖入 **Applications**。
+`UsageHub-0.8.7-mac-arm64.dmg`，双击打开后把 **UsageHub** 拖入 **Applications**。
 首次打开自动注册登录项与后台采集器，菜单栏图标随即显示今日用量简况。
 
-原生 SwiftUI 版本：[OpenUsage-Bar-v0.8.6-macos-arm64.dmg](https://github.com/tttboy123/usagehub/releases/download/v0.8.6/OpenUsage-Bar-v0.8.6-macos-arm64.dmg)（候选发布后可用）。
+原生 SwiftUI 版本：[OpenUsage-Bar-v0.8.7-macos-arm64.dmg](https://github.com/tttboy123/usagehub/releases/download/v0.8.7/OpenUsage-Bar-v0.8.7-macos-arm64.dmg)（候选发布后可用）。
 
-> 0.8.6 为候选预发布，未做 Developer ID 公证；Windows/Linux 安装包随跨平台发布提供。
+> 0.8.7 为候选预发布，未做 Developer ID 公证；Windows/Linux 安装包随跨平台发布提供。
 
 ## Development
 

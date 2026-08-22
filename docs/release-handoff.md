@@ -55,7 +55,7 @@ assembly is not reported as success.
 python scripts/release_handoff.py assemble \
   --bundle-dir dist-handoff/mac-arm64 \
   --collector dist-collector/openusage-collector \
-  --artifact dist-desktop/UsageHub-0.8.6-mac-arm64.dmg \
+  --artifact dist-desktop/UsageHub-0.8.7-mac-arm64.dmg \
   --evidence dist-evidence/usagehub-native-evidence-mac-arm64.json \
   --trust-posture-report \
     dist-evidence/usagehub-distribution-trust-mac-arm64.json

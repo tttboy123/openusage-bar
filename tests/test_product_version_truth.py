@@ -213,7 +213,7 @@ class ProductVersionTruthCommittedContractTests(ProductVersionTruthTestCase):
         self.assertEqual(
             payload["candidate"],
             {
-                "build": "28",
+                "build": "29",
                 "canary": {
                     "clock": "not_started",
                     "qualifiedMachines": 0,
@@ -224,7 +224,7 @@ class ProductVersionTruthCommittedContractTests(ProductVersionTruthTestCase):
                 "publicationStatus": "not_published",
                 "releaseEligible": False,
                 "releaseStage": "candidate",
-                "version": "0.8.6",
+                "version": "0.8.7",
             },
         )
         self.assertEqual(payload["publishedBaseline"]["version"], "0.7.1")
@@ -250,8 +250,8 @@ class ProductVersionTruthCommittedContractTests(ProductVersionTruthTestCase):
         self.assertEqual(result.stderr, "")
         self.assertEqual(
             result.stdout,
-            "product_version_truth_ok product=UsageHub candidate=0.8.6 "
-            "build=28 channel=rc published=v0.7.1\n",
+            "product_version_truth_ok product=UsageHub candidate=0.8.7 "
+            "build=29 channel=rc published=v0.7.1\n",
         )
 
     def test_current_candidate_cannot_cross_the_release_publication_gate(self):
@@ -279,7 +279,7 @@ class ProductVersionTruthCommittedContractTests(ProductVersionTruthTestCase):
             result = _run_verifier(root)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("candidate=0.8.6", result.stdout)
+        self.assertIn("candidate=0.8.7", result.stdout)
 
 
 class ProductVersionTruthClosedContractTests(ProductVersionTruthTestCase):
@@ -451,7 +451,7 @@ class ProductVersionTruthReleaseStateMachineTests(ProductVersionTruthTestCase):
             "repository": "tttboy123/openusage-bar",
             "schemaVersion": "github-release-receipt/v1",
             "sourceSha": source_sha,
-            "tag": "v0.8.6",
+            "tag": "v0.8.7",
         }
 
     def test_only_the_three_release_state_rows_are_valid(self):
@@ -470,7 +470,7 @@ class ProductVersionTruthReleaseStateMachineTests(ProductVersionTruthTestCase):
             with self.subTest(stage=stage), _repository_fixture() as root:
                 receipt = self.receipt(root) if receipt_kind == "receipt" else None
                 if receipt is not None:
-                    subprocess.run(["git", "tag", "v0.8.6"], cwd=root, check=True)
+                    subprocess.run(["git", "tag", "v0.8.7"], cwd=root, check=True)
                 self.transition(
                     root,
                     stage=stage,
@@ -505,7 +505,7 @@ class ProductVersionTruthReleaseStateMachineTests(ProductVersionTruthTestCase):
             ), _repository_fixture() as root:
                 receipt = self.receipt(root) if receipt_kind == "receipt" else None
                 if receipt is not None:
-                    subprocess.run(["git", "tag", "v0.8.6"], cwd=root, check=True)
+                    subprocess.run(["git", "tag", "v0.8.7"], cwd=root, check=True)
                 self.transition(
                     root,
                     stage=stage,
@@ -535,7 +535,7 @@ class ProductVersionTruthReleaseStateMachineTests(ProductVersionTruthTestCase):
         for label, mutate in mutations:
             with self.subTest(mutation=label), _repository_fixture() as root:
                 receipt = self.receipt(root)
-                subprocess.run(["git", "tag", "v0.8.6"], cwd=root, check=True)
+                subprocess.run(["git", "tag", "v0.8.7"], cwd=root, check=True)
                 mutate(receipt)
                 self.transition(
                     root,
@@ -548,8 +548,8 @@ class ProductVersionTruthReleaseStateMachineTests(ProductVersionTruthTestCase):
 
     def test_tag_and_local_artifact_cannot_impersonate_publication(self):
         with _repository_fixture() as root:
-            subprocess.run(["git", "tag", "v0.8.6"], cwd=root, check=True)
-            artifact = root / "dist/OpenUsage-Bar-v0.8.6-macos-arm64.dmg"
+            subprocess.run(["git", "tag", "v0.8.7"], cwd=root, check=True)
+            artifact = root / "dist/OpenUsage-Bar-v0.8.7-macos-arm64.dmg"
             artifact.parent.mkdir()
             artifact.write_bytes(b"local candidate bytes, not a publication receipt\n")
 
@@ -557,7 +557,7 @@ class ProductVersionTruthReleaseStateMachineTests(ProductVersionTruthTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("published=v0.7.1", result.stdout)
-        self.assertNotIn("published=v0.8.6", result.stdout)
+        self.assertNotIn("published=v0.8.7", result.stdout)
 
     def test_publication_receipt_never_enters_renderer_safe_projections(self):
         for relative in self.PROJECTION_PATHS:
@@ -609,7 +609,7 @@ class ProductVersionTruthSourceBindingTests(ProductVersionTruthTestCase):
                 (
                     "setup-version",
                     Path("setup.py"),
-                    '"version": "0.8.6"',
+                    '"version": "0.8.7"',
                     '"version": "0.8.5"',
                 ),
             )
@@ -669,7 +669,7 @@ class ProductVersionTruthSourceBindingTests(ProductVersionTruthTestCase):
                 (
                     "desktop-projection",
                     Path("desktop/product_version_truth.js"),
-                    'candidateVersion: "0.8.6"',
+                    'candidateVersion: "0.8.7"',
                     'candidateVersion: "0.8.5"',
                 ),
                 (
@@ -682,7 +682,7 @@ class ProductVersionTruthSourceBindingTests(ProductVersionTruthTestCase):
                     "swift-projection",
                     Path("swift_app/Sources/UsageCore/ProductVersionTruth.swift"),
                     'publishedBaselineTag: "v0.7.1"',
-                    'publishedBaselineTag: "v0.8.6"',
+                    'publishedBaselineTag: "v0.8.7"',
                 ),
             )
         )
@@ -767,10 +767,10 @@ class ProductVersionTruthSourceBindingTests(ProductVersionTruthTestCase):
                 (
                     relative.name,
                     relative,
-                    "candidate=0.8.6 build=28 channel=rc stage=candidate "
+                    "candidate=0.8.7 build=29 channel=rc stage=candidate "
                     "publication=not_published published=v0.7.1",
-                    "candidate=0.8.6 build=28 channel=rc stage=published "
-                    "publication=published published=v0.8.6",
+                    "candidate=0.8.7 build=29 channel=rc stage=published "
+                    "publication=published published=v0.8.7",
                 )
                 for relative in (
                     Path("README.md"),

@@ -108,11 +108,11 @@ class ArtifactBuildIdentityContractTests(unittest.TestCase):
         self.assertIn("artifact-build-identity.v1.json", build_script)
         self.assertIn("Contents/Resources/product-build-identity.v1.json", build_script)
 
-    def test_electron_maps_identity_to_resources_and_native_build_28(self):
+    def test_electron_maps_identity_to_resources_and_native_build_29(self):
         package = json.loads((ROOT / "desktop/package.json").read_text(encoding="utf-8"))
         build = package["build"]
 
-        self.assertEqual(build["buildVersion"], "28")
+        self.assertEqual(build["buildVersion"], "29")
         mappings = build["extraResources"]
         self.assertIn(
             {

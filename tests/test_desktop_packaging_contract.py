@@ -639,7 +639,7 @@ process.stdout.write(JSON.stringify(plan));
             (DESKTOP / "package.json").read_text(encoding="utf-8")
         )
         forbidden_version_literals = tuple(dict.fromkeys((
-            "0.8.6",
+            "0.8.7",
             str(package["version"]),
         )))
         observed = {
@@ -756,7 +756,7 @@ process.stdout.write(JSON.stringify(plan));
             self.assertEqual(
                 baseline.stdout,
                 "artifact_build_identity_ok product=UsageHub "
-                "candidate=0.8.6 build=28\n",
+                "candidate=0.8.7 build=29\n",
             )
         cases = (
             "buildVersion",
@@ -774,11 +774,11 @@ process.stdout.write(JSON.stringify(plan));
                 package = json.loads(package_path.read_text(encoding="utf-8"))
                 build = package["build"]
                 if case == "buildVersion":
-                    build["buildVersion"] = "29"
+                    build["buildVersion"] = "30"
                 elif case == "buildNumber":
-                    build["buildNumber"] = "29"
+                    build["buildNumber"] = "30"
                 elif case == "extraMetadata":
-                    build["extraMetadata"]["buildNumber"] = "29"
+                    build["extraMetadata"]["buildNumber"] = "30"
                 elif case == "extraResources":
                     build["extraResources"] = [
                         value

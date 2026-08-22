@@ -30,8 +30,8 @@ For an extracted or mounted package, `release_artifact_audit.py` performs a
 three-way binding among the packaged bytes, the canonical source, and product
 truth. It also validates native metadata:
 
-- macOS: `UsageHub`, version `0.8.6`, build `28` in `Info.plist`;
-- Windows: `UsageHub`, product version `0.8.6.28`, and a file version whose
+- macOS: `UsageHub`, version `0.8.7`, build `29` in `Info.plist`;
+- Windows: `UsageHub`, product version `0.8.7.29`, and a file version whose
   normalized build is `28` in PE `VersionInfo`;
 - Linux: version/build fields in `app.asar`; a final AppImage additionally has
   exactly one desktop entry with `Name=UsageHub` and

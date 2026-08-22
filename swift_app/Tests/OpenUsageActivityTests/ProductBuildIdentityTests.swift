@@ -15,7 +15,7 @@ struct ProductBuildIdentityTests {
             stage: stage, publication: publication, eligible: eligible
         ))
 
-        #expect(copy.versionAndBuild == "0.8.6 RC (build 28)")
+        #expect(copy.versionAndBuild == "0.8.7 RC (build 29)")
         #expect(copy.lifecycle == expected)
         #expect(copy.published == "Published stable: v0.7.1")
         #expect(copy.accessibilityLabel.contains(expected))
@@ -95,8 +95,8 @@ struct ProductBuildIdentityTests {
         ProductVersionTruth(
             displayName: "UsageHub",
             legacyDisplayName: "OpenUsage Bar",
-            candidateVersion: "0.8.6",
-            candidateBuild: "28",
+            candidateVersion: "0.8.7",
+            candidateBuild: "29",
             channel: "rc",
             releaseStage: stage,
             publicationStatus: publication,

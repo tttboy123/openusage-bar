@@ -320,7 +320,7 @@ class ReleaseHandoffTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     payload["product"],
-                    {"name": "UsageHub", "version": "0.8.6"},
+                    {"name": "UsageHub", "version": "0.8.7"},
                 )
                 self.assertEqual(
                     payload["buildIdentity"],
@@ -514,7 +514,7 @@ class ReleaseHandoffTests(unittest.TestCase):
             bundle, payload = _assemble_fixture(root)
             manifest = bundle / "usagehub-release-handoff-mac-x64.json"
             identity = payload["buildIdentity"]["identity"]
-            identity["candidateBuild"] = "29"
+            identity["candidateBuild"] = "30"
             encoded_identity = (
                 json.dumps(
                     identity,

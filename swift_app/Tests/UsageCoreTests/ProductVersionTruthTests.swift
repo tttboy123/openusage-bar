@@ -9,8 +9,8 @@ struct ProductVersionTruthTests {
 
         #expect(identity.displayName == "UsageHub")
         #expect(identity.legacyDisplayName == "OpenUsage Bar")
-        #expect(identity.candidateVersion == "0.8.6")
-        #expect(identity.candidateBuild == "28")
+        #expect(identity.candidateVersion == "0.8.7")
+        #expect(identity.candidateBuild == "29")
         #expect(identity.channel == "rc")
         #expect(identity.releaseStage == "candidate")
         #expect(identity.publicationStatus == "not_published")
@@ -24,7 +24,7 @@ struct ProductVersionTruthTests {
 
     @Test("Formats version and channel without embedding final UI copy")
     func formatsCandidateVersion() {
-        #expect(ProductVersionTruth.current.formattedCandidateVersion == "0.8.6 RC")
+        #expect(ProductVersionTruth.current.formattedCandidateVersion == "0.8.7 RC")
         #expect(
             ProductVersionTruth.formatCandidateVersion(version: "1.2.3", channel: "beta")
                 == "1.2.3 BETA"
