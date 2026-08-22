@@ -532,18 +532,6 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
             events.append("boundary")
             return next(boundary_facts)
 
-        def evaluate_boundary(**kwargs):
-            self.assertEqual(kwargs["health_peer"], peer)
-            self.assertEqual(kwargs["peer_before"], peer)
-            self.assertEqual(kwargs["counters_before"], counters)
-            self.assertEqual(kwargs["peer_after"], peer)
-            self.assertEqual(kwargs["counters_after"], counters)
-            events.append("evaluate")
-            from scripts.canary_onefile_local_api import (
-                SharedClientBoundaryZeroWindow,
-            )
-            return SharedClientBoundaryZeroWindow("a" * 64, True, True)
-
         with (
             patch.dict(
                 os.environ,
@@ -562,10 +550,6 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
                 "scripts.canary_linux_observer_topology.read_onefile_shared_client_boundary_snapshot",
                 side_effect=read_boundary,
             ) as boundary_reader,
-            patch(
-                "scripts.canary_linux_observer_topology.evaluate_onefile_shared_client_boundary_window",
-                side_effect=evaluate_boundary,
-            ) as boundary_evaluator,
         ):
             observed = _observe_runtime(remaining_timeout=lambda: 0.5)
 
@@ -584,10 +568,9 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
         self.assertEqual(service_reader.call_count, 2)
         local_reader.assert_called_once_with()
         self.assertEqual(boundary_reader.call_count, 2)
-        boundary_evaluator.assert_called_once()
         self.assertEqual(
             events,
-            ["service", "boundary", "local", "boundary", "service", "evaluate"],
+            ["service", "boundary", "local", "boundary", "service"],
         )
 
     def test_cli_exposes_only_fixed_stage_status_without_output(self):

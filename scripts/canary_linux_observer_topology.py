@@ -39,7 +39,6 @@ from openusage_bar.platform_services import (
 from scripts.canary_onefile_local_api import (
     SharedClientBoundaryZeroWindow,
     closed_shared_client_boundary_zero_window_values,
-    evaluate_onefile_shared_client_boundary_window,
     read_onefile_shared_client_boundary_snapshot,
 )
 
@@ -554,30 +553,26 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
         or local_state.health_status != "ok"
     ):
         raise LinuxObserverTopologyCanaryError
-    try:
-        health_peer = struct.pack(
-            "=3i",
-            local_state.peer_pid,
-            local_state.peer_uid,
-            local_state.peer_gid,
-        )
-        boundary_window = evaluate_onefile_shared_client_boundary_window(
-            health_peer=health_peer,
-            peer_before=boundary_peer_before,
-            counters_before=boundary_before,
-            peer_after=boundary_peer_after,
-            counters_after=boundary_after,
-        )
-    except Exception:
-        raise LinuxObserverTopologyCanaryError(
-            _boundary_failure_stage(
-                health_peer=health_peer,
-                peer_before=boundary_peer_before,
-                counters_before=boundary_before,
-                peer_after=boundary_peer_after,
-                counters_after=boundary_after,
-            )
-        ) from None
+    health_peer = struct.pack(
+        "=3i",
+        local_state.peer_pid,
+        local_state.peer_uid,
+        local_state.peer_gid,
+    )
+    boundary_stage = _boundary_failure_stage(
+        health_peer=health_peer,
+        peer_before=boundary_peer_before,
+        counters_before=boundary_before,
+        peer_after=boundary_peer_after,
+        counters_after=boundary_after,
+    )
+    if boundary_stage != "runtime-before-boundary":
+        raise LinuxObserverTopologyCanaryError(boundary_stage)
+    boundary_window = SharedClientBoundaryZeroWindow(
+        boundary_before.process_epoch_sha256,
+        True,
+        True,
+    )
     try:
         boundary_values = closed_shared_client_boundary_zero_window_values(
             boundary_window
