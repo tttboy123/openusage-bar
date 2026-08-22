@@ -596,7 +596,7 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
             str(executable),
             "daemon",
             "--interval",
-            "300",
+            "1800",
             "--api-transport",
             "unix",
             "--api-socket",
@@ -607,7 +607,7 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
         from openusage_bar.platform_services import systemd_unit
 
         unit_bytes = systemd_unit(
-            interval=300,
+            interval=1800,
             api_socket=str(socket_path),
             command=str(executable),
         ).encode("utf-8")

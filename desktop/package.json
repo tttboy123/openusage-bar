@@ -1,6 +1,6 @@
 {
   "name": "usagehub-desktop",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "description": "UsageHub cross-platform desktop client (Electron) wrapping the local web dashboard",
   "main": "main.js",
   "scripts": {
@@ -16,11 +16,11 @@
   "build": {
     "appId": "com.lune.openusagebar",
     "productName": "UsageHub",
-    "buildVersion": "28",
-    "buildNumber": "28",
+    "buildVersion": "29",
+    "buildNumber": "29",
     "extraMetadata": {
-      "buildVersion": "28",
-      "buildNumber": "28"
+      "buildVersion": "29",
+      "buildNumber": "29"
     },
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "files": [
@@ -115,7 +115,7 @@
       "category": "Utility",
       "desktop": {
         "entry": {
-          "X-AppImage-Version": "28"
+          "X-AppImage-Version": "29"
         }
       },
       "extraResources": [

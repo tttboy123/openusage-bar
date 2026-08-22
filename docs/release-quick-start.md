@@ -1,13 +1,13 @@
 # UsageHub 安装指南 / Install guide
 
-UsageHub 0.8.6 RC 候选版支持 Apple Silicon Mac 和 macOS 15 或更高版本。当前
+UsageHub 0.8.7 RC 候选版支持 Apple Silicon Mac 和 macOS 15 或更高版本。当前
 发布形态为桌面客户端（Electron 封装本地 Web 仪表盘），原生 SwiftUI 菜单栏
 版本同步维护。
 
 ## 图形化安装（推荐，桌面客户端）
 
-1. 从 [v0.8.6 发布页](https://github.com/tttboy123/openusage-bar/releases/tag/v0.8.6)
-   下载 `UsageHub-0.8.6-mac-arm64.dmg`。
+1. 从 [v0.8.7 发布页](https://github.com/tttboy123/usagehub/releases/tag/v0.8.7)
+   下载 `UsageHub-0.8.7-mac-arm64.dmg`。
 2. 双击 DMG，将 **UsageHub** 拖入 **Applications**。
 3. 在访达“应用程序”中打开。App 会自动注册登录项和内置采集器，菜单栏图标
    随即显示今日用量简况。
@@ -20,7 +20,7 @@ UsageHub 0.8.6 RC 候选版支持 Apple Silicon Mac 和 macOS 15 或更高版本
 
 ## Install (English)
 
-After candidate publication, download the v0.8.6 DMG, open it, drag
+After candidate publication, download the v0.8.7 DMG, open it, drag
 **UsageHub** to **Applications**, then open it from Finder. The app registers
 its login item and bundled collector on first launch and shows today's usage
 summary in the menu bar. If macOS says the app is damaged, verify the download
@@ -33,19 +33,19 @@ Login Items** if macOS requests background approval.
 将 DMG 和 `.dmg.sha256` 放在同一目录后执行：
 
 ```bash
-shasum -a 256 -c UsageHub-0.8.6-mac-arm64.dmg.sha256
+shasum -a 256 -c UsageHub-0.8.7-mac-arm64.dmg.sha256
 ```
 
 ## 原生 SwiftUI 版本（可选）
 
 原生菜单栏版本仍以 `OpenUsage Bar.app` 分发，产物名为
-`OpenUsage-Bar-v0.8.6-macos-arm64.dmg`（候选发布后可用）。其 ZIP 中附带
+`OpenUsage-Bar-v0.8.7-macos-arm64.dmg`（候选发布后可用）。其 ZIP 中附带
 事务式安装、回滚和卸载工具：
 
 ```bash
-shasum -a 256 -c OpenUsage-Bar-v0.8.6-macos-arm64.zip.sha256
-unzip OpenUsage-Bar-v0.8.6-macos-arm64.zip
-cd OpenUsage-Bar-v0.8.6-macos-arm64
+shasum -a 256 -c OpenUsage-Bar-v0.8.7-macos-arm64.zip.sha256
+unzip OpenUsage-Bar-v0.8.7-macos-arm64.zip
+cd OpenUsage-Bar-v0.8.7-macos-arm64
 scripts/install_app.sh
 ```
 
@@ -73,7 +73,7 @@ readiness inventory:
 python scripts/release_readiness.py --output /tmp/openusage-release-readiness.json
 ```
 
-The current `0.8.6` candidate intentionally reports
+The current `0.8.7` candidate intentionally reports
 `release_readiness_blocked`: local product/version and build-identity checks
 pass, but `releaseEligible=false` and the required external evidence is still
 missing. The report is path-free and fail-closed, but it is not a release
@@ -148,15 +148,15 @@ GitHub CLI. Then the packaged candidate verifier checks the manifest, SBOM,
 checksums, every release asset and all attestations:
 
 ```bash
-gh attestation verify OpenUsage-Bar-v0.8.6-macos-arm64.zip \
+gh attestation verify OpenUsage-Bar-v0.8.7-macos-arm64.zip \
   --repo tttboy123/openusage-bar \
   --signer-workflow tttboy123/openusage-bar/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.8.6 \
+  --source-ref refs/tags/v0.8.7 \
   --deny-self-hosted-runners
-shasum -a 256 -c OpenUsage-Bar-v0.8.6-macos-arm64.zip.sha256
-unzip OpenUsage-Bar-v0.8.6-macos-arm64.zip
-cd OpenUsage-Bar-v0.8.6-macos-arm64
-scripts/verify_canary_candidate.py --assets-dir .. --version 0.8.6
+shasum -a 256 -c OpenUsage-Bar-v0.8.7-macos-arm64.zip.sha256
+unzip OpenUsage-Bar-v0.8.7-macos-arm64.zip
+cd OpenUsage-Bar-v0.8.7-macos-arm64
+scripts/verify_canary_candidate.py --assets-dir .. --version 0.8.7
 ```
 
 After installing the verified candidate, a tester may explicitly create a

@@ -672,7 +672,7 @@ class WindowsFailureFixture:
         )
 
         self.root = root
-        self.artifact = root / "UsageHub-0.8.6-win-x64.exe"
+        self.artifact = root / "UsageHub-0.8.7-win-x64.exe"
         self.artifact.write_bytes(b"audited final NSIS container")
         self.artifact_sha256 = hashlib.sha256(self.artifact.read_bytes()).hexdigest()
         self.run_directory = root / "native-run"
@@ -986,7 +986,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
         artifact = (
             Path(tempfile.gettempdir()).resolve()
-            / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            / "UsageHub-0.8.7-linux-x86_64.AppImage"
         )
         with patch(
             "scripts.native_lifecycle_evidence.native_lifecycle_dependencies_for_host",
@@ -1117,7 +1117,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             "5d228523ef8526d2b117df416820dcc217474675aff07b8ed553a766b8377088"
         )
         with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source = Path(directory) / "UsageHub-0.8.7-linux-x86_64.AppImage"
             source.write_bytes(source_bytes)
             source.chmod(0o644)
             source_before = source.lstat()
@@ -1230,7 +1230,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             xauthority.write_bytes(b"private X authority")
             xauthority.chmod(0o600)
             authority = LifecycleStatePaths(platform="linux", home=home)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited process lease artifact")
             events: list[object] = []
             service_state, local_state, command = _linux_positive_listener_facts(home)
@@ -1459,7 +1459,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             xauthority.write_bytes(b"private X authority")
             xauthority.chmod(0o600)
             authority = LifecycleStatePaths(platform="linux", home=home)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited failed process lease artifact")
             events: list[object] = []
             reserved_attempts = [0]
@@ -1595,7 +1595,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             xauthority.write_bytes(b"private X authority")
             xauthority.chmod(0o600)
             authority = LifecycleStatePaths(platform="linux", home=home)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited drift process lease artifact")
             events: list[object] = []
 
@@ -1915,7 +1915,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             state_root.mkdir(parents=True)
             runtime_parent = home / ".local" / "share" / "usagehub"
             runtime_parent.mkdir(parents=True)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact_bytes = b"audited preserve-uninstall artifact"
             artifact.write_bytes(artifact_bytes)
             artifact_sha256 = hashlib.sha256(artifact_bytes).hexdigest()
@@ -2421,7 +2421,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             home = root / "authoritative-home"
             home.mkdir()
             authority = LifecycleStatePaths(platform="linux", home=home)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited run-root binding artifact")
             context = None
             run_directory: Path | None = None
@@ -2563,7 +2563,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             )
             (home / ".local" / "share" / "usagehub").mkdir(parents=True)
             authority = LifecycleStatePaths(platform="linux", home=home)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited completed preserve artifact")
             service_absent = LinuxCollectorServiceAbsenceState(
                 unit_missing=True,
@@ -2690,7 +2690,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             (state_root / "activity.sqlite3").write_bytes(b"PRIVATE_LEDGER")
             (config_root / "settings.json").write_bytes(b"PRIVATE_CONFIG")
             authority = LifecycleStatePaths(platform="linux", home=home)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited delete-data artifact")
             service_absent = LinuxCollectorServiceAbsenceState(
                 unit_missing=True,
@@ -2860,7 +2860,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             config_parent.mkdir(parents=True)
             runtime_parent.mkdir(parents=True)
             authority = authority_type(platform="linux", home=home)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited delete-data race artifact")
             service_absent = service_absence_type(
                 unit_missing=True,
@@ -3134,7 +3134,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             state_root.mkdir(parents=True)
             (home / ".local" / "share" / "usagehub").mkdir(parents=True)
             authority = LifecycleStatePaths(platform="linux", home=home)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited preserve race artifact")
             socket_path = state_root / "openusage.sock"
             socket_bytes = b"PRIVATE_CONCURRENT_SOCKET_ENTRY"
@@ -3261,7 +3261,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             runtime_root = runtime_parent / "runtime"
             runtime_marker = runtime_root / "PRIVATE_CONCURRENT_RUNTIME"
             authority = LifecycleStatePaths(platform="linux", home=home)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited preserve runtime race artifact")
             service_absent = LinuxCollectorServiceAbsenceState(
                 unit_missing=True,
@@ -3387,7 +3387,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             "f4f1c1610a5d3b905e72c19e6f6ae2bb3b9fbf323d3a9619680726cd4ac7ca51"
         )
         with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source = Path(directory) / "UsageHub-0.8.7-linux-x86_64.AppImage"
             source.write_bytes(source_bytes)
             source.chmod(0o644)
             source_before = source.lstat()
@@ -3544,7 +3544,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             source.write_bytes(source_bytes)
             source.chmod(0o644)
             source_before = source.lstat()
@@ -3772,7 +3772,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             source.write_bytes(source_bytes)
             source.chmod(0o644)
             source_signature = signature(source)
@@ -4055,7 +4055,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 run_directory = dependencies.make_run_directory("linux", "x64")
                 nested = run_directory / "nested-source"
                 nested.mkdir(mode=0o700)
-                source = nested / "UsageHub-0.8.6-linux-x86_64.AppImage"
+                source = nested / "UsageHub-0.8.7-linux-x86_64.AppImage"
                 source.write_bytes(b"private nested source")
                 source.chmod(0o600)
                 destination = run_directory / source.name
@@ -4110,7 +4110,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
         real_write = os.write
         with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source = Path(directory) / "UsageHub-0.8.7-linux-x86_64.AppImage"
             source_bytes = b"audited source remains unchanged"
             source.write_bytes(source_bytes)
             source.chmod(0o644)
@@ -4208,7 +4208,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
         real_rmdir = os.rmdir
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             source_bytes = b"audited execution copy"
             source.write_bytes(source_bytes)
             source.chmod(0o644)
@@ -4321,7 +4321,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
         real_stat = os.stat
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             source_bytes = b"trusted inspect payload"
             mutated_bytes = b"hostile inspect payload"
             self.assertEqual(len(mutated_bytes), len(source_bytes))
@@ -4628,7 +4628,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
         real_stat = os.stat
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            source = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             owned_bytes = b"owned execution copy"
             source.write_bytes(owned_bytes)
             source.chmod(0o644)
@@ -4799,7 +4799,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            artifact = root / "UsageHub-0.8.6-win-x64.exe"
+            artifact = root / "UsageHub-0.8.7-win-x64.exe"
             artifact.write_bytes(b"final NSIS bytes")
             output = root / "native-lifecycle.json"
 
@@ -4833,7 +4833,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited final AppImage container")
             artifact_sha256 = hashlib.sha256(artifact.read_bytes()).hexdigest()
             run_directory = root / "native-run"
@@ -5454,7 +5454,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            artifact = root / "UsageHub-0.8.6-win-x64.exe"
+            artifact = root / "UsageHub-0.8.7-win-x64.exe"
             artifact.write_bytes(b"audited final NSIS container")
             artifact_sha256 = hashlib.sha256(artifact.read_bytes()).hexdigest()
             run_directory = root / "native-run"
@@ -6168,7 +6168,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 "serviceManager": "task_scheduler",
             },
             "artifact": {
-                "name": "UsageHub-0.8.6-win-x64.exe",
+                "name": "UsageHub-0.8.7-win-x64.exe",
                 "sha256": "b" * 64,
                 "sizeBytes": 128,
             },
@@ -8336,7 +8336,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 home = root / "authoritative-home"
                 (home / ".local" / "share" / "usagehub").mkdir(parents=True)
                 authority = LifecycleStatePaths(platform="linux", home=home)
-                artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+                artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
                 artifact_bytes = b"audited host-context artifact"
                 artifact.write_bytes(artifact_bytes)
                 artifact_sha256 = hashlib.sha256(artifact_bytes).hexdigest()
@@ -8516,7 +8516,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited abandon descriptor artifact")
             real_open = lifecycle_evidence.os.open
             real_close = lifecycle_evidence.os.close
@@ -8757,7 +8757,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 root = Path(directory)
                 home = root / "authoritative-home"
                 (home / ".local" / "share" / "usagehub").mkdir(parents=True)
-                source = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+                source = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
                 source.write_bytes(b"audited callback token source")
                 authority = LifecycleStatePaths(platform="linux", home=home)
 
@@ -11692,7 +11692,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"final AppImage bytes")
             output = root / "private-machine-name.json"
             with self.assertRaisesRegex(
@@ -11724,7 +11724,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
             home = root / "authoritative-home"
             home.mkdir()
             authority = LifecycleStatePaths(platform="linux", home=home)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"audited default-host artifact")
             output = root / "native-lifecycle-report.json"
             cleanup_paths: list[Path] = []
@@ -11814,7 +11814,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                 "serviceManager": "task_scheduler",
             },
             "artifact": {
-                "name": "UsageHub-0.8.6-win-x64.exe",
+                "name": "UsageHub-0.8.7-win-x64.exe",
                 "sha256": "b" * 64,
                 "sizeBytes": 128,
             },
@@ -11833,7 +11833,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            artifact = root / "UsageHub-0.8.6-linux-x86_64.AppImage"
+            artifact = root / "UsageHub-0.8.7-linux-x86_64.AppImage"
             artifact.write_bytes(b"final AppImage bytes")
             output = root / "native-lifecycle.json"
             expected = {
@@ -11922,7 +11922,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
         outcome = executor.execute(
             platform="linux",
             arch="x64",
-            artifact=Path("/tmp/UsageHub-0.8.6-linux-x86_64.AppImage"),
+            artifact=Path("/tmp/UsageHub-0.8.7-linux-x86_64.AppImage"),
             artifact_sha256="b" * 64,
         )
 
@@ -11934,7 +11934,7 @@ class NativeLifecycleRunnerTests(unittest.TestCase):
                     "linux",
                     "x64",
                     Path(
-                        "/tmp/UsageHub-0.8.6-linux-x86_64.AppImage"
+                        "/tmp/UsageHub-0.8.7-linux-x86_64.AppImage"
                     ),
                     "b" * 64,
                 )

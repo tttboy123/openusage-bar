@@ -5,7 +5,7 @@ from setuptools import setup
 
 common = {
     "name": "openusage-bar",
-    "version": "0.8.6",
+    "version": "0.8.7",
     "description": (
         "UsageHub (formerly OpenUsage Bar): local-first AI usage ledger "
         "and observation component for schedulers and native clients."

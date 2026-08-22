@@ -11,8 +11,8 @@ const cssSource = await readFile(new URL("../src/styles/app.css", import.meta.ur
 const BASE_IDENTITY = Object.freeze({
   displayName: "UsageHub",
   legacyDisplayName: "OpenUsage Bar",
-  candidateVersion: "0.8.6",
-  candidateBuild: "28",
+  candidateVersion: "0.8.7",
+  candidateBuild: "29",
   channel: "rc",
   releaseStage: "candidate",
   publicationStatus: "not_published",

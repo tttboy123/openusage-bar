@@ -7,7 +7,7 @@ work. It does not bump a version or make a release claim.
 The current repository has two deliberately separate truths:
 
 - published stable baseline: `v0.7.1`;
-- development candidate: `UsageHub 0.8.6 RC (build 28)`, not published and
+- development candidate: `UsageHub 0.8.7 RC (build 29)`, not published and
   not release eligible.
 
 `releaseStage=candidate` describes the candidate's lifecycle. The independent

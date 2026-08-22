@@ -29,10 +29,10 @@ CANONICAL_IDENTITY = (
 )
 PACKAGED_IDENTITY_NAME = "product-build-identity.v1.json"
 PACKAGE_METADATA = {
-    "buildNumber": "28",
-    "buildVersion": "28",
+    "buildNumber": "29",
+    "buildVersion": "29",
     "name": "usagehub-desktop",
-    "version": "0.8.6",
+    "version": "0.8.7",
 }
 
 
@@ -97,9 +97,9 @@ def _write_asar(path: Path, *, extra_payload: bytes = b"") -> None:
 def _windows_versioned_executable() -> bytes:
     image = bytearray(native_collector_bytes("win32", b"usagehub-app"))
     for key, value in (
-        ("FileVersion", "28"),
+        ("FileVersion", "29"),
         ("ProductName", "UsageHub"),
-        ("ProductVersion", "0.8.6.28"),
+        ("ProductVersion", "0.8.7.29"),
     ):
         while len(image) % 4:
             image.append(0)
@@ -149,8 +149,8 @@ def write_desktop_package(
                 {
                     "CFBundleDisplayName": "UsageHub",
                     "CFBundleName": "UsageHub",
-                    "CFBundleShortVersionString": "0.8.6",
-                    "CFBundleVersion": "28",
+                    "CFBundleShortVersionString": "0.8.7",
+                    "CFBundleVersion": "29",
                 }
             )
         )
@@ -162,7 +162,7 @@ def write_desktop_package(
         desktop.write_text(
             "[Desktop Entry]\n"
             "Name=UsageHub\n"
-            "X-AppImage-Version=28\n",
+            "X-AppImage-Version=29\n",
             encoding="utf-8",
         )
     return collector
@@ -736,7 +736,7 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
                     observed["identity"]["candidateVersion"],
                     observed["identity"]["candidateBuild"],
                 ),
-                ("UsageHub", "0.8.6", "28"),
+                ("UsageHub", "0.8.7", "29"),
             )
 
     def test_desktop_package_rejects_identity_and_native_metadata_tamper(self):
@@ -760,7 +760,7 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
                 elif case == "mac":
                     info = root / "Contents/Info.plist"
                     payload = plistlib.loads(info.read_bytes())
-                    payload["CFBundleVersion"] = "29"
+                    payload["CFBundleVersion"] = "30"
                     info.write_bytes(plistlib.dumps(payload))
                     expected_reason = "version_mismatch"
                 elif case == "windows":
@@ -777,7 +777,7 @@ class ReleaseArtifactAuditTests(unittest.TestCase):
                     desktop.write_text(
                         "[Desktop Entry]\n"
                         "Name=UsageHub\n"
-                        "X-AppImage-Version=29\n",
+                        "X-AppImage-Version=30\n",
                         encoding="utf-8",
                     )
                     expected_reason = "version_mismatch"

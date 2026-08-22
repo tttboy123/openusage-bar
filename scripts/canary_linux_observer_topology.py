@@ -413,7 +413,7 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
         expected_collector,
         "daemon",
         "--interval",
-        "300",
+        "1800",
         "--api-transport",
         "unix",
         "--api-socket",
@@ -423,7 +423,7 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
     from openusage_bar.platform_services import systemd_unit
 
     expected_unit = systemd_unit(
-        interval=300,
+        interval=1800,
         api_socket=expected_socket,
         command=expected_collector,
     ).encode("utf-8")

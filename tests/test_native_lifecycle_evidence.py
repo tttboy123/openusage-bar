@@ -26,7 +26,7 @@ def windows_x64_record() -> dict[str, object]:
             "serviceManager": "task_scheduler",
         },
         "artifact": {
-            "name": "UsageHub-0.8.6-win-x64.exe",
+            "name": "UsageHub-0.8.7-win-x64.exe",
             "sha256": "b" * 64,
             "sizeBytes": 128,
         },

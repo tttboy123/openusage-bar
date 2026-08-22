@@ -335,7 +335,7 @@ async function refreshUsageData() {
   const ok = await runCollectorCommand(
     command,
     ["__refresh-current", "--ledger", ledger],
-    { timeoutMs: 180_000 },
+    { timeoutMs: 300_000 },
   );
   if (ok) await refreshTraySnapshot().catch(() => {});
   return {

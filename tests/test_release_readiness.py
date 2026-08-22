@@ -76,8 +76,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             self.assertEqual(
                 report["product"],
                 {
-                    "candidateBuild": "28",
-                    "candidateVersion": "0.8.6",
+                    "candidateBuild": "29",
+                    "candidateVersion": "0.8.7",
                     "channel": "rc",
                     "name": "UsageHub",
                     "publishedBaseline": "v0.7.1",
@@ -134,7 +134,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "version": "0.8.7",
             },
             "product": {"displayName": "UsageHub"},
-            "publishedBaseline": {"tag": "v0.8.6"},
+            "publishedBaseline": {"tag": "v0.8.7"},
         }
 
         with (

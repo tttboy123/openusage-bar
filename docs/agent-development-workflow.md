@@ -121,7 +121,7 @@ clean source tree on an idle reference machine.
   `docs/schemas/product-version-truth-v1.schema.json`; every role runs
   `scripts/verify_product_version_truth.py` after changing a bound surface.
 - Candidate identity and published identity are independent facts. The current
-  candidate is UsageHub 0.8.6 build 28 RC; the published stable baseline remains
+  candidate is UsageHub 0.8.7 build 29 RC; the published stable baseline remains
   v0.7.1. A candidate may never use the `stable` channel.
 - Product versions are not API versions. Local API `1.0`, Gateway
   `gateway.openusage/v1`, and runtime capability

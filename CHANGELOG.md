@@ -2,6 +2,34 @@
 
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.8.7 - 2026-08-22
+
+### Changed
+
+- Menu-bar data refreshes automatically every 30 minutes, while manual refresh and opening the
+  dashboard trigger a fresh bounded query instead of only repainting cached values.
+- Codex quota collection now follows the official app-server rate-limit query path, with bounded
+  fallback and explicit stale-data handling when the upstream service cannot be reached.
+- GPT, Codex, and Cursor capacity displays now preserve live changes and avoid duplicate balance
+  rows or misleading low estimates caused by mixed-age snapshots.
+
+### Security
+
+- Dependency checks now pin the build environment to `pip 26.2` and retain the existing release
+  artifact audit boundary.
+
+### Fixed
+
+- Cross-platform tests no longer invoke POSIX-only process-group behavior or hard-code `/bin/sh`
+  on Windows.
+- Long Provider refreshes no longer cross the old three-minute desktop deadline and get reported
+  as failed shortly before the background refresh succeeds.
+- The 30-minute menu-bar schedule now waits one interval before its first background refresh and
+  defers provider credential initialization until refresh is due, so app launch does not compete
+  with an immediate user or Capacity-page refresh.
+- Refresh failures keep the last known-good quota visible with a clear freshness state instead of
+  silently presenting it as current data.
+
 ## 0.8.6 - 2026-08-16
 
 ### Added

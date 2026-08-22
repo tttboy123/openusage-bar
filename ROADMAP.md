@@ -1,7 +1,7 @@
 # OpenUsage Bar Roadmap
 
-<!-- openusage-release-state: version=0.8.6 channel=rc api=1.0 canary=0/5 clock=not_started -->
-<!-- openusage-build-identity: product=UsageHub candidate=0.8.6 build=28 channel=rc stage=candidate publication=not_published published=v0.7.1 -->
+<!-- openusage-release-state: version=0.8.7 channel=rc api=1.0 canary=0/5 clock=not_started -->
+<!-- openusage-build-identity: product=UsageHub candidate=0.8.7 build=29 channel=rc stage=candidate publication=not_published published=v0.7.1 -->
 
 OpenUsage Bar is a local-first AI usage product with two compatible layers:
 
@@ -22,10 +22,10 @@ contract, packaging, and canary gates below pass. The existing external Canary
 remains **0 / 5 qualified Apple Silicon Macs** with its 30-day clock **not
 started**.
 
-The repository's single candidate truth is now `0.8.6` build `28`, channel
+The repository's single candidate truth is now `0.8.7` build `29`, channel
 `rc`, across machine state, bundle metadata, Python, Web, Desktop, release
 guides, and verification markers. That is candidate preparation, not evidence
-that `v0.8.6` has been published or that its Canary clock has started.
+that `v0.8.7` has been published or that its Canary clock has started.
 
 ## Compatibility invariants
 

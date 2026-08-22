@@ -67,6 +67,34 @@ class OfflineRefresher:
         return None
 
 
+class LazyRefresher:
+    """Build credential-owning adapters only when a refresh is requested."""
+
+    def __init__(self, factory: Callable[[], Any]) -> None:
+        if not callable(factory):
+            raise ValueError("refresh factory unavailable")
+        self._factory = factory
+        self._delegate: Any | None = None
+        self._lock = threading.Lock()
+
+    def _resolved(self) -> Any:
+        delegate = self._delegate
+        if delegate is not None:
+            return delegate
+        with self._lock:
+            delegate = self._delegate
+            if delegate is None:
+                try:
+                    delegate = self._factory()
+                except Exception:
+                    delegate = UnavailableRefresher()
+                self._delegate = delegate
+        return delegate
+
+    def refresh(self, *args: Any, **kwargs: Any) -> Any:
+        return self._resolved().refresh(*args, **kwargs)
+
+
 def build_default_refresher(
     store: ActivityStore,
     *,
@@ -892,6 +920,8 @@ def _run_daemon(
     refresh_coordinator: Any | None = None,
 ) -> int:
     while not stop_event.is_set():
+        if waiter(interval):
+            break
         if catalog_monitor is not None:
             try:
                 catalog_monitor.maybe_run()
@@ -904,8 +934,6 @@ def _run_daemon(
                 refresh_coordinator.run_blocking()
         except Exception:
             stderr.write("refresh unavailable; retained last-good ledger data\n")
-        if waiter(interval):
-            break
     return 0
 
 
@@ -1700,10 +1728,7 @@ def main(
                     catalog_monitor = OpenUsageCatalogMonitor(active_store, clock=clock)
                 if refresher is None:
                     factory = refresher_factory or build_default_refresher
-                    try:
-                        refresher = factory(active_store)
-                    except Exception:
-                        refresher = UnavailableRefresher()
+                    refresher = LazyRefresher(lambda: factory(active_store))
             active_stop = stop_event or threading.Event()
             if stop_event is None and threading.current_thread() is threading.main_thread():
                 def stop(*_: object) -> None:

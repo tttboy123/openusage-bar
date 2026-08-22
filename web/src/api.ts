@@ -421,7 +421,7 @@ export interface RefreshStatus {
   succeeded?: boolean | null;
 }
 
-const HOST_REFRESH_DEADLINE_MS = 185_000;
+const HOST_REFRESH_DEADLINE_MS = 305_000;
 const REFRESH_STATES = new Set(["ok", "attention", "error", "disabled", "unknown"]);
 
 function normalizeHostRefreshResult(value: unknown): RefreshStatus | null {

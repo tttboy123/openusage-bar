@@ -31,15 +31,15 @@ SOURCE_EVIDENCE_SCHEMA = (
 BUILD_IDENTITY = ROOT / "openusage_bar/resources/artifact-build-identity.v1.json"
 PRODUCT_TRUTH = ROOT / "openusage_bar/resources/product-version-truth.v1.json"
 EXPECTED_BUILD_IDENTITY_SHA256 = (
-    "73aafbd28ea8cc553a5dc14c3610c8455964c39eaaafe66dc468d6b37ee16c56"
+    "7261f8782257a2051bc378150d884002e29b8b31bde99cdadb351e5e39986147"
 )
 EXPECTED_BUILD_IDENTITY_SIZE = 424
 EXPECTED_IDENTITY = {
     "canaryClock": "not_started",
     "canaryQualifiedMachines": 0,
     "canaryTargetMachines": 5,
-    "candidateBuild": "28",
-    "candidateVersion": "0.8.6",
+    "candidateBuild": "29",
+    "candidateVersion": "0.8.7",
     "channel": "rc",
     "displayName": "UsageHub",
     "publicationStatus": "not_published",
@@ -82,17 +82,17 @@ RUNNERS = {
 }
 
 TARGET_FILES = {
-    ("mac", "x64"): ("openusage-collector", "UsageHub-0.8.6-mac-x64.dmg"),
-    ("mac", "arm64"): ("openusage-collector", "UsageHub-0.8.6-mac-arm64.dmg"),
-    ("win", "x64"): ("openusage-collector.exe", "UsageHub-0.8.6-win-x64.exe"),
-    ("win", "arm64"): ("openusage-collector.exe", "UsageHub-0.8.6-win-arm64.exe"),
+    ("mac", "x64"): ("openusage-collector", "UsageHub-0.8.7-mac-x64.dmg"),
+    ("mac", "arm64"): ("openusage-collector", "UsageHub-0.8.7-mac-arm64.dmg"),
+    ("win", "x64"): ("openusage-collector.exe", "UsageHub-0.8.7-win-x64.exe"),
+    ("win", "arm64"): ("openusage-collector.exe", "UsageHub-0.8.7-win-arm64.exe"),
     ("linux", "x64"): (
         "openusage-collector",
-        "UsageHub-0.8.6-linux-x86_64.AppImage",
+        "UsageHub-0.8.7-linux-x86_64.AppImage",
     ),
     ("linux", "arm64"): (
         "openusage-collector",
-        "UsageHub-0.8.6-linux-arm64.AppImage",
+        "UsageHub-0.8.7-linux-arm64.AppImage",
     ),
 }
 
@@ -370,7 +370,7 @@ def _generate_command(
         "--product-truth",
         str(product_truth),
         "--version",
-        "0.8.6",
+        "0.8.7",
         "--source-sha",
         "a" * 40,
         "--source-event",
@@ -515,7 +515,7 @@ if result.failures or result.errors:
             root = Path(directory)
             collector = root / "openusage-collector"
             replacement = root / "private-replacement-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "usagehub-native-evidence-mac-x64.json"
             invalid_collector = b"invalid-original-collector"
             collector.write_bytes(invalid_collector)
@@ -916,7 +916,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector.exe"
-            artifact = root / "UsageHub-0.8.6-win-x64.exe"
+            artifact = root / "UsageHub-0.8.7-win-x64.exe"
             source_evidence = root / "observer-source.json"
             lifecycle_evidence = root / "native-lifecycle.json"
             _write_native_row_files(
@@ -1090,7 +1090,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "native-mac.json"
             source_evidence = root / "observer-source.json"
             _write_native_row_files(
@@ -1185,7 +1185,7 @@ if result.failures or result.errors:
             with self.subTest(case=name), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 collector = root / "openusage-collector.exe"
-                artifact = root / "UsageHub-0.8.6-win-x64.exe"
+                artifact = root / "UsageHub-0.8.7-win-x64.exe"
                 evidence = root / "native-win.json"
                 source_evidence = root / "observer-source.json"
                 _write_native_row_files(
@@ -1294,7 +1294,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector.exe"
-            artifact = root / "UsageHub-0.8.6-win-x64.exe"
+            artifact = root / "UsageHub-0.8.7-win-x64.exe"
             evidence = root / "native-win.json"
             source_evidence = root / "observer-source.json"
             _write_native_row_files(
@@ -1394,7 +1394,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "usagehub-native-evidence-mac-x64.json"
             _write_macos_x64_collector(collector)
             _write_dmg(artifact)
@@ -1475,7 +1475,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "usagehub-native-evidence-mac-x64.json"
             tampered_identity = root / "artifact-build-identity.v1.json"
             _write_macos_x64_collector(collector)
@@ -1508,7 +1508,7 @@ if result.failures or result.errors:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 collector = root / "openusage-collector"
-                artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+                artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
                 evidence = root / "usagehub-native-evidence-mac-x64.json"
                 _write_macos_x64_collector(collector)
                 _write_dmg(artifact)
@@ -1560,7 +1560,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "usagehub-native-evidence-mac-x64.json"
             _write_macos_x64_collector(collector)
             _write_dmg(artifact)
@@ -1607,7 +1607,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "usagehub-native-evidence-mac-x64.json"
             _write_macos_x64_collector(collector)
             _write_dmg(artifact)
@@ -1654,7 +1654,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "usagehub-native-evidence-mac-x64.json"
             _write_macos_x64_collector(collector)
             _write_dmg(artifact)
@@ -1699,7 +1699,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector.exe"
-            artifact = root / "UsageHub-0.8.6-win-x64.exe"
+            artifact = root / "UsageHub-0.8.7-win-x64.exe"
             evidence = root / "usagehub-native-evidence-win-x64.json"
             source_evidence = root / "observer-source.json"
             _write_pe(collector, arch="x64", pe_plus=False)
@@ -1802,7 +1802,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "evidence.json"
             _write_macho(collector, arch="x64")
             _write_dmg(artifact)
@@ -1846,7 +1846,7 @@ if result.failures or result.errors:
             root = Path(directory)
             real_collector = root / "missing-private-user-collector"
             collector = root / "openusage-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "evidence.json"
             collector.symlink_to(real_collector)
             _write_dmg(artifact)
@@ -1875,7 +1875,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "evidence.json"
             _write_macho(collector, arch="x64")
             _write_dmg(artifact)
@@ -1927,7 +1927,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "evidence.json"
             _write_macho(collector, arch="x64")
             _write_dmg(artifact)
@@ -1955,7 +1955,7 @@ if result.failures or result.errors:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             collector = root / "openusage-collector"
-            artifact = root / "UsageHub-0.8.6-mac-x64.dmg"
+            artifact = root / "UsageHub-0.8.7-mac-x64.dmg"
             evidence = root / "evidence.json"
             _write_macho(collector, arch="x64")
             _write_dmg(artifact)

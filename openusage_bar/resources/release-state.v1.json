@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "currentVersion": "0.8.6",
-  "buildVersion": "28",
+  "currentVersion": "0.8.7",
+  "buildVersion": "29",
   "channel": "rc",
   "apiVersion": "1.0",
   "canary": {
