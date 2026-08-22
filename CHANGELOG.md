@@ -24,6 +24,8 @@ This project follows [Semantic Versioning](https://semver.org/).
   on Windows.
 - Long Provider refreshes no longer cross the old three-minute desktop deadline and get reported
   as failed shortly before the background refresh succeeds.
+- The 30-minute menu-bar schedule now waits one interval before its first background refresh, so
+  app launch does not compete with an immediate user or Capacity-page refresh.
 - Refresh failures keep the last known-good quota visible with a clear freshness state instead of
   silently presenting it as current data.
 

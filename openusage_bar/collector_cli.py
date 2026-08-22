@@ -892,6 +892,8 @@ def _run_daemon(
     refresh_coordinator: Any | None = None,
 ) -> int:
     while not stop_event.is_set():
+        if waiter(interval):
+            break
         if catalog_monitor is not None:
             try:
                 catalog_monitor.maybe_run()
@@ -904,8 +906,6 @@ def _run_daemon(
                 refresh_coordinator.run_blocking()
         except Exception:
             stderr.write("refresh unavailable; retained last-good ledger data\n")
-        if waiter(interval):
-            break
     return 0
 
 

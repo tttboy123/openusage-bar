@@ -2041,7 +2041,7 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(closed.is_set())
 
-    def test_daemon_immediate_repeat_clean_stop_and_non_overlap(self):
+    def test_daemon_waits_before_each_repeat_clean_stop_and_non_overlap(self):
         refresher = FakeRefresher()
         class CatalogMonitor:
             calls = 0
@@ -2057,7 +2057,7 @@ class CollectorCLITests(unittest.TestCase):
             nonlocal waits
             self.assertEqual(seconds, 60)
             waits += 1
-            if waits == 2:
+            if waits == 3:
                 stop.set()
             return stop.is_set()
 
@@ -2071,6 +2071,26 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual(refresher.calls, 2)
         self.assertEqual(refresher.max_active, 1)
         self.assertEqual(catalog_monitor.calls, 2)
+
+    def test_daemon_stop_during_initial_interval_performs_no_refresh(self):
+        refresher = FakeRefresher()
+        stop = threading.Event()
+
+        def wait(seconds):
+            self.assertEqual(seconds, 60)
+            stop.set()
+            return True
+
+        with tempfile.TemporaryDirectory() as directory:
+            code, out, err = self.run_cli(
+                ["daemon", "--interval", "60", "--api-socket", str(Path(directory) / "api.sock")],
+                refresher=refresher,
+                stop_event=stop,
+                waiter=wait,
+            )
+
+        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual(refresher.calls, 0)
 
     def test_daemon_rejects_zero_bool_and_too_small_interval(self):
         for interval in ("0", "1", "true"):
@@ -2096,6 +2116,16 @@ class CollectorCLITests(unittest.TestCase):
         stop = threading.Event()
 
         with tempfile.TemporaryDirectory() as directory:
+            waits = 0
+
+            def wait(_seconds):
+                nonlocal waits
+                waits += 1
+                if waits == 2:
+                    stop.set()
+                    return True
+                return False
+
             code, out, err = self.run_cli(
                 [
                     "daemon",
@@ -2106,7 +2136,7 @@ class CollectorCLITests(unittest.TestCase):
                 ],
                 refresher=refresher,
                 stop_event=stop,
-                waiter=lambda _seconds: True,
+                waiter=wait,
             )
 
         self.assertEqual((code, out, err), (0, "", ""))
