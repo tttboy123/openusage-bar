@@ -64,7 +64,6 @@ MAX_ID_LENGTH = 128
 MAX_CURSOR = 2**63 - 1
 DEFAULT_MAX_THREADS = 32
 DEFAULT_CLIENT_TIMEOUT = 5.0
-MAX_PRIVATE_DIAGNOSTIC_TIMEOUT = 10.0
 DEFAULT_REQUEST_DEADLINE = 15.0
 DEFAULT_RATE_LIMIT_CAPACITY = 120
 DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 2.0
@@ -485,7 +484,7 @@ def read_linux_shared_client_boundary_state(
             type(value) not in (int, float)
             or not math.isfinite(value)
             or value <= 0
-            or value > MAX_PRIVATE_DIAGNOSTIC_TIMEOUT
+            or value > 1.0
         ):
             raise LocalAPIObservationError
         return float(value)

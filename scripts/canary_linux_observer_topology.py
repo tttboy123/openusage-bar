@@ -29,7 +29,6 @@ from openusage_bar.local_api import (
     LinuxLocalAPIState,
     read_current_user_local_api_state,
 )
-from openusage_bar.shared_client_boundary import SharedClientBoundaryAttemptCounters
 from openusage_bar.platform_services import (
     LinuxCollectorServiceAbsenceState,
     LinuxCollectorServiceState,
@@ -39,6 +38,7 @@ from openusage_bar.platform_services import (
 from scripts.canary_onefile_local_api import (
     SharedClientBoundaryZeroWindow,
     closed_shared_client_boundary_zero_window_values,
+    evaluate_onefile_shared_client_boundary_window,
     read_onefile_shared_client_boundary_snapshot,
 )
 
@@ -55,12 +55,6 @@ class LinuxObserverTopologyCanaryError(RuntimeError):
             "runtime-before-ui-exited",
             "runtime-before-service",
             "runtime-before-boundary",
-            "runtime-before-boundary-peer",
-            "runtime-before-boundary-shape",
-            "runtime-before-boundary-drift",
-            "runtime-before-boundary-activity",
-            "runtime-before-boundary-read-before",
-            "runtime-before-boundary-read-after",
             "runtime-before-local",
             "runtime-before-local-authority",
             "runtime-before-local-authority-home",
@@ -137,10 +131,7 @@ class LinuxObserverRuntimeFact:
 
 
 _APPIMAGE_MODE = 0o700
-# Cold AppImage extraction plus first-time user-systemd activation can exceed
-# thirty seconds on hosted runners. Keep the probe bounded, while leaving
-# enough time to evaluate the unchanged zero-network/zero-keychain boundary.
-_READINESS_SECONDS = 60.0
+_READINESS_SECONDS = 30.0
 _STOP_SECONDS = 5.0
 _PRESERVE_SECONDS = 180.0
 
@@ -323,66 +314,6 @@ def _read_absence() -> LinuxCollectorServiceAbsenceState:
     return observed
 
 
-def _boundary_failure_stage(
-    *,
-    health_peer: bytes,
-    peer_before: bytes,
-    counters_before: object,
-    peer_after: bytes,
-    counters_after: object,
-) -> str:
-    """Classify a closed boundary failure without disclosing private values."""
-
-    peers = (health_peer, peer_before, peer_after)
-    try:
-        unpacked_peers = tuple(struct.unpack("=3i", peer) for peer in peers)
-    except Exception:
-        return "runtime-before-boundary-peer"
-    if (
-        any(type(peer) is not bytes or len(peer) != 12 for peer in peers)
-        or peer_before != health_peer
-        or peer_after != health_peer
-        or any(
-            peer_pid <= 0
-            or peer_uid != os.getuid()
-            or peer_gid != os.getgid()
-            for peer_pid, peer_uid, peer_gid in unpacked_peers
-        )
-    ):
-        return "runtime-before-boundary-peer"
-    if (
-        type(counters_before) is not SharedClientBoundaryAttemptCounters
-        or type(counters_after) is not SharedClientBoundaryAttemptCounters
-    ):
-        return "runtime-before-boundary-shape"
-    before = (
-        counters_before.process_epoch_sha256,
-        counters_before.bounded_http_open_attempts,
-        counters_before.headless_keychain_get_attempts,
-    )
-    after = (
-        counters_after.process_epoch_sha256,
-        counters_after.bounded_http_open_attempts,
-        counters_after.headless_keychain_get_attempts,
-    )
-    if any(
-        type(values[0]) is not str
-        or len(values[0]) != 64
-        or any(character not in "0123456789abcdef" for character in values[0])
-        or type(values[1]) is not int
-        or type(values[2]) is not int
-        or not 0 <= values[1] < 1 << 64
-        or not 0 <= values[2] < 1 << 64
-        for values in (before, after)
-    ):
-        return "runtime-before-boundary-shape"
-    if before != after:
-        return "runtime-before-boundary-drift"
-    if before[1:] != (0, 0):
-        return "runtime-before-boundary-activity"
-    return "runtime-before-boundary"
-
-
 def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
     try:
         service_before = read_current_user_collector_service_state()
@@ -406,9 +337,7 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
             )
         )
     except Exception:
-        raise LinuxObserverTopologyCanaryError(
-            "runtime-before-boundary-read-before"
-        ) from None
+        raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
     try:
         local_state = read_current_user_local_api_state()
     except Exception as error:
@@ -443,9 +372,7 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
             )
         )
     except Exception:
-        raise LinuxObserverTopologyCanaryError(
-            "runtime-before-boundary-read-after"
-        ) from None
+        raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
     try:
         service_after = read_current_user_collector_service_state()
     except Exception:
@@ -454,8 +381,6 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
         ) from None
     try:
         remaining_timeout()
-    except LinuxObserverTopologyCanaryError:
-        raise
     except Exception:
         raise LinuxObserverTopologyCanaryError(
             "runtime-before-service-after"
@@ -488,7 +413,7 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
         expected_collector,
         "daemon",
         "--interval",
-        "300",
+        "1800",
         "--api-transport",
         "unix",
         "--api-socket",
@@ -498,7 +423,7 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
     from openusage_bar.platform_services import systemd_unit
 
     expected_unit = systemd_unit(
-        interval=300,
+        interval=1800,
         api_socket=expected_socket,
         command=expected_collector,
     ).encode("utf-8")
@@ -559,45 +484,30 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
         or local_state.health_status != "ok"
     ):
         raise LinuxObserverTopologyCanaryError
-    health_peer = struct.pack(
-        "=3i",
-        local_state.peer_pid,
-        local_state.peer_uid,
-        local_state.peer_gid,
-    )
-    boundary_stage = _boundary_failure_stage(
-        health_peer=health_peer,
-        peer_before=boundary_peer_before,
-        counters_before=boundary_before,
-        peer_after=boundary_peer_after,
-        counters_after=boundary_after,
-    )
-    if boundary_stage != "runtime-before-boundary":
-        raise LinuxObserverTopologyCanaryError(boundary_stage)
-    boundary_window = SharedClientBoundaryZeroWindow(
-        boundary_before.process_epoch_sha256,
-        True,
-        True,
-    )
     try:
+        health_peer = struct.pack(
+            "=3i",
+            local_state.peer_pid,
+            local_state.peer_uid,
+            local_state.peer_gid,
+        )
+        boundary_window = evaluate_onefile_shared_client_boundary_window(
+            health_peer=health_peer,
+            peer_before=boundary_peer_before,
+            counters_before=boundary_before,
+            peer_after=boundary_peer_after,
+            counters_after=boundary_after,
+        )
         boundary_values = closed_shared_client_boundary_zero_window_values(
             boundary_window
         )
         if boundary_values is None:
-            raise LinuxObserverTopologyCanaryError(
-                "runtime-before-boundary-shape"
-            )
+            raise LinuxObserverTopologyCanaryError("runtime-before-boundary")
         boundary_window = SharedClientBoundaryZeroWindow(*boundary_values)
-    except LinuxObserverTopologyCanaryError:
-        raise
     except Exception:
-        raise LinuxObserverTopologyCanaryError(
-            "runtime-before-boundary-shape"
-        ) from None
+        raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
     try:
         remaining_timeout()
-    except LinuxObserverTopologyCanaryError:
-        raise
     except Exception:
         raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
     return LinuxObserverRuntimeFact(
@@ -823,7 +733,7 @@ def _wait_for_runtime(
                 ):
                     raise LinuxObserverTopologyCanaryError(last_stage)
                 last = float(current)
-                return min(10.0, deadline - last)
+                return min(1.0, deadline - last)
 
             return _observe_runtime(remaining_timeout=remaining_timeout)
         except LinuxObserverTopologyCanaryError as error:
@@ -963,12 +873,6 @@ def main(arguments: tuple[str, ...] | None = None) -> int:
             "runtime-before-local-authority-local-owner": 36,
             "runtime-before-local-authority-local-writable": 37,
             "runtime-before-boundary": 38,
-            "runtime-before-boundary-peer": 39,
-            "runtime-before-boundary-shape": 40,
-            "runtime-before-boundary-drift": 41,
-            "runtime-before-boundary-activity": 42,
-            "runtime-before-boundary-read-before": 43,
-            "runtime-before-boundary-read-after": 44,
             "stop": 13,
             "runtime-after": 14,
             "preserve": 15,

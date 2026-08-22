@@ -21,49 +21,6 @@ if os.name != "nt":
     "Linux observer topology canary contracts",
 )
 class LinuxObserverTopologyCanaryTests(unittest.TestCase):
-    def test_boundary_failure_categories_are_closed_and_actionable(self):
-        from openusage_bar.shared_client_boundary import (
-            SharedClientBoundaryAttemptCounters,
-        )
-        from scripts.canary_linux_observer_topology import _boundary_failure_stage
-
-        peer = struct.pack("=3i", 4313, os.getuid(), os.getgid())
-        other_peer = struct.pack("=3i", 4314, os.getuid(), os.getgid())
-        zero = SharedClientBoundaryAttemptCounters("a" * 64, 0, 0)
-        drifted = SharedClientBoundaryAttemptCounters("b" * 64, 0, 0)
-        active = SharedClientBoundaryAttemptCounters("a" * 64, 1, 0)
-
-        def classify(
-            *,
-            health_peer=peer,
-            peer_before=peer,
-            counters_before=zero,
-            peer_after=peer,
-            counters_after=zero,
-        ):
-            return _boundary_failure_stage(
-                health_peer=health_peer,
-                peer_before=peer_before,
-                counters_before=counters_before,
-                peer_after=peer_after,
-                counters_after=counters_after,
-            )
-
-        self.assertEqual(classify(), "runtime-before-boundary")
-        self.assertEqual(
-            classify(peer_after=other_peer), "runtime-before-boundary-peer"
-        )
-        self.assertEqual(
-            classify(counters_after=object()), "runtime-before-boundary-shape"
-        )
-        self.assertEqual(
-            classify(counters_after=drifted), "runtime-before-boundary-drift"
-        )
-        self.assertEqual(
-            classify(counters_before=active, counters_after=active),
-            "runtime-before-boundary-activity",
-        )
-
     def test_service_survives_owned_ui_group_stop_before_preserve(self):
         from scripts.canary_linux_observer_topology import (
             LinuxObserverTopologySummary,
@@ -532,6 +489,18 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
             events.append("boundary")
             return next(boundary_facts)
 
+        def evaluate_boundary(**kwargs):
+            self.assertEqual(kwargs["health_peer"], peer)
+            self.assertEqual(kwargs["peer_before"], peer)
+            self.assertEqual(kwargs["counters_before"], counters)
+            self.assertEqual(kwargs["peer_after"], peer)
+            self.assertEqual(kwargs["counters_after"], counters)
+            events.append("evaluate")
+            from scripts.canary_onefile_local_api import (
+                SharedClientBoundaryZeroWindow,
+            )
+            return SharedClientBoundaryZeroWindow("a" * 64, True, True)
+
         with (
             patch.dict(
                 os.environ,
@@ -550,6 +519,10 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
                 "scripts.canary_linux_observer_topology.read_onefile_shared_client_boundary_snapshot",
                 side_effect=read_boundary,
             ) as boundary_reader,
+            patch(
+                "scripts.canary_linux_observer_topology.evaluate_onefile_shared_client_boundary_window",
+                side_effect=evaluate_boundary,
+            ) as boundary_evaluator,
         ):
             observed = _observe_runtime(remaining_timeout=lambda: 0.5)
 
@@ -568,9 +541,10 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
         self.assertEqual(service_reader.call_count, 2)
         local_reader.assert_called_once_with()
         self.assertEqual(boundary_reader.call_count, 2)
+        boundary_evaluator.assert_called_once()
         self.assertEqual(
             events,
-            ["service", "boundary", "local", "boundary", "service"],
+            ["service", "boundary", "local", "boundary", "service", "evaluate"],
         )
 
     def test_cli_exposes_only_fixed_stage_status_without_output(self):
@@ -622,7 +596,7 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
             str(executable),
             "daemon",
             "--interval",
-            "300",
+            "1800",
             "--api-transport",
             "unix",
             "--api-socket",
@@ -633,7 +607,7 @@ class LinuxObserverTopologyCanaryTests(unittest.TestCase):
         from openusage_bar.platform_services import systemd_unit
 
         unit_bytes = systemd_unit(
-            interval=300,
+            interval=1800,
             api_socket=str(socket_path),
             command=str(executable),
         ).encode("utf-8")
