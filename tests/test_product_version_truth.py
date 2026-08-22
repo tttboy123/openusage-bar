@@ -110,6 +110,20 @@ def _repository_fixture() -> Iterator[Path]:
             check=True,
         )
         subprocess.run(
+            ["git", "config", "maintenance.auto", "false"],
+            cwd=root,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "gc.auto", "0"],
+            cwd=root,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        subprocess.run(
             ["git", "add", "."],
             cwd=root,
             stdout=subprocess.DEVNULL,

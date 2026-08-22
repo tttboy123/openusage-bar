@@ -21,6 +21,49 @@ if os.name != "nt":
     "Linux observer topology canary contracts",
 )
 class LinuxObserverTopologyCanaryTests(unittest.TestCase):
+    def test_boundary_failure_categories_are_closed_and_actionable(self):
+        from openusage_bar.shared_client_boundary import (
+            SharedClientBoundaryAttemptCounters,
+        )
+        from scripts.canary_linux_observer_topology import _boundary_failure_stage
+
+        peer = struct.pack("=3i", 4313, os.getuid(), os.getgid())
+        other_peer = struct.pack("=3i", 4314, os.getuid(), os.getgid())
+        zero = SharedClientBoundaryAttemptCounters("a" * 64, 0, 0)
+        drifted = SharedClientBoundaryAttemptCounters("b" * 64, 0, 0)
+        active = SharedClientBoundaryAttemptCounters("a" * 64, 1, 0)
+
+        def classify(
+            *,
+            health_peer=peer,
+            peer_before=peer,
+            counters_before=zero,
+            peer_after=peer,
+            counters_after=zero,
+        ):
+            return _boundary_failure_stage(
+                health_peer=health_peer,
+                peer_before=peer_before,
+                counters_before=counters_before,
+                peer_after=peer_after,
+                counters_after=counters_after,
+            )
+
+        self.assertEqual(classify(), "runtime-before-boundary")
+        self.assertEqual(
+            classify(peer_after=other_peer), "runtime-before-boundary-peer"
+        )
+        self.assertEqual(
+            classify(counters_after=object()), "runtime-before-boundary-shape"
+        )
+        self.assertEqual(
+            classify(counters_after=drifted), "runtime-before-boundary-drift"
+        )
+        self.assertEqual(
+            classify(counters_before=active, counters_after=active),
+            "runtime-before-boundary-activity",
+        )
+
     def test_service_survives_owned_ui_group_stop_before_preserve(self):
         from scripts.canary_linux_observer_topology import (
             LinuxObserverTopologySummary,

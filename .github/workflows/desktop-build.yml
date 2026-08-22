@@ -1279,7 +1279,11 @@ jobs:
                   35) topology_category="runtime-before-local-authority-local-identity" ;;
                   36) topology_category="runtime-before-local-authority-local-owner" ;;
                   37) topology_category="runtime-before-local-authority-local-writable" ;;
-                  38) topology_category="runtime-before-boundary" ;;
+                38) topology_category="runtime-before-boundary" ;;
+                39) topology_category="runtime-before-boundary-peer" ;;
+                40) topology_category="runtime-before-boundary-shape" ;;
+                41) topology_category="runtime-before-boundary-drift" ;;
+                42) topology_category="runtime-before-boundary-activity" ;;
                 esac
                 printf "%s\n" "appimage_observer_topology_failed category=$topology_category" >&2
                 exit 1
