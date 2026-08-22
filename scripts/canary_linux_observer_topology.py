@@ -449,6 +449,8 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
         ) from None
     try:
         remaining_timeout()
+    except LinuxObserverTopologyCanaryError:
+        raise
     except Exception:
         raise LinuxObserverTopologyCanaryError(
             "runtime-before-service-after"
