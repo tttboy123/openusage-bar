@@ -24,6 +24,7 @@
     },
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "files": [
+      "app_menu.js",
       "build_identity_copy.js",
       "collector_runtime.js",
       "gateway_proxy.js",

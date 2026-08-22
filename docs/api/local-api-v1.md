@@ -1,16 +1,22 @@
 # OpenUsage Bar Local API v1
 
-This is a read-only, single-version API for local schedulers and native clients.
+This is a single-version, GET/HEAD-only API for local schedulers and native
+clients. Every route is read-only and never accepts provider data or credentials.
 It uses HTTP/1.1 over a user-only Unix domain socket by default. TCP is an
 explicit IPv4-loopback opt-in and always requires bearer authentication.
 
 ## Boundary with the optional Gateway
 
-Local API v1 remains GET/HEAD-only. Its listener never serves, advertises, or
-dispatches `/gateway/*` routes, and no POST request is accepted through this
-API. The optional [Gateway API v1](gateway-api-v1.md) runs as a separate process
+Local API v1 never serves, advertises, or dispatches `/gateway/*` routes. The
+optional [Gateway API v1](gateway-api-v1.md) runs as a separate process
 on a separate loopback listener with its own bearer token. Enabling, disabling,
 restarting, or failing the Gateway does not change this Local API contract.
+
+`GET /v1/refresh/status` reports the daemon's bounded scheduled-refresh state
+using the public semantic `state` and separate operation `phase`. User-triggered
+refresh is a trusted desktop-host action, not a Local API mutation. Standalone
+Web remains read-only and fails closed when that host boundary is unavailable.
+Historical backfills use the dedicated CLI workflow.
 
 The published additive/deprecation/breaking rules, N-1 test contract, and
 version upgrade procedure are frozen in the
@@ -300,7 +306,7 @@ Errors use `Cache-Control: no-store`; successful resources use
 
 ## Non-goals
 
-There are no POST/PUT/PATCH/DELETE/OPTIONS operations, refresh routes,
+There are no POST/PUT/PATCH/DELETE/OPTIONS operations, refresh mutation routes,
 credential or provider configuration routes, remote binds, TLS termination, or
 API lifecycle controls in v1. The installed collector daemon owns the private
 Unix-socket listener; callers cannot start, stop, refresh, or reconfigure it

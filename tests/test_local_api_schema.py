@@ -48,6 +48,7 @@ ROUTE_PARAMETERS = {
     "/v1/sources/status": {},
     "/v1/changes": {"after": "0", "limit": "100"},
     "/v1/quick-connect": {},
+    "/v1/refresh/status": {},
 }
 
 
@@ -268,6 +269,10 @@ class LocalAPISchemaTests(unittest.TestCase):
                 "schemaVersion", "dataRevision", "generatedAt", "schema",
             }),
             frozenset({"schemaVersion", "providers"}),
+            frozenset({
+                "schemaVersion", "dataRevision", "generatedAt", "state",
+                "phase", "lastStartedAt", "lastFinishedAt", "succeeded",
+            }),
             frozenset({"error"}),
         }
         self.assertTrue(expected <= branch_keys, expected - branch_keys)
@@ -367,7 +372,12 @@ class LocalAPISchemaTests(unittest.TestCase):
         mutations["count exceeds total"] = deepcopy(payloads["darwin"])
         mutations["count exceeds total"]["observerPlatform"][
             "supportedSourceCount"
-        ] = 50
+        ] = (
+            mutations["count exceeds total"]["observerPlatform"][
+                "totalSourceCount"
+            ]
+            + 1
+        )
         mutations["source state-reason mismatch"] = deepcopy(
             payloads["darwin"]
         )

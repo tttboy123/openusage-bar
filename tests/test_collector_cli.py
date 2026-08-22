@@ -27,6 +27,7 @@ from openusage_bar.collector_cli import (
     CLIError,
     DEFAULT_FRESH_TIMEOUT_SECONDS,
     INTERNAL_GATEWAY_SELF_TEST_COMMAND,
+    INTERNAL_CURRENT_REFRESH_COMMAND,
     INTERNAL_PLUGIN_SELF_TEST_COMMAND,
     INTERNAL_REFRESH_COMMAND,
     main,
@@ -1830,6 +1831,33 @@ class CollectorCLITests(unittest.TestCase):
             main(["--help"])
         self.assertNotIn("__refresh-once", help_stdout.getvalue())
 
+    def test_internal_current_refresh_uses_only_the_current_refresher_method(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ledger.sqlite3"
+            ActivityStore(path).close()
+
+            class Refresher:
+                def __init__(self):
+                    self.current_calls = 0
+
+                def refresh(self):
+                    raise AssertionError("full refresh must not run")
+
+                def refresh_current(self):
+                    self.current_calls += 1
+
+            refresher = Refresher()
+            stdout, stderr = io.StringIO(), io.StringIO()
+            code = main(
+                [INTERNAL_CURRENT_REFRESH_COMMAND, "--ledger", str(path)],
+                stdout=stdout,
+                stderr=stderr,
+                refresher_factory=lambda _store: refresher,
+            )
+
+            self.assertEqual((code, stdout.getvalue(), stderr.getvalue()), (0, "", ""))
+            self.assertEqual(refresher.current_calls, 1)
+
     def test_fresh_failure_is_sanitized_and_does_not_leak_secret_or_path(self):
         refresher = FakeRefresher(error=RuntimeError("SECRET /Users/private/file"))
         code, out, err = self.run_cli(["status", "--format", "json", "--fresh"], refresher=refresher)
@@ -2051,6 +2079,40 @@ class CollectorCLITests(unittest.TestCase):
             self.assertEqual(out, "")
             self.assertTrue(err)
 
+    @unittest.skipIf(sys.platform == "win32", "Windows uses loopback TCP transport")
+    def test_daemon_with_api_runs_full_scheduled_refresh(self):
+        class Refresher:
+            def __init__(self):
+                self.history_windows = []
+                self.current_calls = 0
+
+            def refresh(self, *, history_days=None):
+                self.history_windows.append(history_days)
+
+            def refresh_current(self):
+                self.current_calls += 1
+
+        refresher = Refresher()
+        stop = threading.Event()
+
+        with tempfile.TemporaryDirectory() as directory:
+            code, out, err = self.run_cli(
+                [
+                    "daemon",
+                    "--interval",
+                    "60",
+                    "--api-socket",
+                    str(Path(directory) / "api.sock"),
+                ],
+                refresher=refresher,
+                stop_event=stop,
+                waiter=lambda _seconds: True,
+            )
+
+        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual(refresher.history_windows, [0])
+        self.assertEqual(refresher.current_calls, 0)
+
     def test_entry_point_imports_no_ui_framework_and_help_works(self):
         source = Path("openusage_collector.py").read_text(encoding="utf-8")
         self.assertNotIn("AppKit", source)
@@ -2125,7 +2187,7 @@ class CollectorCLITests(unittest.TestCase):
         )
 
 
-    def test_dashboard_command_starts_server_with_refresher_factory(self):
+    def test_dashboard_command_starts_read_only_server_without_refresher(self):
         captured: dict[str, object] = {}
 
         class FakeDashboardServer:
@@ -2142,11 +2204,10 @@ class CollectorCLITests(unittest.TestCase):
 
         server = FakeDashboardServer()
 
-        def fake_factory(query, *, port, today, refresher):
+        def fake_factory(query, *, port, today):
             captured["query"] = query
             captured["port"] = port
             captured["today"] = today
-            captured["refresher"] = refresher
             return server
 
         refresher = FakeRefresher()
@@ -2159,7 +2220,7 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(err, "")
         self.assertIn("UsageHub dashboard", out)
-        self.assertIs(captured["refresher"], refresher)
+        self.assertNotIn("refresher", captured)
         self.assertEqual(captured["port"], 0)
         self.assertEqual(captured["today"].isoformat(), "2026-07-14")
         self.assertEqual(server.served, 1)

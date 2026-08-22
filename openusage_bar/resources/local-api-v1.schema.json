@@ -2850,7 +2850,8 @@
             "/v1/quotas/history",
             "/v1/sources/status",
             "/v1/changes",
-            "/v1/quick-connect"
+            "/v1/quick-connect",
+            "/v1/refresh/status"
           ]
         },
         "schemaVersion": {
@@ -2890,8 +2891,8 @@
               "items": {
                 "type": "object"
               },
-              "maxItems": 14,
-              "minItems": 14,
+              "maxItems": 15,
+              "minItems": 15,
               "type": "array"
             },
             "title": {
@@ -2969,6 +2970,68 @@
       "required": [
         "schemaVersion",
         "providers"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "dataRevision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "lastFinishedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastStartedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "enum": [
+            "idle",
+            "running"
+          ]
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "state": {
+          "enum": [
+            "ok",
+            "attention",
+            "error",
+            "disabled",
+            "unknown"
+          ]
+        },
+        "succeeded": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "dataRevision",
+        "generatedAt",
+        "state",
+        "phase",
+        "lastStartedAt",
+        "lastFinishedAt",
+        "succeeded"
       ],
       "type": "object"
     },

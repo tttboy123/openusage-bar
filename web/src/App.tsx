@@ -24,7 +24,6 @@ import AutomationPage from "./pages/AutomationPage";
 import UsageDetailsPage from "./pages/UsageDetailsPage";
 import {
   fetchQuickConnect,
-  fetchRefreshStatus,
   triggerRefresh,
   type QuickConnectItem,
 } from "./api";
@@ -61,9 +60,11 @@ export default function App() {
   const [quick, setQuick] = useState<QuickConnectItem[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const activeNavRef = useRef<HTMLAnchorElement>(null);
-  const lastAutoRefreshRef = useRef(0);
+  const refreshInFlightRef = useRef(false);
   const t: Messages = messages[lang];
   const buildIdentity = buildProductIdentityPresentation(productVersionTruth, t);
 
@@ -76,11 +77,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void autoRefreshOnOpen();
-    // Auto-refresh runs once per window/page open; the manual button and the
-    // backend cooldown keep later navigation cheap.
+    if (location.pathname === "/capacity") void refreshAll();
+    // Entering Capacity is the explicit active-refresh gesture. Other page
+    // navigation remains a read-only ledger fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.pathname]);
 
   useEffect(() => {
     activeNavRef.current?.scrollIntoView({ block: "nearest", inline: "center" });
@@ -110,39 +111,22 @@ export default function App() {
   }, [menuOpen]);
 
   async function refreshAll() {
-    // Ask the local host for one bounded refresh (with history backfill) and
-    // remount every page so all surfaces refetch with fresh data. The desktop
-    // renderer boundary may reject the hint; a renderer-only refetch is fine.
+    if (refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
+    setRefreshing(true);
+    setRefreshError(false);
     try {
-      await triggerRefresh();
-    } catch {
-      // fall through: pages still refetch below
-    }
-    setRefreshNonce((n) => n + 1);
-  }
-
-  async function autoRefreshOnOpen() {
-    const AUTO_REFRESH_COOLDOWN_MS = 60_000;
-    const now = Date.now();
-    if (now - lastAutoRefreshRef.current < AUTO_REFRESH_COOLDOWN_MS) return;
-    lastAutoRefreshRef.current = now;
-    try {
-      await triggerRefresh();
-    } catch {
-      // The desktop renderer boundary or an offline dashboard may reject the
-      // refresh hint; the pages still refetch their data below.
-    }
-    const deadline = Date.now() + 45_000;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      try {
-        const status = await fetchRefreshStatus();
-        if (status.status === "idle" || status.status === "unavailable") break;
-      } catch {
-        break;
+      const requested = await triggerRefresh();
+      if (requested.phase !== "idle" || requested.state !== "ok" || requested.succeeded !== true) {
+        throw new Error("refresh failed");
       }
+      setRefreshNonce((n) => n + 1);
+    } catch {
+      setRefreshError(true);
+    } finally {
+      refreshInFlightRef.current = false;
+      setRefreshing(false);
     }
-    setRefreshNonce((n) => n + 1);
   }
 
   function switchLang() {
@@ -270,10 +254,17 @@ export default function App() {
               type="button"
               className="icon-btn"
               onClick={() => void refreshAll()}
+              disabled={refreshing}
+              aria-busy={refreshing}
             >
-              <ArrowClockwise size={16} />
-              {t.refresh}
+              <ArrowClockwise size={16} className={refreshing ? "spinning" : ""} />
+              {refreshing ? t.refreshing : t.refresh}
             </button>
+            {refreshError ? (
+              <span className="refresh-feedback" role="status" aria-live="polite">
+                {t.refreshFailed}
+              </span>
+            ) : null}
           </div>
         </header>
 

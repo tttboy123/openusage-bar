@@ -43,6 +43,7 @@ DEFAULT_API_TCP_PORT = 17821
 DEFAULT_FRESH_TIMEOUT_SECONDS = 160
 MIN_DAEMON_INTERVAL_SECONDS = 60
 INTERNAL_REFRESH_COMMAND = "__refresh-once"
+INTERNAL_CURRENT_REFRESH_COMMAND = "__refresh-current"
 INTERNAL_GATEWAY_SELF_TEST_COMMAND = "__gateway-self-test"
 INTERNAL_PLUGIN_SELF_TEST_COMMAND = "__plugin-self-test"
 
@@ -94,7 +95,7 @@ def _internal_refresh_once(
     )
     if (
         not valid_shape
-        or argv[0] != INTERNAL_REFRESH_COMMAND
+        or argv[0] not in {INTERNAL_REFRESH_COMMAND, INTERNAL_CURRENT_REFRESH_COMMAND}
         or argv[1] != "--ledger"
     ):
         stderr.write("invalid command input\n")
@@ -120,7 +121,13 @@ def _internal_refresh_once(
             )
         else:
             refresher = factory(store)
-        refresher.refresh()
+        if argv[0] == INTERNAL_CURRENT_REFRESH_COMMAND:
+            refresh_current = getattr(refresher, "refresh_current", None)
+            if not callable(refresh_current):
+                raise RuntimeError("current refresh unavailable")
+            refresh_current()
+        else:
+            refresher.refresh()
         if timing_path is not None:
             snapshot = (
                 refresher.performance_timing_snapshot()
@@ -337,7 +344,7 @@ def _parser() -> SafeArgumentParser:
         required=True,
     )
     desktop_install = desktop_actions.add_parser("install")
-    desktop_install.add_argument("--interval", choices=("300",), required=True)
+    desktop_install.add_argument("--interval", choices=("300", "1800"), required=True)
     desktop_actions.add_parser("uninstall")
     state = commands.add_parser("state")
     state.add_argument("state_action", choices=("delete",))
@@ -882,6 +889,7 @@ def _run_daemon(
     waiter: Callable[[int], bool],
     stderr: TextIO,
     catalog_monitor: Any | None = None,
+    refresh_coordinator: Any | None = None,
 ) -> int:
     while not stop_event.is_set():
         if catalog_monitor is not None:
@@ -890,7 +898,10 @@ def _run_daemon(
             except Exception:
                 pass
         try:
-            refresher.refresh()
+            if refresh_coordinator is None:
+                refresher.refresh()
+            else:
+                refresh_coordinator.run_blocking()
         except Exception:
             stderr.write("refresh unavailable; retained last-good ledger data\n")
         if waiter(interval):
@@ -912,7 +923,9 @@ def _run_daemon_with_api(
     stderr: TextIO,
     catalog_monitor: Any | None = None,
 ) -> int:
-    from .local_api import create_tcp_server, create_unix_server
+    from .local_api import RefreshCoordinator, create_tcp_server, create_unix_server
+
+    refresh_coordinator = RefreshCoordinator(refresher)
 
     try:
         if transport == "tcp":
@@ -920,9 +933,12 @@ def _run_daemon_with_api(
                 query,
                 port=api_port,
                 token_path=api_token_path,
+                refresh_coordinator=refresh_coordinator,
             )
         else:
-            server = create_unix_server(api_socket, query)
+            server = create_unix_server(
+                api_socket, query, refresh_coordinator=refresh_coordinator,
+            )
     except Exception:
         stderr.write("local API unavailable; daemon stopped\n")
         return 1
@@ -936,6 +952,7 @@ def _run_daemon_with_api(
         return _run_daemon(
             interval, refresher, stop_event=stop_event, waiter=waiter,
             stderr=stderr, catalog_monitor=catalog_monitor,
+            refresh_coordinator=refresh_coordinator,
         )
     finally:
         server.shutdown()
@@ -1275,6 +1292,10 @@ def main(
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments == ["__codex-rate-limits"]:
+        from .codex_app_server import run_codex_app_server_helper
+
+        return run_codex_app_server_helper(sys.stdin.buffer, sys.stdout.buffer)
     if arguments and arguments[0] == INTERNAL_PLUGIN_SELF_TEST_COMMAND:
         return _internal_plugin_self_test(
             arguments, stdout=stdout, stderr=stderr,
@@ -1285,7 +1306,10 @@ def main(
             stdout=stdout,
             stderr=stderr,
         )
-    if arguments and arguments[0] == INTERNAL_REFRESH_COMMAND:
+    if arguments and arguments[0] in {
+        INTERNAL_REFRESH_COMMAND,
+        INTERNAL_CURRENT_REFRESH_COMMAND,
+    }:
         return _internal_refresh_once(
             arguments,
             stderr=stderr,
@@ -1648,19 +1672,10 @@ def main(
                 stderr.write("invalid dashboard port\n")
                 return 2
             today = (clock or (lambda: datetime.now(timezone.utc)))().astimezone().date()
-            dashboard_refresher = None
-            if not (offline or args.offline):
-                if refresher is None:
-                    try:
-                        refresher = build_default_refresher(active_store)
-                    except Exception:
-                        refresher = None
-                dashboard_refresher = refresher
             server = (dashboard_server_factory or make_dashboard_server)(
                 active_query,
                 port=port,
                 today=today,
-                refresher=dashboard_refresher,
             )
             stdout.write(
                 f"UsageHub dashboard on http://127.0.0.1:{server.server_address[1]}\n"

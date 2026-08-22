@@ -25,6 +25,7 @@ LOCAL_API_ROUTES = [
     "/v1/sources/status",
     "/v1/changes",
     "/v1/quick-connect",
+    "/v1/refresh/status",
 ]
 
 
@@ -784,8 +785,8 @@ def render_schema() -> dict[str, object]:
             "oneOf": {
                 "type": "array",
                 "items": {"type": "object"},
-                "minItems": 14,
-                "maxItems": 14,
+                "minItems": 15,
+                "maxItems": 15,
             },
         },
         ["$schema", "$id", "title", "oneOf"],
@@ -821,6 +822,24 @@ def render_schema() -> dict[str, object]:
         },
         ["schemaVersion", "providers"],
     )
+    refresh_status = envelope(
+        {
+            "state": {
+                "enum": ["ok", "attention", "error", "disabled", "unknown"]
+            },
+            "phase": {"enum": ["idle", "running"]},
+            "lastStartedAt": {
+                "type": ["string", "null"],
+                "format": "date-time",
+            },
+            "lastFinishedAt": {
+                "type": ["string", "null"],
+                "format": "date-time",
+            },
+            "succeeded": {"type": ["boolean", "null"]},
+        },
+        ["state", "phase", "lastStartedAt", "lastFinishedAt", "succeeded"],
+    )
     error = closed(
         {"error": closed(
             {"code": {"type": "string"}, "message": {"type": "string"}},
@@ -846,6 +865,7 @@ def render_schema() -> dict[str, object]:
             schema_description,
             schema_response,
             quick_connect,
+            refresh_status,
             error,
         ],
     }

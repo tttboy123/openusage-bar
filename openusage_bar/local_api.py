@@ -1,9 +1,10 @@
-"""Version 1 read-only local API for scheduler and native UI consumers.
+"""Version 1 local API for scheduler and native UI consumers.
 
 The API deliberately exposes the same camelCase envelopes as ``QueryService``.
 Unix-domain HTTP is the default transport. TCP is an explicit loopback-only
-opt-in protected by a high-entropy bearer token. There are no write, refresh,
-configuration, credential, remote-bind, CORS-wildcard, or TLS endpoints.
+opt-in protected by a high-entropy bearer token. The API has no configuration
+or credential mutation endpoints. User refresh commands belong to the trusted
+desktop host boundary, not this read-only API.
 """
 
 from __future__ import annotations
@@ -115,6 +116,112 @@ class LocalAPIObservationError(RuntimeError):
             stage = "unknown"
         self.stage = stage
         super().__init__("Local API observation failed")
+
+
+class RefreshCoordinator:
+    """Serialize periodic and user-triggered current-window refreshes."""
+
+    # Desktop refreshes keep the quota page responsive. Historical backfills
+    # remain available through the dedicated CLI fresh workflow.
+    HISTORY_DAYS = 0
+
+    def __init__(self, refresher: Any | None) -> None:
+        self.refresher = refresher
+        self._condition = threading.Condition()
+        self._running = False
+        self._last_started_at: str | None = None
+        self._last_finished_at: str | None = None
+        self._last_succeeded: bool | None = None
+
+    def start(self) -> tuple[HTTPStatus, dict[str, Any]]:
+        if self.refresher is None:
+            return HTTPStatus.SERVICE_UNAVAILABLE, {
+                "state": "disabled", "phase": "idle", "succeeded": None,
+            }
+        with self._condition:
+            if self._running:
+                return HTTPStatus.OK, {
+                    "state": "attention", "phase": "running", "succeeded": None,
+                }
+            self._mark_started()
+            threading.Thread(
+                target=self._run,
+                name="openusage-local-api-refresh",
+                daemon=True,
+            ).start()
+        return HTTPStatus.ACCEPTED, {
+            "state": "attention", "phase": "running", "succeeded": None,
+        }
+
+    def run_blocking(self) -> bool:
+        """Run one full scheduled refresh, waiting behind a current refresh."""
+        if self.refresher is None:
+            return False
+        with self._condition:
+            while self._running:
+                self._condition.wait()
+            self._mark_started()
+        return self._run_refresh(current_only=False)
+
+    def status(self) -> dict[str, Any]:
+        if self.refresher is None:
+            return {
+                "state": "disabled",
+                "phase": "idle",
+                "lastStartedAt": None,
+                "lastFinishedAt": None,
+                "succeeded": None,
+            }
+        with self._condition:
+            running = self._running
+            state = (
+                "attention" if running
+                else "ok" if self._last_succeeded is True
+                else "error" if self._last_succeeded is False
+                else "unknown"
+            )
+            return {
+                "state": state,
+                "phase": "running" if running else "idle",
+                "lastStartedAt": self._last_started_at,
+                "lastFinishedAt": self._last_finished_at,
+                "succeeded": self._last_succeeded,
+            }
+
+    def _mark_started(self) -> None:
+        self._running = True
+        self._last_started_at = datetime.now(timezone.utc).isoformat()
+
+    def _run(self) -> None:
+        self._run_refresh(current_only=True)
+
+    def _run_refresh(self, *, current_only: bool) -> bool:
+        succeeded = False
+        try:
+            if current_only:
+                refresh_current = getattr(self.refresher, "refresh_current", None)
+                if callable(refresh_current):
+                    refresh_current()
+                else:
+                    try:
+                        self.refresher.refresh(history_days=self.HISTORY_DAYS)
+                    except TypeError:
+                        self.refresher.refresh()
+            else:
+                try:
+                    self.refresher.refresh(history_days=self.HISTORY_DAYS)
+                except TypeError:
+                    self.refresher.refresh()
+            succeeded = True
+        except Exception:
+            succeeded = False
+        finally:
+            with self._condition:
+                self._running = False
+                self._last_finished_at = datetime.now(timezone.utc).isoformat()
+                self._last_succeeded = succeeded
+                self._condition.notify_all()
+        return succeeded
 
 
 @dataclass(frozen=True, repr=False)
@@ -1526,7 +1633,7 @@ def _if_none_match(value: str, current_etag: str) -> bool:
 
 
 class LocalAPIRouter:
-    """Pure request router with injected query, clock, registry, and verifier."""
+    """Private request router with injected query and Collector boundaries."""
 
     ROUTES = (
         "/v1/health", "/v1/schema", "/v1/schema.json", "/v1/summary",
@@ -1537,7 +1644,7 @@ class LocalAPIRouter:
         "/v1/costs/daily",
         "/v1/quotas/history",
         "/v1/sources/status", "/v1/changes",
-        "/v1/quick-connect",
+        "/v1/quick-connect", "/v1/refresh/status",
     )
 
     def __init__(
@@ -1551,6 +1658,7 @@ class LocalAPIRouter:
         rate_limiter: TokenBucket | None = None,
         allowed_origins: Collection[str] = (),
         tcp_port: int | None = None,
+        refresh_coordinator: RefreshCoordinator | None = None,
     ) -> None:
         self.query = query
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -1576,6 +1684,7 @@ class LocalAPIRouter:
             raise ValueError("allowed origins must be explicit safe values")
         self.allowed_origins = origins
         self.tcp_port = tcp_port
+        self.refresh_coordinator = refresh_coordinator
 
     def handle(self, handler: "ReadOnlyHandler", *, include_body: bool) -> None:
         try:
@@ -1692,6 +1801,7 @@ class LocalAPIRouter:
             "/v1/sources/status": (),
             "/v1/changes": ("after", "limit"),
             "/v1/quick-connect": (),
+            "/v1/refresh/status": (),
         }
         if route not in allowed:
             raise _error(HTTPStatus.NOT_FOUND, "not_found", "Route was not found.")
@@ -1717,6 +1827,25 @@ class LocalAPIRouter:
                     if "today" in params else now.astimezone().date()
                 )
                 return to_wire(self.query.resource_snapshot(selected))
+            if route == "/v1/refresh/status":
+                refresh_status = (
+                    self.refresh_coordinator.status()
+                    if self.refresh_coordinator is not None
+                    else {
+                        "state": "disabled",
+                        "phase": "idle",
+                        "lastStartedAt": None,
+                        "lastFinishedAt": None,
+                        "succeeded": None,
+                    }
+                )
+                source_status = to_wire(self.query.source_status())
+                return {
+                    "schemaVersion": source_status["schemaVersion"],
+                    "dataRevision": source_status["dataRevision"],
+                    "generatedAt": source_status["generatedAt"],
+                    **refresh_status,
+                }
             if route == "/v1/capacity":
                 limit = _integer(params["limit"], "limit", minimum=1, maximum=MAX_LIMIT) if "limit" in params else None
                 return to_wire(self.query.capacity(limit))
@@ -1998,6 +2127,9 @@ class ReadOnlyHandler(BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         self.server.router.handle(self, include_body=False)
 
+    def do_POST(self) -> None:
+        self._method_not_allowed(include_body=True)
+
     def _handle_unix_internal_shared_client_boundary(self) -> bool:
         if not getattr(self.server, "_shared_client_boundary_enabled", False):
             return False
@@ -2046,7 +2178,6 @@ class ReadOnlyHandler(BaseHTTPRequestHandler):
         problem = _error(HTTPStatus.METHOD_NOT_ALLOWED, "method_not_allowed", "Only GET and HEAD are allowed.")
         self._problem(problem, include_body=include_body, extra_headers={"Allow": "GET, HEAD"})
 
-    do_POST = _method_not_allowed
     do_PUT = _method_not_allowed
     do_DELETE = _method_not_allowed
     do_PATCH = _method_not_allowed
@@ -2767,6 +2898,7 @@ def create_unix_server(
     client_timeout: float = DEFAULT_CLIENT_TIMEOUT,
     request_deadline: float = DEFAULT_REQUEST_DEADLINE,
     cleanup_hook: Callable[[Path], None] | None = None,
+    refresh_coordinator: RefreshCoordinator | None = None,
 ) -> UnixHTTPServer:
     if isinstance(max_threads, bool) or not isinstance(max_threads, int) or not 1 <= max_threads <= 256:
         raise ValueError("max_threads must be between 1 and 256")
@@ -2778,6 +2910,7 @@ def create_unix_server(
         query, clock=clock, provider_registry=provider_registry,
         observer_platform=observer_platform,
         allowed_origins=allowed_origins,
+        refresh_coordinator=refresh_coordinator,
     )
     return UnixHTTPServer(
         Path(socket_path), router, max_threads=max_threads,
@@ -2802,6 +2935,7 @@ def create_tcp_server(
     rate_limit_capacity: int = DEFAULT_RATE_LIMIT_CAPACITY,
     rate_limit_refill_per_second: float = DEFAULT_RATE_LIMIT_REFILL_PER_SECOND,
     monotonic: Callable[[], float] = time.monotonic,
+    refresh_coordinator: RefreshCoordinator | None = None,
 ) -> LoopbackHTTPServer:
     """Create an explicitly opted-in IPv4 loopback server.
 
@@ -2834,6 +2968,7 @@ def create_tcp_server(
         observer_platform=observer_platform,
         bearer_verifier=verifier, rate_limiter=rate_limiter,
         allowed_origins=allowed_origins,
+        refresh_coordinator=refresh_coordinator,
     )
     server = LoopbackHTTPServer(
         router, port, max_threads=max_threads, client_timeout=client_timeout,

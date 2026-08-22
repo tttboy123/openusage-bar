@@ -43,7 +43,11 @@ from openusage_bar.capabilities import (
     SourceVerification,
     registry,
 )
-from openusage_bar.local_api import create_tcp_server, create_unix_server
+from openusage_bar.local_api import (
+    RefreshCoordinator,
+    create_tcp_server,
+    create_unix_server,
+)
 from openusage_bar.collector_cli import main as collector_main
 from openusage_bar.provider_catalog import ObserverPlatformResolver, catalog
 from openusage_bar.query import QueryService
@@ -2564,6 +2568,42 @@ class UnixLocalAPITests(unittest.TestCase):
         self.server.server_close()
         self.thread.join(2)
         self.assertFalse(self.socket_path.exists())
+
+    def test_v1_is_read_only_and_refresh_status_separates_state_from_phase(self):
+        calls = []
+        started = threading.Event()
+
+        class FakeRefresher:
+            def refresh(self, *, history_days=None):
+                calls.append(history_days)
+                started.set()
+
+        coordinator = RefreshCoordinator(FakeRefresher())
+        socket_path = self.root / "refresh.sock"
+        server = create_unix_server(
+            socket_path,
+            self.query,
+            clock=lambda: NOW,
+            refresh_coordinator=coordinator,
+        )
+        thread = start(server)
+        try:
+            status, _, body = unix_request(socket_path, "/v1/refresh", method="POST")
+            self.assertEqual(status, 405)
+            self.assertEqual(json.loads(body)["error"]["code"], "method_not_allowed")
+            status, _, body = unix_request(socket_path, "/v1/refresh/status")
+            payload = json.loads(body)
+            self.assertEqual(payload["schemaVersion"], "1.0")
+            self.assertIsInstance(payload["dataRevision"], int)
+            self.assertEqual(payload["generatedAt"], "2026-07-14T10:00:00Z")
+            self.assertIn(payload["state"], {"ok", "attention", "error", "disabled", "unknown"})
+            self.assertIn(payload["phase"], {"idle", "running"})
+            self.assertNotIn(payload["state"], {"idle", "running"})
+            self.assertEqual(calls, [])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
 
     def test_unix_transport_alone_exposes_closed_shared_client_boundary_snapshot(self):
         from openusage_bar.shared_client_boundary import (

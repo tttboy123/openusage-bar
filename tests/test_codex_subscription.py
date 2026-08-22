@@ -1,14 +1,19 @@
+import io
 import json
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
+from openusage_bar.codex_app_server import run_codex_app_server_helper
 from openusage_bar.codex_subscription import (
     CodexSubscriptionAdapter,
     latest_rate_limit_event,
     parse_rate_limit_card,
     parse_rate_limit_observations,
+    read_codex_app_server_rate_limits,
 )
 from openusage_bar.providers.contracts import QuotaFetchSuccess
 from openusage_bar.models import Category, ProviderStatus
@@ -25,9 +30,14 @@ def window(used_percent: float, minutes: int, resets_at: datetime) -> dict:
     }
 
 
-def rate_limits(primary: dict, secondary: dict | None = None) -> dict:
+def rate_limits(
+    primary: dict | None,
+    secondary: dict | None = None,
+    *,
+    limit_id: str = "codex",
+) -> dict:
     return {
-        "limit_id": "codex",
+        "limit_id": limit_id,
         "limit_name": None,
         "primary": primary,
         "secondary": secondary,
@@ -39,6 +49,171 @@ def rate_limits(primary: dict, secondary: dict | None = None) -> dict:
 
 
 class CodexSubscriptionTests(unittest.TestCase):
+    def test_app_server_helper_drops_secret_environment_before_inner_process(self):
+        responses = io.BytesIO(
+            b'{"id":1,"result":{}}\n'
+            b'{"id":2,"result":{"rateLimitsByLimitId":{}}}\n'
+        )
+
+        class FakeProcess:
+            def __init__(self):
+                self.stdin = io.BytesIO()
+                self.stdout = responses
+
+            def kill(self):
+                return None
+
+            def wait(self, timeout=None):
+                return 0
+
+        request = io.BytesIO(json.dumps({
+            "version": 1,
+            "command": [sys.executable],
+        }).encode("utf-8"))
+        output = io.BytesIO()
+        with patch(
+            "openusage_bar.codex_app_server.subprocess.Popen",
+            return_value=FakeProcess(),
+        ) as popen:
+            code = run_codex_app_server_helper(
+                request,
+                output,
+                environment={
+                    "HOME": "/tmp/home",
+                    "PATH": "/usr/bin",
+                    "SECRET_TOKEN": "must-not-pass",
+                },
+            )
+
+        self.assertEqual(code, 0)
+        child_environment = popen.call_args.kwargs["env"]
+        self.assertEqual(child_environment["HOME"], "/tmp/home")
+        self.assertNotIn("SECRET_TOKEN", child_environment)
+        self.assertNotIn("must-not-pass", output.getvalue().decode("utf-8"))
+
+    def test_app_server_outer_bounded_process_receives_allowlisted_environment(self):
+        response = {"rateLimitsByLimitId": {"codex": {"primary": None}}}
+        completed = type(
+            "Completed",
+            (),
+            {
+                "returncode": 0,
+                "stdout": json.dumps({
+                    "version": 1, "ok": True, "result": response,
+                }).encode(),
+            },
+        )()
+        with patch(
+            "openusage_bar.codex_app_server.run_bounded",
+            return_value=completed,
+        ) as bounded:
+            from openusage_bar.codex_app_server import read_codex_app_server_rate_limits
+
+            read_codex_app_server_rate_limits(
+                codex_command=("/bin/sh",),
+                helper_command=("/bin/sh",),
+                environment={
+                    "HOME": "/tmp/home",
+                    "PATH": "/usr/bin",
+                    "PRIVATE_TOKEN": "secret",
+                },
+            )
+        env = bounded.call_args.kwargs["env"]
+        self.assertEqual(env["HOME"], "/tmp/home")
+        self.assertNotIn("PRIVATE_TOKEN", env)
+
+    def test_official_reader_completes_app_server_handshake(self):
+        response = {
+            "rateLimits": {"limitId": "codex", "primary": None},
+            "rateLimitsByLimitId": {
+                "codex": {
+                    "limitId": "codex",
+                    "primary": {
+                        "usedPercent": 12,
+                        "windowDurationMins": 10080,
+                        "resetsAt": int((NOW + timedelta(days=5)).timestamp()),
+                    },
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            fake_server = Path(directory) / "fake_codex.py"
+            fake_server.write_text(
+                "import json, sys\n"
+                "initialize = json.loads(sys.stdin.readline())\n"
+                "print(json.dumps({'id': initialize['id'], 'result': {}}), flush=True)\n"
+                "json.loads(sys.stdin.readline())\n"
+                "request = json.loads(sys.stdin.readline())\n"
+                f"result = {response!r}\n"
+                "print(json.dumps({'id': request['id'], 'result': result}), flush=True)\n",
+                encoding="utf-8",
+            )
+
+            result = read_codex_app_server_rate_limits(
+                codex_command=(sys.executable, str(fake_server)),
+                helper_command=(
+                    sys.executable,
+                    str(Path(__file__).resolve().parents[1] / "openusage_collector.py"),
+                ),
+            )
+
+        self.assertEqual(result, response)
+
+    def test_adapter_prefers_official_codex_subscription_bucket(self):
+        reset_weekly = NOW + timedelta(days=5)
+        response = {
+            "rateLimits": {
+                "limitId": "codex",
+                "primary": {
+                    "usedPercent": 12,
+                    "windowDurationMins": 10080,
+                    "resetsAt": int(reset_weekly.timestamp()),
+                },
+                "secondary": None,
+                "planType": "pro",
+            },
+            "rateLimitsByLimitId": {
+                "codex_bengalfox": {
+                    "limitId": "codex_bengalfox",
+                    "limitName": "GPT-5.3-Codex-Spark",
+                    "primary": {
+                        "usedPercent": 0,
+                        "windowDurationMins": 300,
+                        "resetsAt": int((NOW + timedelta(hours=3)).timestamp()),
+                    },
+                    "secondary": {
+                        "usedPercent": 0,
+                        "windowDurationMins": 10080,
+                        "resetsAt": int(reset_weekly.timestamp()),
+                    },
+                    "planType": "pro",
+                },
+                "codex": {
+                    "limitId": "codex",
+                    "primary": {
+                        "usedPercent": 12,
+                        "windowDurationMins": 10080,
+                        "resetsAt": int(reset_weekly.timestamp()),
+                    },
+                    "secondary": None,
+                    "planType": "pro",
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = CodexSubscriptionAdapter(
+                Path(directory),
+                clock=lambda: NOW,
+                rate_limits_reader=lambda: response,
+            )
+
+            overview = adapter.fetch()
+
+        self.assertEqual(len(overview.cards), 1)
+        self.assertEqual(overview.cards[0].primary, "Weekly 88% remaining")
+        self.assertEqual(overview.cards[0].remaining_percent, 88)
+        self.assertEqual(overview.cards[0].resets_at, reset_weekly)
+
     def test_all_rate_limit_windows_become_scoped_quota_facts(self):
         five_reset = NOW + timedelta(hours=3)
         weekly_reset = NOW + timedelta(days=5)
@@ -173,9 +348,53 @@ class CodexSubscriptionTests(unittest.TestCase):
         self.assertEqual(event[1], datetime(2026, 7, 14, 0, 30, tzinfo=timezone.utc))
         self.assertNotIn("private", repr(event))
 
+    def test_latest_event_never_promotes_model_bucket_to_subscription(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session = root / "session.jsonl"
+            session.write_text(
+                "\n".join(
+                    json.dumps(item)
+                    for item in (
+                        {
+                            "timestamp": "2026-07-14T00:30:00Z",
+                            "payload": {
+                                "type": "token_count",
+                                "rate_limits": rate_limits(
+                                    window(35, 10080, NOW + timedelta(days=5)),
+                                    limit_id="codex_bengalfox",
+                                ),
+                            },
+                        },
+                        {
+                            "timestamp": "2026-07-14T00:40:00Z",
+                            "payload": {
+                                "type": "token_count",
+                                "rate_limits": rate_limits(
+                                    None,
+                                    limit_id="codex",
+                                ),
+                            },
+                        },
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            event = latest_rate_limit_event(root, max_files=10)
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event[0]["limit_id"], "codex")
+        self.assertIsNone(event[0]["primary"])
+
     def test_adapter_returns_no_override_without_current_quota(self):
         with tempfile.TemporaryDirectory() as directory:
-            adapter = CodexSubscriptionAdapter(Path(directory), clock=lambda: NOW)
+            adapter = CodexSubscriptionAdapter(
+                Path(directory),
+                clock=lambda: NOW,
+                rate_limits_reader=lambda: None,
+            )
 
             overview = adapter.fetch()
 

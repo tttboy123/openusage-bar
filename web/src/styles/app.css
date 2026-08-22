@@ -143,13 +143,18 @@ td { color: var(--text-dim); white-space: nowrap; }
 .pill-ok { color: var(--accent); background: var(--accent-soft); }
 .pill-warn { color: var(--warn); background: var(--warn-soft); }
 .pill-bad { color: var(--bad); background: var(--bad-soft); }
+.pill-low { color: var(--warn); background: var(--warn-soft); }
+.pill-error,
+.pill-exhausted { color: var(--bad); background: var(--bad-soft); }
 .pill-neutral,
-.pill-unknown {
+.pill-unknown,
+.pill-stale {
   color: var(--text-dim);
   background: var(--surface-alt);
   border: 1px solid var(--hairline);
 }
-.pill-unknown { border-style: dashed; }
+.pill-unknown,
+.pill-stale { border-style: dashed; }
 
 .btn-link { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-weight: 600; text-decoration: none; padding: 6px 4px; margin: -6px -4px; border-radius: 6px; white-space: nowrap; }
 .btn-link:hover { text-decoration: underline; }
@@ -170,6 +175,7 @@ td { color: var(--text-dim); white-space: nowrap; }
 }
 .icon-btn:hover { background: var(--surface-alt); }
 .icon-btn:disabled { opacity: 0.5; cursor: default; }
+.refresh-feedback { color: var(--bad); font-size: 0.78rem; white-space: nowrap; }
 .quick-connect { max-width: 180px; }
 
  .icon-btn[aria-pressed="true"],
@@ -1943,6 +1949,7 @@ select option { background: var(--surface); color: var(--text); }
 .menubar-subtitle { font-size: 0.72rem; color: var(--text-faint); margin-top: 2px; }
 .menubar-icon-btn { background: transparent; border: 0; color: var(--text-dim); cursor: pointer; padding: 4px; border-radius: 6px; }
 .menubar-icon-btn:hover { background: var(--surface-alt); }
+.menubar-icon-btn:disabled { opacity: 0.5; cursor: default; }
 .menubar-primary-btn { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0 16px 12px; padding: 8px 12px; border-radius: 8px; border: 0; background: var(--accent); color: white; font-weight: 600; font-size: 0.84rem; cursor: pointer; }
 .menubar-today { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-top: 1px solid var(--hairline); }
 .menubar-today-value { display: flex; flex-direction: column; align-items: flex-end; }

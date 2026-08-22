@@ -4,6 +4,8 @@ const {
   removePackagedObserverService,
   resolveCollectorCommand,
   resolveCollectorLifecyclePlan,
+  runCollectorCommand,
+  waitForActiveRefresh,
 } = require("./collector_runtime");
 const {
   resolveGatewayAccountEditorExecutor,
@@ -15,8 +17,9 @@ const http = require("http");
 const os = require("os");
 const { existsSync } = require("fs");
 const path = require("path");
+const { buildReloadMenuItem } = require("./app_menu");
 const { buildProductIdentityPresentation } = require("./build_identity_copy");
-const { capacityProviders } = require("./tray_state");
+const { balanceRows, capacityProviders } = require("./tray_state");
 const { productVersionTruth } = require("./product_version_truth");
 const {
   createRendererApiHandler,
@@ -85,6 +88,7 @@ function createPrivateApiHandler() {
       platform: process.platform,
       pathExists: existsSync,
     }),
+    refreshExecutor: refreshUsageData,
   });
 }
 
@@ -272,6 +276,79 @@ async function refreshTraySnapshot() {
   }
 }
 
+async function refreshUsageData() {
+  const activeRefresh = await waitForActiveRefresh({
+    readStatus: () => getObserverJSON("/v1/refresh/status"),
+  });
+  if (activeRefresh.waited) {
+    if (activeRefresh.status === null) {
+      return {
+        apiVersion: "host-action.openusage/v1",
+        action: "usage.refresh",
+        ok: false,
+        code: "unavailable",
+        state: "error",
+        phase: "idle",
+        succeeded: false,
+      };
+    }
+    if (
+      activeRefresh.status.phase === "idle" &&
+      activeRefresh.status.state === "ok" &&
+      activeRefresh.status.succeeded === true
+    ) {
+      await refreshTraySnapshot().catch(() => {});
+      return {
+        apiVersion: "host-action.openusage/v1",
+        action: "usage.refresh",
+        ok: true,
+        code: "refreshed",
+        state: "ok",
+        phase: "idle",
+        succeeded: true,
+      };
+    }
+  }
+  const endpoint = privateRuntime?.localApi;
+  const stateDir = endpoint?.transport === "tcp"
+    ? path.dirname(endpoint.tokenPath || "")
+    : path.dirname(endpoint?.socketPath || "");
+  const ledger = stateDir ? path.join(stateDir, "activity.sqlite3") : null;
+  const command = resolveCollectorCommand({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    platform: process.platform,
+    environment: process.env,
+    pathExists: existsSync,
+  });
+  if (!command || !ledger || !path.isAbsolute(ledger)) {
+    return {
+      apiVersion: "host-action.openusage/v1",
+      action: "usage.refresh",
+      ok: false,
+      code: "unavailable",
+      state: "disabled",
+      phase: "idle",
+      succeeded: false,
+    };
+  }
+  const ok = await runCollectorCommand(
+    command,
+    ["__refresh-current", "--ledger", ledger],
+    { timeoutMs: 180_000 },
+  );
+  if (ok) await refreshTraySnapshot().catch(() => {});
+  return {
+    apiVersion: "host-action.openusage/v1",
+    action: "usage.refresh",
+    ok,
+    code: ok ? "refreshed" : "unavailable",
+    state: ok ? "ok" : "error",
+    phase: "idle",
+    succeeded: ok,
+  };
+}
+
 function formatTokens(value) {
   if (value == null) return "—";
   const n = Number(value);
@@ -403,10 +480,7 @@ function buildTrayMenu() {
   });
   items.push({ type: "separator" });
 
-  const balances = Array.isArray(snapshot?.balances) ? snapshot.balances : [];
-  const visibleBalances = balances.filter(
-    (b) => b && b.state !== "unknown" && b.available != null
-  );
+  const visibleBalances = balanceRows(snapshot);
   if (visibleBalances.length > 0) {
     items.push({ label: copy.balances, enabled: false });
     visibleBalances.slice(0, 6).forEach((b) => {
@@ -435,7 +509,7 @@ function buildTrayMenu() {
   items.push({
     label: copy.refresh,
     accelerator: "CommandOrControl+R",
-    click: () => refreshTraySnapshot(),
+    click: () => refreshUsageData().catch(() => {}),
   });
   items.push({
     label: copy.open,
@@ -618,7 +692,7 @@ function createAppMenu() {
         {
           label: "Refresh",
           accelerator: "CommandOrControl+R",
-          click: () => refreshTraySnapshot(),
+          click: () => refreshUsageData().catch(() => {}),
         },
         {
           label: "Open Dashboard",
@@ -658,7 +732,7 @@ function createAppMenu() {
     {
       label: "View",
       submenu: [
-        { label: "Reload", role: "reload" },
+        buildReloadMenuItem(),
         { label: "Force Reload", role: "forceReload" },
         { type: "separator" },
         { label: "Toggle Developer Tools", role: "toggleDevTools" },
@@ -685,8 +759,8 @@ async function startUsageHub() {
     createAppMenu();
     createWindow();
     createTray();
-    // Register the periodic tray refresh first so a slow or failed initial
-    // fetch can never leave the tray permanently stale.
+    // Re-read the latest local ledger every minute so the tray stays current;
+    // provider refreshes themselves are scheduled by the Collector every 30m.
     trayUpdateTimer = setInterval(() => {
       refreshTraySnapshot().catch(() => {});
     }, 60_000);

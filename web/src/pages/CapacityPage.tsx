@@ -27,18 +27,24 @@ function kindLabel(kind: string | undefined, t: Messages): string {
   return kind ?? "—";
 }
 
-function capacityState(state: string | undefined): "ok" | "warn" | "bad" {
-  const value = (state ?? "").toLowerCase();
-  if (value === "ok" || value === "available" || value === "active") return "ok";
-  if (value === "warn" || value === "low" || value === "stale" || value === "temporarily_unavailable") return "warn";
-  return "bad";
+function capacityState(item: CapacityProvider): "ok" | "low" | "stale" | "unknown" | "error" | "exhausted" {
+  const value = (item.state ?? "").toLowerCase();
+  if (item.stale === true || value === "stale") return "stale";
+  if (value === "error" || value === "failed") return "error";
+  if (value === "exhausted" || value === "rate_limited" || item.remainingRatio === 0) return "exhausted";
+  if (value === "unknown" || value === "temporarily_unavailable" || !value) return "unknown";
+  if (value === "low" || (item.remainingRatio !== undefined && item.remainingRatio < 0.2)) return "low";
+  return "ok";
 }
 
-function capacityStateLabel(state: string | undefined, t: Messages): string {
-  const kind = capacityState(state);
+function capacityStateLabel(item: CapacityProvider, t: Messages): string {
+  const kind = capacityState(item);
   if (kind === "ok") return t.capacityOk;
-  if (kind === "warn") return t.capacityWarn;
-  return t.capacityBad;
+  if (kind === "low") return t.capacityLow;
+  if (kind === "stale") return t.capacityStale;
+  if (kind === "error") return t.capacityError;
+  if (kind === "exhausted") return t.capacityExhausted;
+  return t.capacityUnknown;
 }
 
 const HISTORY_COLORS = [
@@ -116,9 +122,10 @@ const [showAll, setShowAll] = useState(false);
     });
   }, [visibleGroups]);
 
-  const okCount = items.filter((item) => capacityState(item.state) === "ok").length;
-  const warnCount = items.filter((item) => capacityState(item.state) === "warn").length;
-  const badCount = items.filter((item) => capacityState(item.state) === "bad").length;
+  const okCount = items.filter((item) => capacityState(item) === "ok").length;
+  const lowCount = items.filter((item) => capacityState(item) === "low").length;
+  const staleCount = items.filter((item) => capacityState(item) === "stale").length;
+  const issueCount = items.filter((item) => ["unknown", "error", "exhausted"].includes(capacityState(item))).length;
   const ratios = items
     .map((item) => item.remainingRatio)
     .filter((r): r is number => r !== undefined);
@@ -141,12 +148,16 @@ const [showAll, setShowAll] = useState(false);
           <p className="metric-label">{t.capacityOk}</p>
         </div>
         <div className="metric">
-          <p className="metric-value">{warnCount}</p>
-          <p className="metric-label">{t.capacityWarn}</p>
+          <p className="metric-value">{lowCount}</p>
+          <p className="metric-label">{t.capacityLow}</p>
         </div>
         <div className="metric">
-          <p className="metric-value">{badCount}</p>
-          <p className="metric-label">{t.capacityBad}</p>
+          <p className="metric-value">{staleCount}</p>
+          <p className="metric-label">{t.capacityStale}</p>
+        </div>
+        <div className="metric">
+          <p className="metric-value">{issueCount}</p>
+          <p className="metric-label">{t.capacityUnknown}</p>
         </div>
         <div className="metric">
           <p className="metric-value">{avgRemaining === null ? "—" : `${avgRemaining}%`}</p>
@@ -202,8 +213,8 @@ const [showAll, setShowAll] = useState(false);
                     ) : null}
                   </td>
                   <td>
-                    <span className={`pill pill-${capacityState(item.state)}`}>
-                      {capacityStateLabel(item.state, t)}
+                    <span className={`pill pill-${capacityState(item)}`}>
+                      {capacityStateLabel(item, t)}
                     </span>
                   </td>
                 </tr>

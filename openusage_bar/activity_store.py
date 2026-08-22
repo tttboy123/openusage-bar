@@ -1660,6 +1660,74 @@ class ActivityStore:
         with self._lock:
             return list(self._resource_quota_states_locked())
 
+    def mark_quota_source_stale(
+        self,
+        provider_id: str,
+        source_id: str,
+        attempted_at: datetime,
+    ) -> int:
+        _validate_id("provider_id", provider_id)
+        _validate_id("source_id", source_id)
+        changed_at = _timestamp(attempted_at.isoformat(), "attempted_at")
+        attempted = datetime.fromisoformat(changed_at.replace("Z", "+00:00"))
+        changed = 0
+        with self._write_transaction():
+            rows = self._connection.execute(
+                "SELECT * FROM quota_state "
+                "WHERE provider_id=? AND source_id=? AND stale=0 "
+                "ORDER BY record_id",
+                (provider_id, source_id),
+            ).fetchall()
+            for row in rows:
+                state = self._row_to_quota_state(row)
+                observed = datetime.fromisoformat(
+                    state.observed_at.replace("Z", "+00:00")
+                )
+                if observed > attempted:
+                    continue
+                observation = QuotaObservation(
+                    record_id=state.record_id,
+                    observed_at=state.observed_at,
+                    provider_id=state.provider_id,
+                    account_ref=state.account_ref,
+                    quota_name=state.quota_name,
+                    unit=state.unit,
+                    used=state.used,
+                    quota_limit=state.quota_limit,
+                    remaining=state.remaining,
+                    remaining_ratio=state.remaining_ratio,
+                    resets_at=state.resets_at,
+                    period_start=state.period_start,
+                    period_end=state.period_end,
+                    state=state.state,
+                    quality=state.quality,
+                    stale=True,
+                    source_id=state.source_id,
+                    quota_window=state.quota_window,
+                    applies_to_kind=state.applies_to_kind,
+                    applies_to_model_ids=state.applies_to_model_ids,
+                )
+                payload_json, payload_hash = self._quota_semantic_payload(
+                    observation
+                )
+                revision = state.revision + 1
+                self._connection.execute(
+                    "UPDATE quota_state "
+                    "SET stale=1,revision=?,payload_hash=? WHERE record_id=?",
+                    (revision, payload_hash, state.record_id),
+                )
+                self._append_change(
+                    "quota",
+                    state.record_id,
+                    revision,
+                    "update",
+                    changed_at,
+                    payload_json,
+                    payload_hash,
+                )
+                changed += 1
+        return changed
+
     def _resource_quota_states_locked(self) -> tuple[QuotaState, ...]:
         rows = self._connection.execute(
             "SELECT * FROM quota_state "

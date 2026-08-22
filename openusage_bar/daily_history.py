@@ -822,6 +822,14 @@ class ActivityCollector:
     ) -> None:
         # Current capacity publishes before slower history sources and remains an
         # independent failure domain.
+        def mark_stale(provider_id: str, source_id: str) -> None:
+            try:
+                self.store.mark_quota_source_stale(
+                    provider_id, source_id, attempted_at
+                )
+            except Exception:
+                pass
+
         explicit_provider_ids: set[str] = set()
         for provider_id, source_id, result in quota_results:
             explicit_provider_ids.add(provider_id)
@@ -839,14 +847,17 @@ class ActivityCollector:
                         provider_id, source_id, attempted_at
                     )
                 except Exception:
+                    mark_stale(provider_id, source_id)
                     self._safe_source_failure(
                         provider_id, "persistence_failed", attempted_at, source_id
                     )
             elif isinstance(result, QuotaFetchFailure):
+                mark_stale(provider_id, source_id)
                 self._safe_source_failure(
                     provider_id, result.error_code, attempted_at, source_id
                 )
             else:
+                mark_stale(provider_id, source_id)
                 self._safe_source_failure(
                     provider_id, "invalid_import_result", attempted_at, source_id
                 )
@@ -1177,6 +1188,25 @@ class ActivityCollector:
                 self.store.apply_retention(730, attempted_at)
             except Exception:
                 pass
+            return True
+        finally:
+            self._lock.release()
+
+    def refresh_current(
+        self,
+        overview: Overview,
+        *,
+        balance_results: tuple[tuple[str, str, object], ...] = (),
+        quota_results: tuple[tuple[str, str, object], ...] = (),
+    ) -> bool:
+        """Persist current quota and balance facts without history imports."""
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            attempted_at = self.clock().astimezone(timezone.utc)
+            self._publish_provider_instances(overview, attempted_at)
+            self._refresh_balance_sources(attempted_at, balance_results)
+            self._refresh_quota_sources(overview, attempted_at, quota_results)
             return True
         finally:
             self._lock.release()
