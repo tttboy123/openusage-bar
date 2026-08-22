@@ -2092,6 +2092,61 @@ class CollectorCLITests(unittest.TestCase):
         self.assertEqual((code, out, err), (0, "", ""))
         self.assertEqual(refresher.calls, 0)
 
+    def test_daemon_defers_refresher_factory_until_after_initial_interval(self):
+        stop = threading.Event()
+        factory_calls = []
+        built = FakeRefresher()
+
+        def factory(_store):
+            factory_calls.append(True)
+            return built
+
+        def stop_before_interval(_seconds):
+            stop.set()
+            return True
+
+        with tempfile.TemporaryDirectory() as directory:
+            code, out, err = self.run_cli(
+                ["daemon", "--interval", "60", "--api-socket", str(Path(directory) / "api.sock")],
+                refresher_factory=factory,
+                stop_event=stop,
+                waiter=stop_before_interval,
+            )
+
+        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual(factory_calls, [])
+        self.assertEqual(built.calls, 0)
+
+    def test_daemon_builds_refresher_once_for_due_repeats(self):
+        stop = threading.Event()
+        factory_calls = []
+        built = FakeRefresher()
+        waits = 0
+
+        def factory(_store):
+            factory_calls.append(True)
+            return built
+
+        def wait(_seconds):
+            nonlocal waits
+            waits += 1
+            if waits == 3:
+                stop.set()
+                return True
+            return False
+
+        with tempfile.TemporaryDirectory() as directory:
+            code, out, err = self.run_cli(
+                ["daemon", "--interval", "60", "--api-socket", str(Path(directory) / "api.sock")],
+                refresher_factory=factory,
+                stop_event=stop,
+                waiter=wait,
+            )
+
+        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual(factory_calls, [True])
+        self.assertEqual(built.calls, 2)
+
     def test_daemon_rejects_zero_bool_and_too_small_interval(self):
         for interval in ("0", "1", "true"):
             code, out, err = self.run_cli(["daemon", "--interval", interval], refresher=FakeRefresher())
