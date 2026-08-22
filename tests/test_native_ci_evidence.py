@@ -2999,6 +2999,8 @@ if result.failures or result.errors:
             "runtime-before-boundary-shape",
             "runtime-before-boundary-drift",
             "runtime-before-boundary-activity",
+            "runtime-before-boundary-read-before",
+            "runtime-before-boundary-read-after",
             "stop",
             "runtime-after",
             "preserve",

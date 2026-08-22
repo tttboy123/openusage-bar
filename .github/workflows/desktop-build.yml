@@ -1284,6 +1284,8 @@ jobs:
                 40) topology_category="runtime-before-boundary-shape" ;;
                 41) topology_category="runtime-before-boundary-drift" ;;
                 42) topology_category="runtime-before-boundary-activity" ;;
+                43) topology_category="runtime-before-boundary-read-before" ;;
+                44) topology_category="runtime-before-boundary-read-after" ;;
                 esac
                 printf "%s\n" "appimage_observer_topology_failed category=$topology_category" >&2
                 exit 1

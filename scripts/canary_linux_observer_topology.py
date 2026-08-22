@@ -59,6 +59,8 @@ class LinuxObserverTopologyCanaryError(RuntimeError):
             "runtime-before-boundary-shape",
             "runtime-before-boundary-drift",
             "runtime-before-boundary-activity",
+            "runtime-before-boundary-read-before",
+            "runtime-before-boundary-read-after",
             "runtime-before-local",
             "runtime-before-local-authority",
             "runtime-before-local-authority-home",
@@ -404,7 +406,9 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
             )
         )
     except Exception:
-        raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
+        raise LinuxObserverTopologyCanaryError(
+            "runtime-before-boundary-read-before"
+        ) from None
     try:
         local_state = read_current_user_local_api_state()
     except Exception as error:
@@ -439,7 +443,9 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
             )
         )
     except Exception:
-        raise LinuxObserverTopologyCanaryError("runtime-before-boundary") from None
+        raise LinuxObserverTopologyCanaryError(
+            "runtime-before-boundary-read-after"
+        ) from None
     try:
         service_after = read_current_user_collector_service_state()
     except Exception:
@@ -817,7 +823,7 @@ def _wait_for_runtime(
                 ):
                     raise LinuxObserverTopologyCanaryError(last_stage)
                 last = float(current)
-                return min(1.0, deadline - last)
+                return min(3.0, deadline - last)
 
             return _observe_runtime(remaining_timeout=remaining_timeout)
         except LinuxObserverTopologyCanaryError as error:
@@ -961,6 +967,8 @@ def main(arguments: tuple[str, ...] | None = None) -> int:
             "runtime-before-boundary-shape": 40,
             "runtime-before-boundary-drift": 41,
             "runtime-before-boundary-activity": 42,
+            "runtime-before-boundary-read-before": 43,
+            "runtime-before-boundary-read-after": 44,
             "stop": 13,
             "runtime-after": 14,
             "preserve": 15,
