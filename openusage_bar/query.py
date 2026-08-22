@@ -434,7 +434,7 @@ class QueryService:
 
     @staticmethod
     def _quota_hub(balance_states: Iterable[Any]) -> tuple[QuotaHubItem, ...]:
-        grouped: dict[str, list[tuple[Decimal, str, str, str]]] = {}
+        normalized: list[tuple[str, Decimal, str, str, str]] = []
         for state in balance_states:
             available = getattr(state, "available", None)
             if available is None:
@@ -444,13 +444,29 @@ class QueryService:
             except InvalidOperation:
                 continue
             currency = getattr(state, "currency", None) or "UNKNOWN"
-            grouped.setdefault(currency, []).append(
+            normalized.append(
                 (
+                    currency,
                     amount,
                     getattr(state, "provider_id", "unknown"),
                     getattr(state, "source_id", "current.balance"),
                     getattr(state, "quality", "unverified"),
                 )
+            )
+        direct_keys = {
+            (currency, provider_id, amount)
+            for currency, amount, provider_id, _, quality in normalized
+            if quality.lower() == "direct"
+        }
+        grouped: dict[str, list[tuple[Decimal, str, str, str]]] = {}
+        for currency, amount, provider_id, source_id, quality in normalized:
+            if (
+                quality.lower() == "derived"
+                and (currency, provider_id, amount) in direct_keys
+            ):
+                continue
+            grouped.setdefault(currency, []).append(
+                (amount, provider_id, source_id, quality)
             )
         items: list[QuotaHubItem] = []
         for currency, entries in sorted(grouped.items()):
@@ -552,7 +568,15 @@ class QueryService:
             groups.setdefault((state.provider_id, state.account_ref), []).append(state)
 
         def window_key(state: Any) -> tuple[Any, ...]:
+            try:
+                observed_at = datetime.fromisoformat(
+                    state.observed_at.replace("Z", "+00:00")
+                ).timestamp()
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                observed_at = 0.0
             return (
+                state.stale,
+                -observed_at,
                 state.remaining_ratio is None,
                 state.remaining_ratio if state.remaining_ratio is not None else 0.0,
                 state.resets_at is None,
@@ -562,7 +586,7 @@ class QueryService:
             )
 
         selected = [min(states, key=window_key) for states in groups.values()]
-        selected.sort(key=lambda state: window_key(state)[:2] + (state.provider_id, state.account_ref))
+        selected.sort(key=lambda state: window_key(state)[:4] + (state.provider_id, state.account_ref))
         if selected_limit is not None:
             selected = selected[:selected_limit]
         providers = [

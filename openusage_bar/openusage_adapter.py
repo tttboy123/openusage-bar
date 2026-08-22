@@ -380,8 +380,16 @@ class OpenUsageAdapter:
             self.provider_filter_supported = False
         return self.provider_filter_supported
 
-    def _export(self, source: str, provider: str | None = None) -> Overview:
-        if provider is not None:
+    def _export(
+        self,
+        source: str,
+        provider: str | None = None,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> Overview:
+        if timeout_seconds is not None:
+            timeout = timeout_seconds
+        elif provider is not None:
             timeout = CURSOR_FILTERED_TIMEOUT_SECONDS
         else:
             timeout = (
@@ -461,6 +469,24 @@ class OpenUsageAdapter:
         if not overview.cards:
             raise OpenUsageExportError("exporter returned no usable snapshots")
         return overview
+
+    def fetch_current(self) -> Overview:
+        """Fetch only the current Cursor quota within the interactive budget."""
+        provider = "cursor" if self._supports_provider_filter() else None
+        overview = self._export(
+            "direct",
+            provider=provider,
+            # The compatibility path is still capped; it cannot become a
+            # history export just because an older CLI lacks --provider.
+            timeout_seconds=CURSOR_FILTERED_TIMEOUT_SECONDS,
+        )
+        cursor = next(
+            (card for card in overview.cards if card.provider_id == "cursor"),
+            None,
+        )
+        if cursor is None:
+            raise OpenUsageExportError("Cursor quota was not returned")
+        return Overview([cursor])
 
     def fetch(self) -> Overview:
         try:

@@ -5,7 +5,8 @@ const childProcess = require("child_process");
 const path = require("path");
 
 const MAX_RUNTIME_PATH_LENGTH = 4096;
-const COLLECTOR_INTERVAL_SECONDS = "300";
+const MAX_COLLECTOR_COMMAND_TIMEOUT_MS = 180_000;
+const COLLECTOR_INTERVAL_SECONDS = "1800";
 const DELETE_STATE_CONFIRMATION = "DELETE-LOCAL-USAGEHUB-STATE";
 const VALID_LIFECYCLE_PLAN = Symbol("validCollectorLifecyclePlan");
 
@@ -275,7 +276,9 @@ function runCollectorCommand(
         finish(code === 0 && (signal === null || signal === undefined)),
       );
       const boundedTimeout =
-        Number.isInteger(timeoutMs) && timeoutMs >= 100 && timeoutMs <= 30_000
+        Number.isInteger(timeoutMs) &&
+        timeoutMs >= 100 &&
+        timeoutMs <= MAX_COLLECTOR_COMMAND_TIMEOUT_MS
           ? timeoutMs
           : 15_000;
       if (!settled) {
@@ -292,6 +295,68 @@ function runCollectorCommand(
       finish(false);
     }
   });
+}
+
+async function waitForActiveRefresh({
+  readStatus,
+  wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  attempts = 90,
+  intervalMs = 2_000,
+} = {}) {
+  if (
+    typeof readStatus !== "function" ||
+    typeof wait !== "function" ||
+    !Number.isInteger(attempts) ||
+    attempts < 1 ||
+    attempts > 90 ||
+    !Number.isInteger(intervalMs) ||
+    intervalMs < 100 ||
+    intervalMs > 2_000
+  ) {
+    return { waited: false, status: null };
+  }
+  let status;
+  try {
+    status = safeRefreshStatus(await readStatus());
+  } catch {
+    return { waited: false, status: null };
+  }
+  if (status?.phase !== "running") {
+    return { waited: false, status };
+  }
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await wait(intervalMs);
+    try {
+      status = safeRefreshStatus(await readStatus());
+    } catch {
+      return { waited: true, status: null };
+    }
+    if (status?.phase !== "running") {
+      return { waited: true, status };
+    }
+  }
+  return { waited: true, status: null };
+}
+
+function safeRefreshStatus(value) {
+  if (value === null || typeof value !== "object") return null;
+  const phase = Object.prototype.hasOwnProperty.call(value, "phase")
+    ? value.phase
+    : null;
+  const state = Object.prototype.hasOwnProperty.call(value, "state")
+    ? value.state
+    : null;
+  const succeeded = Object.prototype.hasOwnProperty.call(value, "succeeded")
+    ? value.succeeded
+    : null;
+  if (
+    (phase !== "idle" && phase !== "running") ||
+    !["ok", "attention", "error", "disabled", "unknown"].includes(state) ||
+    (succeeded !== null && typeof succeeded !== "boolean")
+  ) {
+    return null;
+  }
+  return { phase, state, succeeded };
 }
 
 function validLifecyclePlan(plan) {
@@ -383,4 +448,6 @@ module.exports = {
   removePackagedObserverService,
   resolveCollectorCommand,
   resolveCollectorLifecyclePlan,
+  runCollectorCommand,
+  waitForActiveRefresh,
 };

@@ -62,6 +62,10 @@ class TimedAdapter(Adapter):
     performance_source_class = "network"
 
 
+class ChildProcessAdapter(Adapter):
+    performance_source_class = "child_process"
+
+
 class BoundedReadOnlyKeychainTests(unittest.TestCase):
     if sys.platform == "win32":
         __unittest_skip__ = True
@@ -98,6 +102,40 @@ class BoundedReadOnlyKeychainTests(unittest.TestCase):
         self.assertIsNone(keychain.get("bad\naccount"))
         with self.assertRaises(RuntimeError):
             keychain.set("provider", "new-value")
+
+
+class CurrentRefreshTests(unittest.TestCase):
+    def test_current_refresh_uses_one_targeted_child_fetch_and_keeps_last_good_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = CardCache(Path(directory) / "cards.json")
+            previous = card(
+                "cursor", source="OpenUsage", family_id="cursor",
+                remaining_percent=73,
+            )
+            cache.save([previous])
+
+            class TargetedChild(ChildProcessAdapter):
+                def __init__(self):
+                    self.fetch_calls = 0
+                    self.current_calls = 0
+
+                def fetch(self):
+                    self.fetch_calls += 1
+                    raise AssertionError("full child export must not run")
+
+                def fetch_current(self):
+                    self.current_calls += 1
+                    raise RuntimeError("cursor unavailable")
+
+            adapter = TargetedChild()
+            result = Aggregator([adapter], cache, clock=lambda: NOW).refresh(
+                current_only=True
+            )
+            self.assertEqual(adapter.fetch_calls, 0)
+            self.assertEqual(adapter.current_calls, 1)
+            self.assertEqual(result.cards[0].remaining_percent, 73)
+            self.assertTrue(result.cards[0].stale)
+            self.assertEqual(result.cards[0].status, ProviderStatus.STALE)
 
     def test_real_overflow_is_bounded_and_process_group_is_reaped(self):
         with tempfile.TemporaryDirectory() as directory:

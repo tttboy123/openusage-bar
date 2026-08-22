@@ -16,6 +16,8 @@ interface MenuBarPopoverProps {
   todayTokens: string;
   coverage?: string;
   groups: ProviderCapacityGroup[];
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
 function statusClass(status: string) {
@@ -27,7 +29,14 @@ function statusClass(status: string) {
   }
 }
 
-export default function MenuBarPopover({ updatedAt, todayTokens, coverage, groups }: MenuBarPopoverProps) {
+export default function MenuBarPopover({
+  updatedAt,
+  todayTokens,
+  coverage,
+  groups,
+  onRefresh,
+  refreshing = false,
+}: MenuBarPopoverProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
   return (
     <div className="menubar-popover">
@@ -36,8 +45,15 @@ export default function MenuBarPopover({ updatedAt, todayTokens, coverage, group
           <div className="menubar-title">UsageHub</div>
           <div className="menubar-subtitle">{updatedAt}</div>
         </div>
-        <button className="menubar-icon-btn" aria-label="Refresh">
-          <ArrowsClockwise size={16} />
+        <button
+          className="menubar-icon-btn"
+          type="button"
+          aria-label="Refresh usage data"
+          title="Refresh usage data"
+          onClick={onRefresh}
+          disabled={refreshing}
+        >
+          <ArrowsClockwise size={16} className={refreshing ? "spinning" : ""} />
         </button>
       </header>
       <button className="menubar-primary-btn">

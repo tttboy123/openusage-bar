@@ -2,7 +2,6 @@ import http.client
 import json
 import tempfile
 import threading
-import time
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -297,7 +296,7 @@ class WebDashboardTests(unittest.TestCase):
             server.server_close()
             thread.join(3)
 
-    def test_refresh_route_is_unavailable_without_refresher(self):
+    def test_refresh_route_is_read_only_and_status_is_disabled(self):
         server = make_dashboard_server(self.query, port=0, today=date(2026, 7, 29))
         port = server.server_address[1]
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -306,10 +305,10 @@ class WebDashboardTests(unittest.TestCase):
             connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
             connection.request("POST", "/v1/refresh")
             response = connection.getresponse()
-            body = json.loads(response.read())
+            response.read()
             connection.close()
-            self.assertEqual(response.status, 503)
-            self.assertEqual(body["status"], "unavailable")
+            self.assertEqual(response.status, 405)
+            self.assertEqual(response.getheader("Allow"), "GET, HEAD")
 
             connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
             connection.request("GET", "/v1/refresh/status")
@@ -317,96 +316,13 @@ class WebDashboardTests(unittest.TestCase):
             body = json.loads(response.read())
             connection.close()
             self.assertEqual(response.status, 200)
-            self.assertEqual(body["status"], "unavailable")
+            self.assertEqual(body["schemaVersion"], "1.0")
+            self.assertIsInstance(body["dataRevision"], int)
+            self.assertEqual(body["generatedAt"], "2026-07-29T12:00:00Z")
+            self.assertEqual(body["state"], "disabled")
+            self.assertEqual(body["phase"], "idle")
+            self.assertIsNone(body["succeeded"])
         finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(3)
-
-    def test_refresh_route_runs_bounded_background_refresh_with_history(self):
-        calls: list[dict] = []
-
-        class FakeRefresher:
-            def refresh(self, *, history_days=None):
-                calls.append({"history_days": history_days})
-
-        server = make_dashboard_server(
-            self.query,
-            port=0,
-            today=date(2026, 7, 29),
-            refresher=FakeRefresher(),
-        )
-        port = server.server_address[1]
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
-            connection.request("POST", "/v1/refresh")
-            response = connection.getresponse()
-            body = json.loads(response.read())
-            connection.close()
-            self.assertEqual(response.status, 202)
-            self.assertEqual(body["status"], "started")
-
-            deadline = time.monotonic() + 5
-            status = None
-            while time.monotonic() < deadline:
-                connection = http.client.HTTPConnection(
-                    "127.0.0.1", port, timeout=3
-                )
-                connection.request("GET", "/v1/refresh/status")
-                response = connection.getresponse()
-                status = json.loads(response.read())
-                connection.close()
-                if status["status"] == "idle":
-                    break
-                time.sleep(0.05)
-            self.assertEqual(status["status"], "idle")
-            self.assertIs(status["succeeded"], True)
-            self.assertEqual(calls, [{"history_days": 364}])
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(3)
-
-    def test_refresh_route_reports_in_progress_and_does_not_stack(self):
-        started = threading.Event()
-        release = threading.Event()
-
-        class BlockingRefresher:
-            def refresh(self, *, history_days=None):
-                started.set()
-                release.wait(5)
-
-        server = make_dashboard_server(
-            self.query,
-            port=0,
-            today=date(2026, 7, 29),
-            refresher=BlockingRefresher(),
-        )
-        port = server.server_address[1]
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
-            connection.request("POST", "/v1/refresh")
-            response = connection.getresponse()
-            body = json.loads(response.read())
-            connection.close()
-            self.assertEqual(response.status, 202)
-            self.assertTrue(started.wait(3))
-
-            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
-            connection.request("POST", "/v1/refresh")
-            response = connection.getresponse()
-            body = json.loads(response.read())
-            connection.close()
-            self.assertEqual(response.status, 200)
-            self.assertEqual(body["status"], "in_progress")
-
-            release.set()
-        finally:
-            release.set()
             server.shutdown()
             server.server_close()
             thread.join(3)

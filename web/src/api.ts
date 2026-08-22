@@ -54,6 +54,7 @@ export interface CapacityProvider {
   remainingRatio?: number;
   resetsAt?: string;
   state?: string;
+  stale?: boolean;
   appliesTo?: { kind?: string; modelIds?: string[] };
 }
 
@@ -413,23 +414,75 @@ export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface RefreshStatus {
-  status?: string;
+  state?: "ok" | "attention" | "error" | "disabled" | "unknown";
+  phase?: "idle" | "running";
   lastStartedAt?: string | null;
   lastFinishedAt?: string | null;
   succeeded?: boolean | null;
 }
 
+const HOST_REFRESH_DEADLINE_MS = 185_000;
+const REFRESH_STATES = new Set(["ok", "attention", "error", "disabled", "unknown"]);
+
+function normalizeHostRefreshResult(value: unknown): RefreshStatus | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  let prototype: object | null;
+  let descriptors: PropertyDescriptorMap;
+  try {
+    prototype = Object.getPrototypeOf(value);
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch {
+    return null;
+  }
+  const expected = ["apiVersion", "action", "ok", "code", "state", "phase", "succeeded"];
+  if (
+    prototype !== Object.prototype ||
+    Reflect.ownKeys(descriptors).length !== expected.length ||
+    expected.some((key) => !Object.prototype.hasOwnProperty.call(descriptors[key] ?? {}, "value"))
+  ) {
+    return null;
+  }
+  const record = Object.fromEntries(
+    expected.map((key) => [key, descriptors[key]?.value]),
+  ) as Record<string, unknown>;
+  if (
+    record.apiVersion !== "host-action.openusage/v1" ||
+    record.action !== "usage.refresh" ||
+    record.ok !== true ||
+    record.code !== "refreshed" ||
+    typeof record.state !== "string" ||
+    !REFRESH_STATES.has(record.state) ||
+    record.state !== "ok" ||
+    record.phase !== "idle" ||
+    record.succeeded !== true
+  ) {
+    return null;
+  }
+  return { state: "ok", phase: "idle", succeeded: true };
+}
+
 /**
- * Ask the local dashboard observer to run one bounded refresh with a full
- * history backfill. The renderer never touches credentials or the ledger
- * directly; this is a read-only refresh hint handled by the host.
+ * Ask the trusted desktop host to run one bounded current-window refresh.
+ * Standalone Web has no host action boundary and therefore fails closed.
  */
 export async function triggerRefresh(): Promise<RefreshStatus> {
-  const response = await fetch("/v1/refresh", { method: "POST", cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`/v1/refresh failed: ${response.status}`);
-  }
-  return (await response.json()) as RefreshStatus;
+  const payload = await getHostJsonWithin<unknown>(
+    "/host/v1/actions",
+    HOST_REFRESH_DEADLINE_MS,
+    {
+    method: "POST",
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      apiVersion: "host-action.openusage/v1",
+      action: "usage.refresh",
+    }),
+    },
+  );
+  const normalized = normalizeHostRefreshResult(payload);
+  if (normalized === null) throw new Error("invalid host refresh response");
+  return normalized;
 }
 
 export async function fetchRefreshStatus(): Promise<RefreshStatus> {

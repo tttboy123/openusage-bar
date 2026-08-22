@@ -425,7 +425,7 @@ process.stdout.write(JSON.stringify(plan));
 
         self.assertEqual(
             plan["installArgv"],
-            ["desktop-service", "install", "--interval", "300"],
+            ["desktop-service", "install", "--interval", "1800"],
         )
         self.assertEqual(
             plan["uninstallArgv"],

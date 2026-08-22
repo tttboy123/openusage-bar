@@ -2,8 +2,9 @@
 
 Cross-platform desktop client for UsageHub. The packaged app starts or probes
 one private Observer daemon, serves the bundled `web/dist` assets from an
-ephemeral loopback static server, and proxies fixed read-only Local API routes
-through the main process. When the optional Gateway is explicitly running in
+ephemeral loopback static server, and proxies fixed Local API query routes plus
+one bounded credential-free refresh command through the main process. When the
+optional Gateway is explicitly running in
 Advise or Gateway mode, the same main-process boundary also exposes one narrow
 read-only advice operation: `POST /gateway/v1/should-send`. It never forwards a
 Provider request. The main window and tray therefore share the same

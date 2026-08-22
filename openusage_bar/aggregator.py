@@ -132,18 +132,23 @@ class Aggregator:
         self.timing_recorder = timing_recorder
         self._refresh_lock = threading.Lock()
 
-    def refresh(self) -> Overview:
+    def refresh(self, *, current_only: bool = False) -> Overview:
         if not self._refresh_lock.acquire(blocking=False):
             return Overview(self.cache.load())
         try:
             cached = {card.provider_id: card for card in self.cache.load()}
             fresh: list[ProviderCard] = []
             for adapter in self.adapters:
+                operation = adapter.fetch
+                if current_only and source_class_for(adapter, "network") == "child_process":
+                    operation = getattr(adapter, "fetch_current", None)
+                    if not callable(operation):
+                        continue
                 try:
                     result = measure_source_call(
                         self.timing_recorder,
                         source_class_for(adapter, "network"),
-                        adapter.fetch,
+                        operation,
                     )
                 except Exception:
                     continue
@@ -292,6 +297,26 @@ class LedgerRefresher:
                 quota_results=results,
                 history_days=history_days,
             )
+
+    def refresh_current(self) -> None:
+        """Refresh current quota facts without blocking on history exports."""
+        overview = self.aggregator.refresh(current_only=True)
+        results = tuple(
+            (provider_id, source_id, result)
+            for provider_id, source_id, adapter in self.quota_sources
+            if (result := getattr(adapter, "last_quota_result", None)) is not None
+        )
+        balance_results = tuple(
+            (provider_id, source_id, result)
+            for provider_id, source_id, adapter in self.balance_sources
+            if source_class_for(adapter, "network") != "child_process"
+            and (result := getattr(adapter, "last_balance_result", None)) is not None
+        )
+        self.collector.refresh_current(
+            overview,
+            balance_results=balance_results,
+            quota_results=results,
+        )
 
     def performance_timing_snapshot(self) -> dict:
         if self.timing_recorder is None:

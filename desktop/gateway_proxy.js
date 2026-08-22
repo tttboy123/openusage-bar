@@ -96,6 +96,15 @@ const PROVIDER_CONFIG_CATEGORIES = new Set(["official", "gateway"]);
 const PROVIDER_CONFIG_STATUSES = new Set(["created", "updated"]);
 const ACCOUNT_POOL_EDIT_ACTION = "accountPool.edit";
 const ACCOUNT_POOL_REMOVE_ACTION = "accountPool.remove";
+const USAGE_REFRESH_ACTION = "usage.refresh";
+const USAGE_REFRESH_CODES = new Set(["refreshed", "unavailable"]);
+const PUBLIC_SEMANTIC_STATES = new Set([
+  "ok",
+  "attention",
+  "error",
+  "disabled",
+  "unknown",
+]);
 const ACCOUNT_POOL_MUTATE_VERSION = 1;
 const ACCOUNT_POOL_STRATEGIES = new Set([
   "fixed-first",
@@ -209,6 +218,7 @@ const LOCAL_API_QUERY_FIELDS = new Map([
   ["/v1/sources/status", new Set()],
   ["/v1/changes", new Set(["after", "limit"])],
   ["/v1/quick-connect", new Set()],
+  ["/v1/refresh/status", new Set()],
 ]);
 const FORBIDDEN_RENDERER_HEADERS = new Set([
   "authorization",
@@ -370,7 +380,6 @@ function classifyRendererRequest({ method, target, headers = {} }) {
       headers: { "Content-Type": "application/json" },
     };
   }
-
   const normalizedHeaders = normalizeRendererHeaders(headers);
   if (normalizedHeaders === null) return null;
 
@@ -808,7 +817,7 @@ function observerDaemonArguments(runtime, { offline = false } = {}) {
     ...(offline === true ? ["--offline"] : []),
     "daemon",
     "--interval",
-    "300",
+    "1800",
     "--api-transport",
   ];
   if (
@@ -870,7 +879,11 @@ async function probePrivateObserver(
 }
 
 async function fetchPrivateObserverJson(target, options = {}) {
-  if (target !== "/v1/snapshot" && target !== "/v1/capacity") {
+  if (
+    target !== "/v1/snapshot" &&
+    target !== "/v1/capacity" &&
+    target !== "/v1/refresh/status"
+  ) {
     return null;
   }
   try {
@@ -1088,6 +1101,7 @@ async function fetchRendererResponse(
     deadlineMs = DEFAULT_DEADLINE_MS,
     hostActionExecutor,
     providerConfigExecutor,
+    refreshExecutor,
     gatewayAccountEditorExecutor,
     gatewayAccountOperationHost,
     spawnProcess = childProcess.spawn,
@@ -1140,7 +1154,11 @@ async function fetchRendererResponse(
     classified.target === "/host/v1/capabilities"
   ) {
     return rendererJsonResponse(
-      hostActionCapabilities({ hostActionExecutor, providerConfigExecutor }),
+      hostActionCapabilities({
+        hostActionExecutor,
+        providerConfigExecutor,
+        refreshExecutor,
+      }),
     );
   }
   if (
@@ -1148,6 +1166,18 @@ async function fetchRendererResponse(
     classified.method === "POST" &&
     classified.target === "/host/v1/actions"
   ) {
+    if (classified.actionRequest?.action === USAGE_REFRESH_ACTION) {
+      if (typeof refreshExecutor !== "function") throw requestFailure("unavailable");
+      let result;
+      try {
+        result = await refreshExecutor();
+      } catch {
+        result = null;
+      }
+      const sanitized = sanitizeUsageRefreshResult(result);
+      if (sanitized === null) throw requestFailure("unavailable");
+      return rendererJsonResponse(sanitized, sanitized.ok === true ? 200 : 503);
+    }
     const result = await executeHostActionCommand(classified.actionRequest, {
       hostActionExecutor,
       providerConfigExecutor,
@@ -2163,6 +2193,13 @@ function sanitizeProviderConfigApplyRequest(body) {
 
 function sanitizeHostActionRequest(body) {
   if (body === null || typeof body !== "object") return null;
+  if (body.action === USAGE_REFRESH_ACTION) {
+    const request = ownDataRecord(body, ["apiVersion", "action"]);
+    return request?.apiVersion === HOST_ACTION_API_VERSION &&
+      request.action === USAGE_REFRESH_ACTION
+      ? request
+      : null;
+  }
   if (body.action === PROVIDER_CONFIG_APPLY_ACTION) {
     return sanitizeProviderConfigApplyRequest(body);
   }
@@ -2274,11 +2311,41 @@ function sanitizeHostActionRequestBody(body) {
   return sanitizeHostActionRequest(value);
 }
 
+function sanitizeUsageRefreshResult(value) {
+  const result = ownDataRecord(value, [
+    "apiVersion",
+    "action",
+    "ok",
+    "code",
+    "state",
+    "phase",
+    "succeeded",
+  ]);
+  if (
+    result === null ||
+    result.apiVersion !== HOST_ACTION_API_VERSION ||
+    result.action !== USAGE_REFRESH_ACTION ||
+    typeof result.ok !== "boolean" ||
+    !USAGE_REFRESH_CODES.has(result.code) ||
+    !PUBLIC_SEMANTIC_STATES.has(result.state) ||
+    result.phase !== "idle" ||
+    typeof result.succeeded !== "boolean" ||
+    result.ok !== result.succeeded ||
+    (result.ok && (result.code !== "refreshed" || result.state !== "ok")) ||
+    (!result.ok && result.code !== "unavailable")
+  ) {
+    return null;
+  }
+  return result;
+}
+
 function hostActionCapabilities({
   hostActionExecutor,
   providerConfigExecutor,
+  refreshExecutor,
 } = {}) {
   const actions = [];
+  if (typeof refreshExecutor === "function") actions.push(USAGE_REFRESH_ACTION);
   if (validHostActionExecutor(hostActionExecutor)) {
     actions.push(
       ACCOUNT_POOL_CREATE_ACTION,
@@ -3613,6 +3680,7 @@ module.exports = {
   sanitizeDecisionTracesPayload,
   sanitizeDecisionTracesValue,
   sanitizeHostActionRequest,
+  sanitizeUsageRefreshResult,
   sanitizeGatewayAccountOperationRequest,
   startOrProbeLegacyDashboard,
   startOrProbePrivateObserver,

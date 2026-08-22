@@ -445,6 +445,21 @@ class OpenUsageAdapterTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["errors"], "replace")
         self.assertEqual(run.call_args.args[0][1:], ["export", "--output", "-", "--format", "json", "--source", "auto"])
 
+    def test_current_fetch_is_one_bounded_cursor_export_without_auto_history(self):
+        run = Mock(return_value=completed(envelope(cursor_snapshot({"remaining": 91, "used": 9}))))
+        result = OpenUsageAdapter(
+            clock=lambda: NOW,
+            runner=run,
+            provider_filter_supported=True,
+        ).fetch_current()
+        self.assertEqual([card.provider_id for card in result.cards], ["cursor"])
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(
+            run.call_args.args[0][-4:],
+            ["--source", "direct", "--provider", "cursor"],
+        )
+        self.assertLessEqual(run.call_args.kwargs["timeout"], 15)
+
     def test_incomplete_auto_cursor_is_replaced_by_direct_cursor_quota(self):
         auto_cursor = snapshot("cursor", None)
         auto_cursor["status"] = "UNKNOWN"

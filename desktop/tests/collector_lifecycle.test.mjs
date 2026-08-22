@@ -32,7 +32,7 @@ test("packaged Windows and Linux resolve one observe-only service lifecycle plan
       "service",
       "install",
       "--interval",
-      "300",
+      "1800",
       "--command",
       windowsCollector,
     ],
@@ -65,7 +65,7 @@ test("packaged Windows and Linux resolve one observe-only service lifecycle plan
       "desktop-service",
       "install",
       "--interval",
-      "300",
+      "1800",
     ],
     uninstallArgv: ["desktop-service", "uninstall"],
     deleteStateArgv: [
@@ -77,6 +77,30 @@ test("packaged Windows and Linux resolve one observe-only service lifecycle plan
       "json",
     ],
   });
+});
+
+test("desktop reuses an active scheduled refresh instead of launching a competitor", async () => {
+  const { waitForActiveRefresh } = require("../collector_runtime.js");
+  const statuses = [
+    { phase: "running", state: "attention", succeeded: null },
+    { phase: "running", state: "attention", succeeded: null },
+    { phase: "idle", state: "ok", succeeded: true },
+  ];
+  let waits = 0;
+
+  const result = await waitForActiveRefresh({
+    readStatus: async () => statuses.shift(),
+    wait: async () => {
+      waits += 1;
+    },
+    attempts: 2,
+  });
+
+  assert.deepEqual(result, {
+    waited: true,
+    status: { phase: "idle", state: "ok", succeeded: true },
+  });
+  assert.equal(waits, 2);
 });
 
 test("Linux invokes the packaged managed-service command and waits for readiness", {

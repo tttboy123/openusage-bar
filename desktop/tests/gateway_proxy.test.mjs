@@ -11,6 +11,23 @@ import test from "node:test";
 const require = createRequire(import.meta.url);
 const approveFixtureWindowsAcl = () => true;
 
+test("usage refresh results cross the renderer boundary only as a closed contract", () => {
+  const { sanitizeUsageRefreshResult } = require("../gateway_proxy.js");
+  const valid = {
+    apiVersion: "host-action.openusage/v1",
+    action: "usage.refresh",
+    ok: true,
+    code: "refreshed",
+    state: "ok",
+    phase: "idle",
+    succeeded: true,
+  };
+  assert.deepEqual(sanitizeUsageRefreshResult(valid), valid);
+  assert.equal(sanitizeUsageRefreshResult({ ...valid, privateToken: "secret" }), null);
+  assert.equal(sanitizeUsageRefreshResult({ ...valid, state: "running" }), null);
+  assert.equal(sanitizeUsageRefreshResult({ ...valid, ok: false }), null);
+});
+
 test("discovers the private Local API and Gateway endpoints per platform", () => {
   const { discoverPrivateRuntime } = require("../gateway_proxy.js");
 
@@ -130,6 +147,48 @@ test("allows only credential-free renderer reads and builds closed upstream head
       target: "/gateway/v1/account-pools",
       headers: { Accept: "application/json" },
     },
+  );
+  assert.equal(
+    classifyRendererRequest({
+      method: "POST",
+      target: "/v1/refresh",
+      headers: { "content-length": "0" },
+    }),
+    null,
+  );
+  assert.deepEqual(
+    classifyRendererRequest({
+      method: "POST",
+      target: "/host/v1/actions",
+      headers: { "content-type": "application/json", "content-length": "55" },
+    }),
+    {
+      service: "host",
+      method: "POST",
+      target: "/host/v1/actions",
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+  assert.deepEqual(
+    classifyRendererRequest({
+      method: "GET",
+      target: "/v1/refresh/status",
+      headers: {},
+    }),
+    {
+      service: "localApi",
+      method: "GET",
+      target: "/v1/refresh/status",
+      headers: { Accept: "application/json" },
+    },
+  );
+  assert.equal(
+    classifyRendererRequest({
+      method: "GET",
+      target: "/v1/refresh",
+      headers: {},
+    }),
+    null,
   );
   assert.deepEqual(
     classifyRendererRequest({
@@ -633,7 +692,7 @@ test("builds the offline Observer daemon arguments", () => {
     "--offline",
     "daemon",
     "--interval",
-    "300",
+    "1800",
     "--api-transport",
     "unix",
     "--api-socket",
@@ -658,7 +717,7 @@ test("starts one bounded private Observer daemon only after a failed probe", asy
   assert.deepEqual(observerDaemonArguments(unixRuntime), [
     "daemon",
     "--interval",
-    "300",
+    "1800",
     "--api-transport",
     "unix",
     "--api-socket",
@@ -677,7 +736,7 @@ test("starts one bounded private Observer daemon only after a failed probe", asy
     [
       "daemon",
       "--interval",
-      "300",
+      "1800",
       "--api-transport",
       "tcp",
       "--api-port",
@@ -773,7 +832,7 @@ test("starts the private Observer with offline daemon arguments", async () => {
       "--offline",
       "daemon",
       "--interval",
-      "300",
+      "1800",
       "--api-transport",
       "unix",
       "--api-socket",
@@ -1915,6 +1974,15 @@ test("serves the renderer API boundary without reflecting credentials or private
     },
     platform: process.platform,
     verifyWindowsAcl: approveFixtureWindowsAcl,
+    refreshExecutor: async () => ({
+      apiVersion: "host-action.openusage/v1",
+      action: "usage.refresh",
+      ok: true,
+      code: "refreshed",
+      state: "ok",
+      phase: "idle",
+      succeeded: true,
+    }),
   });
   const rendererServer = http.createServer((request, response) => {
     if (!isRendererApiTarget(request.url)) {
@@ -1937,6 +2005,29 @@ test("serves the renderer API boundary without reflecting credentials or private
   });
   assert.equal(ok.headers["set-cookie"], undefined);
   assert.equal(ok.headers.authorization, undefined);
+
+  const refreshBody = JSON.stringify({
+    apiVersion: "host-action.openusage/v1",
+    action: "usage.refresh",
+  });
+  const refresh = await requestTcp(rendererPort, "/host/v1/actions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": String(Buffer.byteLength(refreshBody)),
+    },
+    body: refreshBody,
+  });
+  assert.equal(refresh.statusCode, 200);
+  assert.deepEqual(JSON.parse(refresh.body.toString("utf8")), {
+    apiVersion: "host-action.openusage/v1",
+    action: "usage.refresh",
+    ok: true,
+    code: "refreshed",
+    state: "ok",
+    phase: "idle",
+    succeeded: true,
+  });
 
   const head = await requestTcp(rendererPort, "/v1/health", {
     method: "HEAD",

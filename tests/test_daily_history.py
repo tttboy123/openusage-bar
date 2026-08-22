@@ -30,8 +30,9 @@ from openusage_bar.openai_organization import (
     ImportFailure,
     UsageImportSuccess,
 )
-from openusage_bar.providers.contracts import QuotaFetchSuccess
+from openusage_bar.providers.contracts import QuotaFetchFailure, QuotaFetchSuccess
 from openusage_bar.providers.quota import percent_observation
+from openusage_bar.query import QueryService
 
 
 NOW = datetime(2026, 7, 14, 2, 0, tzinfo=timezone.utc)
@@ -1454,6 +1455,34 @@ class ActivityCollectorTests(unittest.TestCase):
             ("minimax", "current.quota", NOW),
             [call.args for call in store.record_source_success.call_args_list],
         )
+
+    def test_explicit_quota_failure_marks_last_good_capacity_stale(self):
+        with ActivityStore(":memory:") as store:
+            store.record_quota(percent_observation(
+                provider_id="codex",
+                source_id="codex.app_server",
+                quota_name="Weekly",
+                quota_window="weekly",
+                remaining_percent=85,
+                resets_at=None,
+                observed_at=OLDER,
+            ))
+            importer = Mock()
+            collector = ActivityCollector(store, importer, clock=lambda: NOW)
+
+            collector.refresh_current(
+                Overview([card("codex", remaining_percent=85)]),
+                quota_results=((
+                    "codex",
+                    "codex.app_server",
+                    QuotaFetchFailure("quota_unavailable"),
+                ),),
+            )
+
+            capacity = QueryService(store, clock=lambda: NOW).capacity()
+            self.assertEqual(len(capacity.providers), 1)
+            self.assertEqual(capacity.providers[0].remaining_ratio, 0.85)
+            self.assertTrue(capacity.providers[0].stale)
 
     def test_naive_quota_timestamp_creates_no_quota_and_safe_unavailable_health(self):
         store = Mock()

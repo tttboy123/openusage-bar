@@ -7,6 +7,7 @@ from dataclasses import FrozenInstanceError
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+from openusage_bar.activity_records import BalanceObservation
 from openusage_bar.activity_store import (
     ActivityStore,
     DailyCostRow,
@@ -244,6 +245,31 @@ class QueryServiceTests(unittest.TestCase):
         self.assertIsNone(result.providers[2].account_ref)
         self.assertIsNone(result.providers[0].estimated_cost_per_million_tokens)
         self.assertEqual(result.providers[0].constraints, ())
+
+    def test_capacity_prefers_newer_window_over_older_more_urgent_window(self):
+        self.store.record_quota(
+            quota(
+                "codex.old",
+                "codex",
+                0.01,
+                account_ref="",
+                observed_at="2026-07-14T08:00:00Z",
+            )
+        )
+        self.store.record_quota(
+            quota(
+                "codex.new",
+                "codex",
+                1.0,
+                account_ref="",
+                observed_at="2026-07-14T09:00:00Z",
+            )
+        )
+
+        result = self.query.capacity()
+
+        self.assertEqual(result.providers[0].record_id, "codex.new")
+        self.assertEqual(result.providers[0].remaining_ratio, 1.0)
 
     def test_exact_capacity_fixture_sorts_minimax_first(self):
         self.store.record_quota(quota("minimax.five_hour", "minimax", 0.18))
@@ -621,6 +647,42 @@ class QueryServiceTests(unittest.TestCase):
         "summary", "balances", "quotaWindows", "quotaHub", "providers", "sources",
             "catalogRevision",
         })
+
+    def test_quota_hub_does_not_add_derived_copy_of_direct_balance(self):
+        for record_id, account_ref, quality, source_id in (
+            ("deepseek.balance", "deepseek", "direct", "deepseek.balance"),
+            (
+                "deepseek.openusage.balance",
+                "openusage",
+                "derived",
+                "openusage.deepseek.balance",
+            ),
+        ):
+            self.store.record_balance(BalanceObservation(
+                record_id=record_id,
+                observed_at="2026-07-14T09:00:00Z",
+                provider_id="deepseek",
+                account_ref=account_ref,
+                currency="CNY",
+                available="95.61",
+                voucher=None,
+                cash=None,
+                state="ok",
+                quality=quality,
+                stale=False,
+                source_id=source_id,
+            ))
+
+        result = self.query.resource_snapshot(date(2026, 7, 14))
+
+        self.assertEqual(len(result.balances), 2)
+        self.assertEqual(len(result.quota_hub), 1)
+        self.assertEqual(result.quota_hub[0].total_available, "95.61")
+        self.assertEqual(result.quota_hub[0].provider_count, 1)
+        self.assertEqual(
+            result.quota_hub[0].provenance,
+            (("deepseek", "deepseek.balance", "direct"),),
+        )
 
     def test_change_pages_have_deterministic_next_cursor_and_snapshot_revision(self):
         self.store.replace_daily_usage("codex", "2026-07-13", [usage(day="2026-07-13")])

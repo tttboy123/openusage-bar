@@ -17,7 +17,7 @@ class BuildScriptContractTests(unittest.TestCase):
 
         self.assertIn('python3', source)
         self.assertIn('-m venv "$VENV"', source)
-        self.assertIn('pip==26.1.2', requirements)
+        self.assertIn('pip==26.2', requirements)
         self.assertIn(
             '--no-deps --require-hashes --requirement "$REQUIREMENTS"', source
         )
