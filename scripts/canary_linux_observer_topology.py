@@ -333,10 +333,20 @@ def _boundary_failure_stage(
     """Classify a closed boundary failure without disclosing private values."""
 
     peers = (health_peer, peer_before, peer_after)
+    try:
+        unpacked_peers = tuple(struct.unpack("=3i", peer) for peer in peers)
+    except Exception:
+        return "runtime-before-boundary-peer"
     if (
         any(type(peer) is not bytes or len(peer) != 12 for peer in peers)
         or peer_before != health_peer
         or peer_after != health_peer
+        or any(
+            peer_pid <= 0
+            or peer_uid != os.getuid()
+            or peer_gid != os.getgid()
+            for peer_pid, peer_uid, peer_gid in unpacked_peers
+        )
     ):
         return "runtime-before-boundary-peer"
     if (
@@ -354,6 +364,17 @@ def _boundary_failure_stage(
         counters_after.bounded_http_open_attempts,
         counters_after.headless_keychain_get_attempts,
     )
+    if any(
+        type(values[0]) is not str
+        or len(values[0]) != 64
+        or any(character not in "0123456789abcdef" for character in values[0])
+        or type(values[1]) is not int
+        or type(values[2]) is not int
+        or not 0 <= values[1] < 1 << 64
+        or not 0 <= values[2] < 1 << 64
+        for values in (before, after)
+    ):
+        return "runtime-before-boundary-shape"
     if before != after:
         return "runtime-before-boundary-drift"
     if before[1:] != (0, 0):
@@ -545,12 +566,6 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
             peer_after=boundary_peer_after,
             counters_after=boundary_after,
         )
-        boundary_values = closed_shared_client_boundary_zero_window_values(
-            boundary_window
-        )
-        if boundary_values is None:
-            raise LinuxObserverTopologyCanaryError("runtime-before-boundary")
-        boundary_window = SharedClientBoundaryZeroWindow(*boundary_values)
     except Exception:
         raise LinuxObserverTopologyCanaryError(
             _boundary_failure_stage(
@@ -560,6 +575,21 @@ def _observe_runtime(*, remaining_timeout) -> LinuxObserverRuntimeFact:
                 peer_after=boundary_peer_after,
                 counters_after=boundary_after,
             )
+        ) from None
+    try:
+        boundary_values = closed_shared_client_boundary_zero_window_values(
+            boundary_window
+        )
+        if boundary_values is None:
+            raise LinuxObserverTopologyCanaryError(
+                "runtime-before-boundary-shape"
+            )
+        boundary_window = SharedClientBoundaryZeroWindow(*boundary_values)
+    except LinuxObserverTopologyCanaryError:
+        raise
+    except Exception:
+        raise LinuxObserverTopologyCanaryError(
+            "runtime-before-boundary-shape"
         ) from None
     try:
         remaining_timeout()
