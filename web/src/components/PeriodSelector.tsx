@@ -1,4 +1,3 @@
-import { localDayKey } from "../dates";
 import { type Messages } from "../i18n";
 
 export type Period = "day" | "week" | "month" | "year";
@@ -18,17 +17,16 @@ export function periodDays(period: Period): number {
   }
 }
 
-export { localDayKey } from "../dates";
-
-export function rangeFor(days: number) {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(from.getDate() - days + 1);
-  return {
-    from: localDayKey(from),
-    to: localDayKey(to),
-  };
-}
+export {
+  eachDay,
+  endOfWeek,
+  localDayKey,
+  parseDayKey,
+  rangeFor,
+  rangeLength,
+  startOfWeek,
+} from "../dates";
+export { type DayRange } from "../dates";
 
 export default function PeriodSelector({
   value,

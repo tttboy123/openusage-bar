@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   LineChart,
   Line,
@@ -17,15 +17,27 @@ import {
   type ActivityRow,
   type ActivityCoverageRow,
 } from "../api";
+import {
+  deriveActivitySnapshot,
+  shouldPreserveActivitySnapshot,
+  shouldReplaceActivitySnapshot,
+  type LoadedActivitySnapshot,
+} from "../activitySnapshot";
 import { useAnimatedNumber } from "../hooks/useAnimatedNumber";
 import Skeleton from "../components/Skeleton";
 import PeriodSelector, {
+  eachDay,
+  endOfWeek,
   localDayKey,
+  parseDayKey,
   periodDays,
   rangeFor,
+  rangeLength,
+  startOfWeek,
   type Period,
 } from "../components/PeriodSelector";
 import { type Messages, tpl } from "../i18n";
+import { formatTokenCompact } from "../tokenFormat";
 
 type BadgeState = "partial" | "missing" | "neutral";
 
@@ -80,63 +92,12 @@ const MODEL_COLORS = [
 ];
 
 const CHART_LINE_STYLES = ["", "4 4", "2 4", "6 3"];
+const EMPTY_ACTIVITY_ROWS: ActivityRow[] = [];
+const EMPTY_ACTIVITY_COVERAGE: ActivityCoverageRow[] = [];
+const EMPTY_DAY_TOTALS: Readonly<Record<string, number>> = {};
 
 function dayKey(d: Date): string {
   return localDayKey(d);
-}
-
-function formatCompact(n: number): string {
-  try {
-    return new Intl.NumberFormat(navigator.language, {
-      notation: "compact",
-      maximumFractionDigits: 1,
-    }).format(n);
-  } catch {
-    return Math.round(n).toLocaleString();
-  }
-}
-
-function eachDay(from: string, to: string): Date[] {
-  const days: Date[] = [];
-  const cur = new Date(from);
-  const end = new Date(to);
-  while (cur <= end) {
-    days.push(new Date(cur));
-    cur.setDate(cur.getDate() + 1);
-  }
-  return days;
-}
-
-function startOfWeek(date: string): string {
-  const d = new Date(date);
-  const offset = d.getDay();
-  d.setDate(d.getDate() - offset);
-  return d.toISOString().slice(0, 10);
-}
-
-function endOfWeek(date: string): string {
-  const d = new Date(date);
-  const offset = 6 - d.getDay();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
-}
-
-function rangeLength(from: string, to: string): number {
-  return (
-    Math.round(
-      (new Date(to).getTime() - new Date(from).getTime()) / 86400000,
-    ) + 1
-  );
-}
-
-function yearRange(): { from: string; to: string } {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(from.getDate() - 364);
-  return {
-    from: localDayKey(from),
-    to: localDayKey(to),
-  };
 }
 
 type CalendarDay = {
@@ -154,18 +115,17 @@ function buildCalendar(
   to: string,
   activity: ActivityRow[],
   coverage: ActivityCoverageRow[],
+  dayTotals: Readonly<Record<string, number>>,
 ): {
   days: CalendarDay[];
   weeks: number;
   max: number;
   monthAnchors: { label: string; offset: number }[];
 } {
-  const dayTotals: Record<string, number> = {};
   const partialDays = new Set<string>();
   for (const r of activity) {
     const day = r.day ?? "unknown";
     if (day === "unknown") continue;
-    dayTotals[day] = (dayTotals[day] ?? 0) + (r.totalTokens ?? 0);
     const quality = (r.quality ?? "").toLowerCase();
     if (quality && quality !== "direct" && quality !== "exact") {
       partialDays.add(day);
@@ -205,7 +165,10 @@ function buildCalendar(
     if (!inRange) {
       state = "missing";
     } else if (dayTotals[day] !== undefined) {
-      if (partialDays.has(day)) {
+      if (
+        partialDays.has(day) ||
+        (coverage !== undefined && coverage.covered < coverage.rows)
+      ) {
         state = "partial";
       } else if (total === 0) {
         state = "zero";
@@ -214,7 +177,7 @@ function buildCalendar(
         level = Math.max(1, Math.min(5, Math.ceil((total / max) * 5)));
       }
     } else if (coverage && coverage.rows > 0) {
-      state = coverage.covered > 0 ? "zero" : "partial";
+      state = coverage.covered === coverage.rows ? "zero" : "partial";
     } else {
       state = "missing";
     }
@@ -231,13 +194,11 @@ function buildCalendar(
 
   const monthAnchors: { label: string; offset: number }[] = [];
   const seen = new Set<string>();
-  for (const d of allDays) {
+  for (const [index, d] of allDays.entries()) {
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     if (!seen.has(key)) {
       seen.add(key);
-      const week = Math.floor(
-        (d.getTime() - new Date(start).getTime()) / 604800000,
-      );
+      const week = Math.floor(index / 7);
       monthAnchors.push({
         label: d.toLocaleString(navigator.language, {
           month: "short",
@@ -291,7 +252,7 @@ function modelTooltipContent({
     <div className="model-chart-tip">
       <div className="model-chart-tip-row">
         <span className="model-chart-tip-label">{String(label)}</span>
-        <span className="model-chart-tip-value">{formatCompact(total)}</span>
+        <span className="model-chart-tip-value">{formatTokenCompact(total)}</span>
       </div>
       {items.map((p) => (
         <div className="model-chart-tip-row" key={p.name}>
@@ -302,23 +263,31 @@ function modelTooltipContent({
             />
             {p.name}
           </span>
-          <span className="model-chart-tip-value">{formatCompact(p.value)}</span>
+          <span className="model-chart-tip-value">{formatTokenCompact(p.value)}</span>
         </div>
       ))}
       <div className="model-chart-tip-row model-chart-tip-total">
         <span className="model-chart-tip-label">{t.totalTokens}</span>
-        <span className="model-chart-tip-value">{formatCompact(total)}</span>
+        <span className="model-chart-tip-value">{formatTokenCompact(total)}</span>
       </div>
     </div>
   );
 }
 
-export default function ActivityPage({ t }: { t: Messages }) {
+export default function ActivityPage({
+  t,
+  refreshNonce = 0,
+}: {
+  t: Messages;
+  refreshNonce?: number;
+}) {
   const [period, setPeriod] = useState<Period>("month");
   const [snapshot, setSnapshot] = useState<Snapshot>({});
-  const [activity, setActivity] = useState<ActivityRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [activitySnapshot, setActivitySnapshot] =
+    useState<LoadedActivitySnapshot | null>(null);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const [activityError, setActivityError] = useState<string | null>(null);
+  const [activityLoading, setActivityLoading] = useState(true);
   const [providerFilter, setProviderFilter] = useState<string>("all");
   const [modelFilters, setModelFilters] = useState<ReadonlySet<string>>(new Set());
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
@@ -327,35 +296,60 @@ export default function ActivityPage({ t }: { t: Messages }) {
   const [hiddenModels, setHiddenModels] = useState<Set<string>>(new Set());
   const [providerDisplay, setProviderDisplay] = useState<Map<string, string>>(new Map());
   const [showAllModels, setShowAllModels] = useState(false);
-  const [heatmapActivity, setHeatmapActivity] = useState<ActivityRow[]>([]);
-  const [heatmapCoverage, setHeatmapCoverage] = useState<ActivityCoverageRow[]>([]);
-  const [heatmapLoading, setHeatmapLoading] = useState(false);
+  const latestActivityRequest = useRef(0);
 
-  const { from, to } = useMemo(() => rangeFor(periodDays(period)), [period]);
-
-  async function loadSnapshot() {
-    try {
-      setSnapshot(await fetchSnapshot());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "failed");
-    }
-  }
+  const snapshotRangeEnd = activitySnapshot?.range.to;
+  const { from, to } = useMemo(
+    () =>
+      rangeFor(
+        periodDays(period),
+        snapshotRangeEnd === undefined ? new Date() : parseDayKey(snapshotRangeEnd),
+      ),
+    [period, snapshotRangeEnd],
+  );
+  const activity = activitySnapshot?.response.rows ?? EMPTY_ACTIVITY_ROWS;
+  const derivedActivity = useMemo(
+    () =>
+      activitySnapshot
+        ? deriveActivitySnapshot(activitySnapshot.response, { from, to }, {
+            providerId: providerFilter === "all" ? undefined : providerFilter,
+            modelIds: modelFilters,
+          })
+        : null,
+    [activitySnapshot, from, to, providerFilter, modelFilters],
+  );
 
   useEffect(() => {
-    void loadSnapshot();
+    let active = true;
+    let inFlight = false;
+    async function refreshSnapshot() {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const next = await fetchSnapshot();
+        if (!active) return;
+        setSnapshot(next);
+        setSnapshotError(null);
+      } catch (e) {
+        if (active) {
+          setSnapshotError(e instanceof Error ? e.message : "failed");
+        }
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    void refreshSnapshot();
     // Keep the summary metrics (今日 Token / Provider / 覆盖天数) live while
     // the page is open: the collector imports new data every few minutes.
     const timer = setInterval(() => {
-      void loadSnapshot();
-      const providerIds = providerFilter === "all" ? undefined : [providerFilter];
-      void fetchActivity(from, to, providerIds, undefined)
-        .then(({ rows }) => setActivity(rows))
-        .catch(() => {
-          // Keep the previous rows; the next tick retries.
-        });
+      void refreshSnapshot();
     }, 60_000);
-    return () => clearInterval(timer);
-  }, [from, to, providerFilter]);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [refreshNonce]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -376,42 +370,50 @@ export default function ActivityPage({ t }: { t: Messages }) {
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    const providerIds = providerFilter === "all" ? undefined : [providerFilter];
-    void fetchActivity(from, to, providerIds, undefined, controller.signal)
-      .then(({ rows }) => setActivity(rows))
-      .catch((e) => {
-        if (!controller.signal.aborted) {
-          setError(e instanceof Error ? e.message : "failed");
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [from, to, providerFilter]);
+    let active = true;
+    let controller: AbortController | null = null;
+    setActivityLoading(!shouldPreserveActivitySnapshot(activitySnapshot));
 
-  useEffect(() => {
-    const controller = new AbortController();
-    setHeatmapLoading(true);
-    const { from: heatFrom, to: heatTo } = yearRange();
-    const providerIds = providerFilter === "all" ? undefined : [providerFilter];
-    void fetchActivity(heatFrom, heatTo, providerIds, undefined, controller.signal)
-      .then(({ rows, coverage }) => {
-        setHeatmapActivity(rows);
-        setHeatmapCoverage(coverage);
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) {
-          setError(e instanceof Error ? e.message : "failed");
+    async function refreshActivity() {
+      controller?.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      const requestId = ++latestActivityRequest.current;
+      const range = rangeFor(365);
+      const scopeKey = `${range.from}:${range.to}:all`;
+      try {
+        const response = await fetchActivity(
+          range.from,
+          range.to,
+          undefined,
+          undefined,
+          signal,
+        );
+        if (!active || signal.aborted || requestId !== latestActivityRequest.current) return;
+        const candidate = { scopeKey, range, response };
+        setActivitySnapshot((current) =>
+          shouldReplaceActivitySnapshot(current, candidate) ? candidate : current,
+        );
+        setActivityError(null);
+      } catch (e) {
+        if (active && !signal.aborted && requestId === latestActivityRequest.current) {
+          setActivityError(e instanceof Error ? e.message : "failed");
         }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setHeatmapLoading(false);
-      });
-    return () => controller.abort();
-  }, [providerFilter]);
+      } finally {
+        if (active && !signal.aborted && requestId === latestActivityRequest.current) {
+          setActivityLoading(false);
+        }
+      }
+    }
+
+    void refreshActivity();
+    const timer = setInterval(() => void refreshActivity(), 60_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      controller?.abort();
+    };
+  }, [refreshNonce]);
 
   useEffect(() => {
     setSelectedHeatDay(null);
@@ -419,13 +421,14 @@ export default function ActivityPage({ t }: { t: Messages }) {
   }, [providerFilter, modelFilters]);
 
   useEffect(() => {
+    if (activitySnapshot === null) return;
     if (
       providerFilter !== "all" &&
       !activity.some((r) => r.providerId === providerFilter)
     ) {
       setProviderFilter("all");
     }
-  }, [activity, providerFilter]);
+  }, [activitySnapshot, activity, providerFilter]);
 
   useEffect(() => {
     if (modelFilters.size === 0) return;
@@ -489,50 +492,46 @@ export default function ActivityPage({ t }: { t: Messages }) {
     });
   }
 
-  const filtered = useMemo(
-    () =>
-      modelFilters.size === 0
-        ? activity
-        : activity.filter((r) => r.modelId && modelFilters.has(r.modelId)),
-    [activity, modelFilters],
-  );
-
-  const heatmapFiltered = useMemo(
-    () =>
-      modelFilters.size === 0
-        ? heatmapActivity
-        : heatmapActivity.filter((r) => r.modelId && modelFilters.has(r.modelId)),
-    [heatmapActivity, modelFilters],
-  );
-
-  const dayTotals = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const r of filtered) {
-      const day = r.day ?? "unknown";
-      map[day] = (map[day] ?? 0) + (r.totalTokens ?? 0);
-    }
-    return map;
-  }, [filtered]);
+  const filtered = derivedActivity?.periodRows ?? EMPTY_ACTIVITY_ROWS;
+  const heatmapFiltered = derivedActivity?.rows ?? EMPTY_ACTIVITY_ROWS;
+  const heatmapCoverage = derivedActivity?.coverage ?? EMPTY_ACTIVITY_COVERAGE;
+  const periodCoverage = derivedActivity?.periodCoverage ?? EMPTY_ACTIVITY_COVERAGE;
+  const dayTotals = derivedActivity?.periodDayTotals ?? EMPTY_DAY_TOTALS;
+  const heatmapDayTotals = derivedActivity?.dayTotals ?? EMPTY_DAY_TOTALS;
 
   const totals = useMemo(() => {
-    const byDay: Record<string, number> = {};
-    let total = 0;
+    const byDay: Record<string, number> = { ...dayTotals };
+    const rowDays = new Set<string>();
+    const partialDays = new Set<string>();
+    const coverageByDay = new Map<string, { covered: number; rows: number }>();
+    const total = derivedActivity?.periodTotal ?? 0;
     let input = 0;
     let output = 0;
     let cacheRead = 0;
     let cacheCreation = 0;
     let reasoning = 0;
     for (const r of filtered) {
-      total += r.totalTokens ?? 0;
       input += r.inputTokens ?? 0;
       output += r.outputTokens ?? 0;
       cacheRead += r.cacheReadTokens ?? 0;
       cacheCreation += r.cacheCreationTokens ?? 0;
       if (r.reasoningTokens) reasoning += r.reasoningTokens;
-      const day = r.day ?? "unknown";
-      byDay[day] = (byDay[day] ?? 0) + (r.totalTokens ?? 0);
+      if (r.day === undefined) continue;
+      rowDays.add(r.day);
+      const quality = (r.quality ?? "").toLowerCase();
+      if (quality && quality !== "direct" && quality !== "exact") {
+        partialDays.add(r.day);
+      }
     }
-    const days = Object.keys(byDay).sort();
+    for (const item of periodCoverage) {
+      if (item.day === undefined) continue;
+      const entry = coverageByDay.get(item.day) ?? { covered: 0, rows: 0 };
+      entry.rows += 1;
+      if (item.covered) entry.covered += 1;
+      coverageByDay.set(item.day, entry);
+    }
+    const days = eachDay(from, to).map(dayKey);
+    for (const day of days) byDay[day] ??= 0;
     const active = days.filter((d) => byDay[d] > 0).length;
     let peakDay = "—";
     let peakValue = 0;
@@ -543,16 +542,15 @@ export default function ActivityPage({ t }: { t: Messages }) {
       }
     }
 
-    const sortedDays = [...days].sort();
     let currentStreak = 0;
-    for (let i = sortedDays.length - 1; i >= 0; i--) {
-      if (byDay[sortedDays[i]] > 0) currentStreak++;
+    for (let i = days.length - 1; i >= 0; i--) {
+      if (byDay[days[i]] > 0) currentStreak++;
       else break;
     }
 
     let longestStreak = 0;
     let run = 0;
-    for (const d of sortedDays) {
+    for (const d of days) {
       if (byDay[d] > 0) {
         run++;
         longestStreak = Math.max(longestStreak, run);
@@ -562,11 +560,24 @@ export default function ActivityPage({ t }: { t: Messages }) {
     }
 
     const rangeDays = rangeLength(from, to);
-    const coveredDays = new Set(
-      filtered.map((r) => r.day).filter(Boolean),
-    ).size;
-    const isComplete = coveredDays >= rangeDays;
-    const isMissing = coveredDays === 0;
+    let completeDays = 0;
+    let hasObservedData = rowDays.size > 0;
+    for (const day of days) {
+      const coverage = coverageByDay.get(day);
+      if ((coverage?.covered ?? 0) > 0) hasObservedData = true;
+      if (rowDays.has(day)) {
+        if (
+          !partialDays.has(day) &&
+          (coverage === undefined || coverage.covered === coverage.rows)
+        ) {
+          completeDays += 1;
+        }
+      } else if (coverage && coverage.rows > 0 && coverage.covered === coverage.rows) {
+        completeDays += 1;
+      }
+    }
+    const isComplete = completeDays === rangeDays;
+    const isMissing = !hasObservedData;
     return {
       total,
       input,
@@ -583,7 +594,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
       isMissing,
       rangeDays,
     };
-  }, [filtered, from, to]);
+  }, [dayTotals, derivedActivity, filtered, periodCoverage, from, to]);
 
   const topModels = useMemo(() => {
     const modelTotals = new Map<string, number>();
@@ -620,15 +631,23 @@ export default function ActivityPage({ t }: { t: Messages }) {
     });
   }, [filtered, topModels, from, to]);
 
-  const heatRange = useMemo(() => yearRange(), []);
+  const fallbackHeatRange = useMemo(() => rangeFor(365), []);
+  const heatRange = activitySnapshot?.range ?? fallbackHeatRange;
   const { days: calendarDays, weeks, monthAnchors } = useMemo(
-    () => buildCalendar(heatRange.from, heatRange.to, heatmapFiltered, heatmapCoverage),
-    [heatRange, heatmapFiltered, heatmapCoverage],
+    () =>
+      buildCalendar(
+        heatRange.from,
+        heatRange.to,
+        heatmapFiltered,
+        heatmapCoverage,
+        heatmapDayTotals,
+      ),
+    [heatRange, heatmapFiltered, heatmapCoverage, heatmapDayTotals],
   );
 
   const heatStats = useMemo(() => {
     const inRange = calendarDays.filter((d) => d.inRange);
-    const active = inRange.filter((d) => d.state === "active").length;
+    const active = inRange.filter((d) => d.total > 0).length;
     const missing = inRange.filter((d) => d.state === "missing").length;
     const partial = inRange.filter((d) => d.state === "partial").length;
     const total = inRange.reduce((sum, d) => sum + d.total, 0);
@@ -712,7 +731,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
     if (!activeHeatDay) return null;
     const day = calendarDays.find((d) => d.day === activeHeatDay);
     if (!day) return null;
-    const date = new Date(day.day).toLocaleDateString(navigator.language, {
+    const date = parseDayKey(day.day).toLocaleDateString(navigator.language, {
       month: "short",
       day: "numeric",
     });
@@ -720,7 +739,11 @@ export default function ActivityPage({ t }: { t: Messages }) {
       return { date, text: t.noData, value: "" };
     }
     if (day.state === "partial") {
-      return { date, text: t.heatmapLegendPartial, value: "" };
+      return {
+        date,
+        text: t.heatmapLegendPartial,
+        value: day.total > 0 ? formatTokenCompact(day.total) : "",
+      };
     }
     if (day.state === "zero") {
       return { date, text: t.activeDays, value: "0" };
@@ -728,14 +751,15 @@ export default function ActivityPage({ t }: { t: Messages }) {
     return {
       date,
       text: `${t.totalTokens}`,
-      value: formatCompact(day.total),
+      value: formatTokenCompact(day.total),
     };
   }, [activeHeatDay, calendarDays, t]);
+  const error = activityError ?? snapshotError;
 
   return (
     <>
       <PeriodSelector value={period} onChange={setPeriod} t={t} />
-      {loading ? (
+      {activityLoading ? (
         <Skeleton lines={8} />
       ) : (
         <>
@@ -845,33 +869,33 @@ export default function ActivityPage({ t }: { t: Messages }) {
           <div className="metrics">
             <KpiV2
               label={totals.isComplete ? t.totalTokens : t.observedTokens}
-              value={formatCompact(totals.total)}
+              value={formatTokenCompact(totals.total)}
               badge={heatBadge}
             />
             <KpiV2
               label={t.inputTokens}
-              value={formatCompact(totals.input)}
+              value={formatTokenCompact(totals.input)}
             />
             <KpiV2
               label={t.outputTokens}
-              value={formatCompact(totals.output)}
+              value={formatTokenCompact(totals.output)}
             />
             {(totals.cacheRead > 0 || totals.cacheCreation > 0) && (
               <>
                 <KpiV2
                   label={t.cacheReadTokens}
-                  value={formatCompact(totals.cacheRead)}
+                  value={formatTokenCompact(totals.cacheRead)}
                 />
                 <KpiV2
                   label={t.cacheCreationTokens}
-                  value={formatCompact(totals.cacheCreation)}
+                  value={formatTokenCompact(totals.cacheCreation)}
                 />
               </>
             )}
             {totals.reasoning > 0 && (
               <KpiV2
                 label={t.reasoningTokens}
-                value={formatCompact(totals.reasoning)}
+                value={formatTokenCompact(totals.reasoning)}
               />
             )}
           </div>
@@ -892,7 +916,7 @@ export default function ActivityPage({ t }: { t: Messages }) {
                           dataKey="day"
                           tickFormatter={(d: string) => String(d).slice(5)}
                         />
-                        <YAxis tickFormatter={(v: number) => formatCompact(v)} width={70} />
+                        <YAxis tickFormatter={(v: number) => formatTokenCompact(v)} width={70} />
                         <Tooltip
                           content={(props) => modelTooltipContent({ ...props, t, dayTotals })}
                         />
@@ -956,15 +980,13 @@ export default function ActivityPage({ t }: { t: Messages }) {
               <span>{t.heatmapSubtitle}</span>
             </div>
             <div className="panel-body">
-              {heatmapLoading ? (
-                <p className="empty">{t.refreshing}</p>
-              ) : calendarDays.length > 0 ? (
+              {calendarDays.length > 0 ? (
                 <>
                   <div className="heatmap-v2-summary">
                     <span>
                       {heatSummary
                         ? `${heatSummary.date} · ${heatSummary.text} ${heatSummary.value}`
-                        : `${heatStats.active} / ${heatStats.rangeDays} ${t.activeDays} · ${formatCompact(heatStats.total)} ${t.totalTokens}`}
+                        : `${heatStats.active} / ${heatStats.rangeDays} ${t.activeDays} · ${formatTokenCompact(heatStats.total)} ${t.totalTokens}`}
                     </span>
                     <div className="heatmap-v2-legend">
                       <span className="heatmap-legend-item">
@@ -1039,9 +1061,9 @@ export default function ActivityPage({ t }: { t: Messages }) {
                                       )
                                     }
                                     onKeyDown={(event) => handleHeatKey(event, d.day)}
-                                    title={`${d.day}: ${formatCompact(d.total)}`}
+                                    title={`${d.day}: ${formatTokenCompact(d.total)}`}
                                     role="button"
-                                    aria-label={`${d.day}: ${formatCompact(d.total)}`}
+                                    aria-label={`${d.day}: ${formatTokenCompact(d.total)}`}
                                     tabIndex={d.inRange && d.day === heatAnchor ? 0 : -1}
                                   />
                                 ))}

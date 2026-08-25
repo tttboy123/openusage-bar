@@ -67,6 +67,9 @@ export interface ActivityCoverageRow {
 }
 
 export interface ActivityResponse {
+  schemaVersion: string;
+  dataRevision: number;
+  generatedAt: string;
   rows: ActivityRow[];
   coverage: ActivityCoverageRow[];
 }
@@ -184,12 +187,31 @@ export async function fetchActivity(
   if (providerIds?.length) params.set("providerIds", providerIds.join(","));
   if (modelIds?.length) params.set("modelIds", modelIds.join(","));
   const payload = await getJson<{
+    schemaVersion?: string;
+    dataRevision?: number;
+    generatedAt?: string;
     rows?: ActivityRow[];
     coverage?: ActivityCoverageRow[];
   }>(`/v1/activity/daily?${params.toString()}`, { signal });
+  if (
+    typeof payload.schemaVersion !== "string" ||
+    payload.schemaVersion.length === 0 ||
+    typeof payload.dataRevision !== "number" ||
+    !Number.isSafeInteger(payload.dataRevision) ||
+    payload.dataRevision < 0 ||
+    typeof payload.generatedAt !== "string" ||
+    payload.generatedAt.length === 0 ||
+    !Array.isArray(payload.rows) ||
+    !Array.isArray(payload.coverage)
+  ) {
+    throw new Error("invalid activity response");
+  }
   return {
-    rows: payload.rows ?? [],
-    coverage: payload.coverage ?? [],
+    schemaVersion: payload.schemaVersion,
+    dataRevision: payload.dataRevision,
+    generatedAt: payload.generatedAt,
+    rows: payload.rows,
+    coverage: payload.coverage,
   };
 }
 

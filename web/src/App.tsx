@@ -67,6 +67,10 @@ export default function App() {
   const refreshInFlightRef = useRef(false);
   const t: Messages = messages[lang];
   const buildIdentity = buildProductIdentityPresentation(productVersionTruth, t);
+  const isActivityRoute = location.pathname === "/" || location.pathname === "/activity";
+  const revealKey = isActivityRoute
+    ? location.pathname
+    : `${location.pathname}-${refreshNonce}`;
 
   useEffect(() => {
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
@@ -268,10 +272,10 @@ export default function App() {
           </div>
         </header>
 
-        <Reveal key={`${location.pathname}-${refreshNonce}`}>
+        <Reveal key={revealKey}>
           <Routes>
-            <Route path="/" element={<ActivityPage t={t} />} />
-            <Route path="/activity" element={<ActivityPage t={t} />} />
+            <Route path="/" element={<ActivityPage t={t} refreshNonce={refreshNonce} />} />
+            <Route path="/activity" element={<ActivityPage t={t} refreshNonce={refreshNonce} />} />
             <Route path="/usage-details" element={<UsageDetailsPage t={t} />} />
             <Route path="/capacity" element={<CapacityPage t={t} />} />
             <Route path="/api-spend" element={<ApiSpendPage t={t} />} />

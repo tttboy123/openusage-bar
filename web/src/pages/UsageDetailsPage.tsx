@@ -17,6 +17,7 @@ import PeriodSelector, {
 } from "../components/PeriodSelector";
 import Skeleton from "../components/Skeleton";
 import { type Messages } from "../i18n";
+import { formatTokenCompact } from "../tokenFormat";
 
 interface BreakdownRow {
   provider: string;
@@ -43,17 +44,6 @@ const MODEL_PALETTE = [
 ];
 const MAX_CHART_MODELS = 10;
 const OTHER_KEY = "__other__";
-
-function formatCompact(n: number): string {
-  try {
-    return new Intl.NumberFormat(navigator.language, {
-      notation: "compact",
-      maximumFractionDigits: 1,
-    }).format(n);
-  } catch {
-    return Math.round(n).toLocaleString();
-  }
-}
 
 type TooltipItem = {
   name?: unknown;
@@ -104,7 +94,7 @@ function dailyTooltipContent({
     <div className="model-chart-tip">
       <div className="model-chart-tip-row">
         <span className="model-chart-tip-label">{String(label)}</span>
-        <span className="model-chart-tip-value">{formatCompact(total)}</span>
+        <span className="model-chart-tip-value">{formatTokenCompact(total)}</span>
       </div>
       {items.map((p) => (
         <div className="model-chart-tip-row" key={p.name}>
@@ -115,12 +105,12 @@ function dailyTooltipContent({
             />
             {p.name}
           </span>
-          <span className="model-chart-tip-value">{formatCompact(p.value)}</span>
+          <span className="model-chart-tip-value">{formatTokenCompact(p.value)}</span>
         </div>
       ))}
       <div className="model-chart-tip-row model-chart-tip-total">
         <span className="model-chart-tip-label">{t.totalTokens}</span>
-        <span className="model-chart-tip-value">{formatCompact(total)}</span>
+        <span className="model-chart-tip-value">{formatTokenCompact(total)}</span>
       </div>
     </div>
   );
@@ -266,15 +256,15 @@ export default function UsageDetailsPage({ t }: { t: Messages }) {
         <>
           <div className="metrics">
             <div className="metric">
-              <p className="metric-value">{formatCompact(totals.tokens)}</p>
+              <p className="metric-value">{formatTokenCompact(totals.tokens)}</p>
               <p className="metric-label">{t.totalTokens}</p>
             </div>
             <div className="metric">
-              <p className="metric-value">{formatCompact(totals.input)}</p>
+              <p className="metric-value">{formatTokenCompact(totals.input)}</p>
               <p className="metric-label">{t.inputTokens}</p>
             </div>
             <div className="metric">
-              <p className="metric-value">{formatCompact(totals.output)}</p>
+              <p className="metric-value">{formatTokenCompact(totals.output)}</p>
               <p className="metric-label">{t.outputTokens}</p>
             </div>
             <div className="metric">
@@ -288,7 +278,7 @@ export default function UsageDetailsPage({ t }: { t: Messages }) {
               <h3>{t.dailyActivity}</h3>
               <span>
                 {t.peakDay}: {totals.peakDay}
-                {totals.peakValue ? ` · ${formatCompact(totals.peakValue)}` : ""}
+                {totals.peakValue ? ` · ${formatTokenCompact(totals.peakValue)}` : ""}
               </span>
             </div>
             <div className="panel-body">
@@ -310,7 +300,7 @@ export default function UsageDetailsPage({ t }: { t: Messages }) {
                           minTickGap={16}
                         />
                         <YAxis
-                          tickFormatter={(v: number) => formatCompact(v)}
+                          tickFormatter={(v: number) => formatTokenCompact(v)}
                           tick={{ fontSize: 11, fill: "var(--text-faint)" }}
                           stroke="var(--hairline)"
                           width={64}

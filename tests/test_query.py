@@ -340,6 +340,120 @@ class QueryServiceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.query.activity(date(2026, 7, 13), date(2026, 7, 14), provider_ids=bad)
 
+    def test_activity_family_filter_matches_resolved_rows_without_leaking_raw_scope(self):
+        self.store.replace_daily_usage(
+            "codex",
+            "2026-07-14",
+            [
+                usage(model_id="kimi-k3", total_tokens=100),
+                usage(model_id="deepseek-v4-flash", total_tokens=200),
+                usage(model_id="gpt-5.5", total_tokens=300),
+            ],
+        )
+        self.store.replace_daily_usage(
+            "minimax",
+            "2026-07-14",
+            [usage(provider_id="minimax", model_id="MiniMax-M3", total_tokens=400)],
+        )
+        self.store.replace_daily_usage(
+            "deepseek",
+            "2026-07-14",
+            [usage(provider_id="deepseek", model_id="deepseek-chat", total_tokens=500)],
+        )
+
+        result = self.query.activity(
+            date(2026, 7, 14),
+            date(2026, 7, 14),
+            provider_ids=("moonshot",),
+        )
+
+        self.assertEqual(
+            [(row.provider_id, row.model_id, row.total_tokens) for row in result.rows],
+            [("moonshot", "kimi-k3", 100)],
+        )
+        self.assertEqual(
+            [
+                (row.provider_id, row.account_ref, row.covered, row.source_id)
+                for row in result.coverage
+            ],
+            [("moonshot", None, True, "openusage.daily")],
+        )
+
+        deepseek_result = self.query.activity(
+            date(2026, 7, 14),
+            date(2026, 7, 14),
+            provider_ids=("deepseek",),
+        )
+        self.assertEqual(
+            [
+                (row.provider_id, row.model_id, row.total_tokens)
+                for row in deepseek_result.rows
+            ],
+            [
+                ("deepseek", "deepseek-v4-flash", 200),
+                ("deepseek", "deepseek-chat", 500),
+            ],
+        )
+        self.assertEqual(
+            [
+                (row.provider_id, row.account_ref, row.covered, row.source_id)
+                for row in deepseek_result.coverage
+            ],
+            [("deepseek", None, True, "openusage.daily")],
+        )
+
+    def test_activity_provider_filter_uses_displayed_family_without_raw_leakage(self):
+        self.store.replace_daily_usage(
+            "codex",
+            "2026-07-14",
+            [
+                usage(model_id="kimi-k3", total_tokens=100),
+                usage(model_id="deepseek-v4-flash", total_tokens=200),
+                usage(model_id="gpt-5.5", total_tokens=300),
+            ],
+        )
+        self.store.replace_daily_usage(
+            "deepseek",
+            "2026-07-14",
+            [usage(provider_id="deepseek", model_id="deepseek-chat", total_tokens=400)],
+        )
+
+        result = self.query.activity(
+            date(2026, 7, 14),
+            date(2026, 7, 14),
+            provider_ids=("codex",),
+        )
+
+        self.assertEqual(
+            [(row.provider_id, row.model_id) for row in result.rows],
+            [("codex", "gpt-5.5")],
+        )
+        self.assertEqual(
+            [(row.provider_id, row.covered) for row in result.coverage],
+            [("codex", True)],
+        )
+
+    def test_activity_unfiltered_projects_coverage_to_displayed_families(self):
+        self.store.replace_daily_usage(
+            "codex", "2026-07-14", [usage(model_id="kimi-k3")]
+        )
+        self.store.replace_daily_usage(
+            "deepseek",
+            "2026-07-14",
+            [usage(provider_id="deepseek", model_id="deepseek-chat")],
+        )
+
+        result = self.query.activity(date(2026, 7, 14), date(2026, 7, 14))
+
+        self.assertEqual(
+            [(row.provider_id, row.model_id) for row in result.rows],
+            [("moonshot", "kimi-k3"), ("deepseek", "deepseek-chat")],
+        )
+        self.assertEqual(
+            [(row.provider_id, row.covered) for row in result.coverage],
+            [("deepseek", True), ("moonshot", True)],
+        )
+
     def test_activity_uses_all_time_known_scope_outside_requested_range(self):
         self.store.replace_daily_usage("codex", "2026-07-13", [])
         result = self.query.activity(date(2026, 7, 14), date(2026, 7, 14))

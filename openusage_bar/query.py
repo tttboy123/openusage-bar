@@ -621,20 +621,36 @@ class QueryService:
             quality=row.quality, imported_at=row.imported_at or "", revision=row.revision,
             record_id=row.record_id, source_id=row.source_id,
             model_family=resolve_family(row.provider_id, row.model_id),
-        ) for row in snapshot.rows if (not providers or row.provider_id in providers) and (not models or row.model_id in models))
-        scopes = {
+        ) for row in snapshot.rows if (
+            not providers
+            or resolve_family(row.provider_id, row.model_id) in providers
+        ) and (not models or row.model_id in models))
+        raw_scopes = {
             (row.provider_id, row.account_ref) for row in snapshot.rows
-            if not providers or row.provider_id in providers
         } | {
-            (provider_id, account_ref) for _, provider_id, account_ref in snapshot.covered
-            if not providers or provider_id in providers
-        } | {
-            (provider_id, account_ref) for provider_id, account_ref in snapshot.known_scopes
-            if not providers or provider_id in providers
-        }
-        for provider_id in providers:
-            if not any(scope[0] == provider_id for scope in scopes):
-                scopes.add((provider_id, ""))
+            (provider_id, account_ref)
+            for _, provider_id, account_ref in snapshot.covered
+        } | set(snapshot.known_scopes)
+        families_by_raw_scope: dict[tuple[str, str], set[str]] = {}
+        for row in snapshot.rows:
+            families_by_raw_scope.setdefault(
+                (row.provider_id, row.account_ref), set()
+            ).add(resolve_family(row.provider_id, row.model_id))
+        scope_backings: dict[tuple[str, str], set[tuple[str, str]]] = {}
+        for raw_provider_id, account_ref in raw_scopes:
+            raw_scope = (raw_provider_id, account_ref)
+            family_ids = families_by_raw_scope.get(raw_scope) or {
+                resolve_family(raw_provider_id)
+            }
+            for family_id in family_ids:
+                if not providers or family_id in providers:
+                    scope_backings.setdefault(
+                        (family_id, account_ref), set()
+                    ).add(raw_scope)
+        if providers:
+            for provider_id in providers:
+                if not any(scope[0] == provider_id for scope in scope_backings):
+                    scope_backings[(provider_id, "")] = {(provider_id, "")}
         coverage_rows: list[CoverageRow] = []
         coverage_sources = {
             (day, provider_id, account_ref): source_id
@@ -643,11 +659,21 @@ class QueryService:
         current = start
         while current <= end:
             day = current.isoformat()
-            for provider_id, account_ref in sorted(scopes):
-                key = (day, provider_id, account_ref)
+            for provider_id, account_ref in sorted(scope_backings):
+                backing_keys = {
+                    (day, raw_provider_id, raw_account_ref)
+                    for raw_provider_id, raw_account_ref
+                    in scope_backings[(provider_id, account_ref)]
+                }
+                source_ids = {
+                    coverage_sources[key]
+                    for key in backing_keys
+                    if key in snapshot.covered and key in coverage_sources
+                }
                 coverage_rows.append(CoverageRow(
                     day, provider_id, account_ref or None,
-                    key in snapshot.covered, coverage_sources.get(key),
+                    bool(backing_keys & snapshot.covered),
+                    next(iter(source_ids)) if len(source_ids) == 1 else None,
                 ))
             current += timedelta(days=1)
         coverage = tuple(coverage_rows)
